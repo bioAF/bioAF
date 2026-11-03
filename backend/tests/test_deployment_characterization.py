@@ -530,3 +530,34 @@ async def test_toggle_cellxgene_build_failure_still_enables(client, admin_token,
 
     assert response.json() == {"component_key": "cellxgene", "enabled": True, "status": "build_failed"}
     assert await _state(db_engine, "cellxgene") == (True, "build_failed")
+
+
+@pytest.mark.asyncio
+async def test_aws_image_build_counts_in_the_stack_totals(session):
+    user_id = await _seed_user(session)
+    await _seed_config(
+        session,
+        cloud_provider="aws",
+        aws_account_id="111122223333",
+        aws_region="us-west-1",
+        terraform_initialized="true",
+        compute_deployed="false",
+        storage_deployed="true",
+    )
+
+    with patch("app.services.stack_deployment._ensure_aws_cluster_autoscaler", AsyncMock(return_value="installed")):
+        events = await _deploy(
+            session,
+            user_id,
+            {
+                "image_build": [_event("apply_complete", resources_completed=2, resources_total=2)],
+                "compute": [_event("apply_complete", resources_completed=3, resources_total=3)],
+            },
+        )
+
+    phases = [e for e in events if e.event_type == "phase_complete"]
+    assert [(p.message, p.resources_completed, p.resources_total) for p in phases] == [
+        ("Image build infrastructure deployed", 2, 2),
+        ("Compute deployment complete", 5, 5),
+    ]
+    assert (events[-1].resources_completed, events[-1].resources_total) == (5, 5)

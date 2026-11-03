@@ -17,23 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.platform.platform_config_service import PlatformConfigService
+from app.services.deployment_outputs import STORAGE_DEPLOY_OUTPUTS, BlankOutputs, persist_outputs
 from app.services.file_organization import FileOrganizationService
 from app.services.gcs_storage import BucketMetrics, GcsStorageService
 
 logger = logging.getLogger("bioaf.storage_deploy_api")
-
-_STORAGE_OUTPUT_KEYS = [
-    "ingest_bucket_name",
-    "raw_bucket_name",
-    "working_bucket_name",
-    "results_bucket_name",
-    "references_bucket_name",
-    "literature_bucket_name",
-    "config_backups_bucket_name",
-    "pubsub_topic_name",
-    "pubsub_subscription_name",
-]
-
 
 async def _store_storage_outputs(session: AsyncSession) -> None:
     """Read Terraform outputs for the storage module and store them in platform_config."""
@@ -45,10 +33,7 @@ async def _store_storage_outputs(session: AsyncSession) -> None:
         logger.warning("Could not read storage module outputs after apply", exc_info=True)
         return
 
-    for config_key in _STORAGE_OUTPUT_KEYS:
-        val = outputs.get(config_key, {}).get("value", "")
-        if val:
-            await PlatformConfigService.set(session, config_key, val)
+    await persist_outputs(session, outputs, STORAGE_DEPLOY_OUTPUTS, BlankOutputs.SKIP)
     await session.commit()
 
 
