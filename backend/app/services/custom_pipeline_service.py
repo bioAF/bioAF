@@ -26,6 +26,7 @@ from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
     CustomPipelineLaunchRequest,
     CustomPipelineUpdateRequest,
+    CustomPipelineVariableValue,
     CustomPipelineVersionCreateRequest,
 )
 from app.services.audit_service import log_action
@@ -877,6 +878,80 @@ class CustomPipelineService:
                 logger.warning("Could not advance experiment status: %s", e)
 
         return run
+
+    # --- Reproduction ---
+
+    @staticmethod
+    async def reproduce_run(session: AsyncSession, original: PipelineRun, org_id: int, user_id: int) -> PipelineRun:
+        """Relaunch a custom run as it was recorded: its version, variables, inputs and context.
+
+        ``original`` must already have passed the caller's Organization check. Everything here
+        refuses before a run is created or a job submitted; the launcher's own checks (version
+        active, environment ready, experiment/project/files in this Organization) run before it
+        creates anything, too.
+        """
+        input_ids = await CustomPipelineService._recorded_input_ids(session, original)
+
+        variables = original.parameters_json
+        if not isinstance(variables, dict) or not all(isinstance(v, str) for v in variables.values()):
+            raise ValidationError("This run cannot be reproduced: its recorded variable values are unreadable.")
+
+        if input_ids:
+            files = (
+                (await session.execute(select(File).where(File.id.in_(input_ids), File.organization_id == org_id)))
+                .scalars()
+                .all()
+            )
+            available = {f.id for f in files if f.deleted_at is None and not f.storage_deleted}
+            if available != set(input_ids):
+                raise ValidationError(
+                    "This run cannot be reproduced: one or more of its input files are no longer available."
+                )
+
+        return await CustomPipelineService.launch_run(
+            session,
+            org_id,
+            user_id,
+            CustomPipelineLaunchRequest(
+                version_id=original.custom_pipeline_version_id,
+                experiment_id=original.experiment_id,
+                project_id=original.project_id,
+                input_file_ids=input_ids,
+                variables=[
+                    CustomPipelineVariableValue(variable_name=name, variable_value=value)
+                    for name, value in variables.items()
+                ],
+            ),
+        )
+
+    @staticmethod
+    async def _recorded_input_ids(session: AsyncSession, original: PipelineRun) -> list[int]:
+        """The run's inputs, when its two records of them agree; a refusal otherwise.
+
+        The input links are authoritative and ``input_files_json`` is the launcher's copy of the
+        same list. Both are written by every custom launch, so a run where they disagree, or where
+        the list is missing or malformed, has an input set nobody can vouch for. That is refused,
+        never read as "no inputs": an empty set is valid only when both records say so.
+        """
+        linked = list(
+            (
+                await session.execute(
+                    select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == original.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        recorded = original.input_files_json
+        if not isinstance(recorded, list) or not all(isinstance(i, int) for i in recorded):
+            raise ValidationError(
+                "This run cannot be reproduced: its input files were not recorded in a readable form."
+            )
+        if len(recorded) != len(set(recorded)) or set(recorded) != set(linked):
+            raise ValidationError(
+                "This run cannot be reproduced: its records disagree about which input files it used."
+            )
+        return recorded
 
     # --- Launch helpers ---
 

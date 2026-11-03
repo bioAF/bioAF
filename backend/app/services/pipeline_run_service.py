@@ -9,6 +9,7 @@ from app.exceptions import (
     ConflictError,
     DomainError,
     NotFoundError,
+    PermissionDeniedError,
     SamplesMissingFilesError,
     ValidationError,
 )
@@ -1369,6 +1370,8 @@ class PipelineRunService:
         org_id: int,
         user_id: int,
         drop_samples_without_files: bool = False,
+        *,
+        allow_custom: bool = False,
     ) -> PipelineRun:
         """Re-launch with identical parameters.
 
@@ -1381,10 +1384,25 @@ class PipelineRunService:
         in. The original is looked up inside it, so a run in another Organization
         is not found, before anything is reconstructed or launched; the original
         row's own Organization never authorizes anything.
+
+        A custom pipeline run goes back through the custom launcher, decided by the run's custom
+        version and never by its name. ``allow_custom`` is whether the caller may launch custom
+        pipelines (role grant and API-key scope); reproducing must not be a way around that.
         """
         original = await PipelineRunService.get_run(session, original_run_id, org_id)
         if not original:
             raise NotFoundError("Original run not found")
+
+        if original.custom_pipeline_version_id is not None:
+            if not allow_custom:
+                raise PermissionDeniedError(
+                    "Reproducing a custom pipeline run requires permission to launch custom pipelines."
+                )
+            from app.services.custom_pipeline_service import CustomPipelineService
+
+            new_run = await CustomPipelineService.reproduce_run(session, original, org_id, user_id)
+            await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
+            return new_run
 
         pipeline_key = await PipelineRunService._reproducible_catalog_key(session, original, org_id)
 
@@ -1401,7 +1419,11 @@ class PipelineRunService:
         )
 
         new_run = await PipelineRunService.launch_run(session, org_id, user_id, data)
+        await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
+        return new_run
 
+    @staticmethod
+    async def _audit_reproduction(session: AsyncSession, new_run: PipelineRun, original_run_id: int, user_id: int):
         await log_action(
             session,
             user_id=user_id,
@@ -1410,8 +1432,6 @@ class PipelineRunService:
             action="reproduce",
             details={"original_run_id": original_run_id},
         )
-
-        return new_run
 
     @staticmethod
     async def _reproducible_catalog_key(session: AsyncSession, original: PipelineRun, org_id: int) -> str:

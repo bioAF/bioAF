@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_permission
+from app.api.dependencies import has_effective_permission, require_permission
 from app.models.pipeline_run_review import PipelineRunReview
 from app.schemas.pipeline_run import (
     ExperimentSummary,
@@ -245,7 +245,13 @@ async def reproduce_run(
     org_id = int(current_user["org_id"])
 
     new_run = await PipelineRunService.reproduce_run(
-        session, run_id, org_id, user_id, drop_samples_without_files=drop_samples_without_files
+        session,
+        run_id,
+        org_id,
+        user_id,
+        drop_samples_without_files=drop_samples_without_files,
+        # A custom run relaunches through the custom launcher, which has its own permission.
+        allow_custom=await has_effective_permission(session, current_user, "custom_pipelines", "launch"),
     )
     await session.commit()
     new_run = await PipelineRunService.get_run(session, new_run.id, org_id)

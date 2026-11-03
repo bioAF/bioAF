@@ -22,6 +22,7 @@ from app.models.organization import Organization
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample, sample_files
 from app.models.user import User
+from app.services.auth_service import AuthService
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_STARTED
@@ -303,3 +304,360 @@ async def test_a_run_from_a_different_pipeline_version_is_refused(client, sessio
     await _assert_refused_without_effects(response, session, compute, runs_before)
     detail = response.json()["detail"]
     assert "2.6.0" in detail and "2.7.1" in detail
+
+
+# --- Custom pipeline reproduction (owner decisions 2026-11-03) ---
+#
+# A run of a custom pipeline is reproduced through the custom launcher, on the version it ran (not
+# the pipeline's current one), with its recorded variables, inputs and experiment/project. It needs
+# the custom launch permission on top of the route's own, and anything that would make the relaunch
+# differ from the original is refused before a run is created or a job submitted.
+
+
+@pytest.fixture
+def custom_compute():
+    adapter = MagicMock()
+    adapter.submit_job = AsyncMock(
+        return_value=_job_submit_result_from_dict(
+            {"job_id": "bioaf-custom-repro", "namespace": "bioaf-pipelines", "status": "queued"}
+        )
+    )
+    with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
+        yield adapter
+
+
+async def _custom_original(session, org_id: int, user_id: int, *, name: str = "Inhouse QC", inputs: int = 1):
+    """A completed custom run, launched through the real launcher so its records are the real shape."""
+    from app.models.environment import Environment
+    from app.models.environment_version import EnvironmentVersion
+    from app.models.project import Project
+    from app.schemas.custom_pipeline import (
+        CustomPipelineCreateRequest,
+        CustomPipelineLaunchRequest,
+        CustomPipelineVariableDefinition,
+        CustomPipelineVariableValue,
+        CustomPipelineVersionCreateRequest,
+    )
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    env = Environment(name="Env", organization_id=org_id, created_by_user_id=user_id, environment_type="pipeline")
+    session.add(env)
+    await session.flush()
+    env_version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status="ready",
+        definition_format="conda",
+        definition_content="name: p\n",
+        image_uri="registry.test/p:v1",
+        created_by_user_id=user_id,
+    )
+    project = Project(organization_id=org_id, name="Custom Repro", owner_user_id=user_id)
+    session.add_all([env_version, project])
+    await session.flush()
+    experiment = Experiment(
+        organization_id=org_id, project_id=project.id, name="Custom Exp", owner_user_id=user_id, status="processing"
+    )
+    session.add(experiment)
+    await session.flush()
+    files = []
+    for i in range(inputs):
+        f = File(
+            organization_id=org_id,
+            experiment_id=experiment.id,
+            gcs_uri=f"gs://bucket/custom_{i}.tsv",
+            filename=f"custom_{i}.tsv",
+            file_type="tsv",
+        )
+        session.add(f)
+        files.append(f)
+    await session.flush()
+
+    pipeline = await CustomPipelineService.create_pipeline(
+        session, org_id, user_id, CustomPipelineCreateRequest(name=name)
+    )
+    version = await CustomPipelineService.create_version(
+        session,
+        org_id,
+        user_id,
+        pipeline.id,
+        CustomPipelineVersionCreateRequest(
+            code_source_type="inline",
+            code_content="echo qc",
+            entrypoint_command="run-qc",
+            environment_version_id=env_version.id,
+            cpu_request="1",
+            memory_request="1Gi",
+            variables=[
+                CustomPipelineVariableDefinition(variable_name="depth", variable_type="number", default_value="10"),
+                CustomPipelineVariableDefinition(variable_name="label", variable_type="string"),
+            ],
+        ),
+    )
+    accepting = MagicMock()
+    accepting.submit_job = AsyncMock(
+        return_value=_job_submit_result_from_dict(
+            {"job_id": "orig", "namespace": "bioaf-pipelines", "status": "queued"}
+        )
+    )
+    with (
+        patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=accepting),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        run = await CustomPipelineService.launch_run(
+            session,
+            org_id,
+            user_id,
+            CustomPipelineLaunchRequest(
+                version_id=version.id,
+                experiment_id=experiment.id,
+                project_id=project.id,
+                input_file_ids=[f.id for f in files],
+                variables=[
+                    CustomPipelineVariableValue(variable_name="depth", variable_value="25"),
+                    CustomPipelineVariableValue(variable_name="label", variable_value="batch 7"),
+                ],
+            ),
+        )
+    run.status = "completed"
+    await session.commit()
+    return SimpleNamespace(
+        run=run,
+        version=version,
+        pipeline=pipeline,
+        env_version=env_version,
+        files=files,
+        experiment=experiment,
+        project=project,
+    )
+
+
+async def _reproduce(client, run_id: int, headers: dict):
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        return await client.post(f"/api/pipeline-runs/{run_id}/reproduce", headers=headers)
+
+
+@pytest.mark.asyncio
+async def test_custom_reproduction_relaunches_the_original_version_inputs_variables_and_context(
+    client, session, admin_user, admin_token, custom_compute, compute
+):
+    from app.schemas.custom_pipeline import CustomPipelineVersionCreateRequest
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original = await _custom_original(session, org_id, user_id)
+    # A newer active version exists; reproduction must still run the one the original ran.
+    await CustomPipelineService.create_version(
+        session,
+        org_id,
+        user_id,
+        original.pipeline.id,
+        CustomPipelineVersionCreateRequest(
+            code_source_type="inline",
+            code_content="echo qc v2",
+            entrypoint_command="run-qc --v2",
+            environment_version_id=original.env_version.id,
+            cpu_request="1",
+            memory_request="1Gi",
+        ),
+    )
+    await session.commit()
+
+    original_id, version_id = original.run.id, original.version.id
+    file_ids = [f.id for f in original.files]
+    context = (original.experiment.id, original.project.id)
+
+    response = await _reproduce(client, original_id, _bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    assert custom_compute.submit_job.await_count == 1
+    assert compute.submit_job.await_count == 0
+    session.expire_all()
+    new_run = await session.get(PipelineRun, response.json()["id"])
+    assert new_run.custom_pipeline_version_id == version_id
+    assert new_run.parameters_json == {"depth": "25", "label": "batch 7"}
+    assert new_run.input_files_json == file_ids
+    assert (new_run.experiment_id, new_run.project_id) == context
+    audit = (
+        await session.execute(select(AuditLog).where(AuditLog.action == "reproduce", AuditLog.entity_id == new_run.id))
+    ).scalar_one()
+    assert audit.details_json["original_run_id"] == original_id
+
+
+@pytest.mark.asyncio
+async def test_a_custom_run_named_like_a_catalog_key_never_takes_the_catalog_path(
+    client, session, admin_user, admin_token, custom_compute, compute
+):
+    org_id = admin_user.organization_id
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+    original = await _custom_original(session, org_id, admin_user.id, name="bioaf-system-test")
+
+    response = await _reproduce(client, original.run.id, _bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    assert custom_compute.submit_job.await_count == 1
+    assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_inputs_recorded_as_none_reproduces(
+    client, session, admin_user, admin_token, custom_compute
+):
+    original = await _custom_original(session, admin_user.organization_id, admin_user.id, inputs=0)
+    assert original.run.input_files_json == []
+
+    response = await _reproduce(client, original.run.id, _bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    assert custom_compute.submit_job.await_count == 1
+
+
+async def _role_headers(session, org_id: int, grants: list[tuple[str, str]]) -> dict:
+    from app.services import role_service
+
+    role = await role_service.create_role(session, org_id, f"repro-{len(grants)}", permissions=grants)
+    user = User(
+        email=f"repro{len(grants)}@test.com",
+        password_hash="x",
+        role_id=role.id,
+        organization_id=org_id,
+        status="active",
+    )
+    session.add(user)
+    await session.commit()
+    role_service.invalidate_cache()
+    return _bearer(AuthService.create_token(user.id, user.email, role.id, org_id, role_name=role.name))
+
+
+@pytest.mark.asyncio
+async def test_custom_reproduction_without_the_custom_launch_grant_is_forbidden(
+    client, session, admin_user, custom_compute
+):
+    org_id = admin_user.organization_id
+    original = await _custom_original(session, org_id, admin_user.id)
+    headers = await _role_headers(session, org_id, [("pipelines", "launch"), ("pipelines", "view")])
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce(client, original.run.id, headers)
+
+    assert response.status_code == 403
+    session.expire_all()
+    assert await _count(session, PipelineRun) == runs_before
+    assert custom_compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_custom_reproduction_with_both_grants_is_allowed(client, session, admin_user, custom_compute):
+    org_id = admin_user.organization_id
+    original = await _custom_original(session, org_id, admin_user.id)
+    headers = await _role_headers(session, org_id, [("pipelines", "launch"), ("custom_pipelines", "launch")])
+
+    response = await _reproduce(client, original.run.id, headers)
+
+    assert response.status_code == 200, response.text
+    assert custom_compute.submit_job.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_an_api_key_without_launch_scopes_cannot_reproduce_a_custom_run(
+    client, session, admin_user, custom_compute
+):
+    """Its role (admin) holds both grants; the key's scope envelope does not."""
+    from tests.test_permissions_and_ownership import _api_key_headers
+
+    original = await _custom_original(session, admin_user.organization_id, admin_user.id)
+    headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["experiments:view"])
+
+    response = await _reproduce(client, original.run.id, headers)
+
+    assert response.status_code == 403
+    assert custom_compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_the_reproduce_service_refuses_a_custom_run_unless_custom_launch_is_allowed(
+    session, admin_user, custom_compute
+):
+    """Non-HTTP callers state the caller's custom launch permission; the default is no."""
+    from app.exceptions import PermissionDeniedError
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original = await _custom_original(session, org_id, user_id)
+
+    with pytest.raises(PermissionDeniedError):
+        await PipelineRunService.reproduce_run(session, original.run.id, org_id, user_id)
+    assert custom_compute.submit_job.await_count == 0
+
+
+def _breakers():
+    """Each makes the original no longer reproducible as recorded; all must refuse before any effect."""
+
+    async def deprecate_version(session, o):
+        o.version.status = "deprecated"
+
+    async def unready_environment(session, o):
+        o.env_version.status = "building"
+
+    async def delete_input(session, o):
+        from datetime import datetime, timezone
+
+        o.files[0].deleted_at = datetime.now(timezone.utc)
+
+    async def erase_input(session, o):
+        o.files[0].storage_deleted = True
+
+    async def json_only_inputs(session, o):
+        from sqlalchemy import delete
+
+        from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+        await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == o.run.id))
+
+    async def conflicting_inputs(session, o):
+        o.run.input_files_json = [o.files[0].id, 999999]
+
+    async def unknown_inputs(session, o):
+        o.run.input_files_json = None
+
+    async def malformed_inputs(session, o):
+        o.run.input_files_json = {"ids": [o.files[0].id]}
+
+    async def malformed_variables(session, o):
+        o.run.parameters_json = ["depth", "25"]
+
+    async def inaccessible_experiment(session, o):
+        other = Organization(name="Elsewhere", setup_complete=True)
+        session.add(other)
+        await session.flush()
+        o.experiment.organization_id = other.id
+
+    return [
+        deprecate_version,
+        unready_environment,
+        delete_input,
+        erase_input,
+        json_only_inputs,
+        conflicting_inputs,
+        unknown_inputs,
+        malformed_inputs,
+        malformed_variables,
+        inaccessible_experiment,
+    ]
+
+
+@pytest.mark.parametrize("breaker", _breakers(), ids=lambda b: b.__name__)
+@pytest.mark.asyncio
+async def test_custom_reproduction_refuses_what_it_cannot_reproduce_as_recorded(
+    client, session, admin_user, admin_token, custom_compute, breaker
+):
+    original = await _custom_original(session, admin_user.organization_id, admin_user.id)
+    await breaker(session, original)
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce(client, original.run.id, _bearer(admin_token))
+
+    assert response.status_code in (400, 409), response.text
+    session.expire_all()
+    assert await _count(session, PipelineRun) == runs_before
+    assert custom_compute.submit_job.await_count == 0
