@@ -67,7 +67,12 @@ async def test_valid_and_malformed_output():
     events = [event async for event in _stream(process, progress)]
 
     assert [e.message for e in events] == ["first", "second"]
-    assert progress.log_lines == [json.dumps({"@message": "first"}), "not json", "[1, 2]", json.dumps({"@message": "second"})]
+    assert progress.log_lines == [
+        json.dumps({"@message": "first"}),
+        "not json",
+        "[1, 2]",
+        json.dumps({"@message": "second"}),
+    ]
     assert (await read_exit(process)).return_code == 0
 
 
@@ -202,10 +207,7 @@ async def test_stop_terminates_gracefully():
 async def test_stop_kills_a_process_that_ignores_sigterm(monkeypatch):
     monkeypatch.setattr(terraform_stream, "STOP_TERM_SECONDS", 0.1)
     process = await _spawn(
-        "import signal, time\n"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        "print('up', flush=True)\n"
-        "time.sleep(30)\n"
+        "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint('up', flush=True)\ntime.sleep(30)\n"
     )
     await process.stdout.readline()
 

@@ -17,14 +17,14 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from typing import Literal
+from typing import AsyncGenerator, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.api.terraform_streaming import ClosingStreamingResponse, client_event
 from app.database import async_session_factory, get_session
 from app.exceptions import DomainError
 from app.platform.cloud_provider import get_cloud_provider
@@ -43,7 +43,8 @@ from app.services.stack_deployment import (
     sync_storage_config,
     teardown_stack,
 )
-from app.services.terraform_executor import TerraformExecutor
+from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.terraform_stream import owned_event_stream
 
 # Components that require the bioaf-scrna notebook image
 _NOTEBOOK_COMPONENTS = {"rstudio", "jupyterhub"}
@@ -79,6 +80,42 @@ def _safe_stack_error_message(exc: DomainError) -> str:
         if msg == known:
             return known
     return "Stack operation failed. See server logs."
+
+
+async def _stack_event_stream(
+    session: AsyncSession,
+    events: AsyncGenerator[TerraformProgressEvent, None],
+) -> AsyncGenerator[str, None]:
+    """Serve a stack operation over SSE as the owner of ``session``."""
+    async with owned_event_stream(session, events) as stream:
+        try:
+            async for raw_event in stream:
+                event = client_event(raw_event)
+                payload: dict = {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "resource_address": event.resource_address,
+                    "resources_completed": event.resources_completed,
+                    "resources_total": event.resources_total,
+                }
+                if event.extra:
+                    payload["extra"] = event.extra
+                yield f"data: {json.dumps(payload)}\n\n"
+        except DomainError as exc:
+            logger.exception("Stack SSE stream failed")
+            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
+            yield f"data: {error_data}\n\n"
+
+
+def _stack_sse_response(
+    session: AsyncSession,
+    events: AsyncGenerator[TerraformProgressEvent, None],
+) -> ClosingStreamingResponse:
+    return ClosingStreamingResponse(
+        _stack_event_stream(session, events),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 router = APIRouter(tags=["stack_deploy"])
@@ -273,31 +310,7 @@ async def stack_deploy_endpoint(
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
 
-    async def event_generator():
-        try:
-            async for event in deploy_stack(session, stack_type, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, deploy_stack(session, stack_type, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/deploy-background")
@@ -340,19 +353,21 @@ async def stack_deploy_background_endpoint(
         """Drain the deploy_stack generator in the background with its own session."""
         async with async_session_factory() as bg_session:
             try:
-                async for _event in deploy_stack(
+                async with owned_event_stream(
                     bg_session,
-                    stack_type,
-                    user_id,
-                    org_id=org_id,
-                    compute_region=compute_region,
-                    compute_zone=compute_zone,
-                ):
-                    await bg_session.commit()
-                await bg_session.commit()
+                    deploy_stack(
+                        bg_session,
+                        stack_type,
+                        user_id,
+                        org_id=org_id,
+                        compute_region=compute_region,
+                        compute_zone=compute_zone,
+                    ),
+                ) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background deploy failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_deploy())
 
@@ -380,12 +395,11 @@ async def stack_teardown_background_endpoint(
     async def _run_teardown():
         async with async_session_factory() as bg_session:
             try:
-                async for _event in teardown_stack(bg_session, user_id, org_id=org_id):
-                    await bg_session.commit()
-                await bg_session.commit()
+                async with owned_event_stream(bg_session, teardown_stack(bg_session, user_id, org_id=org_id)) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background teardown failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_teardown())
 
@@ -417,12 +431,13 @@ async def stack_destroy_storage_background_endpoint(
     async def _run_destroy_storage():
         async with async_session_factory() as bg_session:
             try:
-                async for _event in destroy_storage(bg_session, user_id, org_id=org_id):
-                    await bg_session.commit()
-                await bg_session.commit()
+                async with owned_event_stream(
+                    bg_session, destroy_storage(bg_session, user_id, org_id=org_id)
+                ) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background storage destroy failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_destroy_storage())
 
@@ -503,31 +518,7 @@ async def stack_teardown_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    async def event_generator():
-        try:
-            async for event in teardown_stack(session, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, teardown_stack(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/destroy-storage")
@@ -549,31 +540,7 @@ async def stack_destroy_storage_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    async def event_generator():
-        try:
-            async for event in destroy_storage(session, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, destroy_storage(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/sync-storage-config")
@@ -1144,9 +1111,10 @@ async def _run_apply_background(run_id: int, user_id: int) -> None:
     """Run TerraformExecutor.run_apply in the background with its own session."""
     async with async_session_factory() as bg_session:
         try:
-            async for _event in TerraformExecutor.run_apply(bg_session, run_id, user_id):
-                pass
-            await bg_session.commit()
+            async with owned_event_stream(
+                bg_session, TerraformExecutor.run_apply(bg_session, run_id, user_id)
+            ) as events:
+                async for _event in events:
+                    pass
         except Exception:
             logger.exception("Background terraform apply failed for run %d", run_id)
-            await bg_session.rollback()
