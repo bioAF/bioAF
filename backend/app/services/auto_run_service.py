@@ -256,6 +256,7 @@ class AutoRunService:
         from app.services.event_bus import event_bus
         from app.services.event_types import AUTO_RUN_BUDGET_DISABLED, AUTO_RUN_LAUNCHED
         from app.services.pipeline_run_service import PipelineRunService
+        from app.services.post_commit_events import defer_event
 
         now = datetime.now(timezone.utc)
 
@@ -362,31 +363,38 @@ class AutoRunService:
                         config.configured_by_user_id,
                         launch_data,
                     )
-                    pr.status = "launched"
                     pr.pipeline_run_id = run.id
-                    await session.flush()
+                    if run.status == "failed":
+                        # The run exists and is committed with the batch, so it stays reachable
+                        # from the pending entry; the entry itself did not launch anything.
+                        pr.status = "cancelled"
+                        pr.cancelled_reason = "launch_failed"
+                    else:
+                        pr.status = "launched"
 
-                    await event_bus.emit(
-                        AUTO_RUN_LAUNCHED,
-                        {
-                            "event_type": AUTO_RUN_LAUNCHED,
-                            "org_id": config.organization_id,
-                            "user_id": config.configured_by_user_id,
-                            "entity_type": "pipeline_run",
-                            "entity_id": run.id,
-                            "title": f"Auto-run launched: {config.pipeline_key}",
-                            "message": (
-                                f"Pipeline '{config.pipeline_key}' auto-launched for experiment {config.experiment_id}"
-                            ),
-                            "summary": f"Auto-run launched pipeline '{config.pipeline_key}' (run {run.id})",
-                            "metadata": {
-                                "pipeline_run_id": run.id,
-                                "sample_id": pr.sample_id,
-                                "experiment_id": config.experiment_id,
-                                "pipeline_key": config.pipeline_key,
+                        # Announced once the loop commits this batch; dropped if it never does.
+                        defer_event(
+                            session,
+                            AUTO_RUN_LAUNCHED,
+                            {
+                                "event_type": AUTO_RUN_LAUNCHED,
+                                "org_id": config.organization_id,
+                                "user_id": config.configured_by_user_id,
+                                "entity_type": "pipeline_run",
+                                "entity_id": run.id,
+                                "title": f"Auto-run launched: {config.pipeline_key}",
+                                "message": (
+                                    f"Pipeline '{config.pipeline_key}' auto-launched for experiment {config.experiment_id}"
+                                ),
+                                "summary": f"Auto-run launched pipeline '{config.pipeline_key}' (run {run.id})",
+                                "metadata": {
+                                    "pipeline_run_id": run.id,
+                                    "sample_id": pr.sample_id,
+                                    "experiment_id": config.experiment_id,
+                                    "pipeline_key": config.pipeline_key,
+                                },
                             },
-                        },
-                    )
+                        )
                 except Exception as exc:
                     logger.exception(
                         "Auto-run launch failed for pending_auto_run %d: %s",
