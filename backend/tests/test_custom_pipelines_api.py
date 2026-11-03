@@ -757,3 +757,51 @@ async def test_launch_invalid_version(
         headers=_bearer(admin_token),
     )
     assert response.status_code == 400
+
+
+async def _pipeline_with_version(client, token, name: str, env_version_id: int) -> tuple[int, int]:
+    pipeline_id = (
+        await client.post("/api/v1/custom-pipelines", json={"name": name}, headers=_bearer(token))
+    ).json()["id"]
+    version_id = (
+        await client.post(
+            f"/api/v1/custom-pipelines/{pipeline_id}/versions",
+            json={
+                "code_source_type": "inline",
+                "code_content": "print()",
+                "entrypoint_command": "python /code/script.py",
+                "environment_version_id": env_version_id,
+            },
+            headers=_bearer(token),
+        )
+    ).json()["id"]
+    return pipeline_id, version_id
+
+
+@pytest.mark.asyncio
+async def test_launch_refuses_a_version_from_a_different_pipeline(
+    client, session, admin_token, ready_env_version, experiment, input_files, platform_results_bucket
+):
+    """The URL names the pipeline; a version of another pipeline is not launched through it."""
+    from sqlalchemy import func, select
+
+    from app.models.pipeline_run import PipelineRun
+
+    url_pipeline_id, _ = await _pipeline_with_version(client, admin_token, "UrlPipeline", ready_env_version.id)
+    _, other_version_id = await _pipeline_with_version(client, admin_token, "OtherPipeline", ready_env_version.id)
+
+    adapter = _mock_compute_adapter()
+    with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
+        response = await client.post(
+            f"/api/v1/custom-pipelines/{url_pipeline_id}/launch",
+            json={
+                "version_id": other_version_id,
+                "experiment_id": experiment.id,
+                "input_file_ids": [f.id for f in input_files],
+            },
+            headers=_bearer(admin_token),
+        )
+
+    assert response.status_code == 400
+    assert adapter.submit_job.await_count == 0
+    assert (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 0

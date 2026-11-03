@@ -544,8 +544,14 @@ class CustomPipelineService:
         org_id: int,
         user_id: int,
         data: CustomPipelineLaunchRequest,
+        *,
+        pipeline_id: int | None = None,
     ) -> PipelineRun:
-        """Launch a custom pipeline run. Implements spec-launch-orchestration.md."""
+        """Launch a custom pipeline run. Implements spec-launch-orchestration.md.
+
+        ``pipeline_id``, when given, is the pipeline the caller addressed (the
+        launch URL's); the version must belong to it.
+        """
         if data.experiment_id is None and data.project_id is None:
             raise ValidationError("Either experiment_id or project_id must be provided")
 
@@ -567,6 +573,8 @@ class CustomPipelineService:
         pipeline = version.custom_pipeline
         if pipeline is None or pipeline.organization_id != org_id:
             raise ValidationError("Pipeline version does not belong to this organization")
+        if pipeline_id is not None and pipeline.id != pipeline_id:
+            raise ValidationError(f"Pipeline version {data.version_id} does not belong to this pipeline")
 
         if version.status != "active":
             raise StateError(
