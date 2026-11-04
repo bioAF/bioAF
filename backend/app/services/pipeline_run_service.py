@@ -474,7 +474,9 @@ class PipelineRunService:
         )
         if data.sample_ids:
             sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
-        samples = list((await session.execute(sample_query)).scalars().all())
+        samples = PipelineRunService._in_requested_order(
+            list((await session.execute(sample_query)).scalars().all()), data.sample_ids
+        )
         for sample in samples:
             # Resolved with the SAME opt-in the launch will use. Hardcoding this
             # off previewed a sheet with empty read columns and then submitted
@@ -717,6 +719,19 @@ class PipelineRunService:
     DERIVED_SOURCE_TYPES: frozenset[str] = frozenset({"pipeline_output", "notebook_output"})
 
     @staticmethod
+    def _in_requested_order(samples: list, sample_ids: list[int] | None) -> list:
+        """The samples in the order they were asked for, or by id when none were named.
+
+        A sheet's rows follow this order, so it must never be the order the database happens to
+        return them in: rewriting a row moves it in the table, and a reproduction compares the
+        sheet it would submit with the recorded one exactly.
+        """
+        if not sample_ids:
+            return sorted(samples, key=lambda s: s.id)
+        position = {sample_id: i for i, sample_id in enumerate(sample_ids)}
+        return sorted(samples, key=lambda s: (position.get(s.id, len(position)), s.id))
+
+    @staticmethod
     def _input_eligible_files(files: list, include_derived: bool) -> list:
         """Filter a sample's files to those eligible as pipeline inputs.
 
@@ -864,6 +879,7 @@ class PipelineRunService:
                 .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
             )
             samples = list(sample_result.scalars().all())
+        samples = PipelineRunService._in_requested_order(samples, data.sample_ids)
 
         # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
         # outputs are excluded by default so they are never fed back in as inputs
@@ -1457,7 +1473,7 @@ class PipelineRunService:
                 "This run cannot be reproduced exactly: it was recorded before bioAF kept the samplesheet, "
                 "per-sample values and parameters a run was given."
             )
-        sample_ids = [s.id for s in original.samples] if original.samples else None
+        sample_ids = PipelineRunService._recorded_sample_order(original)
 
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
@@ -1485,6 +1501,24 @@ class PipelineRunService:
         )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run
+
+    @staticmethod
+    def _recorded_sample_order(original: PipelineRun) -> list[int] | None:
+        """The original's samples in the order its sheet listed them.
+
+        Read from the rows the run recorded emitting, each naming its sample. A run recorded before
+        those were kept has its samples taken by id; if that is not the order its sheet used, the
+        sheet check refuses the reproduction rather than relaunching it reordered.
+        """
+        linked = {s.id for s in original.samples or []}
+        if not linked:
+            return None
+        ordered: list[int] = []
+        for row in original.samplesheet_emitted_json or []:
+            sample_id = row.get("sample_id") if isinstance(row, dict) else None
+            if sample_id in linked and sample_id not in ordered:
+                ordered.append(sample_id)
+        return ordered + sorted(linked - set(ordered))
 
     @staticmethod
     def _stated_sample_values(snapshot: dict) -> dict[str, dict[str, str]]:
