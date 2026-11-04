@@ -60,8 +60,8 @@ class CustomPipelineVersionCreateRequest(BaseModel):
     github_repo_id: int | None = None
     entrypoint_command: str = Field(..., min_length=1)
     environment_version_id: int
-    cpu_request: str = "2"
-    memory_request: str = "8Gi"
+    cpu_request: str = "1"
+    memory_request: str = "4Gi"
     log_file_path: str | None = None
     variables: list[CustomPipelineVariableDefinition] = []
     qc_template: str | None = None

@@ -187,7 +187,7 @@ async def _create_pipeline_with_version(
             github_repo_id=github_repo_id if code_source_type == "github_repo" else None,
             entrypoint_command=entrypoint_command,
             environment_version_id=env_version_id,
-            cpu_request="2",
+            cpu_request="1",
             memory_request="4Gi",
             variables=variables or [],
         ),

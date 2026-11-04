@@ -386,8 +386,8 @@ async def test_create_version_inline(session, admin_user, ready_env_version):
             code_content="print('hi')",
             entrypoint_command="python script.py",
             environment_version_id=ready_env_version.id,
-            cpu_request="4",
-            memory_request="16Gi",
+            cpu_request="1400m",
+            memory_request="5Gi",
         ),
     )
     await session.commit()
@@ -396,8 +396,8 @@ async def test_create_version_inline(session, admin_user, ready_env_version):
     assert version.code_source_type == "inline"
     assert version.code_content == "print('hi')"
     assert version.github_repo_id is None
-    assert version.cpu_request == "4"
-    assert version.memory_request == "16Gi"
+    assert version.cpu_request == "1400m"
+    assert version.memory_request == "5Gi"
     assert version.version_trigger == "user"
     assert version.status == "active"
 

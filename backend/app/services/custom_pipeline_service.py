@@ -31,6 +31,7 @@ from app.schemas.custom_pipeline import (
     CustomPipelineVersionCreateRequest,
 )
 from app.services.audit_service import log_action
+from app.services.custom_pipeline_resources import check_fits_head_pool
 from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
 from app.services.post_commit_events import defer_event
@@ -40,8 +41,6 @@ logger = logging.getLogger("bioaf.custom_pipeline")
 
 
 VALID_CODE_SOURCE_TYPES = ("github_repo", "code_blob", "inline")
-CPU_PATTERN = re.compile(r"^\d+(\.\d+)?m?$")
-MEMORY_PATTERN = re.compile(r"^\d+(Ki|Mi|Gi|Ti|Pi|Ei|K|M|G|T|P|E)?$")
 PARAM_NAME_SANITIZER = re.compile(r"[^A-Z0-9]")
 
 
@@ -54,11 +53,28 @@ def _slugify(name: str) -> str:
     return slug[:100]
 
 
-def _validate_resource_strings(cpu_request: str, memory_request: str) -> None:
-    if not CPU_PATTERN.match(cpu_request):
-        raise ValidationError(f"Invalid cpu_request: {cpu_request}")
-    if not MEMORY_PATTERN.match(memory_request):
-        raise ValidationError(f"Invalid memory_request: {memory_request}")
+def _check_unique_variable_names(variables: list) -> None:
+    """Each variable reaches the job as one PARAM_<NAME> and one params.json key, so names must differ."""
+    seen: set[str] = set()
+    for var in variables:
+        if var.variable_name in seen:
+            raise ValidationError(
+                f'Each variable needs its own name, and "{var.variable_name}" is used more than once. '
+                "Rename or remove one of them."
+            )
+        seen.add(var.variable_name)
+
+
+_ENVIRONMENT_NOT_READY: dict[str, str] = {
+    "draft": (
+        "This pipeline's environment has not been built yet. Build it from Pipeline Templates, then launch again."
+    ),
+    "building": "This pipeline's environment is still building. Launch again once its build has finished.",
+    "failed": (
+        "This pipeline's environment did not build, so it cannot run. Rebuild it from Pipeline Templates, "
+        "then launch again."
+    ),
+}
 
 
 class CustomPipelineService:
@@ -260,7 +276,8 @@ class CustomPipelineService:
         if not data.entrypoint_command or not data.entrypoint_command.strip():
             raise ValidationError("entrypoint_command must not be empty")
 
-        _validate_resource_strings(data.cpu_request, data.memory_request)
+        check_fits_head_pool(data.cpu_request, data.memory_request)
+        _check_unique_variable_names(data.variables)
 
         if data.log_file_path is not None and not data.log_file_path.startswith("/outputs/"):
             raise ValidationError("log_file_path must start with /outputs/")
@@ -721,6 +738,7 @@ class CustomPipelineService:
             project_id=data.project_id,
             submitted_by_user_id=user_id,
             pipeline_name=pipeline.name,
+            pipeline_key=pipeline.pipeline_key,
             pipeline_version=str(version.version_number),
             parameters_json=resolved_variables,
             input_files_json=[f.id for f in input_files],
@@ -878,6 +896,26 @@ class CustomPipelineService:
                     "This run cannot be reproduced: one or more of its input files are no longer available."
                 )
 
+        # The launcher checks the version too, but in launch words; checked here first so the refusal
+        # says it is the reproduction that cannot go ahead.
+        version = (
+            await session.execute(
+                select(CustomPipelineVersion)
+                .where(CustomPipelineVersion.id == original.custom_pipeline_version_id)
+                .options(
+                    selectinload(CustomPipelineVersion.custom_pipeline),
+                    selectinload(CustomPipelineVersion.environment_version),
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            raise ValidationError("This run cannot be reproduced: the pipeline version it ran no longer exists.")
+        try:
+            CustomPipelineService.check_launchable(version, org_id, None)
+        except (StateError, ValidationError) as refused:
+            reason = str(refused)
+            raise type(refused)(f"This run cannot be reproduced: {reason[:1].lower()}{reason[1:]}") from refused
+
         return await CustomPipelineService.launch_run(
             session,
             org_id,
@@ -930,8 +968,9 @@ class CustomPipelineService:
         """Whether ``version`` may be launched in ``org_id``; returns its environment's image.
 
         ``pipeline_id``, when given, is the pipeline the caller addressed. Refuses a version of
-        another Organization or pipeline, a version that is not active, and an environment that
-        is missing or not built.
+        another Organization or pipeline, a version that is not active, an environment that is
+        missing or not built, and a resource request the pipeline-head pool cannot schedule. Each
+        refusal says why in plain words; the technical state goes to the log.
         """
         pipeline = version.custom_pipeline
         if pipeline is None or pipeline.organization_id != org_id:
@@ -939,14 +978,26 @@ class CustomPipelineService:
         if pipeline_id is not None and pipeline.id != pipeline_id:
             raise ValidationError(f"Pipeline version {version.id} does not belong to this pipeline")
         if version.status != "active":
+            logger.info("Custom version %s refused for launch: status %r", version.id, version.status)
             raise StateError(
-                f"Pipeline version {version.version_number} has status '{version.status}', expected 'active'"
+                f"Version {version.version_number} of this pipeline is {version.status} and can no longer be "
+                "launched. Choose an active version."
             )
         env_version = version.environment_version
         if env_version is None:
-            raise ValidationError("Environment version not found")
+            logger.info("Custom version %s refused for launch: no environment version", version.id)
+            raise ValidationError(
+                "This pipeline version has no environment to run in. Create a new version with a pipeline template."
+            )
         if env_version.status != "ready":
-            raise StateError(f"Environment version has status '{env_version.status}', expected 'ready'")
+            logger.info(
+                "Custom version %s refused for launch: environment version %s status %r",
+                version.id,
+                getattr(env_version, "id", None),
+                env_version.status,
+            )
+            raise StateError(_ENVIRONMENT_NOT_READY.get(env_version.status, _ENVIRONMENT_NOT_READY["failed"]))
+        check_fits_head_pool(version.cpu_request, version.memory_request)
         return env_version.image_uri or ""
 
     @staticmethod
@@ -959,6 +1010,11 @@ class CustomPipelineService:
         for entry in provided:
             if entry.variable_name not in defined_by_name:
                 raise ValidationError(f"Unknown variable: {entry.variable_name}")
+            earlier = provided_by_name.get(entry.variable_name)
+            if earlier is not None and earlier != entry.variable_value:
+                raise ValidationError(
+                    f'Two different values were given for "{entry.variable_name}". Give it one value.'
+                )
             provided_by_name[entry.variable_name] = entry.variable_value
 
         resolved: dict[str, str] = {}

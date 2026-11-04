@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1362,8 +1362,13 @@ class PipelineRunService:
             query = query.where(PipelineRun.experiment_id == experiment_id)
             count_query = count_query.where(PipelineRun.experiment_id == experiment_id)
         if pipeline_key:
-            query = query.where(PipelineRun.pipeline_name == pipeline_key)
-            count_query = count_query.where(PipelineRun.pipeline_name == pipeline_key)
+            # The stored key, or, for a run stored before keys were kept, its name.
+            matches_key = or_(
+                PipelineRun.pipeline_key == pipeline_key,
+                and_(PipelineRun.pipeline_key.is_(None), PipelineRun.pipeline_name == pipeline_key),
+            )
+            query = query.where(matches_key)
+            count_query = count_query.where(matches_key)
         if status:
             query = query.where(PipelineRun.status == status)
             count_query = count_query.where(PipelineRun.status == status)

@@ -40,8 +40,12 @@ async def test_a_version_with_two_variables_of_one_name_is_refused(session, admi
                 entrypoint_command="x",
                 environment_version_id=ready_env_version.id,
                 variables=[
-                    CustomPipelineVariableDefinition(variable_name="greeting", default_value="a"),
-                    CustomPipelineVariableDefinition(variable_name="greeting", default_value="b"),
+                    CustomPipelineVariableDefinition(
+                        variable_name="greeting", default_value="a", variable_type="string"
+                    ),
+                    CustomPipelineVariableDefinition(
+                        variable_name="greeting", default_value="b", variable_type="string"
+                    ),
                 ],
             ),
         )
