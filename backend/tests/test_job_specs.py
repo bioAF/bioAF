@@ -7,6 +7,7 @@ The legacy dict form is still accepted at the adapter and read into the same typ
 """
 
 import dataclasses
+from typing import Any
 
 import pytest
 
@@ -146,7 +147,7 @@ def test_an_init_container_with_fields_the_spec_cannot_carry_is_refused():
 
 
 def test_reading_a_dict_does_not_keep_references_to_its_parts():
-    raw = {"pipeline_source": "https://x", "parameters": {"a": "1"}}
+    raw: dict[str, Any] = {"pipeline_source": "https://x", "parameters": {"a": "1"}}
     spec = job_spec_from_dict(raw)
     raw["parameters"]["a"] = "changed"
     assert spec.parameters == {"a": "1"}

@@ -52,6 +52,7 @@ def test_a_refused_submission_is_failed_with_a_plain_message(caplog):
 
     assert run.status == "failed"
     assert run.failure_reason == SUBMISSION_FAILED
+    assert run.error_message is not None
     assert "10.0.0.7" not in run.error_message
     assert "run 5" in run.error_message
     assert run.started_at is None and run.completed_at is not None

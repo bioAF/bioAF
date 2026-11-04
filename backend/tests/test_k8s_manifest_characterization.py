@@ -12,6 +12,7 @@ Regenerate (only for an intended manifest change): BIOAF_REGEN_K8S_GOLDENS=1 pyt
 import copy
 import json
 import os
+from typing import Any
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -53,7 +54,7 @@ NEXTFLOW = {
     "input_files": ["S1"],
 }
 
-CUSTOM_BASE = {
+CUSTOM_BASE: dict[str, Any] = {
     "run_id": 202,
     "pipeline_name": "In-house QC",
     "container_image": "registry.test/bioaf/qc:v3",
