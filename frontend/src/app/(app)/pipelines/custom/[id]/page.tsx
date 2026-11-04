@@ -37,8 +37,9 @@ interface VariableDraft extends CustomPipelineVariableDefinition {
   _key: string;
 }
 
-const DEFAULT_CPU = "2";
-const DEFAULT_MEMORY = "8Gi";
+// What one pipeline-head node can schedule for a custom job; the server refuses more than 1.4 CPU / 5Gi.
+const DEFAULT_CPU = "1";
+const DEFAULT_MEMORY = "4Gi";
 
 function emptyVariableDraft(): VariableDraft {
   return {
@@ -346,11 +347,19 @@ export default function CustomPipelineDetailPage() {
       setVersionError("Provide code content for the chosen source type.");
       return;
     }
+    const seenNames = new Set<string>();
     for (const v of versionForm.variables) {
       if (!v.variable_name.trim()) {
         setVersionError("All variables need a name.");
         return;
       }
+      if (seenNames.has(v.variable_name)) {
+        setVersionError(
+          `Each variable needs its own name, and "${v.variable_name}" is used more than once. Rename or remove one of them.`,
+        );
+        return;
+      }
+      seenNames.add(v.variable_name);
     }
 
     let qcConfigParsed: Record<string, unknown> | null = null;
