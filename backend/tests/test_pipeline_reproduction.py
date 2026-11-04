@@ -19,7 +19,7 @@ from app.models.audit_log import AuditLog
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.organization import Organization
-from app.models.pipeline_run import PipelineRun, PipelineRunSample
+from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample, sample_files
 from app.models.user import User
 from app.services.auth_service import AuthService
@@ -29,6 +29,7 @@ from app.services.event_types import PIPELINE_STARTED
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.pipeline_run_service import PipelineRunService
 from app.services.post_commit_events import wait_for_deferred_events
+from tests.test_samplesheet_declared_launch import world as declared_world  # noqa: F401  (fixture)
 
 
 def _bearer(token: str) -> dict:
@@ -80,6 +81,7 @@ async def _launchable_run(
     version: object = _UNSET,
     samples: int = 1,
     launch_fields: dict | None = None,
+    file_source_type: str = "upload",
 ) -> PipelineRun:
     """A completed catalog run whose samples still have their reads: reproducible as it stands.
 
@@ -107,6 +109,7 @@ async def _launchable_run(
                 gcs_uri=f"gs://bucket/{org_id}/S{i}_{read}_001.fastq.gz",
                 filename=f"S{i}_{read}_001.fastq.gz",
                 file_type="fastq",
+                source_type=file_source_type,
             )
             session.add(f)
             await session.flush()
@@ -718,3 +721,146 @@ async def test_a_missing_version_on_either_side_is_refused(
     response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
 
     await _assert_refused_without_effects(response, session, compute, runs_before)
+
+
+# --- Faithful catalog reproduction ---
+#
+# A reproduction gives the pipeline what the original was given: the per-sample values the
+# scientist stated, the reference and alignment choices, the project, and the same kind of input
+# files. bioAF checks the sheet it would submit against the sheet the original recorded, before
+# anything is created or submitted, and refuses if they differ. The one permitted difference is an
+# explicitly confirmed drop of samples that have lost their files.
+
+
+async def _reproduce_catalog(client, run_id: int, token: str, **query):
+    suffix = "?" + "&".join(f"{k}={str(v).lower()}" for k, v in query.items()) if query else ""
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        return await client.post(f"/api/pipeline-runs/{run_id}/reproduce{suffix}", headers=_bearer(token))
+
+
+@pytest.mark.asyncio
+async def test_stated_per_sample_values_are_carried_into_the_reproduction(client, session, declared_world, compute):  # noqa: F811
+    """The original needed a stated value for a declared column; the reproduction must give it again."""
+    from tests.test_samplesheet_declared_launch import DECLARATION, KEY, _headers, _save_declaration
+
+    world = declared_world
+
+    headers = _headers(world["admin"], "admin")
+    assert (await _save_declaration(client, headers, world["exp"].id, DECLARATION)).status_code in (200, 201)
+    body = {
+        "pipeline_key": KEY,
+        "experiment_id": world["exp"].id,
+        "sample_ids": [world["sample"].id],
+        "sample_values": {str(world["sample"].id): {"cycle": "3"}},
+    }
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        launched = await client.post("/api/pipeline-runs", json=body, headers=headers)
+    assert launched.status_code == 200, launched.text
+    original_sheet = compute.submit_job.call_args.args[0].sample_sheet
+    assert "3" in original_sheet.splitlines()[1]
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        response = await client.post(f"/api/pipeline-runs/{launched.json()['id']}/reproduce", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.await_count == 2
+    assert compute.submit_job.call_args.args[0].sample_sheet == original_sheet
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_used_derived_inputs_reproduces_with_them(client, session, admin_user, admin_token, compute):
+    """Fetched reads are pipeline outputs; a run that opted into them must reproduce with them."""
+    original = await _launchable_run(
+        session,
+        admin_user.organization_id,
+        admin_user.id,
+        stored_key="nf-core/scrnaseq",
+        launch_fields={"include_derived_inputs": True},
+        file_source_type="pipeline_output",
+    )
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_a_sheet_that_would_differ_from_the_recorded_one_is_refused(
+    client, session, admin_user, admin_token, compute
+):
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    sample = (await session.execute(select(Sample).where(Sample.external_id == "S1"))).scalar_one()
+    sample.external_id = "S1-renamed"
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
+    assert "samplesheet" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("missing", ["samplesheet_mapping_json", "samplesheet_csv"])
+@pytest.mark.asyncio
+async def test_a_run_that_did_not_record_its_sheet_or_design_is_refused(
+    client, session, admin_user, admin_token, compute, missing
+):
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    setattr(original, missing, None)
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
+
+
+@pytest.mark.asyncio
+async def test_the_original_reference_alignment_and_project_are_kept(client, session, admin_user, admin_token, compute):
+    from app.models.project import Project
+
+    org_id = admin_user.organization_id
+    project = Project(organization_id=org_id, name="Repro Project", owner_user_id=admin_user.id)
+    session.add(project)
+    await session.commit()
+    project_id = project.id
+    original = await _launchable_run(
+        session,
+        org_id,
+        admin_user.id,
+        stored_key="nf-core/scrnaseq",
+        launch_fields={"alignment_algorithm": "STARsolo", "project_id": project_id},
+    )
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    session.expire_all()
+    new_run = await session.get(PipelineRun, response.json()["id"])
+    assert new_run.alignment_algorithm == "STARsolo"
+    assert new_run.project_id == project_id
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_drop_of_samples_without_files_still_reproduces_the_rest(
+    client, session, admin_user, admin_token, compute
+):
+    """The confirmed drop is the one permitted difference: fewer rows, nothing new."""
+    from sqlalchemy import delete
+
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", samples=2
+    )
+    original_rows = set(original.samplesheet_csv.splitlines()[1:])
+    s2 = (await session.execute(select(Sample).where(Sample.external_id == "S2"))).scalar_one()
+    await session.execute(delete(sample_files).where(sample_files.c.sample_id == s2.id))
+    await session.commit()
+
+    refused = await _reproduce_catalog(client, original.id, admin_token)
+    assert refused.status_code == 400
+    response = await _reproduce_catalog(client, original.id, admin_token, drop_samples_without_files=True)
+
+    assert response.status_code == 200, response.text
+    submitted = compute.submit_job.call_args.args[0].sample_sheet.splitlines()
+    assert submitted[0] == original.samplesheet_csv.splitlines()[0]
+    assert set(submitted[1:]) < original_rows
