@@ -77,44 +77,68 @@ async def _launchable_run(
     name: str | None = None,
     stored_key: object = None,
     version: object = _UNSET,
+    samples: int = 1,
+    launch_fields: dict | None = None,
 ) -> PipelineRun:
     """A completed catalog run whose samples still have their reads: reproducible as it stands.
 
-    By default it is a historical row: no stored ``pipeline_key``, and a ``pipeline_name`` equal to
-    the catalog key, which is what every nf-core run recorded before the key was stored looks like.
+    Launched through the real launcher, so it records what a real launch records (its sheet, its
+    stated design, its inputs). By default it is then made to look historical: no stored
+    ``pipeline_key``, and a ``pipeline_name`` equal to the catalog key, which is what every nf-core
+    run recorded before the key was stored looks like.
     """
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
     await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
     experiment = Experiment(organization_id=org_id, name="Repro Exp", owner_user_id=user_id, status="fastq_uploaded")
     session.add(experiment)
     await session.flush()
-    sample = Sample(experiment_id=experiment.id, external_id="S1", organism="Homo sapiens", tissue_type="PBMC")
-    session.add(sample)
-    await session.flush()
-    for read in ("R1", "R2"):
-        f = File(
-            organization_id=org_id,
-            experiment_id=experiment.id,
-            gcs_uri=f"gs://bucket/{org_id}/S1_{read}_001.fastq.gz",
-            filename=f"S1_{read}_001.fastq.gz",
-            file_type="fastq",
-        )
-        session.add(f)
+    sample_ids = []
+    for i in range(1, samples + 1):
+        sample = Sample(experiment_id=experiment.id, external_id=f"S{i}", organism="Homo sapiens", tissue_type="PBMC")
+        session.add(sample)
         await session.flush()
-        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=f.id))
-    pipeline = await PipelineCatalogService.get_pipeline(session, org_id, key)
-    run = PipelineRun(
-        organization_id=org_id,
-        experiment_id=experiment.id,
-        submitted_by_user_id=user_id,
-        pipeline_name=name if name is not None else key,
-        pipeline_key=stored_key,
-        pipeline_version=pipeline.version if version is _UNSET else version,
-        parameters_json={"aligner": "cellranger"},
-        status="completed",
+        sample_ids.append(sample.id)
+        for read in ("R1", "R2"):
+            f = File(
+                organization_id=org_id,
+                experiment_id=experiment.id,
+                gcs_uri=f"gs://bucket/{org_id}/S{i}_{read}_001.fastq.gz",
+                filename=f"S{i}_{read}_001.fastq.gz",
+                file_type="fastq",
+            )
+            session.add(f)
+            await session.flush()
+            await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=f.id))
+    await session.commit()
+
+    accepting = MagicMock()
+    accepting.submit_job = AsyncMock(
+        return_value=_job_submit_result_from_dict(
+            {"job_id": "orig", "namespace": "bioaf-pipelines", "status": "queued"}
+        )
     )
-    session.add(run)
-    await session.flush()
-    session.add(PipelineRunSample(pipeline_run_id=run.id, sample_id=sample.id))
+    with (
+        patch("app.services.pipeline_run_service.get_compute_adapter", return_value=accepting),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        run = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key=key,
+                experiment_id=experiment.id,
+                sample_ids=sample_ids,
+                parameters={"aligner": "cellranger"},
+                **(launch_fields or {}),
+            ),
+        )
+    run.pipeline_name = name if name is not None else key
+    run.pipeline_key = stored_key
+    if version is not _UNSET:
+        run.pipeline_version = version
+    run.status = "completed"
     await session.commit()
     return run
 
@@ -150,6 +174,7 @@ async def test_reproducing_another_organizations_run_is_not_found_and_has_no_eff
 ):
     foreign = await _launchable_run(session, other_org.id, other_org.user.id)
     runs_before = await _count(session, PipelineRun)
+    audits_before = await _count(session, AuditLog, AuditLog.action.in_(["reproduce", "launch"]))
 
     response = await client.post(f"/api/pipeline-runs/{foreign.id}/reproduce", headers=_bearer(admin_token))
 
@@ -157,7 +182,7 @@ async def test_reproducing_another_organizations_run_is_not_found_and_has_no_eff
     session.expire_all()
     assert await _count(session, PipelineRun) == runs_before
     assert compute.submit_job.await_count == 0
-    assert await _count(session, AuditLog, AuditLog.action.in_(["reproduce", "launch"])) == 0
+    assert await _count(session, AuditLog, AuditLog.action.in_(["reproduce", "launch"])) == audits_before
     assert started_events == []
 
 
