@@ -28,6 +28,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_STARTED
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.pipeline_run_service import PipelineRunService
+from app.services.post_commit_events import wait_for_deferred_events
 
 
 def _bearer(token: str) -> dict:
@@ -175,6 +176,8 @@ async def test_reproducing_another_organizations_run_is_not_found_and_has_no_eff
     foreign = await _launchable_run(session, other_org.id, other_org.user.id)
     runs_before = await _count(session, PipelineRun)
     audits_before = await _count(session, AuditLog, AuditLog.action.in_(["reproduce", "launch"]))
+    await wait_for_deferred_events()
+    started_events.clear()  # the original's own launch
 
     response = await client.post(f"/api/pipeline-runs/{foreign.id}/reproduce", headers=_bearer(admin_token))
 
