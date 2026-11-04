@@ -1,7 +1,8 @@
-"""What a pipeline run records when the compute provider does not accept its job.
+"""What a pipeline run records about the submission of its job.
 
-Shared by the catalog and custom launch paths, which agree on this much: the run is failed with a
-stable category and a plain-language message, and the provider's own error (which can name hosts,
+Shared by the catalog and custom launch paths, which agree on this much. An accepted job is
+recorded under its handles. A refused one is failed with a stable category and a plain-language
+message, and the provider's own error (which can name hosts,
 namespaces, and internal job IDs) goes to the server log next to the run it belongs to, never onto
 the run or into a notification.
 
@@ -17,6 +18,7 @@ follow-up work (pipeline launch plan, Delivery A item 7), not a guarantee this c
 import logging
 from datetime import datetime, timezone
 
+from app.adapters.models import JobSubmitResult
 from app.models.pipeline_run import PipelineRun
 
 SUBMISSION_FAILED = "submission_failed"
@@ -43,3 +45,23 @@ def mark_submission_failed(run: PipelineRun, error: BaseException, logger: loggi
         error,
         exc_info=error,
     )
+
+
+def record_submission_accepted(run: PipelineRun, result: JobSubmitResult) -> None:
+    """Mark ``run`` running under the job the provider accepted.
+
+    The backend-neutral handle (``compute_job_ref`` + ``provider_metadata``) is dual-written with
+    the legacy ``k8s_*``/``slurm_job_id`` columns until those are dropped (BAL Phase 4); the monitor
+    and cancellation read either.
+    """
+    run.status = "running"
+    run.started_at = datetime.now(timezone.utc)
+    run.k8s_job_name = result.job_id
+    run.k8s_namespace = result.provider_details.get("namespace", "")
+    run.slurm_job_id = result.job_id
+    run.compute_job_ref = result.job_id
+    run.provider_metadata = {
+        k: v for k, v in {"job_name": result.job_id, **(result.provider_details or {})}.items() if v is not None
+    }
+    if result.estimated_cost:
+        run.cost_estimate = result.estimated_cost.estimated_cost_usd

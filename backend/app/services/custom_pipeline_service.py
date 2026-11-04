@@ -32,7 +32,7 @@ from app.schemas.custom_pipeline import (
 )
 from app.services.audit_service import log_action
 from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
-from app.services.launch_outcome import mark_submission_failed
+from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
 from app.services.post_commit_events import defer_event
 from app.services.quota_service import QuotaService
 
@@ -791,20 +791,7 @@ class CustomPipelineService:
             mark_submission_failed(run, e, logger)
             await session.flush()
         else:
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            run.k8s_job_name = job_result.job_id
-            run.k8s_namespace = job_result.provider_details.get("namespace", "")
-            run.slurm_job_id = job_result.job_id
-            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
-            run.compute_job_ref = job_result.job_id
-            run.provider_metadata = {
-                k: v
-                for k, v in {"job_name": job_result.job_id, **(job_result.provider_details or {})}.items()
-                if v is not None
-            }
-            if job_result.estimated_cost:
-                run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
+            record_submission_accepted(run, job_result)
             await session.flush()
 
         # 16. Audit, and announce the outcome once the caller commits it
