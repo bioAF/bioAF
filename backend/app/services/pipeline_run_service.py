@@ -1458,10 +1458,22 @@ class PipelineRunService:
                     "Launch it again from the pipeline catalog."
                 )
 
+        # A missing version on either side is not a match, even against another missing one: neither
+        # says which code the run used. Checked before the comparison, so None == None cannot pass.
+        recorded, installed = (original.pipeline_version or "").strip(), (pipeline.version or "").strip()
+        if not recorded:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: it did not record which version of {key} it used."
+            )
+        if not installed:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: the installed {key} has no version to compare with "
+                f"the {recorded} the run used."
+            )
         if original.pipeline_version != pipeline.version:
             raise ValidationError(
                 f"This run cannot be reproduced exactly: it used {key} version "
-                f"{original.pipeline_version or 'unknown'}, and version {pipeline.version} is installed now."
+                f"{original.pipeline_version}, and version {pipeline.version} is installed now."
             )
         return key
 

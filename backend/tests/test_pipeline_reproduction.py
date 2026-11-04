@@ -661,3 +661,32 @@ async def test_custom_reproduction_refuses_what_it_cannot_reproduce_as_recorded(
     session.expire_all()
     assert await _count(session, PipelineRun) == runs_before
     assert custom_compute.submit_job.await_count == 0
+
+
+@pytest.mark.parametrize(
+    "recorded,installed",
+    [(None, None), ("", ""), (None, ""), ("", None), (None, "2.7.1"), ("2.7.1", None), ("2.7.1", "")],
+    ids=["both-none", "both-empty", "none-vs-empty", "empty-vs-none", "unrecorded", "uninstalled", "installed-empty"],
+)
+@pytest.mark.asyncio
+async def test_a_missing_version_on_either_side_is_refused(
+    client, session, admin_user, admin_token, compute, recorded, installed
+):
+    """Two missing versions are not a match: neither says which code the run used."""
+    from sqlalchemy import update
+
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    org_id = admin_user.organization_id
+    original = await _launchable_run(session, org_id, admin_user.id, stored_key="nf-core/scrnaseq", version=recorded)
+    await session.execute(
+        update(PipelineCatalogEntry)
+        .where(PipelineCatalogEntry.organization_id == org_id, PipelineCatalogEntry.pipeline_key == "nf-core/scrnaseq")
+        .values(version=installed)
+    )
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
