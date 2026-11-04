@@ -245,7 +245,7 @@ async def test_a_run_whose_name_differs_from_its_key_reproduces_through_the_key(
         response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
 
     assert response.status_code == 200, response.text
-    assert compute.submit_job.call_args.args[0]["pipeline_name"] == "bioaf-system-test"
+    assert compute.submit_job.call_args.args[0].pipeline_key == "bioaf-system-test"
     session.expire_all()
     assert (await session.get(PipelineRun, response.json()["id"])).pipeline_key == "bioaf-system-test"
 
@@ -261,7 +261,7 @@ async def test_a_historical_run_named_by_its_exact_key_still_reproduces(
         response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
 
     assert response.status_code == 200, response.text
-    assert compute.submit_job.call_args.args[0]["pipeline_name"] == "nf-core/scrnaseq"
+    assert compute.submit_job.call_args.args[0].pipeline_key == "nf-core/scrnaseq"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.adapters.job_specs import CustomCommandJobSpec, EnvVar, InitStep, VolumeMount
 from app.adapters.registry import get_compute_adapter
 from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.custom_pipeline import CustomPipeline
@@ -690,7 +691,7 @@ class CustomPipelineService:
 
         # 8. Code init containers + 9. working directory + ssh key
         ssh_private_key: str | None = None
-        code_init_containers: list[dict] = []
+        code_init_containers: list[InitStep] = []
         has_code_dir = True
 
         if version.code_source_type == "github_repo":
@@ -718,10 +719,10 @@ class CustomPipelineService:
             output_prefix = f"projects/{data.project_id}"
 
         # 11. Build PARAM_* env vars
-        extra_env = [
-            {"name": f"PARAM_{PARAM_NAME_SANITIZER.sub('_', name.upper())}", "value": str(value)}
+        extra_env = tuple(
+            EnvVar(name=f"PARAM_{PARAM_NAME_SANITIZER.sub('_', name.upper())}", value=str(value))
             for name, value in resolved_variables.items()
-        ]
+        )
 
         # 12. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0, isolate_denial=True)
@@ -761,27 +762,24 @@ class CustomPipelineService:
             run_id=run.id,
         )
 
-        extra_init_containers = [manifest_init, params_init] + code_init_containers
-
         # 15. Build job spec and submit
-        job_spec = {
-            "run_id": run.id,
-            "pipeline_name": pipeline.name,
-            "container_image": image_uri,
-            "command": ["/bin/sh", "-c", wrapped_command],
-            "stage_commands": stage_commands,
-            "namespace": "bioaf-pipelines",
-            "has_outputs_dir": True,
-            "has_code_dir": has_code_dir,
-            "extra_init_containers": extra_init_containers,
-            "ssh_private_key": ssh_private_key,
-            "cpu_request": version.cpu_request,
-            "memory_request": version.memory_request,
-            "extra_env": extra_env,
-            "working_dir": working_dir,
-            "experiment_id": data.experiment_id,
-            "project_id": data.project_id,
-        }
+        job_spec = CustomCommandJobSpec(
+            run_id=run.id,
+            pipeline_name=pipeline.name,
+            container_image=image_uri,
+            command=("/bin/sh", "-c", wrapped_command),
+            stage_commands=tuple(stage_commands),
+            has_outputs_dir=True,
+            has_code_dir=has_code_dir,
+            extra_init_containers=(manifest_init, params_init, *code_init_containers),
+            ssh_private_key=ssh_private_key,
+            cpu_request=version.cpu_request,
+            memory_request=version.memory_request,
+            extra_env=extra_env,
+            working_dir=working_dir,
+            experiment_id=data.experiment_id,
+            project_id=data.project_id,
+        )
 
         # A provider that raises is treated as having refused the job. That is not always true:
         # an error after the API accepted it (a timeout reading the response, say) leaves a job
@@ -1048,29 +1046,29 @@ class CustomPipelineService:
         return content.replace("'", "'\\''")
 
     @staticmethod
-    def _build_write_manifest_init(manifest_payload: dict) -> dict:
+    def _build_write_manifest_init(manifest_payload: dict) -> InitStep:
         manifest_json = json.dumps(manifest_payload)
         escaped = CustomPipelineService._shell_escape_single(manifest_json)
-        return {
-            "name": "write-manifest",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/manifest.json"],
-            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-        }
+        return InitStep(
+            name="write-manifest",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/manifest.json"),
+            mounts=(VolumeMount("data", "/data"),),
+        )
 
     @staticmethod
-    def _build_write_params_init(params_payload: dict) -> dict:
+    def _build_write_params_init(params_payload: dict) -> InitStep:
         params_json = json.dumps(params_payload)
         escaped = CustomPipelineService._shell_escape_single(params_json)
-        return {
-            "name": "write-params",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/params.json"],
-            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-        }
+        return InitStep(
+            name="write-params",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/params.json"),
+            mounts=(VolumeMount("data", "/data"),),
+        )
 
     @staticmethod
-    def _build_git_clone_init(repo: GitHubRepo) -> dict:
+    def _build_git_clone_init(repo: GitHubRepo) -> InitStep:
         ssh_url = repo.git_ssh_url
         target = f"/code/{repo.display_name}"
         clone_script = (
@@ -1080,25 +1078,22 @@ class CustomPipelineService:
             "ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && "
             f"git clone '{ssh_url}' '{target}'"
         )
-        return {
-            "name": "clone-repo",
-            "image": "alpine/git:latest",
-            "command": ["/bin/sh", "-c", clone_script],
-            "volumeMounts": [
-                {"name": "code", "mountPath": "/code"},
-                {"name": "ssh-key", "mountPath": "/secrets/ssh", "readOnly": True},
-            ],
-        }
+        return InitStep(
+            name="clone-repo",
+            image="alpine/git:latest",
+            command=("/bin/sh", "-c", clone_script),
+            mounts=(VolumeMount("code", "/code"), VolumeMount("ssh-key", "/secrets/ssh", read_only=True)),
+        )
 
     @staticmethod
-    def _build_write_code_init(code_content: str) -> dict:
+    def _build_write_code_init(code_content: str) -> InitStep:
         escaped = CustomPipelineService._shell_escape_single(code_content)
-        return {
-            "name": "write-code",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /code/script"],
-            "volumeMounts": [{"name": "code", "mountPath": "/code"}],
-        }
+        return InitStep(
+            name="write-code",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /code/script"),
+            mounts=(VolumeMount("code", "/code"),),
+        )
 
     @staticmethod
     def _build_entrypoint_wrapper(

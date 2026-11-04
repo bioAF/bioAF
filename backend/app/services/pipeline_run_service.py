@@ -27,6 +27,7 @@ from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_declaration import parse_declaration
 from app.services.samplesheet_mapping_service import SamplesheetMappingService
+from app.adapters.job_specs import NextflowJobSpec
 from app.adapters.registry import get_compute_adapter
 from app.services.vocabulary_validator import VocabularyValidator
 
@@ -969,18 +970,18 @@ class PipelineRunService:
 
         # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
         # having refused the job; see launch_outcome for the case where it had in fact accepted it.
-        job_spec = {
-            "run_id": run.id,
-            "pipeline_name": pipeline.pipeline_key,
-            "pipeline_source": pipeline.source_url,
-            "pipeline_version": pipeline.version,
-            "parameters": merged_params,
-            "sample_sheet": sample_sheet_csv,
-            "experiment_id": data.experiment_id,
-            "work_dir": run.work_dir,
-            "resume_from_run_id": data.resume_from_run_id,
-            "input_files": [s.external_id or str(s.id) for s in samples],
-        }
+        job_spec = NextflowJobSpec(
+            run_id=run.id,
+            pipeline_key=pipeline.pipeline_key,
+            pipeline_source=pipeline.source_url,
+            pipeline_version=pipeline.version,
+            parameters=merged_params,
+            sample_sheet=sample_sheet_csv,
+            experiment_id=data.experiment_id,
+            work_dir=run.work_dir,
+            resume_from_run_id=data.resume_from_run_id,
+            input_files=tuple(s.external_id or str(s.id) for s in samples),
+        )
         try:
             job_result = await get_compute_adapter().submit_job(job_spec)
         except Exception as e:

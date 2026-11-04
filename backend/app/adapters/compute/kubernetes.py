@@ -268,7 +268,7 @@ class KubernetesComputeProvider(ComputeProvider):
             quota_introspection=True,
         )
 
-    async def submit_job(self, job_spec: dict) -> JobSubmitResult:
+    async def submit_job(self, job_spec: JobSpec) -> JobSubmitResult:
         d = await self._local_submit_job(job_spec) if self.is_local else await self._k8s_submit_job(job_spec)
         return _job_submit_result_from_dict(d)
 

@@ -46,9 +46,13 @@ def defer_event(session: AsyncSession | Session, event_type: str, payload: dict[
 
 
 async def wait_for_deferred_events() -> None:
-    """Wait for every emission scheduled so far to finish."""
-    while _in_flight:
-        await asyncio.gather(*list(_in_flight), return_exceptions=True)
+    """Wait for every emission scheduled on this event loop so far to finish.
+
+    Tasks from another loop (a closed test loop, say) are skipped: they can never finish here.
+    """
+    loop = asyncio.get_running_loop()
+    while pending := [t for t in _in_flight if t.get_loop() is loop and not t.done()]:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 @event.listens_for(Session, "after_commit")

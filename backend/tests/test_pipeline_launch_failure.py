@@ -229,6 +229,9 @@ async def test_custom_successful_submission_commits_a_running_run_and_advances_t
 
     assert response.status_code == 200, response.text
     assert adapter.submit_job.await_count == 1
+    from app.adapters.job_specs import CustomCommandJobSpec
+
+    assert isinstance(adapter.submit_job.call_args.args[0], CustomCommandJobSpec)
     run = await fresh.get(PipelineRun, response.json()["id"])
     assert run.status == "running"
     assert run.compute_job_ref == "bioaf-pipeline-ok"
@@ -350,6 +353,11 @@ async def test_catalog_successful_submission_advances_the_experiment_and_announc
 
     assert response.status_code == 200, response.text
     assert adapter.submit_job.await_count == 1
+    from app.adapters.job_specs import NextflowJobSpec
+
+    submitted = adapter.submit_job.call_args.args[0]
+    assert isinstance(submitted, NextflowJobSpec)
+    assert submitted.pipeline_key == "nf-core/scrnaseq"
     run = await fresh.get(PipelineRun, response.json()["id"])
     assert run.status == "running"
     assert run.compute_job_ref == "bioaf-pipeline-ok"

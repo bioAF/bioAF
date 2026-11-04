@@ -4,12 +4,13 @@ SLURM support is planned for a future release. All methods raise NotImplementedE
 """
 
 from app.adapters.base import ComputeProvider
+from app.adapters.job_specs import JobSpec
 
 
 class SlurmComputeProvider(ComputeProvider):
     """SLURM compute backend - not yet implemented."""
 
-    async def submit_job(self, job_spec: dict) -> dict:  # type: ignore[override]
+    async def submit_job(self, job_spec: JobSpec) -> dict:  # type: ignore[override]
         raise NotImplementedError("SLURM compute backend coming soon. Select Kubernetes during setup.")
 
     async def cancel_job(self, job_id: str) -> dict:  # type: ignore[override]
