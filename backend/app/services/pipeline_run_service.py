@@ -1,5 +1,7 @@
+import copy
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func, text
@@ -220,6 +222,21 @@ _CHEMISTRY_TO_PROTOCOL: dict[str, str] = {
     "10x chromium 5' v2": "10XV2",
     "10x chromium 5' v3": "10XV3",
 }
+
+
+@dataclass(frozen=True)
+class RecordedLaunch:
+    """What a catalog run recorded about its launch, which a reproduction relaunches as it was.
+
+    ``parameters`` are the resolved parameters the run was given, used as they are rather than
+    resolved again over today's catalog defaults. ``reference_genome`` is the run's recorded label,
+    which may have been inferred from a linked reference dataset rather than chosen from the
+    assembly vocabulary, so it is carried onto the new run and never validated as a selection.
+    """
+
+    samplesheet: str
+    parameters: dict
+    reference_genome: str | None
 
 
 class PipelineRunService:
@@ -802,13 +819,14 @@ class PipelineRunService:
         data: PipelineRunLaunchRequest,
         *,
         via_assistant: bool = False,
-        expected_samplesheet: str | None = None,
+        recorded: RecordedLaunch | None = None,
     ) -> PipelineRun:
         """Launch a pipeline run: the core orchestration method.
 
-        ``expected_samplesheet`` (reproduction) is the sheet the original run recorded. The launch is
-        refused, before anything is created or submitted, unless the sheet it would submit is that
-        sheet; with ``drop_samples_without_files`` it may instead be that sheet less some rows.
+        ``recorded`` (reproduction) is what the original run recorded. Its parameters and reference
+        label are used as recorded, and the launch is refused, before anything is created or
+        submitted, unless the sheet it would submit is the recorded sheet; with
+        ``drop_samples_without_files`` it may instead be that sheet less some rows.
         """
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
@@ -882,8 +900,15 @@ class PipelineRunService:
             },
         )
 
-        # 6. Decide the run's parameters (user params override defaults)
-        merged_params = PipelineRunService.resolve_parameters(pipeline, data.parameters, data.reference_genome, samples)
+        # 6. Decide the run's parameters (user params override defaults). A reproduction runs the
+        # parameters the original was given: resolving them again would add any default the
+        # catalog has gained since, which no samplesheet check can see.
+        if recorded is not None:
+            merged_params = copy.deepcopy(recorded.parameters)
+        else:
+            merged_params = PipelineRunService.resolve_parameters(
+                pipeline, data.parameters, data.reference_genome, samples
+            )
 
         # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
         # is still free to do so. Deliberately BEFORE the run row, the sample
@@ -914,8 +939,8 @@ class PipelineRunService:
             sample_values=sample_values,
         )
         sample_sheet_csv = sheet["csv"]
-        if expected_samplesheet is not None and not PipelineRunService._sheet_matches(
-            expected_samplesheet, sample_sheet_csv, allow_dropped_rows=data.drop_samples_without_files
+        if recorded is not None and not PipelineRunService._sheet_matches(
+            recorded.samplesheet, sample_sheet_csv, allow_dropped_rows=data.drop_samples_without_files
         ):
             raise ValidationError(
                 "This run cannot be reproduced exactly: the samplesheet it would be given now differs from the "
@@ -932,7 +957,7 @@ class PipelineRunService:
             pipeline_key=pipeline.pipeline_key,
             pipeline_version=pipeline.version,
             parameters_json=merged_params,
-            reference_genome=data.reference_genome,
+            reference_genome=recorded.reference_genome if recorded is not None else data.reference_genome,
             alignment_algorithm=data.alignment_algorithm,
             status="pending",
             work_dir="/data/working/nextflow/run-{id}",
@@ -1096,8 +1121,9 @@ class PipelineRunService:
         except Exception as e:
             logger.warning("Reference linkage failed for run %d: %s", run.id, e)
 
-        # 14. Auto-populate reference_genome if not explicitly set
-        if not run.reference_genome:
+        # 14. Auto-populate reference_genome if not explicitly set. A reproduction keeps the
+        # original's label, even an empty one, rather than deriving it from today's datasets.
+        if recorded is None and not run.reference_genome:
             run.reference_genome = await PipelineRunService._resolve_reference_genome(
                 session, linked_ref_ids, merged_params
             )
@@ -1418,13 +1444,18 @@ class PipelineRunService:
 
         pipeline_key = await PipelineRunService._reproducible_catalog_key(session, original, org_id)
 
-        # Reconstruct the launch from what the original recorded, and hold the result to the sheet the
-        # original was given. A run that did not record its sheet or its stated design cannot be
+        # Reconstruct the launch from what the original recorded: its resolved parameters and
+        # reference label are used as they are, and the result is held to the sheet the original
+        # was given. A run that did not record its sheet or its stated design cannot be
         # checked, so it is refused rather than rebuilt from today's configuration.
-        if original.samplesheet_csv is None or original.samplesheet_mapping_json is None:
+        if (
+            original.samplesheet_csv is None
+            or original.samplesheet_mapping_json is None
+            or original.parameters_json is None
+        ):
             raise ValidationError(
-                "This run cannot be reproduced exactly: it was recorded before bioAF kept the samplesheet and "
-                "per-sample values a run was given."
+                "This run cannot be reproduced exactly: it was recorded before bioAF kept the samplesheet, "
+                "per-sample values and parameters a run was given."
             )
         sample_ids = [s.id for s in original.samples] if original.samples else None
 
@@ -1433,9 +1464,8 @@ class PipelineRunService:
             experiment_id=original.experiment_id,
             project_id=original.project_id,
             sample_ids=sample_ids,
-            parameters=original.parameters_json or {},
+            parameters=original.parameters_json,
             sample_values=PipelineRunService._stated_sample_values(original.samplesheet_mapping_json),
-            reference_genome=original.reference_genome,
             alignment_algorithm=original.alignment_algorithm,
             include_derived_inputs=await PipelineRunService._used_derived_inputs(session, original.id),
             resume_from_run_id=original_run_id,
@@ -1443,7 +1473,15 @@ class PipelineRunService:
         )
 
         new_run = await PipelineRunService.launch_run(
-            session, org_id, user_id, data, expected_samplesheet=original.samplesheet_csv
+            session,
+            org_id,
+            user_id,
+            data,
+            recorded=RecordedLaunch(
+                samplesheet=original.samplesheet_csv,
+                parameters=original.parameters_json,
+                reference_genome=original.reference_genome,
+            ),
         )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run

@@ -799,7 +799,7 @@ async def test_a_sheet_that_would_differ_from_the_recorded_one_is_refused(
     assert "samplesheet" in response.json()["detail"]
 
 
-@pytest.mark.parametrize("missing", ["samplesheet_mapping_json", "samplesheet_csv"])
+@pytest.mark.parametrize("missing", ["samplesheet_mapping_json", "samplesheet_csv", "parameters_json"])
 @pytest.mark.asyncio
 async def test_a_run_that_did_not_record_its_sheet_or_design_is_refused(
     client, session, admin_user, admin_token, compute, missing
