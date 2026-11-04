@@ -720,6 +720,80 @@ class PipelineRunService:
         ]
 
     @staticmethod
+    def resolve_parameters(pipeline, caller_params: dict, reference_genome: str | None, samples: list) -> dict:
+        """The parameters a catalog run is given: the launch's parameter policy, with no effects.
+
+        Reads the catalog entry's key, defaults and schema and the samples' fields, and returns a
+        new dict; nothing passed in is changed. What the caller stated always wins.
+        """
+        merged_params = dict(pipeline.default_params_json or {})
+        merged_params.update(caller_params)
+
+        # reference_genome is the first-class control for the reference a run aligns against. See
+        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
+        # the caller stated beats both.
+        merged_params = PipelineRunService._apply_reference(
+            pipeline.pipeline_key, merged_params, caller_params, reference_genome
+        )
+
+        # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
+        # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
+        # supply it. Derive macs_gsize from the genome so these runs work out of the box; an explicit
+        # macs_gsize/read_length wins.
+        if any(k in pipeline.pipeline_key for k in ("chipseq", "atacseq")):
+            if "macs_gsize" not in merged_params and "read_length" not in merged_params:
+                gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
+                if gsize is not None:
+                    merged_params["macs_gsize"] = gsize
+
+        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
+        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
+        # caller never having stated it themselves.
+        if "igenomes_ignore" not in caller_params and PipelineRunService._should_ignore_igenomes(
+            pipeline, merged_params
+        ):
+            merged_params["igenomes_ignore"] = True
+
+        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
+        # full key, not a substring: `scrnaseq` contains `rnaseq`.
+        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
+            merged_params = PipelineRunService._apply_10x_protocol(merged_params, caller_params, samples)
+
+        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
+        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
+        #
+        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
+        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
+        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
+        #    without it there is no miRNA annotation at all.
+        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
+        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
+        #    kit, which is always the case for somebody else's deposited data.
+        #
+        # All three are defaults, never policy: anything the scientist stated wins.
+        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
+            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
+            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
+            merged_params.setdefault("three_prime_adapter", "auto-detect")
+            # The genome is the more specific statement and the one the reads are aligned against,
+            # so it wins; the samples' organism is the fallback, and it is the one that actually
+            # answers for a paper that never named a build. Neither known means the parameter stays
+            # unset: a wrong species quantifies against the wrong miRBase and still produces a
+            # plausible-looking table.
+            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
+            if species is None:
+                organisms = {(s.organism or "").strip().lower() for s in samples}
+                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
+                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
+                # can be pointed at, and picking one of two would be a guess.
+                if len(codes) == 1:
+                    species = codes.pop()
+            if species is not None:
+                merged_params.setdefault("mirtrace_species", species)
+
+        return merged_params
+
+    @staticmethod
     async def launch_run(
         session: AsyncSession,
         org_id: int,
@@ -801,71 +875,8 @@ class PipelineRunService:
             },
         )
 
-        # 6. Merge parameters (user params override defaults)
-        merged_params = dict(pipeline.default_params_json or {})
-        merged_params.update(data.parameters)
-
-        # reference_genome is the first-class control for the reference a run aligns against. See
-        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
-        # the caller stated beats both.
-        merged_params = PipelineRunService._apply_reference(
-            pipeline.pipeline_key, merged_params, data.parameters, data.reference_genome
-        )
-
-        # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
-        # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
-        # supply it. Derive macs_gsize from the genome so these runs work out of the box; an explicit
-        # macs_gsize/read_length wins.
-        if any(k in pipeline.pipeline_key for k in ("chipseq", "atacseq")):
-            if "macs_gsize" not in merged_params and "read_length" not in merged_params:
-                gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
-                if gsize is not None:
-                    merged_params["macs_gsize"] = gsize
-
-        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
-        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
-        # caller never having stated it themselves.
-        if "igenomes_ignore" not in data.parameters and PipelineRunService._should_ignore_igenomes(
-            pipeline, merged_params
-        ):
-            merged_params["igenomes_ignore"] = True
-
-        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
-        # full key, not a substring: `scrnaseq` contains `rnaseq`.
-        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
-            merged_params = PipelineRunService._apply_10x_protocol(merged_params, data.parameters, samples)
-
-        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
-        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
-        #
-        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
-        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
-        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
-        #    without it there is no miRNA annotation at all.
-        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
-        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
-        #    kit, which is always the case for somebody else's deposited data.
-        #
-        # All three are defaults, never policy: anything the scientist stated wins.
-        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
-            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
-            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
-            merged_params.setdefault("three_prime_adapter", "auto-detect")
-            # The genome is the more specific statement and the one the reads are aligned against,
-            # so it wins; the samples' organism is the fallback, and it is the one that actually
-            # answers for a paper that never named a build. Neither known means the parameter stays
-            # unset: a wrong species quantifies against the wrong miRBase and still produces a
-            # plausible-looking table.
-            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
-            if species is None:
-                organisms = {(s.organism or "").strip().lower() for s in samples}
-                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
-                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
-                # can be pointed at, and picking one of two would be a guess.
-                if len(codes) == 1:
-                    species = codes.pop()
-            if species is not None:
-                merged_params.setdefault("mirtrace_species", species)
+        # 6. Decide the run's parameters (user params override defaults)
+        merged_params = PipelineRunService.resolve_parameters(pipeline, data.parameters, data.reference_genome, samples)
 
         # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
         # is still free to do so. Deliberately BEFORE the run row, the sample
