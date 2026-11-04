@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func, text
@@ -801,8 +802,14 @@ class PipelineRunService:
         data: PipelineRunLaunchRequest,
         *,
         via_assistant: bool = False,
+        expected_samplesheet: str | None = None,
     ) -> PipelineRun:
-        """Launch a pipeline run: the core orchestration method."""
+        """Launch a pipeline run: the core orchestration method.
+
+        ``expected_samplesheet`` (reproduction) is the sheet the original run recorded. The launch is
+        refused, before anything is created or submitted, unless the sheet it would submit is that
+        sheet; with ``drop_samples_without_files`` it may instead be that sheet less some rows.
+        """
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
@@ -893,6 +900,28 @@ class PipelineRunService:
         if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
             SampleSheetService.check_contract_satisfiable(contract, samples, merged_params, sample_values)
 
+        # 6c. Generate the sample sheet, through the same call the review step
+        # used. One computation produces the CSV, the rows (each naming the
+        # sample it belongs to) and the column holding the name, so the sheet
+        # that runs and the record of what it emitted cannot disagree about
+        # either. Pure, so it is computed before anything is created: a
+        # reproduction checks it against the sheet the original recorded.
+        sheet = SampleSheetService.preview(
+            pipeline.pipeline_key,
+            samples,
+            merged_params,
+            contract=contract,
+            sample_values=sample_values,
+        )
+        sample_sheet_csv = sheet["csv"]
+        if expected_samplesheet is not None and not PipelineRunService._sheet_matches(
+            expected_samplesheet, sample_sheet_csv, allow_dropped_rows=data.drop_samples_without_files
+        ):
+            raise ValidationError(
+                "This run cannot be reproduced exactly: the samplesheet it would be given now differs from the "
+                "one the original run used, because its samples, their files, or the declared columns have changed."
+            )
+
         # 7. Create pipeline_runs record
         run = PipelineRun(
             organization_id=org_id,
@@ -935,20 +964,6 @@ class PipelineRunService:
             # Also populate input_files_json for backward compat
             run.input_files_json = sorted(seen_file_ids)
             await session.flush()
-
-        # 8. Generate the sample sheet, through the same call the review step
-        # used. One computation produces the CSV, the rows (each naming the
-        # sample it belongs to) and the column holding the name, so the sheet
-        # that runs and the record of what it emitted cannot disagree about
-        # either.
-        sheet = SampleSheetService.preview(
-            pipeline.pipeline_key,
-            samples,
-            merged_params,
-            contract=contract,
-            sample_values=sample_values,
-        )
-        sample_sheet_csv = sheet["csv"]
 
         # 8b. Keep what this run was actually given. Re-deriving the sheet later
         # reads today's samples, today's files and today's mapping, none of which
@@ -1403,21 +1418,78 @@ class PipelineRunService:
 
         pipeline_key = await PipelineRunService._reproducible_catalog_key(session, original, org_id)
 
-        # Reconstruct launch request from original
+        # Reconstruct the launch from what the original recorded, and hold the result to the sheet the
+        # original was given. A run that did not record its sheet or its stated design cannot be
+        # checked, so it is refused rather than rebuilt from today's configuration.
+        if original.samplesheet_csv is None or original.samplesheet_mapping_json is None:
+            raise ValidationError(
+                "This run cannot be reproduced exactly: it was recorded before bioAF kept the samplesheet and "
+                "per-sample values a run was given."
+            )
         sample_ids = [s.id for s in original.samples] if original.samples else None
 
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
             experiment_id=original.experiment_id,
+            project_id=original.project_id,
             sample_ids=sample_ids,
             parameters=original.parameters_json or {},
+            sample_values=PipelineRunService._stated_sample_values(original.samplesheet_mapping_json),
+            reference_genome=original.reference_genome,
+            alignment_algorithm=original.alignment_algorithm,
+            include_derived_inputs=await PipelineRunService._used_derived_inputs(session, original.id),
             resume_from_run_id=original_run_id,
             drop_samples_without_files=drop_samples_without_files,
         )
 
-        new_run = await PipelineRunService.launch_run(session, org_id, user_id, data)
+        new_run = await PipelineRunService.launch_run(
+            session, org_id, user_id, data, expected_samplesheet=original.samplesheet_csv
+        )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run
+
+    @staticmethod
+    def _stated_sample_values(snapshot: dict) -> dict[str, dict[str, str]]:
+        """The per-sample values a run's frozen design recorded, without their authorship stamps."""
+        values: dict[str, dict[str, str]] = {}
+        for sample_id, columns in (snapshot.get("values") or {}).items():
+            if not isinstance(columns, dict):
+                continue
+            stated = {
+                str(column): str(entry.get("value", "")) if isinstance(entry, dict) else str(entry)
+                for column, entry in columns.items()
+            }
+            if stated:
+                values[str(sample_id)] = stated
+        return values
+
+    @staticmethod
+    async def _used_derived_inputs(session: AsyncSession, run_id: int) -> bool:
+        """Whether a run's recorded inputs include derived files, which a launch only uses on request."""
+        from app.models.file import File
+
+        derived = await session.execute(
+            select(func.count())
+            .select_from(PipelineRunInputFile)
+            .join(File, File.id == PipelineRunInputFile.file_id)
+            .where(
+                PipelineRunInputFile.pipeline_run_id == run_id,
+                File.source_type.in_(PipelineRunService.DERIVED_SOURCE_TYPES),
+            )
+        )
+        return bool(derived.scalar())
+
+    @staticmethod
+    def _sheet_matches(expected: str, actual: str, *, allow_dropped_rows: bool) -> bool:
+        """Whether ``actual`` is the recorded sheet, or (on a confirmed drop) that sheet less some rows."""
+        if actual == expected:
+            return True
+        if not allow_dropped_rows:
+            return False
+        expected_lines, actual_lines = expected.splitlines(), actual.splitlines()
+        if not expected_lines or not actual_lines or expected_lines[0] != actual_lines[0]:
+            return False
+        return Counter(actual_lines[1:]) <= Counter(expected_lines[1:])
 
     @staticmethod
     async def _audit_reproduction(session: AsyncSession, new_run: PipelineRun, original_run_id: int, user_id: int):
