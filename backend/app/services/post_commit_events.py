@@ -36,7 +36,7 @@ logger = logging.getLogger("bioaf.post_commit_events")
 _PENDING_KEY = "bioaf_pending_events"
 
 # Strong references, so a scheduled emission is not garbage-collected before it runs.
-_in_flight: set[asyncio.Task] = set()
+_in_flight: set[asyncio.Task[None]] = set()
 
 
 def defer_event(session: AsyncSession | Session, event_type: str, payload: dict[str, Any]) -> None:
