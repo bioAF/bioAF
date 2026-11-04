@@ -1038,3 +1038,41 @@ async def test_a_launch_emits_rows_in_the_requested_sample_order_and_the_preview
     submitted = compute.submit_job.call_args.args[0].sample_sheet
     assert [r.split(",")[0] for r in submitted.splitlines()[1:]] == expected
     assert preflight["samplesheet"]["csv"] == submitted
+
+
+# --- A custom reproduction refused for its version says so in plain words ---
+
+
+async def _deprecate(session, o):
+    o.version.status = "deprecated"
+
+
+async def _unready(session, o):
+    o.env_version.status = "building"
+
+
+async def _oversize(session, o):
+    o.version.cpu_request, o.version.memory_request = "2", "8Gi"
+
+
+@pytest.mark.parametrize(
+    "breaker,plain",
+    [(_deprecate, "deprecated"), (_unready, "still building"), (_oversize, "at most 1.4 CPU and 5Gi")],
+    ids=["deprecated", "environment-building", "oversize"],
+)
+@pytest.mark.asyncio
+async def test_a_custom_reproduction_refused_for_its_version_says_why_plainly(
+    client, session, admin_user, admin_token, custom_compute, breaker, plain
+):
+    original = await _custom_original(session, admin_user.organization_id, admin_user.id)
+    await breaker(session, original)
+    await session.commit()
+
+    response = await _reproduce(client, original.run.id, _bearer(admin_token))
+
+    assert response.status_code in (400, 409), response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("This run cannot be reproduced:")
+    assert plain in detail
+    for technical in ("expected", "status '"):
+        assert technical not in detail
