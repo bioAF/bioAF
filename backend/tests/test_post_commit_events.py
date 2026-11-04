@@ -105,3 +105,65 @@ async def test_a_failing_subscriber_does_not_undo_the_commit_or_block_others(ses
     assert received == [{"n": 2}]
     count = (await session.execute(text("SELECT count(*) FROM organizations WHERE name = 'Committed Org'"))).scalar()
     assert count == 1
+
+
+# --- Savepoints: only a committed savepoint's events reach the outer commit ---
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_savepoint_drops_its_events_and_keeps_the_outer_ones(session, received):
+    await session.execute(text("SELECT 1"))
+    defer_event(session, EVENT, {"n": "outer before"})
+    savepoint = await session.begin_nested()
+    defer_event(session, EVENT, {"n": "in rolled-back savepoint"})
+    await savepoint.rollback()
+    defer_event(session, EVENT, {"n": "outer after"})
+    await session.commit()
+    await wait_for_deferred_events()
+
+    assert received == [{"n": "outer before"}, {"n": "outer after"}]
+
+
+@pytest.mark.asyncio
+async def test_a_rolled_back_inner_savepoint_inside_a_released_one(session, received):
+    await session.execute(text("SELECT 1"))
+    defer_event(session, EVENT, {"n": "outer"})
+    outer_sp = await session.begin_nested()
+    defer_event(session, EVENT, {"n": "released savepoint"})
+    inner_sp = await session.begin_nested()
+    defer_event(session, EVENT, {"n": "rolled-back inner"})
+    await inner_sp.rollback()
+    await outer_sp.commit()
+    await session.commit()
+    await wait_for_deferred_events()
+
+    assert received == [{"n": "outer"}, {"n": "released savepoint"}]
+
+
+@pytest.mark.asyncio
+async def test_a_released_savepoint_inside_a_rolled_back_one_is_dropped_with_it(session, received):
+    await session.execute(text("SELECT 1"))
+    defer_event(session, EVENT, {"n": "outer"})
+    outer_sp = await session.begin_nested()
+    inner_sp = await session.begin_nested()
+    defer_event(session, EVENT, {"n": "released inside rolled-back"})
+    await inner_sp.commit()
+    await outer_sp.rollback()
+    await session.commit()
+    await wait_for_deferred_events()
+
+    assert received == [{"n": "outer"}]
+
+
+@pytest.mark.asyncio
+async def test_a_savepoint_rolled_back_by_an_exception_drops_its_events(session, received):
+    await session.execute(text("SELECT 1"))
+    with pytest.raises(RuntimeError):
+        async with session.begin_nested():
+            defer_event(session, EVENT, {"n": "doomed"})
+            raise RuntimeError("abandon the savepoint")
+    defer_event(session, EVENT, {"n": "kept"})
+    await session.commit()
+    await wait_for_deferred_events()
+
+    assert received == [{"n": "kept"}]
