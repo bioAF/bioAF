@@ -17,6 +17,7 @@ follow-up work (pipeline launch plan, Delivery A item 7), not a guarantee this c
 
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from app.adapters.models import JobSubmitResult
 from app.models.pipeline_run import PipelineRun
@@ -64,4 +65,4 @@ def record_submission_accepted(run: PipelineRun, result: JobSubmitResult) -> Non
         k: v for k, v in {"job_name": result.job_id, **(result.provider_details or {})}.items() if v is not None
     }
     if result.estimated_cost:
-        run.cost_estimate = result.estimated_cost.estimated_cost_usd
+        run.cost_estimate = Decimal(str(result.estimated_cost.estimated_cost_usd))
