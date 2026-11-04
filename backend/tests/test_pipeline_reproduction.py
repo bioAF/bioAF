@@ -134,8 +134,7 @@ async def _launchable_run(
                 pipeline_key=key,
                 experiment_id=experiment.id,
                 sample_ids=sample_ids,
-                parameters={"aligner": "cellranger"},
-                **(launch_fields or {}),
+                **{"parameters": {"aligner": "cellranger"}, **(launch_fields or {})},
             ),
         )
     run.pipeline_name = name if name is not None else key
@@ -864,3 +863,65 @@ async def test_an_explicit_drop_of_samples_without_files_still_reproduces_the_re
     submitted = compute.submit_job.call_args.args[0].sample_sheet.splitlines()
     assert submitted[0] == original.samplesheet_csv.splitlines()[0]
     assert set(submitted[1:]) < original_rows
+
+
+@pytest.mark.asyncio
+async def test_a_default_added_to_the_catalog_since_is_not_picked_up(client, session, admin_user, admin_token, compute):
+    """Same installed version, new catalog default: the reproduction runs the parameters recorded."""
+    org_id = admin_user.organization_id
+    original = await _launchable_run(session, org_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    recorded = dict(original.parameters_json)
+    assert "skip_fastqc" not in recorded
+    pipeline = await PipelineCatalogService.get_pipeline(session, org_id, "nf-core/scrnaseq")
+    pipeline.default_params_json = {**(pipeline.default_params_json or {}), "skip_fastqc": True}
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    assert dict(compute.submit_job.call_args.args[0].parameters) == recorded
+    session.expire_all()
+    new_run = await session.get(PipelineRun, response.json()["id"])
+    assert new_run.parameters_json == recorded
+
+
+@pytest.mark.asyncio
+async def test_an_inferred_reference_label_is_kept_and_not_treated_as_an_assembly_choice(
+    client, session, admin_user, admin_token, compute
+):
+    """A run that named no assembly records its linked reference dataset's label. Reproducing it must
+    neither validate that label as a new assembly selection nor re-derive it from today's datasets."""
+    from app.models.controlled_vocabulary import ControlledVocabulary
+    from app.models.reference_dataset import ReferenceDataset
+
+    for order, assembly in enumerate(("GRCh38", "GRCm39")):
+        session.add(ControlledVocabulary(field_name="reference_genome", allowed_value=assembly, display_order=order))
+    org_id = admin_user.organization_id
+    ref = ReferenceDataset(
+        organization_id=org_id,
+        name="GRCh38 GENCODE",
+        category="genome",
+        scope="public",
+        version="v43",
+        gcs_prefix="genomes/GRCh38/v43/",
+        status="active",
+    )
+    session.add(ref)
+    await session.commit()
+    original = await _launchable_run(
+        session,
+        org_id,
+        admin_user.id,
+        stored_key="nf-core/scrnaseq",
+        launch_fields={"parameters": {"aligner": "cellranger", "fasta": "/data/references/genomes/GRCh38/v43/g.fa"}},
+    )
+    assert original.reference_genome == "GRCh38 GENCODE v43"
+    ref.name = "Renamed since"
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    session.expire_all()
+    new_run = await session.get(PipelineRun, response.json()["id"])
+    assert new_run.reference_genome == "GRCh38 GENCODE v43"
