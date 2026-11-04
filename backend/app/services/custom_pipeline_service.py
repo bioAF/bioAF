@@ -573,23 +573,8 @@ class CustomPipelineService:
             raise ValidationError(f"Pipeline version {data.version_id} not found")
 
         pipeline = version.custom_pipeline
-        if pipeline is None or pipeline.organization_id != org_id:
-            raise ValidationError("Pipeline version does not belong to this organization")
-        if pipeline_id is not None and pipeline.id != pipeline_id:
-            raise ValidationError(f"Pipeline version {data.version_id} does not belong to this pipeline")
-
-        if version.status != "active":
-            raise StateError(
-                f"Pipeline version {version.version_number} has status '{version.status}', expected 'active'"
-            )
-
-        # 2. Validate environment
-        env_version = version.environment_version
-        if env_version is None:
-            raise ValidationError("Environment version not found")
-        if env_version.status != "ready":
-            raise StateError(f"Environment version has status '{env_version.status}', expected 'ready'")
-        image_uri = env_version.image_uri or ""
+        # 2. Validate the version and its environment
+        image_uri = CustomPipelineService.check_launchable(version, org_id, pipeline_id)
 
         # 3. Validate experiment / project / inputs
         experiment: Experiment | None = None
@@ -627,7 +612,7 @@ class CustomPipelineService:
                 input_files.append(f)
 
         # 4. Validate and resolve variables
-        resolved_variables = CustomPipelineService._resolve_variables(version.variables, data.variables)
+        resolved_variables = CustomPipelineService.resolve_variables(version.variables, data.variables)
 
         # Build name/path context for input files (for staging + manifest)
         from app.services.notebook_service import _build_relative_path, _resolve_input_file_context
@@ -941,7 +926,31 @@ class CustomPipelineService:
     # --- Launch helpers ---
 
     @staticmethod
-    def _resolve_variables(
+    def check_launchable(version: CustomPipelineVersion, org_id: int, pipeline_id: int | None) -> str:
+        """Whether ``version`` may be launched in ``org_id``; returns its environment's image.
+
+        ``pipeline_id``, when given, is the pipeline the caller addressed. Refuses a version of
+        another Organization or pipeline, a version that is not active, and an environment that
+        is missing or not built.
+        """
+        pipeline = version.custom_pipeline
+        if pipeline is None or pipeline.organization_id != org_id:
+            raise ValidationError("Pipeline version does not belong to this organization")
+        if pipeline_id is not None and pipeline.id != pipeline_id:
+            raise ValidationError(f"Pipeline version {version.id} does not belong to this pipeline")
+        if version.status != "active":
+            raise StateError(
+                f"Pipeline version {version.version_number} has status '{version.status}', expected 'active'"
+            )
+        env_version = version.environment_version
+        if env_version is None:
+            raise ValidationError("Environment version not found")
+        if env_version.status != "ready":
+            raise StateError(f"Environment version has status '{env_version.status}', expected 'ready'")
+        return env_version.image_uri or ""
+
+    @staticmethod
+    def resolve_variables(
         defined: list[CustomPipelineVariable],
         provided: list,
     ) -> dict[str, str]:
