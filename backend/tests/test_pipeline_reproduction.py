@@ -82,6 +82,7 @@ async def _launchable_run(
     samples: int = 1,
     launch_fields: dict | None = None,
     file_source_type: str = "upload",
+    reverse_samples: bool = False,
 ) -> PipelineRun:
     """A completed catalog run whose samples still have their reads: reproducible as it stands.
 
@@ -115,6 +116,8 @@ async def _launchable_run(
             await session.flush()
             await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=f.id))
     await session.commit()
+    if reverse_samples:
+        sample_ids.reverse()
 
     accepting = MagicMock()
     accepting.submit_job = AsyncMock(
@@ -925,3 +928,113 @@ async def test_an_inferred_reference_label_is_kept_and_not_treated_as_an_assembl
     session.expire_all()
     new_run = await session.get(PipelineRun, response.json()["id"])
     assert new_run.reference_genome == "GRCh38 GENCODE v43"
+
+
+# --- Row order: a sheet's rows follow the samples' requested order, never the table's ---
+
+
+@pytest.mark.asyncio
+async def test_a_sample_row_update_does_not_make_a_run_unreproducible(
+    client, session, admin_user, admin_token, compute
+):
+    """Renaming a sample and renaming it back changes nothing in its sheet, but it rewrites the row,
+    which moves it in the table. Reproduction must not depend on where the row now sits."""
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", samples=2
+    )
+    s1 = (await session.execute(select(Sample).where(Sample.external_id == "S1"))).scalar_one()
+    s1.external_id = "S1-renamed"
+    await session.commit()
+    s1.external_id = "S1"
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.call_args.args[0].sample_sheet == original.samplesheet_csv
+
+
+@pytest.mark.asyncio
+async def test_reproduction_replays_the_row_order_the_original_emitted(
+    client, session, admin_user, admin_token, compute
+):
+    original = await _launchable_run(
+        session,
+        admin_user.organization_id,
+        admin_user.id,
+        stored_key="nf-core/scrnaseq",
+        samples=2,
+        reverse_samples=True,
+    )
+    assert [r.split(",")[0] for r in original.samplesheet_csv.splitlines()[1:]] == ["S2", "S1"]
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.call_args.args[0].sample_sheet == original.samplesheet_csv
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_its_emitted_rows_reproduces_in_sample_id_order(
+    client, session, admin_user, admin_token, compute
+):
+    """Older runs did not record which sample each row stood for; their samples are taken by id."""
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", samples=2
+    )
+    original.samplesheet_emitted_json = None
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.call_args.args[0].sample_sheet == original.samplesheet_csv
+
+
+async def _two_sample_experiment(session, org_id: int, user_id: int) -> tuple[int, list[int]]:
+    """An experiment with samples S1 and S2 (created in that order), each with paired reads."""
+    await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
+    experiment = Experiment(organization_id=org_id, name="Order Exp", owner_user_id=user_id, status="fastq_uploaded")
+    session.add(experiment)
+    await session.flush()
+    ids = []
+    for name in ("S1", "S2"):
+        sample = Sample(experiment_id=experiment.id, external_id=name, organism="Homo sapiens")
+        session.add(sample)
+        await session.flush()
+        ids.append(sample.id)
+        for read in ("R1", "R2"):
+            f = File(
+                organization_id=org_id,
+                experiment_id=experiment.id,
+                gcs_uri=f"gs://bucket/{name}_{read}_001.fastq.gz",
+                filename=f"{name}_{read}_001.fastq.gz",
+                file_type="fastq",
+            )
+            session.add(f)
+            await session.flush()
+            await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=f.id))
+    await session.commit()
+    return experiment.id, ids
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.asyncio
+async def test_a_launch_emits_rows_in_the_requested_sample_order_and_the_preview_agrees(
+    session, admin_user, compute, reverse
+):
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
+    org_id = admin_user.organization_id
+    experiment_id, ids = await _two_sample_experiment(session, org_id, admin_user.id)
+    requested = list(reversed(ids)) if reverse else ids
+    expected = ["S2", "S1"] if reverse else ["S1", "S2"]
+    data = PipelineRunLaunchRequest(pipeline_key="nf-core/scrnaseq", experiment_id=experiment_id, sample_ids=requested)
+
+    preflight = await PipelineRunService.preflight(session, org_id, data)
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        await PipelineRunService.launch_run(session, org_id, admin_user.id, data)
+
+    submitted = compute.submit_job.call_args.args[0].sample_sheet
+    assert [r.split(",")[0] for r in submitted.splitlines()[1:]] == expected
+    assert preflight["samplesheet"]["csv"] == submitted
