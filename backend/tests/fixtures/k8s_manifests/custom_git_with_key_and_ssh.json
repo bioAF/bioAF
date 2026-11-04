@@ -1,0 +1,289 @@
+{
+  "job": {
+    "body": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "bioaf.io/pipeline": "In-house-QC",
+          "bioaf.io/pipeline-run": "202",
+          "bioaf.io/pool": "pipelines"
+        },
+        "name": "bioaf-pipeline-202-1790000000",
+        "namespace": "bioaf-pipelines"
+      },
+      "spec": {
+        "backoffLimit": 0,
+        "template": {
+          "metadata": {
+            "annotations": {
+              "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "#!/bin/sh\nset -e\ntrap 'true' EXIT\nrun-qc"
+                ],
+                "env": [
+                  {
+                    "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                    "value": "/secrets/gcp/key.json"
+                  },
+                  {
+                    "name": "PARAM_DEPTH",
+                    "value": "25"
+                  }
+                ],
+                "image": "registry.test/bioaf/qc:v3",
+                "name": "pipeline",
+                "resources": {
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "4Gi"
+                  },
+                  "requests": {
+                    "cpu": "2",
+                    "memory": "4Gi"
+                  }
+                },
+                "terminationMessagePolicy": "FallbackToLogsOnError",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/secrets/gcp",
+                    "name": "gcp-sa-key",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/outputs",
+                    "name": "outputs"
+                  },
+                  {
+                    "mountPath": "/code",
+                    "name": "code"
+                  }
+                ],
+                "workingDir": "/code/myrepo"
+              }
+            ],
+            "initContainers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "if [ -f \"/secrets/gcp/key.json\" ]; then gcloud auth activate-service-account --key-file=/secrets/gcp/key.json; fi && mkdir -p /data/Proj/Exp && gsutil cp gs://b/a.tsv /data/Proj/Exp/a.tsv"
+                ],
+                "env": [
+                  {
+                    "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                    "value": "/secrets/gcp/key.json"
+                  }
+                ],
+                "image": "google/cloud-sdk:slim",
+                "name": "stage-inputs",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/secrets/gcp",
+                    "name": "gcp-sa-key",
+                    "readOnly": true
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/manifest.json"
+                ],
+                "env": [
+                  {
+                    "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                    "value": "/secrets/gcp/key.json"
+                  }
+                ],
+                "image": "alpine:3.19",
+                "name": "write-manifest",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/secrets/gcp",
+                    "name": "gcp-sa-key",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/root/.ssh",
+                    "name": "ssh-key",
+                    "readOnly": true
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/params.json"
+                ],
+                "env": [
+                  {
+                    "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                    "value": "/secrets/gcp/key.json"
+                  }
+                ],
+                "image": "alpine:3.19",
+                "name": "write-params",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/secrets/gcp",
+                    "name": "gcp-sa-key",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/root/.ssh",
+                    "name": "ssh-key",
+                    "readOnly": true
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "git clone 'git@github.com:x/myrepo.git' '/code/myrepo'"
+                ],
+                "env": [
+                  {
+                    "name": "GOOGLE_APPLICATION_CREDENTIALS",
+                    "value": "/secrets/gcp/key.json"
+                  }
+                ],
+                "image": "alpine/git:latest",
+                "name": "clone-repo",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/code",
+                    "name": "code"
+                  },
+                  {
+                    "mountPath": "/secrets/ssh",
+                    "name": "ssh-key",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/secrets/gcp",
+                    "name": "gcp-sa-key",
+                    "readOnly": true
+                  },
+                  {
+                    "mountPath": "/root/.ssh",
+                    "name": "ssh-key",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "nodeSelector": {
+              "bioaf.io/pool": "pipeline-head"
+            },
+            "restartPolicy": "Never",
+            "serviceAccountName": "bioaf-pipeline-runner",
+            "tolerations": [
+              {
+                "effect": "NoSchedule",
+                "key": "bioaf.io/pool",
+                "value": "pipeline-head"
+              }
+            ],
+            "volumes": [
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "data"
+              },
+              {
+                "name": "gcp-sa-key",
+                "secret": {
+                  "secretName": "bioaf-gcs-sa-key"
+                }
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "outputs"
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "10Gi"
+                },
+                "name": "code"
+              },
+              {
+                "name": "ssh-key",
+                "secret": {
+                  "defaultMode": 256,
+                  "secretName": "bioaf-ssh-key-202"
+                }
+              }
+            ]
+          }
+        },
+        "ttlSecondsAfterFinished": 3600
+      }
+    },
+    "namespace": "bioaf-pipelines"
+  },
+  "result": {
+    "job_id": "bioaf-pipeline-202-1790000000",
+    "namespace": "bioaf-pipelines",
+    "status": "queued"
+  },
+  "secrets": [
+    {
+      "apiVersion": "v1",
+      "data": {
+        "key.json": "eyJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsICJwcm9qZWN0X2lkIjogImJpb2FmLXRlc3QifQ=="
+      },
+      "kind": "Secret",
+      "metadata": {
+        "labels": {
+          "bioaf.io/managed": "true"
+        },
+        "name": "bioaf-gcs-sa-key"
+      },
+      "type": "Opaque"
+    },
+    {
+      "apiVersion": "v1",
+      "data": {
+        "id_rsa": "LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KS0VZCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQ=="
+      },
+      "kind": "Secret",
+      "metadata": {
+        "labels": {
+          "bioaf.io/managed": "true"
+        },
+        "name": "bioaf-ssh-key-202"
+      },
+      "type": "Opaque"
+    }
+  ]
+}

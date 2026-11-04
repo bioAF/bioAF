@@ -1,0 +1,74 @@
+{
+  "job": {
+    "body": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "bioaf.io/pipeline": "Smoke-Test",
+          "bioaf.io/pipeline-run": "303",
+          "bioaf.io/pool": "pipelines"
+        },
+        "name": "bioaf-pipeline-303-1790000000",
+        "namespace": "bioaf-pipelines"
+      },
+      "spec": {
+        "backoffLimit": 0,
+        "template": {
+          "metadata": {
+            "annotations": {
+              "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "echo",
+                  "hi"
+                ],
+                "image": "alpine:3.19",
+                "name": "pipeline",
+                "terminationMessagePolicy": "FallbackToLogsOnError",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              }
+            ],
+            "nodeSelector": {
+              "bioaf.io/pool": "pipeline-head"
+            },
+            "restartPolicy": "Never",
+            "serviceAccountName": "bioaf-pipeline-runner",
+            "tolerations": [
+              {
+                "effect": "NoSchedule",
+                "key": "bioaf.io/pool",
+                "value": "pipeline-head"
+              }
+            ],
+            "volumes": [
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "data"
+              }
+            ]
+          }
+        },
+        "ttlSecondsAfterFinished": 3600
+      }
+    },
+    "namespace": "bioaf-pipelines"
+  },
+  "result": {
+    "job_id": "bioaf-pipeline-303-1790000000",
+    "namespace": "bioaf-pipelines",
+    "status": "queued"
+  },
+  "secrets": []
+}
