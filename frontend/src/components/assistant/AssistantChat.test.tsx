@@ -123,7 +123,7 @@ describe("AssistantChat", () => {
           status: "failed",
           pipeline_key: "nf-core/rnaseq",
           experiment_id: 3,
-          error_message: "The compute cluster did not accept this run, so it never started.",
+          error_message: "bioAF could not confirm that the compute cluster accepted this run, so it is marked failed.",
         },
       });
 
@@ -134,7 +134,9 @@ describe("AssistantChat", () => {
     expect(await screen.findByTestId("plan-confirm-card")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
 
-    expect(await screen.findByText(/Run #42 could not start/i)).toBeInTheDocument();
+    // The launch outcome is uncertain, so the chat must not claim the run never ran.
+    expect(await screen.findByText(/Run #42 may not have started/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not start/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Run #42 started/i)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view run #42/i })).toHaveAttribute("href", "/pipelines/runs/42");
   });

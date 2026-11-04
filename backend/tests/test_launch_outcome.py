@@ -56,3 +56,16 @@ def test_a_refused_submission_is_failed_with_a_plain_message(caplog):
     assert "run 5" in run.error_message
     assert run.started_at is None and run.completed_at is not None
     assert "10.0.0.7" in caplog.text
+
+
+def test_the_failure_message_does_not_claim_the_job_never_ran():
+    """A raised submission is not proof the provider refused the job: it may have been accepted
+    before the error (a timeout reading the response, say). The message must not say otherwise."""
+    run = _run()
+    mark_submission_failed(run, TimeoutError("read timed out"), logging.getLogger("t"))
+
+    message = run.error_message.lower()
+    for overclaim in ("never started", "did not accept", "was not accepted", "rejected"):
+        assert overclaim not in message
+    assert "could not confirm" in message
+    assert "run 5" in message

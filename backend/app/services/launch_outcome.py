@@ -1,8 +1,8 @@
 """What a pipeline run records about the submission of its job.
 
 Shared by the catalog and custom launch paths, which agree on this much. An accepted job is
-recorded under its handles. A refused one is failed with a stable category and a plain-language
-message, and the provider's own error (which can name hosts,
+recorded under its handles. One whose submission raised is failed with a stable category and a
+plain-language message, and the provider's own error (which can name hosts,
 namespaces, and internal job IDs) goes to the server log next to the run it belongs to, never onto
 the run or into a notification.
 
@@ -26,9 +26,12 @@ SUBMISSION_FAILED = "submission_failed"
 
 
 def submission_failed_message(run_id: int) -> str:
+    # Worded for uncertainty: an error from the submission call does not prove the cluster refused
+    # the job (see the module notes), so the message must not say the job never ran.
     return (
-        "The compute cluster did not accept this run, so it never started. "
-        f"An administrator can find the technical details in the server logs for run {run_id}."
+        "bioAF could not confirm that the compute cluster accepted this run, so it is marked failed. "
+        "The job may not have started, or may still be running on the cluster. An administrator can "
+        f"find the technical details in the server logs for run {run_id}."
     )
 
 

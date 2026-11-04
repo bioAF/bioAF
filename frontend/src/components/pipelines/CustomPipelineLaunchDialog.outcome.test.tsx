@@ -98,7 +98,7 @@ test("a run the cluster refused is handed to the caller so the user reaches its 
     status: "failed",
     failure_reason: "submission_failed",
     error_message:
-      "The compute cluster did not accept this run, so it never started.",
+      "bioAF could not confirm that the compute cluster accepted this run, so it is marked failed.",
   });
   const onLaunched = jest.fn();
 
