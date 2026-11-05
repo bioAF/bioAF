@@ -28,16 +28,9 @@ from app.services.auth_service import AuthService  # noqa: E402
 
 from tests.plugins.db_url import database_url  # noqa: E402
 
-pytest_plugins = ["tests.plugins.phase_report"]
+pytest_plugins = ["tests.plugins.phase_report", "tests.plugins.invocation"]
 
 TEST_DATABASE_URL = database_url()
-
-
-def _worker_schema(worker_id: str) -> str:
-    """Return a per-worker schema name for pytest-xdist isolation."""
-    if worker_id == "master":
-        return "public"
-    return f"test_{worker_id}"
 
 
 @pytest.fixture(autouse=True)
@@ -60,62 +53,39 @@ async def _init_adapter_registry():
 
 @pytest_asyncio.fixture
 async def db_engine(worker_id):
-    """Create engine, set up tables in a per-worker schema, yield, tear down."""
+    """Create engine, set up tables in this invocation's worker schema, yield, tear down.
+
+    The schema is ``test_<invocation>_<worker>`` (see tests/plugins/invocation.py),
+    serial runs included, so concurrent invocations never share a schema and
+    nothing here touches ``public``.
+    """
     import app.models  # noqa: F401 -- register all models with Base.metadata
     from app.database import Base
+    from tests.plugins import invocation  # imported here so pytest registers the plugin first
 
-    schema = _worker_schema(worker_id)
+    schema = invocation.claim_schema("test", worker_id)
+    quoted = invocation.quote(schema)
 
-    # For per-worker (xdist) schemas, pin search_path at the asyncpg protocol
-    # level via connect_args so EVERY connection lands in the worker schema. The
-    # "connect" event listener below sets it too, but that runs a SET through the
-    # greenlet bridge and can miss a freshly-created connection under concurrent
-    # connection creation (e.g. tests that spawn a background DB task during a
-    # request); that connection then resolves tables in the wrong schema and
-    # raises "relation ... does not exist". server_settings is race-free.
-    connect_args = {} if schema == "public" else {"server_settings": {"search_path": schema}}
-
+    # Pin search_path at the asyncpg protocol level via connect_args so EVERY
+    # connection lands in the worker schema. A "connect" event listener running a
+    # SET through the greenlet bridge can miss a freshly-created connection under
+    # concurrent connection creation (e.g. tests that spawn a background DB task
+    # during a request); that connection then resolves tables in the wrong schema
+    # and raises "relation ... does not exist". server_settings is race-free.
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
-        connect_args=connect_args,
+        connect_args={"server_settings": {"search_path": schema}},
     )
 
-    if schema != "public":
-        async with engine.begin() as conn:
-            await conn.execute(sa_text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-            await conn.execute(sa_text(f"SET search_path TO {schema}"))
-            await conn.run_sync(Base.metadata.create_all)
-    else:
-        # Drop all tables individually, then drop user-defined enum types
-        # that survive table drops and cause IntegrityError on create_all.
-        async with engine.begin() as conn:
-            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
-            tables = [row[0] for row in rows.fetchall()]
-        for table in tables:
-            async with engine.begin() as conn:
-                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-        async with engine.begin() as conn:
-            rows = await conn.execute(
-                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
-            )
-            for (name,) in rows.fetchall():
-                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    # Set search_path for all connections from this engine
-    if schema != "public":
-        from sqlalchemy import event
-
-        @event.listens_for(engine.sync_engine, "connect")
-        def set_search_path(dbapi_conn, connection_record):
-            cursor = dbapi_conn.cursor()
-            cursor.execute(f"SET search_path TO {schema}")
-            cursor.close()
+    async with engine.begin() as conn:
+        # A schema left by an interrupted test in this same invocation is stale.
+        await conn.execute(sa_text(f"DROP SCHEMA IF EXISTS {quoted} CASCADE"))
+        await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
+        await conn.run_sync(Base.metadata.create_all)
 
     # Redirect any code path that calls `app.database.async_session_factory`
     # directly (auth middleware, webhook dispatcher and worker, etc.) to the
@@ -131,22 +101,8 @@ async def db_engine(worker_id):
 
     database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
 
-    if schema != "public":
-        async with engine.begin() as conn:
-            await conn.execute(sa_text(f"DROP SCHEMA {schema} CASCADE"))
-    else:
-        async with engine.begin() as conn:
-            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
-            tables = [row[0] for row in rows.fetchall()]
-        for table in tables:
-            async with engine.begin() as conn:
-                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-        async with engine.begin() as conn:
-            rows = await conn.execute(
-                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
-            )
-            for (name,) in rows.fetchall():
-                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
+    async with engine.begin() as conn:
+        await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
 
     await engine.dispose()
 

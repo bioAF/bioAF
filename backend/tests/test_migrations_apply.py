@@ -30,13 +30,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.database import Base
 import app.models  # noqa: F401 -- registers every model on Base.metadata
 
+from tests.plugins import invocation
+
 from .conftest import TEST_DATABASE_URL
 
 ALEMBIC_DIR = Path(__file__).resolve().parent.parent / "alembic"
 
 # Its own schema, so applying 100+ migrations cannot disturb the create_all
-# tables the rest of the suite is using in `public` (or in a per-xdist-worker
-# schema). Named per worker for the same reason.
+# tables the rest of the suite is using. Named per invocation and worker for the
+# same reason.
 SCHEMA = "migration_check"
 
 # Drift categories that mean the models and the migrations genuinely disagree.
@@ -82,7 +84,8 @@ def _drift_key(diff) -> tuple | None:
 
 
 def _schema_for(worker_id: str) -> str:
-    return SCHEMA if worker_id == "master" else f"{SCHEMA}_{worker_id}"
+    """``migration_check_<invocation>_<worker>``: unique per invocation and worker, recorded for cleanup."""
+    return invocation.claim_schema(SCHEMA, worker_id)
 
 
 @pytest_asyncio.fixture
@@ -97,8 +100,8 @@ async def migrated_schema(worker_id):
 
     async with engine.begin() as conn:
         # Start from nothing, so this measures the chain and not leftovers.
-        await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
-        await conn.execute(text(f"CREATE SCHEMA {schema}"))
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
+        await conn.execute(text(f"CREATE SCHEMA {invocation.quote(schema)}"))
 
     cfg = Config(str(ALEMBIC_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(ALEMBIC_DIR))
@@ -121,7 +124,7 @@ async def migrated_schema(worker_id):
         yield conn, schema
 
     async with engine.begin() as conn:
-        await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
     await engine.dispose()
 
 
