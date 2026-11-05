@@ -30,7 +30,9 @@ async def test_sample_batch_table_exists(session: AsyncSession):
 
 async def test_old_batches_table_gone(session: AsyncSession):
     """The old 'batches' table should no longer exist."""
-    result = await session.execute(text("SELECT 1 FROM information_schema.tables WHERE table_name = 'batches'"))
+    result = await session.execute(
+        text("SELECT 1 FROM information_schema.tables WHERE table_name = 'batches' AND table_schema = current_schema()")
+    )
     assert result.scalar() is None
 
 
@@ -73,7 +75,7 @@ async def test_sample_has_sample_batch_id_fk(session: AsyncSession):
     result2 = await session.execute(
         text(
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'samples' AND column_name = 'batch_id'"
+            "WHERE table_name = 'samples' AND column_name = 'batch_id' AND table_schema = current_schema()"
         )
     )
     assert result2.scalar() is None
