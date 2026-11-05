@@ -144,3 +144,64 @@ def test_summary_separates_phase_sums_from_wall_time(pytester, tmp_path):
     assert summary["phase_seconds"]["setup"] >= 0.05
     assert summary["phase_seconds"]["teardown"] >= 0.05
     assert summary["wall_seconds"] > 0
+
+
+def _fake_report(path: Path, wall: float, setup: float, outcomes: dict[str, str]) -> Path:
+    lines = [{"type": "start", "run_id": "r", "metadata": {"workers": 4}}]
+    for i, (nodeid, outcome) in enumerate(outcomes.items()):
+        lines.append(
+            {
+                "type": "phase",
+                "nodeid": nodeid,
+                "when": "setup",
+                "duration": setup / len(outcomes),
+                "outcome": "skipped" if outcome == "skipped" else "passed",
+                "worker": "gw0",
+                "run_id": "r",
+            }
+        )
+        if outcome != "skipped":
+            lines.append(
+                {
+                    "type": "phase",
+                    "nodeid": nodeid,
+                    "when": "call",
+                    "duration": 0.1,
+                    "outcome": outcome,
+                    "worker": "gw0",
+                    "run_id": "r",
+                }
+            )
+    lines.append({"type": "end", "run_id": "r", "exitstatus": 0, "wall_seconds": wall})
+    path.write_text("\n".join(json.dumps(x) for x in lines))
+    return path
+
+
+def test_compare_reports_medians_and_ranges_per_variant(tmp_path):
+    from tests.plugins.phase_report import compare
+
+    same = {"a": "passed", "b": "passed", "c": "skipped"}
+    base = [
+        _fake_report(tmp_path / f"base-{i}.jsonl", w, s, same)
+        for i, (w, s) in enumerate([(10, 30), (12, 34), (11, 32)])
+    ]
+    cand = [_fake_report(tmp_path / f"cand-{i}.jsonl", w, s, same) for i, (w, s) in enumerate([(8, 20), (9, 22)])]
+
+    result = compare({"base": base, "cand": cand})
+
+    assert result["base"]["runs"] == 3
+    assert result["base"]["wall_seconds"] == {"median": 11, "min": 10, "max": 12}
+    assert result["base"]["phase_seconds"]["setup"]["median"] == 32
+    assert result["cand"]["wall_seconds"]["median"] == 8.5
+    assert result["cand"]["outcome_differences"] == {}
+
+
+def test_compare_names_tests_whose_outcome_differs_from_the_first_variant(tmp_path):
+    from tests.plugins.phase_report import compare
+
+    base = [_fake_report(tmp_path / "b.jsonl", 10, 30, {"a": "passed", "b": "passed", "c": "skipped"})]
+    cand = [_fake_report(tmp_path / "c.jsonl", 9, 20, {"a": "passed", "b": "failed", "d": "passed"})]
+
+    diff = compare({"base": base, "cand": cand})["cand"]["outcome_differences"]
+
+    assert diff == {"b": ["passed", "failed"], "c": ["skipped", None], "d": [None, "passed"]}

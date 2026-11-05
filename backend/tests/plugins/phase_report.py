@@ -12,13 +12,18 @@ normally, carries the exit status and wall time.
 
 ``python -m tests.plugins.phase_report SUMMARY.jsonl [...]`` prints phase sums,
 outcome counts and wall time for one or more reports.
+``python -m tests.plugins.phase_report compare base='a-*.jsonl' cand='b-*.jsonl'``
+prints the median and range per variant and every test whose outcome differs
+from the first variant.
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import platform
+import statistics
 import subprocess
 import sys
 import time
@@ -184,19 +189,31 @@ def pytest_unconfigure(config: pytest.Config) -> None:
         state["stream"].close()
 
 
-def summarize(path: Path) -> dict[str, Any]:
-    """Phase sums, per-test outcomes and wall time for one report file."""
-    records = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
-    phases = [r for r in records if r["type"] == "phase"]
-    sums: Counter[str] = Counter()
+def _load(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def _outcomes(records: list[dict[str, Any]]) -> dict[str, str]:
+    """Each test's outcome: its call result, unless setup or teardown failed or skipped it."""
     outcome_by_test: dict[str, str] = {}
-    for r in phases:
-        sums[r["when"]] += r["duration"]
-        # A test's outcome is its worst phase: a failed teardown fails a passed call.
+    for r in records:
+        if r["type"] != "phase":
+            continue
         previous = outcome_by_test.get(r["nodeid"])
         if r["when"] == "call" or previous is None or r["outcome"] != "passed":
             if not (previous in ("failed", "skipped") and r["outcome"] == "passed"):
                 outcome_by_test[r["nodeid"]] = r["outcome"]
+    return outcome_by_test
+
+
+def summarize(path: Path) -> dict[str, Any]:
+    """Phase sums, per-test outcomes and wall time for one report file."""
+    records = _load(path)
+    sums: Counter[str] = Counter()
+    for r in records:
+        if r["type"] == "phase":
+            sums[r["when"]] += r["duration"]
+    outcome_by_test = _outcomes(records)
     end = next((r for r in reversed(records) if r["type"] == "end"), None)
     start = next((r for r in records if r["type"] == "start"), None)
     return {
@@ -209,7 +226,54 @@ def summarize(path: Path) -> dict[str, Any]:
     }
 
 
+def _stats(values: list[float]) -> dict[str, float]:
+    return {"median": round(statistics.median(values), 3), "min": round(min(values), 3), "max": round(max(values), 3)}
+
+
+def _variant_outcomes(paths: list[Path]) -> dict[str, str]:
+    """Per test, its outcome across every run of a variant, or "mixed" if the runs disagree."""
+    seen: dict[str, set[str]] = {}
+    for path in paths:
+        for nodeid, outcome in _outcomes(_load(path)).items():
+            seen.setdefault(nodeid, set()).add(outcome)
+    return {k: (next(iter(v)) if len(v) == 1 else "mixed") for k, v in seen.items()}
+
+
+def compare(variants: dict[str, list[Path]]) -> dict[str, dict[str, Any]]:
+    """Median and range of wall time and phase sums per variant, and outcome changes against the first."""
+    reference: dict[str, str] | None = None
+    result: dict[str, dict[str, Any]] = {}
+    for label, paths in variants.items():
+        summaries = [summarize(p) for p in paths]
+        outcomes = _variant_outcomes(paths)
+        if reference is None:
+            reference = outcomes
+        differences = {
+            nodeid: [reference.get(nodeid), outcomes.get(nodeid)]
+            for nodeid in sorted(set(reference) | set(outcomes))
+            if reference.get(nodeid) != outcomes.get(nodeid)
+        }
+        phases = sorted({k for s in summaries for k in s["phase_seconds"]})
+        result[label] = {
+            "runs": len(paths),
+            "wall_seconds": _stats([s["wall_seconds"] for s in summaries if s["wall_seconds"] is not None]),
+            "phase_seconds": {k: _stats([s["phase_seconds"].get(k, 0.0) for s in summaries]) for k in phases},
+            "tests": sorted({s["tests"] for s in summaries}),
+            "outcomes": [s["outcomes"] for s in summaries],
+            "outcome_differences": differences,
+        }
+    return result
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["compare"]:
+        # compare LABEL=GLOB [LABEL=GLOB ...]; the first label is the reference.
+        variants = {}
+        for spec in argv[1:]:
+            label, pattern = spec.split("=", 1)
+            variants[label] = sorted(Path(p) for p in glob.glob(pattern))
+        print(json.dumps(compare(variants), indent=1))
+        return 0
     for arg in argv:
         summary = summarize(Path(arg))
         meta = summary.pop("metadata") or {}
