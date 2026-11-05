@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import asyncpg
@@ -99,6 +100,13 @@ def test_this_run_records_the_schemas_it_owns(db_engine, worker_id):
 PROBE_TEST = "tests/test_invocation_namespace.py::test_the_database_fixture_uses_this_invocations_schema_never_public"
 
 
+def _restore_sigint() -> None:
+    # A run started in the background (`cmd &`) inherits SIGINT ignored; the probe must still see it.
+    import signal
+
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def _run_pytest(*args: str, inv: str | None = None, extra_env: dict[str, str] | None = None):
     env = dict(os.environ)
     env.pop("BIOAF_TEST_INVOCATION_ID", None)
@@ -112,12 +120,13 @@ def _run_pytest(*args: str, inv: str | None = None, extra_env: dict[str, str] | 
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        preexec_fn=_restore_sigint,
     )
 
 
 @pytest.mark.parametrize("workers", ["0", "2"])
 def test_a_finished_invocation_removes_its_schemas_and_manifest(workers, tmp_path):
-    inv = f"done{workers}x"
+    inv = f"done{workers}{uuid.uuid4().hex[:8]}"  # unique, so concurrent runs of this file never share it
     proc = _run_pytest("-n", workers, PROBE_TEST, inv=inv, extra_env={"BIOAF_TEST_MANIFEST_DIR": str(tmp_path)})
     out, _ = proc.communicate(timeout=180)
     assert proc.returncode == 0, out
@@ -140,6 +149,9 @@ def test_concurrent_invocations_do_not_collide(tmp_path):
 
 # --- cleanup of an abandoned invocation ---------------------------------------
 
+# Per-run suffix so two concurrent runs of this file never touch the same names.
+RUN = uuid.uuid4().hex[:6]
+
 
 def _abandon(manifest_dir: Path, inv: str, schemas: list[str], database: dict | None = None) -> None:
     for name in schemas:
@@ -150,51 +162,55 @@ def _abandon(manifest_dir: Path, inv: str, schemas: list[str], database: dict | 
 
 
 def test_cleanup_removes_only_the_named_invocations_schemas(tmp_path):
-    mine = ["test_abandon1_gw0", "migration_check_abandon1_gw0"]
-    theirs = ["test_keepme1_gw0"]
-    _abandon(tmp_path, "abandon1", mine)
-    _abandon(tmp_path, "keepme1", theirs)
+    mine = [f"test_abandon{RUN}_gw0", f"migration_check_abandon{RUN}_gw0"]
+    theirs = [f"test_keepme{RUN}_gw0"]
+    _abandon(tmp_path, f"abandon{RUN}", mine)
+    _abandon(tmp_path, f"keepme{RUN}", theirs)
     # Same prefix, not recorded by anyone: a sweep would take it, a scoped cleanup must not.
-    _create_schema("test_abandon1_gw9")
+    _create_schema(f"test_abandon{RUN}_gw9")
     try:
-        dropped = invocation.cleanup("abandon1", directory=tmp_path)
+        dropped = invocation.cleanup(f"abandon{RUN}", directory=tmp_path)
 
         assert sorted(dropped) == sorted(mine)
-        assert _schemas_like("%abandon1%") == {"test_abandon1_gw9"}
-        assert _schemas_like("test_keepme1_gw0") == {"test_keepme1_gw0"}
-        assert not list(tmp_path.glob("abandon1.*.json"))
-        assert list(tmp_path.glob("keepme1.*.json"))
+        assert _schemas_like(f"%abandon{RUN}%") == {f"test_abandon{RUN}_gw9"}
+        assert _schemas_like(f"test_keepme{RUN}_gw0") == {f"test_keepme{RUN}_gw0"}
+        assert not list(tmp_path.glob(f"abandon{RUN}.*.json"))
+        assert list(tmp_path.glob(f"keepme{RUN}.*.json"))
     finally:
-        invocation.drop_schemas(["test_abandon1_gw9", "test_keepme1_gw0"])
+        invocation.drop_schemas([f"test_abandon{RUN}_gw9", f"test_keepme{RUN}_gw0"])
 
 
 def test_cleanup_refuses_a_manifest_recorded_against_another_database(tmp_path):
-    _abandon(tmp_path, "elsewhere1", ["test_elsewhere1_gw0"], database={**describe(database_url()), "port": 1})
+    _abandon(
+        tmp_path, f"elsewhere{RUN}", [f"test_elsewhere{RUN}_gw0"], database={**describe(database_url()), "port": 1}
+    )
     try:
         with pytest.raises(invocation.CleanupRefused):
-            invocation.cleanup("elsewhere1", directory=tmp_path)
-        assert _schemas_like("test_elsewhere1_gw0") == {"test_elsewhere1_gw0"}
+            invocation.cleanup(f"elsewhere{RUN}", directory=tmp_path)
+        assert _schemas_like(f"test_elsewhere{RUN}_gw0") == {f"test_elsewhere{RUN}_gw0"}
     finally:
-        invocation.drop_schemas(["test_elsewhere1_gw0"])
+        invocation.drop_schemas([f"test_elsewhere{RUN}_gw0"])
 
 
 def test_cleanup_of_an_unknown_invocation_is_refused(tmp_path):
     with pytest.raises(invocation.CleanupRefused):
-        invocation.cleanup("neverseen1", directory=tmp_path)
+        invocation.cleanup(f"neverseen{RUN}", directory=tmp_path)
 
 
 def test_cleanup_refuses_names_outside_the_invocation(tmp_path):
     """A tampered manifest cannot be used to drop someone else's schema."""
-    _create_schema("test_victim1_gw0")
-    (tmp_path / "evil1.gw0.json").write_text(
-        json.dumps({"invocation_id": "evil1", "database": describe(database_url()), "schemas": ["test_victim1_gw0"]})
+    _create_schema(f"test_victim{RUN}_gw0")
+    (tmp_path / f"evil{RUN}.gw0.json").write_text(
+        json.dumps(
+            {"invocation_id": f"evil{RUN}", "database": describe(database_url()), "schemas": [f"test_victim{RUN}_gw0"]}
+        )
     )
     try:
         with pytest.raises(invocation.CleanupRefused):
-            invocation.cleanup("evil1", directory=tmp_path)
-        assert _schemas_like("test_victim1_gw0") == {"test_victim1_gw0"}
+            invocation.cleanup(f"evil{RUN}", directory=tmp_path)
+        assert _schemas_like(f"test_victim{RUN}_gw0") == {f"test_victim{RUN}_gw0"}
     finally:
-        invocation.drop_schemas(["test_victim1_gw0"])
+        invocation.drop_schemas([f"test_victim{RUN}_gw0"])
 
 
 SLEEPING_PROBE = """
@@ -215,10 +231,9 @@ async def test_holds_its_schema(session):
 def test_an_interrupted_invocation_still_removes_its_schemas(workers, tmp_path):
     import signal
     import time
-    import uuid as _uuid
 
-    inv = f"intr{workers}x"
-    probe = BACKEND_DIR / "tests" / f"_sigint_probe_{_uuid.uuid4().hex[:8]}.py"
+    inv = f"intr{workers}{uuid.uuid4().hex[:8]}"  # unique, so concurrent runs of this file never share it
+    probe = BACKEND_DIR / "tests" / f"_sigint_probe_{uuid.uuid4().hex[:8]}.py"
     probe.write_text(SLEEPING_PROBE)
     try:
         proc = _run_pytest(
