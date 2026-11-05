@@ -3933,6 +3933,13 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_worker_schema_routes.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
+  },
   "test_worknode_zone_capacity.py": {
    "category": "no_database",
    "evidence": [],

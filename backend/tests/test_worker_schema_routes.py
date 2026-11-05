@@ -1,0 +1,208 @@
+"""Pilot fixture routes on a migration-built worker schema (plan 4, stage 5).
+
+``migrated_reset``: the worker's migrated schema is reset to the empty-upgrade
+baseline before each test (tables truncated, sequences restarted, migration
+seed rows and their sequences restored). Real commits stay real.
+
+``rollback``: the test runs inside one outer transaction on one connection;
+the session and every redirected session factory join it with savepoints, and
+it is rolled back at the end.
+
+Files not on a pilot route keep the existing per-test create_all schema.
+"""
+
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from tests.plugins.db_url import database_url
+from tests.support import fixture_routes, worker_schema
+
+MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 42}
+
+
+async def _counts(conn, schema: str) -> dict[str, int]:
+    tables = (
+        await conn.execute(
+            text("SELECT tablename FROM pg_tables WHERE schemaname = :s AND tablename <> 'alembic_version'"),
+            {"s": schema},
+        )
+    ).scalars()
+    found = {}
+    for t in tables:
+        n = (await conn.execute(text(f'SELECT count(*) FROM "{schema}"."{t}"'))).scalar_one()
+        if n:
+            found[t] = n
+    return found
+
+
+@pytest.fixture
+def scratch_worker_schema(worker_id):
+    """A worker schema of this test's own, so reset tests cannot disturb the shared one."""
+    ws = worker_schema.build("routecheck", worker_id)
+    yield ws
+    worker_schema.drop(ws)
+
+
+# --- the committed-state reset --------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reset_restores_the_empty_upgrade_baseline_after_real_commits(scratch_worker_schema):
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with engine.begin() as conn:
+            assert await _counts(conn, ws.schema) == MIGRATION_SEEDS
+            await conn.execute(text("INSERT INTO organizations (name) VALUES ('a'), ('b')"))
+            await conn.execute(text("DELETE FROM platform_config"))
+            await conn.execute(
+                text("INSERT INTO controlled_vocabularies (field_name, allowed_value) VALUES ('f', 'v')")
+            )
+
+        await worker_schema.reset(engine, ws)
+
+        async with engine.begin() as conn:
+            assert await _counts(conn, ws.schema) == MIGRATION_SEEDS
+            # Identity restarts where an empty upgrade leaves it: the first Organization is id 1 again,
+            # and a seeded table continues after its seed rows instead of colliding with them.
+            org = (await conn.execute(text("INSERT INTO organizations (name) VALUES ('c') RETURNING id"))).scalar_one()
+            assert org == 1
+            await conn.execute(
+                text("INSERT INTO controlled_vocabularies (field_name, allowed_value) VALUES ('f', 'w')")
+            )
+            assert (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reset_rebuilds_when_a_test_changed_the_schema(scratch_worker_schema):
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE stray (id int)"))
+            await conn.execute(text("DROP TABLE lab_document_tags CASCADE"))
+
+        await worker_schema.reset(engine, ws)
+
+        async with engine.begin() as conn:
+            tables = set(
+                (
+                    await conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = :s"), {"s": ws.schema})
+                ).scalars()
+            )
+        assert "stray" not in tables
+        assert "lab_document_tags" in tables
+    finally:
+        await engine.dispose()
+
+
+# --- routing ------------------------------------------------------------------------------
+
+
+def test_routes_come_from_the_pilot_lists():
+    assert fixture_routes.route_for("test_worker_schema_routes.py") == "existing"
+    for name in fixture_routes.MIGRATED_RESET_PILOT:
+        assert fixture_routes.route_for(name) == "migrated_reset"
+    for name in fixture_routes.ROLLBACK_PILOT:
+        assert fixture_routes.route_for(name) == "rollback"
+
+
+def test_the_existing_route_can_be_forced_for_comparisons(monkeypatch):
+    monkeypatch.setenv("BIOAF_FIXTURE_ROUTES", "existing")
+    for name in fixture_routes.MIGRATED_RESET_PILOT | fixture_routes.ROLLBACK_PILOT:
+        assert fixture_routes.route_for(name) == "existing"
+
+
+def test_pilots_only_take_files_the_inventory_allows():
+    """A real-commit file never goes through rollback; schema-changing files go nowhere."""
+    import json
+    from pathlib import Path
+
+    inventory = json.loads((Path(__file__).parent / "isolation_inventory.json").read_text())["files"]
+    for name in fixture_routes.ROLLBACK_PILOT:
+        assert inventory[name]["category"] == "single_connection", name
+    for name in fixture_routes.MIGRATED_RESET_PILOT:
+        assert inventory[name]["category"] in {"real_commit", "single_connection"}, name
+
+
+# --- the rollback route ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rollback_route_keeps_commits_visible_inside_and_discards_them_after(scratch_worker_schema):
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with worker_schema.rollback_scope(engine) as factory:
+            async with factory() as first:
+                await first.execute(text("INSERT INTO organizations (name) VALUES ('inside')"))
+                await first.commit()  # releases a savepoint; the outer transaction stays open
+            async with factory() as second:  # another "session", same connection: sees the commit
+                names = (await second.execute(text("SELECT name FROM organizations"))).scalars().all()
+            assert names == ["inside"]
+
+            # A savepoint rolled back inside the test still discards only its own work.
+            async with factory() as third:
+                await third.execute(text("INSERT INTO organizations (name) VALUES ('dropped')"))
+                await third.rollback()
+            async with factory() as fourth:
+                names = (await fourth.execute(text("SELECT name FROM organizations"))).scalars().all()
+            assert names == ["inside"]
+
+        outside = async_sessionmaker(engine, class_=AsyncSession)
+        async with outside() as reader:
+            assert (await reader.execute(text("SELECT count(*) FROM organizations"))).scalar_one() == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rollback_route_publishes_post_commit_events_for_the_session_commit(scratch_worker_schema):
+    """The test session's commit is its outermost transaction, so after-commit hooks still fire."""
+    from app.services.event_bus import event_bus
+    from app.services.post_commit_events import defer_event, wait_for_deferred_events
+
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    seen: list[dict] = []
+
+    async def _record(payload):
+        seen.append(payload)
+
+    event_bus.subscribe("route.probe", _record)
+    try:
+        async with worker_schema.rollback_scope(engine) as factory:
+            async with factory() as s:
+                defer_event(s, "route.probe", {"n": 1})
+                await s.commit()
+            await wait_for_deferred_events()
+        assert seen == [{"n": 1}]
+    finally:
+        await engine.dispose()
+
+
+def test_a_trial_routes_whole_inventory_categories(monkeypatch):
+    """BIOAF_FIXTURE_TRIAL characterizes candidates without editing the pilot lists."""
+    import json
+    from pathlib import Path
+
+    inventory = json.loads((Path(__file__).parent / "isolation_inventory.json").read_text())["files"]
+    single = next(n for n, e in inventory.items() if e["category"] == "single_connection")
+    real = next(n for n, e in inventory.items() if e["category"] == "real_commit")
+    schema = next(n for n, e in inventory.items() if e["category"] == "schema")
+
+    monkeypatch.setenv("BIOAF_FIXTURE_TRIAL", "rollback=single_connection;migrated_reset=real_commit")
+    assert fixture_routes.route_for(single) == "rollback"
+    assert fixture_routes.route_for(real) == "migrated_reset"
+    assert fixture_routes.route_for(schema) == "existing"
+
+
+def test_a_trial_cannot_send_real_commit_files_through_rollback(monkeypatch):
+    monkeypatch.setenv("BIOAF_FIXTURE_TRIAL", "rollback=real_commit")
+    with pytest.raises(ValueError, match="rollback"):
+        fixture_routes.route_for("test_auth.py")

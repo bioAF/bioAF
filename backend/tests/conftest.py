@@ -15,6 +15,7 @@ from tests.plugins.bcrypt_rounds import apply_test_bcrypt_rounds  # noqa: E402
 
 apply_test_bcrypt_rounds(os.environ)
 
+import asyncio  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
 import pytest  # noqa: E402
@@ -59,28 +60,20 @@ async def _init_adapter_registry():
     adapter_registry.reset_registry()
 
 
-@pytest_asyncio.fixture
-async def db_engine(worker_id):
-    """Create engine, set up tables in this invocation's worker schema, yield, tear down.
+# Migration-built worker schemas, one per pilot prefix, built on first use (tests/support/worker_schema.py).
+_WORKER_SCHEMAS: dict[str, object] = {}
+# Set when a migrated_reset test has run since the worker schema was last reset.
+_WORKER_SCHEMA_DIRTY = {"value": False}
 
-    The schema is ``test_<invocation>_<worker>`` (see tests/plugins/invocation.py),
-    serial runs included, so concurrent invocations never share a schema and
-    nothing here touches ``public``.
-    """
-    import app.models  # noqa: F401 -- register all models with Base.metadata
-    from app.database import Base
-    from tests.plugins import invocation  # imported here so pytest registers the plugin first
 
-    schema = invocation.claim_schema("test", worker_id)
-    quoted = invocation.quote(schema)
-
+def _engine_for(schema: str):
     # Pin search_path at the asyncpg protocol level via connect_args so EVERY
-    # connection lands in the worker schema. A "connect" event listener running a
+    # connection lands in the test's schema. A "connect" event listener running a
     # SET through the greenlet bridge can miss a freshly-created connection under
     # concurrent connection creation (e.g. tests that spawn a background DB task
     # during a request); that connection then resolves tables in the wrong schema
     # and raises "relation ... does not exist". server_settings is race-free.
-    engine = create_async_engine(
+    return create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         pool_pre_ping=True,
@@ -89,24 +82,68 @@ async def db_engine(worker_id):
         connect_args={"server_settings": {"search_path": schema}},
     )
 
-    async with engine.begin() as conn:
-        # A schema left by an interrupted test in this same invocation is stale.
-        await conn.execute(sa_text(f"DROP SCHEMA IF EXISTS {quoted} CASCADE"))
-        await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
-        await conn.run_sync(Base.metadata.create_all)
+
+@pytest_asyncio.fixture
+async def db_engine(worker_id, request):
+    """An engine on this test's database, every session factory routed to it, torn down after.
+
+    The route comes from tests/support/fixture_routes.py:
+
+    - ``existing`` (default): a fresh create_all schema ``test_<invocation>_<worker>``, dropped after.
+    - ``migrated_reset``: the worker's migration-built schema, reset to its empty-upgrade baseline.
+    - ``rollback``: the worker's migration-built schema inside one outer transaction, rolled back.
+
+    Schemas are per invocation and worker (tests/plugins/invocation.py), serial runs included, so
+    concurrent invocations never share one and nothing here touches ``public``.
+    """
+    import app.models  # noqa: F401 -- register all models with Base.metadata
+    from app.database import Base
+    from tests.plugins import invocation  # imported here so pytest registers the plugin first
+    from tests.support import fixture_routes, worker_schema
+
+    route = fixture_routes.route_for(request.node.path.name)
+    cleanup: list = []
+
+    if route == "existing":
+        schema = invocation.claim_schema("test", worker_id)
+        quoted = invocation.quote(schema)
+        engine = _engine_for(schema)
+        async with engine.begin() as conn:
+            # A schema left by an interrupted test in this same invocation is stale.
+            await conn.execute(sa_text(f"DROP SCHEMA IF EXISTS {quoted} CASCADE"))
+            await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
+            await conn.run_sync(Base.metadata.create_all)
+
+        async def _drop_schema():
+            async with engine.begin() as conn:
+                await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
+
+        test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        cleanup.append(_drop_schema)
+    else:
+        ws = _WORKER_SCHEMAS.get("pilot")
+        if ws is None:
+            ws = await asyncio.to_thread(worker_schema.build, "pilot", worker_id)
+            _WORKER_SCHEMA_DIRTY["value"] = False
+        engine = _engine_for(ws.schema)  # type: ignore[attr-defined]
+        if route == "migrated_reset" or _WORKER_SCHEMA_DIRTY["value"]:
+            ws = await worker_schema.reset(engine, ws)  # type: ignore[arg-type]
+        _WORKER_SCHEMAS["pilot"] = ws
+        _WORKER_SCHEMA_DIRTY["value"] = route == "migrated_reset"
+        if route == "rollback":
+            scope = worker_schema.rollback_scope(engine)
+            test_factory = await scope.__aenter__()
+            cleanup.append(lambda: scope.__aexit__(None, None, None))
+        else:
+            test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     # Route every database entry point to this test's engine: `app.database.async_session_factory`
     # (auth middleware, webhook dispatcher and worker, etc.) and every module that copied it at import
     # (stack_deploy, lab_documents, lab_glossary, agent_reviews). See tests/support/lifecycle.py.
     import app.database as database_module
 
-    test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
     tasks_before = lifecycle.snapshot_tasks()
-
-    async def _drop_schema():
-        async with engine.begin() as conn:
-            await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
 
     try:
         yield engine
@@ -117,15 +154,17 @@ async def db_engine(worker_id):
         await lifecycle.run_all(
             lambda: lifecycle.drain_and_cancel(tasks_before),
             restore_factories,
-            _drop_schema,
+            *cleanup,
             engine.dispose,
         )
 
 
 @pytest_asyncio.fixture
 async def session(db_engine):
-    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as session:
+    # The factory db_engine routed for this test (on the rollback route it joins the outer transaction).
+    import app.database as database_module
+
+    async with database_module.async_session_factory() as session:
         yield session
 
 
