@@ -23,6 +23,13 @@ from tests.support import fixture_routes, worker_schema
 MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 42}
 
 
+@pytest.fixture(autouse=True)
+def _no_route_overrides_from_the_outer_run(monkeypatch):
+    """These tests set the route switches themselves; a whole-suite override must not leak in."""
+    monkeypatch.delenv("BIOAF_FIXTURE_ROUTES", raising=False)
+    monkeypatch.delenv("BIOAF_FIXTURE_TRIAL", raising=False)
+
+
 async def _counts(conn, schema: str) -> dict[str, int]:
     tables = (
         await conn.execute(

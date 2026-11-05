@@ -273,3 +273,47 @@ def test_the_reset_list_names_real_attributes():
     for module_name, attr in lifecycle.RESET_STATE:
         module = importlib.import_module(module_name)
         assert hasattr(module, attr), (module_name, attr)
+
+
+def test_settings_assigned_directly_are_restored():
+    """Several test files assign app settings without monkeypatch; the next test must not inherit them."""
+    from app.config import settings
+
+    original = settings.encryption_keys, settings.bcrypt_rounds
+    with lifecycle.isolated_state():
+        settings.encryption_keys = ""
+        settings.bcrypt_rounds = 31
+    assert (settings.encryption_keys, settings.bcrypt_rounds) == original
+
+
+def test_a_reloaded_encryption_service_is_restored():
+    """Reloading encryption_service with bad keys must not leave every later test unable to encrypt."""
+    import importlib
+
+    from app.config import settings
+    from app.platform import encryption_service
+
+    with lifecycle.isolated_state():
+        settings.encryption_keys = "yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U="
+        importlib.reload(encryption_service)
+    cipher = encryption_service.encrypt("x")
+    # The suite's two-key setup is back: the second key can decrypt nothing, the first writes.
+    assert encryption_service.decrypt(cipher) == "x"
+    assert len(encryption_service._keys) == 2
+
+
+def test_redirect_replaces_a_stale_test_factory_left_by_a_late_monkeypatch_undo():
+    """monkeypatch can undo after db_engine's teardown and put a dead test factory back on a module."""
+    production, first, second = object(), object(), object()
+    module = _fake_module("app._probe_stale", production)
+    try:
+        restore = lifecycle.redirect_session_factories(first, production)
+        restore()
+        module.async_session_factory = first  # what the late monkeypatch undo leaves behind
+
+        restore = lifecycle.redirect_session_factories(second, production)
+        assert module.async_session_factory is second
+        restore()
+        assert module.async_session_factory is production
+    finally:
+        sys.modules.pop("app._probe_stale", None)

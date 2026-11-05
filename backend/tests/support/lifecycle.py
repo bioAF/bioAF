@@ -51,6 +51,10 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.adapters.work_nodes.ec2", "_local_vms"),
     ("app.adapters.work_nodes.gce", "_local_vms"),
     ("app.adapters.notebooks.kubernetes", "_local_sessions"),
+    # Tests reload encryption_service with other keys; reload keeps the module object, so
+    # restoring these two restores it for every importer.
+    ("app.platform.encryption_service", "_keys"),
+    ("app.platform.encryption_service", "_multifernet"),
 )
 
 # Object attributes reset the same way: (module, object, attribute).
@@ -82,20 +86,28 @@ NOT_RESET: dict[tuple[str, str], str] = {
 # --- session factory routing ------------------------------------------------------
 
 
-def _holders(value: object) -> list[Any]:
+# Every test factory ever installed. A monkeypatch undo that runs after db_engine's teardown can put
+# one back on a module, so the next redirect replaces those too, not just the production factory.
+_INSTALLED: list[object] = []
+
+
+def _holders(*values: object) -> list[Any]:
+    wanted = {id(v) for v in values}
     found = []
     for name, module in list(sys.modules.items()):
         if module is None or not (name == "app" or name.startswith(("app.", "tests."))):
             continue
-        if getattr(module, "async_session_factory", None) is value:
+        if id(getattr(module, "async_session_factory", None)) in wanted:
             found.append(module)
     return found
 
 
 def redirect_session_factories(test_factory: object, production_factory: object) -> Callable[[], None]:
-    """Point every module holding ``production_factory`` at ``test_factory``; return the undo."""
-    for module in _holders(production_factory):
+    """Point every module holding the production (or a stale test) factory at ``test_factory``; return the undo."""
+    for module in _holders(production_factory, *_INSTALLED):
         module.async_session_factory = test_factory
+    _INSTALLED.clear()  # older factories are now on no module; keep only the live one
+    _INSTALLED.append(test_factory)
 
     def restore() -> None:
         # Also catches modules imported during the test, which copied the test factory.
@@ -189,6 +201,10 @@ def isolated_state() -> Iterator[None]:
         module = importlib.import_module(module_name)
         value = getattr(module, attr)
         saved.append((module, attr, value, _copy(value)))
+    # Some test files assign app settings directly instead of through monkeypatch.
+    from app.config import settings
+
+    settings_before = dict(settings.__dict__)
     for module_name, obj_name, attr in RESET_OBJECT_STATE:
         owner = getattr(importlib.import_module(module_name), obj_name)
         value = getattr(owner, attr)
@@ -198,3 +214,6 @@ def isolated_state() -> Iterator[None]:
     finally:
         for owner, attr, original, contents in saved:
             _restore_into(owner, attr, original, contents)
+        for key in set(settings.__dict__) - set(settings_before):
+            del settings.__dict__[key]
+        settings.__dict__.update(settings_before)
