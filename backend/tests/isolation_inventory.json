@@ -2008,6 +2008,7 @@
    "category": "schema",
    "evidence": [
     "alembic",
+    "create_all",
     "migrated_schema",
     "ddl"
    ],
