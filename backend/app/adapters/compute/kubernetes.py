@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 """
 
 import asyncio
+import dataclasses
 import logging
 import os
 import time
@@ -19,6 +20,8 @@ from datetime import datetime, timezone
 from kubernetes import client
 
 from app.adapters.base import ComputeProvider
+from app.adapters.compute.k8s_manifest import ManifestInputs, NextflowLaunch, build_job_manifest, builds_nextflow
+from app.adapters.job_specs import CustomCommandJobSpec, JobSpec, NextflowJobSpec, job_spec_from_dict
 from app.adapters.capabilities import ProviderCapabilities
 from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
@@ -127,19 +130,6 @@ def _load_gcp_credentials(cfg: dict):
     from app.adapters.credentials import credential_injector
 
     return credential_injector.load_gcp_credentials(cfg)
-
-
-def _sanitize_label_value(value: str) -> str:
-    """Sanitize a string for use as a K8s label value.
-
-    Label values must match: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
-    Replaces invalid characters with '-' and trims to 63 chars.
-    """
-    import re
-
-    sanitized = re.sub(r"[^A-Za-z0-9\-_.]", "-", value)
-    sanitized = sanitized.strip("-_.")
-    return sanitized[:63]
 
 
 def _pod_log_to_text(value) -> str:
@@ -278,7 +268,7 @@ class KubernetesComputeProvider(ComputeProvider):
             quota_introspection=True,
         )
 
-    async def submit_job(self, job_spec: dict) -> JobSubmitResult:
+    async def submit_job(self, job_spec: JobSpec) -> JobSubmitResult:
         d = await self._local_submit_job(job_spec) if self.is_local else await self._k8s_submit_job(job_spec)
         return _job_submit_result_from_dict(d)
 
@@ -1037,7 +1027,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
     @staticmethod
     def _build_nextflow_command(
-        job_spec: dict,
+        job_spec: NextflowJobSpec | dict,
         report_gcs_path: str = "",
         trace_gcs_path: str = "",
         igenomes_ignore: bool = False,
@@ -1056,10 +1046,13 @@ class KubernetesComputeProvider(ComputeProvider):
         off on AWS avoids the 403 for pipelines that do not need iGenomes (bioAF
         manages references via its own bucket). GCP passes ``False`` -> unchanged.
         """
-        pipeline_source = job_spec.get("pipeline_source", "")
-        pipeline_version = job_spec.get("pipeline_version", "")
-        parameters = job_spec.get("parameters", {})
-        sample_sheet = job_spec.get("sample_sheet", "")
+        spec = job_spec if isinstance(job_spec, NextflowJobSpec) else job_spec_from_dict(job_spec)
+        if not isinstance(spec, NextflowJobSpec):
+            raise ValueError("A Nextflow command needs a pipeline_source")
+        pipeline_source = spec.pipeline_source
+        pipeline_version = spec.pipeline_version
+        parameters = spec.parameters
+        sample_sheet = spec.sample_sheet
 
         # Log the config file before running so it appears in pod logs
         parts = ["cat /data/nextflow.config &&", "nextflow", "run", pipeline_source]
@@ -1105,18 +1098,30 @@ class KubernetesComputeProvider(ComputeProvider):
         return ["/bin/sh", "-c", " ".join(parts)]
 
     def _ensure_outdir(self, job_spec: dict) -> dict:
-        """Return ``job_spec`` with a durable outdir guaranteed.
+        """Return the dict ``job_spec`` with a durable outdir guaranteed; see ``_durable_outdir``.
 
-        Keeps an explicitly-supplied outdir. Otherwise resolves the results bucket
-        (explicit results_bucket_name, else derived from raw_bucket_name) and sets
-        outdir to a durable gs:// path. FAILS CLOSED when no results bucket can be
-        resolved, rather than letting outdir fall back to a pod-local path that the
-        Job's ttlSecondsAfterFinished destroys an hour later (the (!)E silent-loss
-        path). Returns a new dict; the input job_spec is not mutated.
+        Returns a new dict; the input job_spec is not mutated.
         """
         params = job_spec.get("parameters", {})
         if "outdir" in params:
             return job_spec
+        outdir = self._durable_outdir(job_spec.get("experiment_id", "unknown"), job_spec.get("run_id", 0))
+        return {**job_spec, "parameters": {**params, "outdir": outdir}}
+
+    def _with_durable_outdir(self, spec: NextflowJobSpec) -> NextflowJobSpec:
+        if "outdir" in spec.parameters:
+            return spec
+        outdir = self._durable_outdir(spec.experiment_id if spec.experiment_id is not None else "unknown", spec.run_id)
+        return dataclasses.replace(spec, parameters={**spec.parameters, "outdir": outdir})
+
+    def _durable_outdir(self, experiment_id: int | str, run_id: int) -> str:
+        """The results-bucket path a run's outputs go to when it did not name one.
+
+        Resolves the results bucket (explicit results_bucket_name, else derived from
+        raw_bucket_name). FAILS CLOSED when no results bucket can be resolved, rather than letting
+        outdir fall back to a pod-local path that the Job's ttlSecondsAfterFinished destroys an hour
+        later (the (!)E silent-loss path).
+        """
         results_bucket = _resolve_results_bucket(self._cluster_config or {})
         if not results_bucket:
             raise RuntimeError(
@@ -1125,20 +1130,12 @@ class KubernetesComputeProvider(ComputeProvider):
                 "raw_bucket_name) and no explicit outdir was provided. Refusing to "
                 "write outputs to a pod-local path that is destroyed at pod cleanup."
             )
-        experiment_id = job_spec.get("experiment_id", "unknown")
-        run_id = job_spec.get("run_id", 0)
         # Backend-neutral outdir URI (gs:// on GCS, s3:// on S3) via the storage
         # seam, instead of a hardcoded gs:// literal.
         from app.adapters.registry import get_storage_adapter
 
-        outdir = get_storage_adapter().build_uri(results_bucket, f"experiments/{experiment_id}/pipeline-runs/{run_id}")
-        return {**job_spec, "parameters": {**params, "outdir": outdir}}
+        return get_storage_adapter().build_uri(results_bucket, f"experiments/{experiment_id}/pipeline-runs/{run_id}")
 
-    # Allocatable resources per GCP machine type (after system reservations).
-    # Used to set Nextflow resourceLimits so retry escalation never exceeds
-    # what a single node can provide.  See ADR-042.
-    # What one genome-scale step actually holds, plus margin. A STAR step on a human reference
-    # measured ~80 GB on run 43 (a ~30 GB index, 12-18 GB of reads, outputs and the Fusion cache).
     @staticmethod
     def scratch_work_dir_key(run_id: int) -> str:
         """Where this run's Nextflow work dir lives under the raw bucket.
@@ -1430,8 +1427,18 @@ class KubernetesComputeProvider(ComputeProvider):
         logger.info("Created SSH resource in namespace %s for run %s", namespace, run_id)
         return resource_name
 
-    async def _k8s_submit_job(self, job_spec: dict) -> dict:
-        """Submit a real Kubernetes Job to the GKE cluster."""
+    async def _k8s_submit_job(self, job_spec: JobSpec | dict) -> dict:
+        """Submit a real Kubernetes Job to the cluster.
+
+        The effects live here: cluster config, namespace and autoscaler setup, credential reads,
+        Secret creation, and the submission. So do the values that need the clock, the cluster
+        config or the storage backend. The manifest itself comes from the pure
+        ``build_job_manifest``. A legacy dict spec is read into the typed form first.
+        """
+        spec = (
+            job_spec if isinstance(job_spec, (NextflowJobSpec, CustomCommandJobSpec)) else job_spec_from_dict(job_spec)
+        )
+
         # Force-reload cluster config. The sync _get_api_client() used by
         # downstream sync K8s helpers does not itself reload config, so
         # without this call a backend that started before compute deploy
@@ -1439,14 +1446,7 @@ class KubernetesComputeProvider(ComputeProvider):
         # even after deploy finishes.
         await self._ensure_cluster_config_fresh()
 
-        run_id = job_spec.get("run_id", 0)
-        pipeline_name = job_spec.get("pipeline_name", "unknown")
-        namespace = job_spec.get("namespace", "bioaf-pipelines")
-        container_image = job_spec.get("container_image", "alpine:3.19")
-        command = job_spec.get("command", [])
-        stage_commands = job_spec.get("stage_commands", [])
-        pipeline_source = job_spec.get("pipeline_source", "")
-        sample_sheet = job_spec.get("sample_sheet", "")
+        namespace = spec.namespace
 
         # Ensure namespace, service account, and role binding exist on first use.
         # Pass the pipeline-runner cloud identity so the KSA gets the right
@@ -1456,7 +1456,8 @@ class KubernetesComputeProvider(ComputeProvider):
         cfg = self._cluster_config or {}
         project_id = cfg.get("gcp_project_id", "")
         runner_role_arn = cfg.get("pipeline_runner_role_arn", "")
-        if runner_role_arn and runner_role_arn != "null":
+        on_aws = bool(runner_role_arn and runner_role_arn != "null")
+        if on_aws:
             pipeline_runner_identity = runner_role_arn
         elif project_id:
             pipeline_runner_identity = f"bioaf-pipeline-runner@{project_id}.iam.gserviceaccount.com"
@@ -1481,271 +1482,37 @@ class KubernetesComputeProvider(ComputeProvider):
         # unique even when run_id is recycled (e.g., after a DB sequence
         # reset). Reads use pipeline_runs.k8s_job_name as the authoritative
         # key, so the suffix flows through transparently.
-        job_name = f"bioaf-pipeline-{run_id}-{int(time.time())}"
+        job_name = f"bioaf-pipeline-{spec.run_id}-{int(time.time())}"
 
-        # Auto-build Nextflow command when pipeline_source is set and no
-        # explicit command was provided
-        if pipeline_source and not command:
-            container_image = self.NEXTFLOW_IMAGE
+        from app.adapters.registry import get_storage_adapter
 
-            from app.adapters.registry import get_storage_adapter
+        nextflow: NextflowLaunch | None = None
+        if isinstance(spec, NextflowJobSpec) and builds_nextflow(spec):
+            nextflow = self._resolve_nextflow_launch(spec, job_name, has_gcs_secret, on_aws, get_storage_adapter())
 
-            nf_cfg = self._cluster_config or {}
-            raw_bucket = nf_cfg.get("raw_bucket_name", "")
+        # Custom pipeline: SSH key secret for its init steps (e.g., git clone).
+        # Created before the Job; a Job the API then rejects leaves it behind.
+        if isinstance(spec, CustomCommandJobSpec) and spec.ssh_private_key:
+            self._ensure_ssh_key_secret(namespace, spec.run_id, spec.ssh_private_key)
 
-            # Write the Nextflow HTML report and execution trace directly to the
-            # object store (gs:// on GCS, s3:// on S3, via the storage seam) so they
-            # persist after the head pod is cleaned up.
-            _adapter = get_storage_adapter()
-            report_gcs_path = (
-                _adapter.build_uri(raw_bucket, f"nextflow-reports/{job_name}/report.html") if raw_bucket else ""
-            )
-            trace_gcs_path = (
-                _adapter.build_uri(raw_bucket, f"nextflow-traces/{job_name}/trace.tsv") if raw_bucket else ""
-            )
-
-            # Set --outdir to a durable results-bucket path so pipeline outputs
-            # persist after pod cleanup. The path mirrors the prefix that
-            # _gcs_collect_outputs and _extract_metrics use to find outputs.
-            # _ensure_outdir resolves the results bucket explicitly and fails closed
-            # if none is configured (rather than silently using a pod-local path).
-            job_spec = self._ensure_outdir(job_spec)
-
-            command = self._build_nextflow_command(
-                job_spec,
-                report_gcs_path=report_gcs_path,
-                trace_gcs_path=trace_gcs_path,
-                # AWS runs carry an IRSA runner role; default iGenomes off there
-                # so schema validation does not 403 on the public ngi-igenomes
-                # bucket. GCP has no runner role arn -> False -> unchanged.
-                igenomes_ignore=bool(runner_role_arn and runner_role_arn != "null"),
-            )
-
-        # Build init containers for input staging. The stage container runs the
-        # storage backend's CLI image (CopyStager seam); GCS -> google/cloud-sdk:slim.
-        init_containers = []
-        if stage_commands:
-            from app.adapters.registry import get_storage_adapter
-
-            stage_script = " && ".join(stage_commands)
-            init_containers.append(
-                {
-                    "name": "stage-inputs",
-                    "image": get_storage_adapter().staging_image(),
-                    "command": ["/bin/sh", "-c", stage_script],
-                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-                }
-            )
-
-        # Custom pipeline: extra init containers (e.g., git clone, build).
-        # Appended after stage-inputs so input data is available if needed.
-        extra_init_containers = list(job_spec.get("extra_init_containers") or [])
-        init_containers.extend(extra_init_containers)
-
-        # Write sample sheet to the data volume via init container
-        if sample_sheet and pipeline_source and not job_spec.get("command"):
-            # Strip carriage returns that browsers/forms sometimes inject
-            clean_sheet = sample_sheet.replace("\r\n", "\n").replace("\r", "\n")
-            escaped_sheet = clean_sheet.replace("'", "'\\''")
-            init_containers.append(
-                {
-                    "name": "write-samplesheet",
-                    "image": "alpine:3.19",
-                    "command": ["/bin/sh", "-c", f"printf '%s' '{escaped_sheet}' > /data/samplesheet.csv"],
-                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-                }
-            )
-
-        # Write nextflow.config with K8s executor settings for Nextflow pipelines
-        if pipeline_source and not job_spec.get("command"):
-            from app.adapters.registry import get_storage_adapter
-
-            nf_cfg = self._cluster_config or {}
-            raw_bucket = nf_cfg.get("raw_bucket_name", "")
-            # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
-            # storage seam, instead of a hardcoded gs:// literal.
-            # Per-run, so an abandoned run's intermediates can be identified and deleted.
-            # A single shared directory accumulated 2.13 TB across five runs with nothing
-            # able to tell one run's garbage from another's live data.
-            scratch_work_dir = (
-                get_storage_adapter().build_uri(
-                    raw_bucket, KubernetesComputeProvider.scratch_work_dir_key(job_spec.get("run_id") or 0)
-                )
-                if raw_bucket
-                else None
-            )
-            pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
-            pipeline_disk_raw = (nf_cfg.get("k8s_pipeline_disk_size_gb") or "").strip()
-            pipeline_disk = int(pipeline_disk_raw) if pipeline_disk_raw.isdigit() else None
-            # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
-            # validation of the public igenomes_base default (it 403s). GCP omits.
-            nf_config = self._build_nextflow_k8s_config(
-                namespace,
-                has_gcs_secret,
-                scratch_work_dir,
-                pipeline_machine,
-                ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
-                pipeline_disk_gb=pipeline_disk,
-                run_id=job_spec.get("run_id") or None,
-            )
-            # Use heredoc to avoid shell escaping issues with single quotes
-            # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
-            init_containers.append(
-                {
-                    "name": "write-nf-config",
-                    "image": "alpine:3.19",
-                    "command": [
-                        "/bin/sh",
-                        "-c",
-                        f"cat > /data/nextflow.config << 'NFEOF'\n{nf_config}\nNFEOF",
-                    ],
-                    "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-                }
-            )
-
-        # GCS credential mounts for all containers
-        gcs_volume_mount = {"name": "gcp-sa-key", "mountPath": "/secrets/gcp", "readOnly": True}
-        gcs_env = {"name": "GOOGLE_APPLICATION_CREDENTIALS", "value": "/secrets/gcp/key.json"}
-
-        if has_gcs_secret:
-            for ic in init_containers:
-                ic.setdefault("volumeMounts", []).append(gcs_volume_mount)
-                ic.setdefault("env", []).append(gcs_env)
-
-        # Custom pipeline: SSH key secret for extra init containers (e.g., git clone).
-        ssh_private_key = job_spec.get("ssh_private_key")
-        if ssh_private_key:
-            self._ensure_ssh_key_secret(namespace, run_id, ssh_private_key)
-            ssh_volume_mount = {"name": "ssh-key", "mountPath": "/root/.ssh", "readOnly": True}
-            for ic in extra_init_containers:
-                ic.setdefault("volumeMounts", []).append(ssh_volume_mount)
-
-        # Build main container
-        main_container = {
-            "name": "pipeline",
-            "image": container_image,
-            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-            "terminationMessagePolicy": "FallbackToLogsOnError",
-        }
-        if has_gcs_secret:
-            main_container["volumeMounts"].append(gcs_volume_mount)
-            main_container["env"] = [gcs_env]
-        if command:
-            main_container["command"] = command
-
-        # Custom pipeline: extra volume mounts on main container
-        has_outputs_dir = bool(job_spec.get("has_outputs_dir"))
-        has_code_dir = bool(job_spec.get("has_code_dir"))
-        if has_outputs_dir:
-            main_container["volumeMounts"].append({"name": "outputs", "mountPath": "/outputs"})
-        if has_code_dir:
-            main_container["volumeMounts"].append({"name": "code", "mountPath": "/code"})
-
-        # Custom pipeline: resource requests/limits (guaranteed QoS).
-        cpu_request = job_spec.get("cpu_request")
-        memory_request = job_spec.get("memory_request")
-        if cpu_request or memory_request:
-            requests: dict[str, str] = {}
-            limits: dict[str, str] = {}
-            if cpu_request:
-                requests["cpu"] = str(cpu_request)
-                limits["cpu"] = str(cpu_request)
-            if memory_request:
-                requests["memory"] = str(memory_request)
-                limits["memory"] = str(memory_request)
-            main_container["resources"] = {"requests": requests, "limits": limits}
-
-        # Custom pipeline: extra environment variables on main container.
-        extra_env = list(job_spec.get("extra_env") or [])
-        if extra_env:
-            main_container.setdefault("env", []).extend(extra_env)
-
-        # Custom pipeline: working directory on main container.
-        working_dir = job_spec.get("working_dir")
-        if working_dir:
-            main_container["workingDir"] = working_dir
-
-        # Build job manifest
-        job_manifest = {
-            "apiVersion": "batch/v1",
-            "kind": "Job",
-            "metadata": {
-                "name": job_name,
-                "namespace": namespace,
-                "labels": {
-                    "bioaf.io/pipeline-run": str(run_id),
-                    "bioaf.io/pipeline": _sanitize_label_value(pipeline_name),
-                    "bioaf.io/pool": "pipelines",
-                },
-            },
-            "spec": {
-                "backoffLimit": 0,
-                "ttlSecondsAfterFinished": 3600,
-                "template": {
-                    "metadata": {
-                        # Pin the head pod to its node. Without this, the
-                        # cluster autoscaler treats Nextflow's coordinator pod
-                        # as "movable" (it requests no resources) and scales
-                        # down its node mid-pipeline, killing the workflow
-                        # and any task pods it's coordinating.
-                        "annotations": {
-                            "cluster-autoscaler.kubernetes.io/safe-to-evict": "false",
-                        },
-                    },
-                    "spec": {
-                        # Head pod runs on the dedicated on-demand pipeline-head
-                        # pool, NOT the Spot pipelines pool. Spot preemption of
-                        # the head pod kills the entire pipeline; on-demand keeps
-                        # the orchestrator alive while task pods (Spot, retried
-                        # by Nextflow's errorStrategy on exit 143/137/247) stay
-                        # cheap. This head pool is tainted bioaf.io/pool=pipeline-head;
-                        # task pods tolerate only the pipelines taint, so they never land here.
-                        "nodeSelector": {"bioaf.io/pool": "pipeline-head"},
-                        "tolerations": [
-                            {
-                                "key": "bioaf.io/pool",
-                                "value": "pipeline-head",
-                                "effect": "NoSchedule",
-                            }
-                        ],
-                        "serviceAccountName": "bioaf-pipeline-runner",
-                        "containers": [main_container],
-                        "volumes": [
-                            {"name": "data", "emptyDir": {"sizeLimit": "50Gi"}},
-                        ]
-                        + (
-                            [{"name": "gcp-sa-key", "secret": {"secretName": "bioaf-gcs-sa-key"}}]
-                            if has_gcs_secret
-                            else []
-                        )
-                        + ([{"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}}] if has_outputs_dir else [])
-                        + ([{"name": "code", "emptyDir": {"sizeLimit": "10Gi"}}] if has_code_dir else [])
-                        + (
-                            [
-                                {
-                                    "name": "ssh-key",
-                                    "secret": {
-                                        "secretName": f"bioaf-ssh-key-{run_id}",
-                                        "defaultMode": 0o400,
-                                    },
-                                }
-                            ]
-                            if ssh_private_key
-                            else []
-                        ),
-                        "restartPolicy": "Never",
-                    },
-                },
-            },
-        }
-
-        if init_containers:
-            job_manifest["spec"]["template"]["spec"]["initContainers"] = init_containers  # type: ignore[index]
+        # The stage container runs the storage backend's CLI image (CopyStager seam);
+        # GCS -> google/cloud-sdk:slim.
+        staging_image = (
+            get_storage_adapter().staging_image()
+            if isinstance(spec, CustomCommandJobSpec) and spec.stage_commands
+            else ""
+        )
+        job_manifest = build_job_manifest(
+            spec,
+            ManifestInputs(
+                job_name=job_name, has_gcs_secret=has_gcs_secret, staging_image=staging_image, nextflow=nextflow
+            ),
+        )
 
         batch_client = self._get_k8s_batch_client()
         batch_client.create_namespaced_job(namespace=namespace, body=job_manifest)
 
-        cost_estimate = self._cost_estimate_dict(job_spec)
+        cost_estimate = self._cost_estimate_dict(spec)
 
         return {
             "job_id": job_name,
@@ -1753,6 +1520,62 @@ class KubernetesComputeProvider(ComputeProvider):
             "status": "queued",
             "estimated_cost": cost_estimate,
         }
+
+    def _resolve_nextflow_launch(
+        self, spec: NextflowJobSpec, job_name: str, has_gcs_secret: bool, on_aws: bool, storage
+    ) -> NextflowLaunch:
+        """The command, image and executor config for a catalog Nextflow run on this cluster."""
+        nf_cfg = self._cluster_config or {}
+        raw_bucket = nf_cfg.get("raw_bucket_name", "")
+
+        # Write the Nextflow HTML report and execution trace directly to the
+        # object store (gs:// on GCS, s3:// on S3, via the storage seam) so they
+        # persist after the head pod is cleaned up.
+        report_gcs_path = (
+            storage.build_uri(raw_bucket, f"nextflow-reports/{job_name}/report.html") if raw_bucket else ""
+        )
+        trace_gcs_path = storage.build_uri(raw_bucket, f"nextflow-traces/{job_name}/trace.tsv") if raw_bucket else ""
+
+        # Set --outdir to a durable results-bucket path so pipeline outputs
+        # persist after pod cleanup. The path mirrors the prefix that
+        # _gcs_collect_outputs and _extract_metrics use to find outputs.
+        # It fails closed if no results bucket is configured (rather than
+        # silently using a pod-local path).
+        spec = self._with_durable_outdir(spec)
+
+        command = self._build_nextflow_command(
+            spec,
+            report_gcs_path=report_gcs_path,
+            trace_gcs_path=trace_gcs_path,
+            # AWS runs carry an IRSA runner role; default iGenomes off there
+            # so schema validation does not 403 on the public ngi-igenomes
+            # bucket. GCP has no runner role arn -> False -> unchanged.
+            igenomes_ignore=on_aws,
+        )
+
+        # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
+        # storage seam, instead of a hardcoded gs:// literal.
+        # Per-run, so an abandoned run's intermediates can be identified and deleted.
+        # A single shared directory accumulated 2.13 TB across five runs with nothing
+        # able to tell one run's garbage from another's live data.
+        scratch_work_dir = (
+            storage.build_uri(raw_bucket, KubernetesComputeProvider.scratch_work_dir_key(spec.run_id or 0))
+            if raw_bucket
+            else None
+        )
+        pipeline_disk_raw = (nf_cfg.get("k8s_pipeline_disk_size_gb") or "").strip()
+        # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
+        # validation of the public igenomes_base default (it 403s). GCP omits.
+        config = self._build_nextflow_k8s_config(
+            spec.namespace,
+            has_gcs_secret,
+            scratch_work_dir,
+            nf_cfg.get("k8s_pipeline_machine_type"),
+            ignore_igenomes_base=on_aws,
+            pipeline_disk_gb=int(pipeline_disk_raw) if pipeline_disk_raw.isdigit() else None,
+            run_id=spec.run_id or None,
+        )
+        return NextflowLaunch(image=self.NEXTFLOW_IMAGE, command=tuple(command), config=config)
 
     async def _k8s_cancel_job(self, job_id: str) -> dict:
         """Delete a Kubernetes Job with background propagation."""

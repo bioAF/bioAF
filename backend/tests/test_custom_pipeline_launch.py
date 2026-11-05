@@ -187,7 +187,7 @@ async def _create_pipeline_with_version(
             github_repo_id=github_repo_id if code_source_type == "github_repo" else None,
             entrypoint_command=entrypoint_command,
             environment_version_id=env_version_id,
-            cpu_request="2",
+            cpu_request="1",
             memory_request="4Gi",
             variables=variables or [],
         ),
@@ -242,15 +242,15 @@ async def test_launch_inline_source(session, admin_user, ready_env_version, proj
         await session.commit()
 
     spec = captured["job_spec"]
-    assert spec["working_dir"] == "/data"
-    assert spec["has_code_dir"] is False
-    assert spec["has_outputs_dir"] is True
-    init_names = [ic["name"] for ic in spec["extra_init_containers"]]
+    assert spec.working_dir == "/data"
+    assert spec.has_code_dir is False
+    assert spec.has_outputs_dir is True
+    init_names = [ic.name for ic in spec.extra_init_containers]
     assert "write-manifest" in init_names
     assert "write-params" in init_names
     assert "clone-repo" not in init_names
     assert "write-code" not in init_names
-    assert spec["ssh_private_key"] is None
+    assert spec.ssh_private_key is None
     assert run.status == "running"
     assert run.custom_pipeline_version_id == version.id
 
@@ -283,12 +283,12 @@ async def test_launch_code_blob_source(session, admin_user, ready_env_version, e
         await session.commit()
 
     spec = captured["job_spec"]
-    assert spec["working_dir"] == "/code"
-    assert spec["has_code_dir"] is True
-    init_names = [ic["name"] for ic in spec["extra_init_containers"]]
+    assert spec.working_dir == "/code"
+    assert spec.has_code_dir is True
+    init_names = [ic.name for ic in spec.extra_init_containers]
     assert "write-code" in init_names
-    write_code = next(ic for ic in spec["extra_init_containers"] if ic["name"] == "write-code")
-    assert "echo hi" in write_code["command"][2]
+    write_code = next(ic for ic in spec.extra_init_containers if ic.name == "write-code")
+    assert "echo hi" in write_code.command[2]
 
 
 @pytest.mark.asyncio
@@ -321,13 +321,13 @@ async def test_launch_github_repo_source(
         await session.commit()
 
     spec = captured["job_spec"]
-    assert spec["working_dir"] == f"/code/{github_repo.display_name}"
-    assert spec["has_code_dir"] is True
-    assert spec["ssh_private_key"] == session_creds.ssh_private_key
-    init_names = [ic["name"] for ic in spec["extra_init_containers"]]
+    assert spec.working_dir == f"/code/{github_repo.display_name}"
+    assert spec.has_code_dir is True
+    assert spec.ssh_private_key == session_creds.ssh_private_key
+    init_names = [ic.name for ic in spec.extra_init_containers]
     assert "clone-repo" in init_names
-    clone = next(ic for ic in spec["extra_init_containers"] if ic["name"] == "clone-repo")
-    assert github_repo.git_ssh_url in clone["command"][2]
+    clone = next(ic for ic in spec.extra_init_containers if ic.name == "clone-repo")
+    assert github_repo.git_ssh_url in clone.command[2]
 
 
 @pytest.mark.asyncio
@@ -384,8 +384,8 @@ async def test_manifest_contains_file_mappings(
         await session.commit()
 
     spec = captured["job_spec"]
-    manifest_init = next(ic for ic in spec["extra_init_containers"] if ic["name"] == "write-manifest")
-    cmd = manifest_init["command"][2]
+    manifest_init = next(ic for ic in spec.extra_init_containers if ic.name == "write-manifest")
+    cmd = manifest_init.command[2]
     parts = cmd.split("'")
     raw_json = parts[3].replace("'\\''", "'")
     manifest = json.loads(raw_json)
@@ -423,9 +423,9 @@ async def test_stage_commands_use_relative_paths(session, admin_user, ready_env_
     # The activation is guarded by a file test: the adapter mounts the key only in
     # `service_account_key` mode, and an unguarded activation killed staging on every Workload
     # Identity / IRSA cluster. The activation itself is unchanged where a key IS mounted.
-    assert spec["stage_commands"][0].startswith('if [ -f "/secrets/gcp/key.json" ]')
-    assert "gcloud auth activate-service-account" in spec["stage_commands"][0]
-    cp_commands = spec["stage_commands"][1:]
+    assert spec.stage_commands[0].startswith('if [ -f "/secrets/gcp/key.json" ]')
+    assert "gcloud auth activate-service-account" in spec.stage_commands[0]
+    cp_commands = spec.stage_commands[1:]
     assert len(cp_commands) == 2
     for cmd in cp_commands:
         assert cmd.startswith("mkdir -p /data/")
@@ -479,7 +479,7 @@ async def test_variables_use_defaults_and_overrides(session, admin_user, ready_e
 
     assert run.parameters_json == {"threshold": "0.9", "mode": "fast"}
     spec = captured["job_spec"]
-    env_pairs = {e["name"]: e["value"] for e in spec["extra_env"]}
+    env_pairs = {e.name: e.value for e in spec.extra_env}
     assert env_pairs["PARAM_THRESHOLD"] == "0.9"
     assert env_pairs["PARAM_MODE"] == "fast"
 
@@ -676,7 +676,7 @@ async def test_experiment_status_unchanged_when_only_project(
     update_mock.assert_not_called()
     spec = captured["job_spec"]
     # Output prefix should target projects, not experiments
-    wrapped = spec["command"][2]
+    wrapped = spec.command[2]
     assert f"gs://bioaf-results-test/projects/{project.id}/pipeline-runs/" in wrapped
     assert "experiments/" not in wrapped
 
@@ -703,7 +703,7 @@ async def test_experiment_scoped_output_path(session, admin_user, ready_env_vers
         )
 
     spec = captured["job_spec"]
-    wrapped = spec["command"][2]
+    wrapped = spec.command[2]
     assert f"gs://bioaf-results-test/experiments/{experiment.id}/pipeline-runs/" in wrapped
     assert "projects/" not in wrapped
 

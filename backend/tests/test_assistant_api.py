@@ -553,6 +553,61 @@ async def test_confirm_launches_a_real_run(client, session, admin_user, admin_to
     assert (run.parameters_json or {}).get("accessions") == ["SRR1"]
 
 
+async def test_confirm_reports_a_refused_launch_as_not_launched(client, session, admin_user, admin_token):
+    """The provider refusing the job leaves a committed failed run; the confirm says so rather than
+    reporting a launch."""
+    from unittest.mock import MagicMock
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id, name="Import", owner_user_id=admin_user.id, status="registered"
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/fetchngs",
+            name="nf-core/fetchngs",
+            source_type="nf-core",
+            version="1.12.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.flush()
+    conv = AssistantConversation(organization_id=admin_user.organization_id, user_id=admin_user.id, status="active")
+    session.add(conv)
+    await session.flush()
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {
+                "tool": "launch_run",
+                "args": {"experiment_id": exp.id, "pipeline_key": "nf-core/fetchngs", "accessions": ["SRR1"]},
+            }
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.commit()
+
+    adapter = MagicMock()
+    adapter.submit_job = AsyncMock(side_effect=RuntimeError("quota exceeded for resource cpus in us-central1"))
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=adapter):
+        resp = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["result"]["launched"] is False
+    assert body["result"]["status"] == "failed"
+    assert "us-central1" not in body["result"]["error_message"]
+    assert body["run_id"]
+    run = (await session.execute(select(PipelineRun).where(PipelineRun.id == body["run_id"]))).scalar_one()
+    assert run.status == "failed"
+    audit = await _latest_audit(session, "pipeline_run", "launch")
+    assert audit.user_id == admin_user.id
+    assert audit.details_json.get("via_assistant") is True
+
+
 # ---- Audit: assistant-driven domain actions are attributed to the user AND marked via_assistant ----
 #
 # The action stays the user's (user_id on the audit row); the marker is how the audit log notes the

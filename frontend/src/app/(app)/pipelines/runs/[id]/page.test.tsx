@@ -515,3 +515,21 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 });
+
+describe("PipelineRunDetailPage reproduce of a custom pipeline run", () => {
+  test("uses the same Reproduce button and lands on the new run", async () => {
+    mockApiResponses("completed", { pipeline_name: "In-house QC", custom_pipeline_version_id: 12 });
+    mockPost.mockResolvedValueOnce({ id: 77 });
+
+    render(<PipelineRunDetailPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reproduce" })).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reproduce" }));
+    });
+
+    // The backend chooses the custom launcher from the run itself; the page does not branch.
+    expect(mockPost.mock.calls[0][0]).toContain("/api/pipeline-runs/1/reproduce");
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith("/pipelines/runs/77"));
+  });
+});

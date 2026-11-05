@@ -100,6 +100,47 @@ describe("AssistantChat", () => {
     expect(screen.getByRole("link", { name: /open experiment/i })).toHaveAttribute("href", "/experiments/3");
   });
 
+  it("says a refused launch did not start, and still links to the failed run", async () => {
+    allowUse();
+    mockGet.mockResolvedValue({ enabled: true, reason: null });
+    mockPost
+      .mockResolvedValueOnce({ id: 1, status: "active", provider: "anthropic", model: "x" })
+      .mockResolvedValueOnce({
+        status: "awaiting_confirmation",
+        text: null,
+        action_plan_id: 11,
+        plan_steps: [{ tool: "launch_run", args: { experiment_id: 3, pipeline_key: "nf-core/rnaseq" } }],
+        reason: null,
+      })
+      .mockResolvedValueOnce({
+        status: "approved",
+        plan_id: 11,
+        executed: true,
+        run_id: 42,
+        result: {
+          launched: false,
+          run_id: 42,
+          status: "failed",
+          pipeline_key: "nf-core/rnaseq",
+          experiment_id: 3,
+          error_message: "bioAF could not confirm that the compute cluster accepted this run, so it is marked failed.",
+        },
+      });
+
+    render(<AssistantChat />);
+    const input = await screen.findByLabelText("Message");
+    fireEvent.change(input, { target: { value: "run it" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByTestId("plan-confirm-card")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/i }));
+
+    // The launch outcome is uncertain, so the chat must not claim the run never ran.
+    expect(await screen.findByText(/Run #42 may not have started/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not start/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Run #42 started/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view run #42/i })).toHaveAttribute("href", "/pipelines/runs/42");
+  });
+
   it("links to the experiment it just created so the user isn't left to find it", async () => {
     allowUse();
     mockGet.mockResolvedValue({ enabled: true, reason: null });

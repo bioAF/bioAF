@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import BinaryIO
 
 from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.job_specs import JobSpec
 from app.adapters.models import (
     CellxgeneInstance,
     ClusterDetail,
@@ -83,8 +84,8 @@ class ComputeProvider(ABC):
         return None
 
     @abstractmethod
-    async def submit_job(self, job_spec: dict) -> JobSubmitResult:
-        """Submit a pipeline job. Returns a JobSubmitResult."""
+    async def submit_job(self, job_spec: JobSpec) -> JobSubmitResult:
+        """Submit a pipeline job: a catalog Nextflow run or a custom container command."""
 
     @abstractmethod
     async def cancel_job(self, job_id: str) -> JobStatus:

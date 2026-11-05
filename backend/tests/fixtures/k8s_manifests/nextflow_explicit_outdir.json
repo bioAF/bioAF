@@ -1,0 +1,107 @@
+{
+  "job": {
+    "body": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "bioaf.io/pipeline": "nf-core-scrnaseq",
+          "bioaf.io/pipeline-run": "101",
+          "bioaf.io/pool": "pipelines"
+        },
+        "name": "bioaf-pipeline-101-1790000000",
+        "namespace": "bioaf-pipelines"
+      },
+      "spec": {
+        "backoffLimit": 0,
+        "template": {
+          "metadata": {
+            "annotations": {
+              "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "cat /data/nextflow.config && nextflow run https://github.com/nf-core/scrnaseq -r 2.7.1 -c /data/nextflow.config --input /data/samplesheet.csv -with-report gs://bioaf-raw-test/nextflow-reports/bioaf-pipeline-101-1790000000/report.html -with-trace gs://bioaf-raw-test/nextflow-traces/bioaf-pipeline-101-1790000000/trace.tsv --aligner star --genome GRCh38 --outdir gs://elsewhere/out --protocol 10XV3"
+                ],
+                "image": "nextflow/nextflow:25.10.4",
+                "name": "pipeline",
+                "terminationMessagePolicy": "FallbackToLogsOnError",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              }
+            ],
+            "initContainers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' 'sample,fastq_1,fastq_2\nS1,gs://b/S1_R1.fq.gz,gs://b/S1_R2.fq.gz\n' > /data/samplesheet.csv"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-samplesheet",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "cat > /data/nextflow.config << 'NFEOF'\nprocess.executor = 'k8s'\nk8s.namespace = 'bioaf-pipelines'\nk8s.serviceAccount = 'bioaf-pipeline-runner'\nprocess.pod = [[label: 'bioaf.io/run-id', value: '101']]\nworkDir = 'gs://bioaf-raw-test/nextflow-work/run-101'\nwave.enabled = true\nfusion.enabled = true\nfusion.exportStorageCredentials = true\nprocess.resourceLimits = [cpus: 14, memory: '110.GB']\nprocess.disk = { \"120.GB\" }\nprocess.maxRetries = 3\nprocess.errorStrategy = { task.exitStatus in [143, 137, 247] ? (task.attempt <= 3 ? 'retry' : 'finish') : (task.attempt <= 2 ? 'retry' : 'finish') }\nk8s.pod = [[annotation: 'cluster-autoscaler.kubernetes.io/safe-to-evict', value: 'false'], [nodeSelector: 'bioaf.io/pool=pipelines'], [toleration: [key: 'bioaf.io/pool', operator: 'Equal', value: 'pipelines', effect: 'NoSchedule']]]\ndocker.enabled = true\nprocess { withName: 'MULTIQC' { ext.args = '--export' } }\nprocess { withName: 'STAR_ALIGN' { ext.args = '--readFilesCommand zcat --runDirPerm All_RWX --outWigType bedGraph --twopassMode Basic --outSAMtype BAM SortedByCoordinate --limitBAMsortRAM 59055800320' } }\nNFEOF"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-nf-config",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              }
+            ],
+            "nodeSelector": {
+              "bioaf.io/pool": "pipeline-head"
+            },
+            "restartPolicy": "Never",
+            "serviceAccountName": "bioaf-pipeline-runner",
+            "tolerations": [
+              {
+                "effect": "NoSchedule",
+                "key": "bioaf.io/pool",
+                "value": "pipeline-head"
+              }
+            ],
+            "volumes": [
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "data"
+              }
+            ]
+          }
+        },
+        "ttlSecondsAfterFinished": 3600
+      }
+    },
+    "namespace": "bioaf-pipelines"
+  },
+  "result": {
+    "job_id": "bioaf-pipeline-101-1790000000",
+    "namespace": "bioaf-pipelines",
+    "status": "queued"
+  },
+  "secrets": []
+}

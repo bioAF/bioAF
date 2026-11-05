@@ -367,13 +367,17 @@ async def confirm_action_plan(
                     # Mark the launch audit entry as agent-driven (attribution stays the user).
                     via_assistant=True,
                 )
+                # A run the compute provider refused is still created (and committed below), but it
+                # was not launched; say so rather than reporting a start.
                 output = {
-                    "launched": True,
+                    "launched": run.status != "failed",
                     "run_id": run.id,
                     "status": run.status,
                     "pipeline_key": built["pipeline_key"],
                     "experiment_id": built["experiment_id"],
                 }
+                if run.status == "failed":
+                    output["error_message"] = run.error_message
                 run_id = run.id
             else:
                 # A mutating handler applies its change (install, create_experiment/sample, import).

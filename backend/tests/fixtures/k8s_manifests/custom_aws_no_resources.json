@@ -1,0 +1,117 @@
+{
+  "job": {
+    "body": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "bioaf.io/pipeline": "In-house-QC",
+          "bioaf.io/pipeline-run": "202",
+          "bioaf.io/pool": "pipelines"
+        },
+        "name": "bioaf-pipeline-202-1790000000",
+        "namespace": "bioaf-pipelines"
+      },
+      "spec": {
+        "backoffLimit": 0,
+        "template": {
+          "metadata": {
+            "annotations": {
+              "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "#!/bin/sh\nset -e\ntrap 'true' EXIT\nrun-qc"
+                ],
+                "image": "registry.test/bioaf/qc:v3",
+                "name": "pipeline",
+                "terminationMessagePolicy": "FallbackToLogsOnError",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/outputs",
+                    "name": "outputs"
+                  }
+                ]
+              }
+            ],
+            "initContainers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/manifest.json"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-manifest",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/params.json"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-params",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              }
+            ],
+            "nodeSelector": {
+              "bioaf.io/pool": "pipeline-head"
+            },
+            "restartPolicy": "Never",
+            "serviceAccountName": "bioaf-pipeline-runner",
+            "tolerations": [
+              {
+                "effect": "NoSchedule",
+                "key": "bioaf.io/pool",
+                "value": "pipeline-head"
+              }
+            ],
+            "volumes": [
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "data"
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "outputs"
+              }
+            ]
+          }
+        },
+        "ttlSecondsAfterFinished": 3600
+      }
+    },
+    "namespace": "bioaf-pipelines"
+  },
+  "result": {
+    "job_id": "bioaf-pipeline-202-1790000000",
+    "namespace": "bioaf-pipelines",
+    "status": "queued"
+  },
+  "secrets": []
+}
