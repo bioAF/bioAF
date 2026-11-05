@@ -9,6 +9,12 @@ os.environ.setdefault(
     "yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=,RULBtMyNqzJbIBpDe1gwY2YCCYkBI0UqjJsdAP-41AU=",
 )
 
+# Test-only password hashing cost (default 4; BIOAF_TEST_BCRYPT_ROUNDS=12 for an
+# unchanged baseline). Overwrites BIOAF_BCRYPT_ROUNDS; see tests/plugins/bcrypt_rounds.py.
+from tests.plugins.bcrypt_rounds import apply_test_bcrypt_rounds  # noqa: E402
+
+apply_test_bcrypt_rounds(os.environ)
+
 from contextlib import asynccontextmanager  # noqa: E402
 
 import pytest  # noqa: E402
