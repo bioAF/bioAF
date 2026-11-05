@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -9,6 +8,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.adapters.job_specs import CustomCommandJobSpec, EnvVar, InitStep, VolumeMount
 from app.adapters.registry import get_compute_adapter
 from app.exceptions import ConflictError, NotFoundError, StateError, ValidationError
 from app.models.custom_pipeline import CustomPipeline
@@ -27,19 +27,20 @@ from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
     CustomPipelineLaunchRequest,
     CustomPipelineUpdateRequest,
+    CustomPipelineVariableValue,
     CustomPipelineVersionCreateRequest,
 )
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
-from app.services.event_types import PIPELINE_STARTED
+from app.services.custom_pipeline_resources import check_fits_head_pool
+from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
+from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
+from app.services.post_commit_events import defer_event
 from app.services.quota_service import QuotaService
 
 logger = logging.getLogger("bioaf.custom_pipeline")
 
 
 VALID_CODE_SOURCE_TYPES = ("github_repo", "code_blob", "inline")
-CPU_PATTERN = re.compile(r"^\d+(\.\d+)?m?$")
-MEMORY_PATTERN = re.compile(r"^\d+(Ki|Mi|Gi|Ti|Pi|Ei|K|M|G|T|P|E)?$")
 PARAM_NAME_SANITIZER = re.compile(r"[^A-Z0-9]")
 
 
@@ -52,11 +53,28 @@ def _slugify(name: str) -> str:
     return slug[:100]
 
 
-def _validate_resource_strings(cpu_request: str, memory_request: str) -> None:
-    if not CPU_PATTERN.match(cpu_request):
-        raise ValidationError(f"Invalid cpu_request: {cpu_request}")
-    if not MEMORY_PATTERN.match(memory_request):
-        raise ValidationError(f"Invalid memory_request: {memory_request}")
+def _check_unique_variable_names(variables: list) -> None:
+    """Each variable reaches the job as one PARAM_<NAME> and one params.json key, so names must differ."""
+    seen: set[str] = set()
+    for var in variables:
+        if var.variable_name in seen:
+            raise ValidationError(
+                f'Each variable needs its own name, and "{var.variable_name}" is used more than once. '
+                "Rename or remove one of them."
+            )
+        seen.add(var.variable_name)
+
+
+_ENVIRONMENT_NOT_READY: dict[str, str] = {
+    "draft": (
+        "This pipeline's environment has not been built yet. Build it from Pipeline Templates, then launch again."
+    ),
+    "building": "This pipeline's environment is still building. Launch again once its build has finished.",
+    "failed": (
+        "This pipeline's environment did not build, so it cannot run. Rebuild it from Pipeline Templates, "
+        "then launch again."
+    ),
+}
 
 
 class CustomPipelineService:
@@ -258,7 +276,8 @@ class CustomPipelineService:
         if not data.entrypoint_command or not data.entrypoint_command.strip():
             raise ValidationError("entrypoint_command must not be empty")
 
-        _validate_resource_strings(data.cpu_request, data.memory_request)
+        check_fits_head_pool(data.cpu_request, data.memory_request)
+        _check_unique_variable_names(data.variables)
 
         if data.log_file_path is not None and not data.log_file_path.startswith("/outputs/"):
             raise ValidationError("log_file_path must start with /outputs/")
@@ -544,8 +563,14 @@ class CustomPipelineService:
         org_id: int,
         user_id: int,
         data: CustomPipelineLaunchRequest,
+        *,
+        pipeline_id: int | None = None,
     ) -> PipelineRun:
-        """Launch a custom pipeline run. Implements spec-launch-orchestration.md."""
+        """Launch a custom pipeline run. Implements spec-launch-orchestration.md.
+
+        ``pipeline_id``, when given, is the pipeline the caller addressed (the
+        launch URL's); the version must belong to it.
+        """
         if data.experiment_id is None and data.project_id is None:
             raise ValidationError("Either experiment_id or project_id must be provided")
 
@@ -565,21 +590,8 @@ class CustomPipelineService:
             raise ValidationError(f"Pipeline version {data.version_id} not found")
 
         pipeline = version.custom_pipeline
-        if pipeline is None or pipeline.organization_id != org_id:
-            raise ValidationError("Pipeline version does not belong to this organization")
-
-        if version.status != "active":
-            raise StateError(
-                f"Pipeline version {version.version_number} has status '{version.status}', expected 'active'"
-            )
-
-        # 2. Validate environment
-        env_version = version.environment_version
-        if env_version is None:
-            raise ValidationError("Environment version not found")
-        if env_version.status != "ready":
-            raise StateError(f"Environment version has status '{env_version.status}', expected 'ready'")
-        image_uri = env_version.image_uri or ""
+        # 2. Validate the version and its environment
+        image_uri = CustomPipelineService.check_launchable(version, org_id, pipeline_id)
 
         # 3. Validate experiment / project / inputs
         experiment: Experiment | None = None
@@ -617,7 +629,7 @@ class CustomPipelineService:
                 input_files.append(f)
 
         # 4. Validate and resolve variables
-        resolved_variables = CustomPipelineService._resolve_variables(version.variables, data.variables)
+        resolved_variables = CustomPipelineService.resolve_variables(version.variables, data.variables)
 
         # Build name/path context for input files (for staging + manifest)
         from app.services.notebook_service import _build_relative_path, _resolve_input_file_context
@@ -681,7 +693,7 @@ class CustomPipelineService:
 
         # 8. Code init containers + 9. working directory + ssh key
         ssh_private_key: str | None = None
-        code_init_containers: list[dict] = []
+        code_init_containers: list[InitStep] = []
         has_code_dir = True
 
         if version.code_source_type == "github_repo":
@@ -709,13 +721,13 @@ class CustomPipelineService:
             output_prefix = f"projects/{data.project_id}"
 
         # 11. Build PARAM_* env vars
-        extra_env = [
-            {"name": f"PARAM_{PARAM_NAME_SANITIZER.sub('_', name.upper())}", "value": str(value)}
+        extra_env = tuple(
+            EnvVar(name=f"PARAM_{PARAM_NAME_SANITIZER.sub('_', name.upper())}", value=str(value))
             for name, value in resolved_variables.items()
-        ]
+        )
 
         # 12. Check quota
-        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0, isolate_denial=True)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
 
@@ -726,6 +738,7 @@ class CustomPipelineService:
             project_id=data.project_id,
             submitted_by_user_id=user_id,
             pipeline_name=pipeline.name,
+            pipeline_key=pipeline.pipeline_key,
             pipeline_version=str(version.version_number),
             parameters_json=resolved_variables,
             input_files_json=[f.id for f in input_files],
@@ -752,56 +765,43 @@ class CustomPipelineService:
             run_id=run.id,
         )
 
-        extra_init_containers = [manifest_init, params_init] + code_init_containers
-
         # 15. Build job spec and submit
-        job_spec = {
-            "run_id": run.id,
-            "pipeline_name": pipeline.name,
-            "container_image": image_uri,
-            "command": ["/bin/sh", "-c", wrapped_command],
-            "stage_commands": stage_commands,
-            "namespace": "bioaf-pipelines",
-            "has_outputs_dir": True,
-            "has_code_dir": has_code_dir,
-            "extra_init_containers": extra_init_containers,
-            "ssh_private_key": ssh_private_key,
-            "cpu_request": version.cpu_request,
-            "memory_request": version.memory_request,
-            "extra_env": extra_env,
-            "working_dir": working_dir,
-            "experiment_id": data.experiment_id,
-            "project_id": data.project_id,
-        }
+        job_spec = CustomCommandJobSpec(
+            run_id=run.id,
+            pipeline_name=pipeline.name,
+            container_image=image_uri,
+            command=("/bin/sh", "-c", wrapped_command),
+            stage_commands=tuple(stage_commands),
+            has_outputs_dir=True,
+            has_code_dir=has_code_dir,
+            extra_init_containers=(manifest_init, params_init, *code_init_containers),
+            ssh_private_key=ssh_private_key,
+            cpu_request=version.cpu_request,
+            memory_request=version.memory_request,
+            extra_env=extra_env,
+            working_dir=working_dir,
+            experiment_id=data.experiment_id,
+            project_id=data.project_id,
+        )
 
+        # A provider that raises is treated as having refused the job. That is not always true:
+        # an error after the API accepted it (a timeout reading the response, say) leaves a job
+        # running with this run marked failed. Nothing reconciles that today; see the module notes
+        # in launch_outcome.
         try:
-            compute_adapter = get_compute_adapter()
-            job_result = await compute_adapter.submit_job(job_spec)
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            run.k8s_job_name = job_result.job_id
-            run.k8s_namespace = job_result.provider_details.get("namespace", "")
-            run.slurm_job_id = job_result.job_id
-            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
-            run.compute_job_ref = job_result.job_id
-            run.provider_metadata = {
-                k: v
-                for k, v in {"job_name": job_result.job_id, **(job_result.provider_details or {})}.items()
-                if v is not None
-            }
-            if job_result.estimated_cost:
-                run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
-            await session.flush()
+            job_result = await get_compute_adapter().submit_job(job_spec)
         except Exception as e:
-            run.status = "failed"
-            run.error_message = str(e)
+            mark_submission_failed(run, e, logger)
             await session.flush()
-            logger.error("Custom pipeline launch failed for run %d: %s", run.id, e)
-            raise
+        else:
+            record_submission_accepted(run, job_result)
+            await session.flush()
 
-        # 16. Emit events + audit log
-        asyncio.create_task(
-            event_bus.emit(
+        # 16. Audit, and announce the outcome once the caller commits it
+        submitted = run.status == "running"
+        if submitted:
+            defer_event(
+                session,
                 PIPELINE_STARTED,
                 {
                     "event_type": PIPELINE_STARTED,
@@ -815,7 +815,23 @@ class CustomPipelineService:
                     "summary": f"Custom pipeline '{pipeline.name}' run {run.id} started",
                 },
             )
-        )
+        else:
+            defer_event(
+                session,
+                PIPELINE_FAILED,
+                {
+                    "event_type": PIPELINE_FAILED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Custom pipeline '{pipeline.name}' failed to launch",
+                    "message": run.error_message,
+                    "severity": "critical",
+                    "summary": f"Custom pipeline run {run.id} failed to launch",
+                },
+            )
 
         await log_action(
             session,
@@ -834,8 +850,8 @@ class CustomPipelineService:
             },
         )
 
-        # 17. Advance experiment status if applicable
-        if data.experiment_id is not None and experiment is not None:
+        # 17. Advance experiment status, only for a run the provider accepted
+        if submitted and data.experiment_id is not None and experiment is not None:
             try:
                 from app.services.experiment_service import ExperimentService
 
@@ -851,10 +867,141 @@ class CustomPipelineService:
 
         return run
 
+    # --- Reproduction ---
+
+    @staticmethod
+    async def reproduce_run(session: AsyncSession, original: PipelineRun, org_id: int, user_id: int) -> PipelineRun:
+        """Relaunch a custom run as it was recorded: its version, variables, inputs and context.
+
+        ``original`` must already have passed the caller's Organization check. Everything here
+        refuses before a run is created or a job submitted; the launcher's own checks (version
+        active, environment ready, experiment/project/files in this Organization) run before it
+        creates anything, too.
+        """
+        input_ids = await CustomPipelineService._recorded_input_ids(session, original)
+
+        variables = original.parameters_json
+        if not isinstance(variables, dict) or not all(isinstance(v, str) for v in variables.values()):
+            raise ValidationError("This run cannot be reproduced: its recorded variable values are unreadable.")
+
+        if input_ids:
+            files = (
+                (await session.execute(select(File).where(File.id.in_(input_ids), File.organization_id == org_id)))
+                .scalars()
+                .all()
+            )
+            available = {f.id for f in files if f.deleted_at is None and not f.storage_deleted}
+            if available != set(input_ids):
+                raise ValidationError(
+                    "This run cannot be reproduced: one or more of its input files are no longer available."
+                )
+
+        # The launcher checks the version too, but in launch words; checked here first so the refusal
+        # says it is the reproduction that cannot go ahead.
+        version = (
+            await session.execute(
+                select(CustomPipelineVersion)
+                .where(CustomPipelineVersion.id == original.custom_pipeline_version_id)
+                .options(
+                    selectinload(CustomPipelineVersion.custom_pipeline),
+                    selectinload(CustomPipelineVersion.environment_version),
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            raise ValidationError("This run cannot be reproduced: the pipeline version it ran no longer exists.")
+        try:
+            CustomPipelineService.check_launchable(version, org_id, None)
+        except (StateError, ValidationError) as refused:
+            reason = str(refused)
+            raise type(refused)(f"This run cannot be reproduced: {reason[:1].lower()}{reason[1:]}") from refused
+
+        return await CustomPipelineService.launch_run(
+            session,
+            org_id,
+            user_id,
+            CustomPipelineLaunchRequest(
+                version_id=original.custom_pipeline_version_id,
+                experiment_id=original.experiment_id,
+                project_id=original.project_id,
+                input_file_ids=input_ids,
+                variables=[
+                    CustomPipelineVariableValue(variable_name=name, variable_value=value)
+                    for name, value in variables.items()
+                ],
+            ),
+        )
+
+    @staticmethod
+    async def _recorded_input_ids(session: AsyncSession, original: PipelineRun) -> list[int]:
+        """The run's inputs, when its two records of them agree; a refusal otherwise.
+
+        The input links are authoritative and ``input_files_json`` is the launcher's copy of the
+        same list. Both are written by every custom launch, so a run where they disagree, or where
+        the list is missing or malformed, has an input set nobody can vouch for. That is refused,
+        never read as "no inputs": an empty set is valid only when both records say so.
+        """
+        linked = list(
+            (
+                await session.execute(
+                    select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == original.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        recorded = original.input_files_json
+        if not isinstance(recorded, list) or not all(isinstance(i, int) for i in recorded):
+            raise ValidationError(
+                "This run cannot be reproduced: its input files were not recorded in a readable form."
+            )
+        if len(recorded) != len(set(recorded)) or set(recorded) != set(linked):
+            raise ValidationError(
+                "This run cannot be reproduced: its records disagree about which input files it used."
+            )
+        return recorded
+
     # --- Launch helpers ---
 
     @staticmethod
-    def _resolve_variables(
+    def check_launchable(version: CustomPipelineVersion, org_id: int, pipeline_id: int | None) -> str:
+        """Whether ``version`` may be launched in ``org_id``; returns its environment's image.
+
+        ``pipeline_id``, when given, is the pipeline the caller addressed. Refuses a version of
+        another Organization or pipeline, a version that is not active, an environment that is
+        missing or not built, and a resource request the pipeline-head pool cannot schedule. Each
+        refusal says why in plain words; the technical state goes to the log.
+        """
+        pipeline = version.custom_pipeline
+        if pipeline is None or pipeline.organization_id != org_id:
+            raise ValidationError("Pipeline version does not belong to this organization")
+        if pipeline_id is not None and pipeline.id != pipeline_id:
+            raise ValidationError(f"Pipeline version {version.id} does not belong to this pipeline")
+        if version.status != "active":
+            logger.info("Custom version %s refused for launch: status %r", version.id, version.status)
+            raise StateError(
+                f"Version {version.version_number} of this pipeline is {version.status} and can no longer be "
+                "launched. Choose an active version."
+            )
+        env_version = version.environment_version
+        if env_version is None:
+            logger.info("Custom version %s refused for launch: no environment version", version.id)
+            raise ValidationError(
+                "This pipeline version has no environment to run in. Create a new version with a pipeline template."
+            )
+        if env_version.status != "ready":
+            logger.info(
+                "Custom version %s refused for launch: environment version %s status %r",
+                version.id,
+                getattr(env_version, "id", None),
+                env_version.status,
+            )
+            raise StateError(_ENVIRONMENT_NOT_READY.get(env_version.status, _ENVIRONMENT_NOT_READY["failed"]))
+        check_fits_head_pool(version.cpu_request, version.memory_request)
+        return env_version.image_uri or ""
+
+    @staticmethod
+    def resolve_variables(
         defined: list[CustomPipelineVariable],
         provided: list,
     ) -> dict[str, str]:
@@ -863,6 +1010,11 @@ class CustomPipelineService:
         for entry in provided:
             if entry.variable_name not in defined_by_name:
                 raise ValidationError(f"Unknown variable: {entry.variable_name}")
+            earlier = provided_by_name.get(entry.variable_name)
+            if earlier is not None and earlier != entry.variable_value:
+                raise ValidationError(
+                    f'Two different values were given for "{entry.variable_name}". Give it one value.'
+                )
             provided_by_name[entry.variable_name] = entry.variable_value
 
         resolved: dict[str, str] = {}
@@ -946,29 +1098,29 @@ class CustomPipelineService:
         return content.replace("'", "'\\''")
 
     @staticmethod
-    def _build_write_manifest_init(manifest_payload: dict) -> dict:
+    def _build_write_manifest_init(manifest_payload: dict) -> InitStep:
         manifest_json = json.dumps(manifest_payload)
         escaped = CustomPipelineService._shell_escape_single(manifest_json)
-        return {
-            "name": "write-manifest",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/manifest.json"],
-            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-        }
+        return InitStep(
+            name="write-manifest",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/manifest.json"),
+            mounts=(VolumeMount("data", "/data"),),
+        )
 
     @staticmethod
-    def _build_write_params_init(params_payload: dict) -> dict:
+    def _build_write_params_init(params_payload: dict) -> InitStep:
         params_json = json.dumps(params_payload)
         escaped = CustomPipelineService._shell_escape_single(params_json)
-        return {
-            "name": "write-params",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/params.json"],
-            "volumeMounts": [{"name": "data", "mountPath": "/data"}],
-        }
+        return InitStep(
+            name="write-params",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /data/params.json"),
+            mounts=(VolumeMount("data", "/data"),),
+        )
 
     @staticmethod
-    def _build_git_clone_init(repo: GitHubRepo) -> dict:
+    def _build_git_clone_init(repo: GitHubRepo) -> InitStep:
         ssh_url = repo.git_ssh_url
         target = f"/code/{repo.display_name}"
         clone_script = (
@@ -978,25 +1130,22 @@ class CustomPipelineService:
             "ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && "
             f"git clone '{ssh_url}' '{target}'"
         )
-        return {
-            "name": "clone-repo",
-            "image": "alpine/git:latest",
-            "command": ["/bin/sh", "-c", clone_script],
-            "volumeMounts": [
-                {"name": "code", "mountPath": "/code"},
-                {"name": "ssh-key", "mountPath": "/secrets/ssh", "readOnly": True},
-            ],
-        }
+        return InitStep(
+            name="clone-repo",
+            image="alpine/git:latest",
+            command=("/bin/sh", "-c", clone_script),
+            mounts=(VolumeMount("code", "/code"), VolumeMount("ssh-key", "/secrets/ssh", read_only=True)),
+        )
 
     @staticmethod
-    def _build_write_code_init(code_content: str) -> dict:
+    def _build_write_code_init(code_content: str) -> InitStep:
         escaped = CustomPipelineService._shell_escape_single(code_content)
-        return {
-            "name": "write-code",
-            "image": "alpine:3.19",
-            "command": ["/bin/sh", "-c", f"printf '%s' '{escaped}' > /code/script"],
-            "volumeMounts": [{"name": "code", "mountPath": "/code"}],
-        }
+        return InitStep(
+            name="write-code",
+            image="alpine:3.19",
+            command=("/bin/sh", "-c", f"printf '%s' '{escaped}' > /code/script"),
+            mounts=(VolumeMount("code", "/code"),),
+        )
 
     @staticmethod
     def _build_entrypoint_wrapper(

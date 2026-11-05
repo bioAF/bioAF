@@ -1,0 +1,174 @@
+{
+  "job": {
+    "body": {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+        "labels": {
+          "bioaf.io/pipeline": "In-house-QC",
+          "bioaf.io/pipeline-run": "202",
+          "bioaf.io/pool": "pipelines"
+        },
+        "name": "bioaf-pipeline-202-1790000000",
+        "namespace": "bioaf-pipelines"
+      },
+      "spec": {
+        "backoffLimit": 0,
+        "template": {
+          "metadata": {
+            "annotations": {
+              "cluster-autoscaler.kubernetes.io/safe-to-evict": "false"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "#!/bin/sh\nset -e\ntrap 'true' EXIT\nrun-qc"
+                ],
+                "env": [
+                  {
+                    "name": "PARAM_DEPTH",
+                    "value": "25"
+                  }
+                ],
+                "image": "registry.test/bioaf/qc:v3",
+                "name": "pipeline",
+                "resources": {
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "4Gi"
+                  },
+                  "requests": {
+                    "cpu": "2",
+                    "memory": "4Gi"
+                  }
+                },
+                "terminationMessagePolicy": "FallbackToLogsOnError",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  },
+                  {
+                    "mountPath": "/outputs",
+                    "name": "outputs"
+                  },
+                  {
+                    "mountPath": "/code",
+                    "name": "code"
+                  }
+                ],
+                "workingDir": "/code"
+              }
+            ],
+            "initContainers": [
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "if [ -f \"/secrets/gcp/key.json\" ]; then gcloud auth activate-service-account --key-file=/secrets/gcp/key.json; fi && mkdir -p /data/Proj/Exp && gsutil cp gs://b/a.tsv /data/Proj/Exp/a.tsv"
+                ],
+                "image": "google/cloud-sdk:slim",
+                "name": "stage-inputs",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/manifest.json"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-manifest",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' '{}' > /data/params.json"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-params",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/data",
+                    "name": "data"
+                  }
+                ]
+              },
+              {
+                "command": [
+                  "/bin/sh",
+                  "-c",
+                  "printf '%s' 'echo hi' > /code/script"
+                ],
+                "image": "alpine:3.19",
+                "name": "write-code",
+                "volumeMounts": [
+                  {
+                    "mountPath": "/code",
+                    "name": "code"
+                  }
+                ]
+              }
+            ],
+            "nodeSelector": {
+              "bioaf.io/pool": "pipeline-head"
+            },
+            "restartPolicy": "Never",
+            "serviceAccountName": "bioaf-pipeline-runner",
+            "tolerations": [
+              {
+                "effect": "NoSchedule",
+                "key": "bioaf.io/pool",
+                "value": "pipeline-head"
+              }
+            ],
+            "volumes": [
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "data"
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "50Gi"
+                },
+                "name": "outputs"
+              },
+              {
+                "emptyDir": {
+                  "sizeLimit": "10Gi"
+                },
+                "name": "code"
+              }
+            ]
+          }
+        },
+        "ttlSecondsAfterFinished": 3600
+      }
+    },
+    "namespace": "bioaf-pipelines"
+  },
+  "result": {
+    "job_id": "bioaf-pipeline-202-1790000000",
+    "namespace": "bioaf-pipelines",
+    "status": "queued"
+  },
+  "secrets": []
+}

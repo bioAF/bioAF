@@ -15,6 +15,8 @@ def _fake_run(**overrides):
     base = dict(
         id=1,
         pipeline_name="nf-core/scrnaseq",
+        pipeline_key="nf-core/scrnaseq",
+        project_id=None,
         pipeline_version="2.7.1",
         experiment=None,
         submitted_by=None,

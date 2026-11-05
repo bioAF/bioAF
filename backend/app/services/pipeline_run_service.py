@@ -1,7 +1,10 @@
+import copy
 import logging
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,6 +12,7 @@ from app.exceptions import (
     ConflictError,
     DomainError,
     NotFoundError,
+    PermissionDeniedError,
     SamplesMissingFilesError,
     ValidationError,
 )
@@ -18,13 +22,15 @@ from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
+from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
+from app.services.post_commit_events import defer_event
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_declaration import parse_declaration
 from app.services.samplesheet_mapping_service import SamplesheetMappingService
+from app.adapters.job_specs import NextflowJobSpec
 from app.adapters.registry import get_compute_adapter
 from app.services.vocabulary_validator import VocabularyValidator
 
@@ -216,6 +222,21 @@ _CHEMISTRY_TO_PROTOCOL: dict[str, str] = {
     "10x chromium 5' v2": "10XV2",
     "10x chromium 5' v3": "10XV3",
 }
+
+
+@dataclass(frozen=True)
+class RecordedLaunch:
+    """What a catalog run recorded about its launch, which a reproduction relaunches as it was.
+
+    ``parameters`` are the resolved parameters the run was given, used as they are rather than
+    resolved again over today's catalog defaults. ``reference_genome`` is the run's recorded label,
+    which may have been inferred from a linked reference dataset rather than chosen from the
+    assembly vocabulary, so it is carried onto the new run and never validated as a selection.
+    """
+
+    samplesheet: str
+    parameters: dict
+    reference_genome: str | None
 
 
 class PipelineRunService:
@@ -453,7 +474,9 @@ class PipelineRunService:
         )
         if data.sample_ids:
             sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
-        samples = list((await session.execute(sample_query)).scalars().all())
+        samples = PipelineRunService._in_requested_order(
+            list((await session.execute(sample_query)).scalars().all()), data.sample_ids
+        )
         for sample in samples:
             # Resolved with the SAME opt-in the launch will use. Hardcoding this
             # off previewed a sheet with empty read columns and then submitted
@@ -696,6 +719,19 @@ class PipelineRunService:
     DERIVED_SOURCE_TYPES: frozenset[str] = frozenset({"pipeline_output", "notebook_output"})
 
     @staticmethod
+    def _in_requested_order(samples: list, sample_ids: list[int] | None) -> list:
+        """The samples in the order they were asked for, or by id when none were named.
+
+        A sheet's rows follow this order, so it must never be the order the database happens to
+        return them in: rewriting a row moves it in the table, and a reproduction compares the
+        sheet it would submit with the recorded one exactly.
+        """
+        if not sample_ids:
+            return sorted(samples, key=lambda s: s.id)
+        position = {sample_id: i for i, sample_id in enumerate(sample_ids)}
+        return sorted(samples, key=lambda s: (position.get(s.id, len(position)), s.id))
+
+    @staticmethod
     def _input_eligible_files(files: list, include_derived: bool) -> list:
         """Filter a sample's files to those eligible as pipeline inputs.
 
@@ -717,6 +753,80 @@ class PipelineRunService:
         ]
 
     @staticmethod
+    def resolve_parameters(pipeline, caller_params: dict, reference_genome: str | None, samples: list) -> dict:
+        """The parameters a catalog run is given: the launch's parameter policy, with no effects.
+
+        Reads the catalog entry's key, defaults and schema and the samples' fields, and returns a
+        new dict; nothing passed in is changed. What the caller stated always wins.
+        """
+        merged_params = dict(pipeline.default_params_json or {})
+        merged_params.update(caller_params)
+
+        # reference_genome is the first-class control for the reference a run aligns against. See
+        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
+        # the caller stated beats both.
+        merged_params = PipelineRunService._apply_reference(
+            pipeline.pipeline_key, merged_params, caller_params, reference_genome
+        )
+
+        # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
+        # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
+        # supply it. Derive macs_gsize from the genome so these runs work out of the box; an explicit
+        # macs_gsize/read_length wins.
+        if any(k in pipeline.pipeline_key for k in ("chipseq", "atacseq")):
+            if "macs_gsize" not in merged_params and "read_length" not in merged_params:
+                gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
+                if gsize is not None:
+                    merged_params["macs_gsize"] = gsize
+
+        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
+        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
+        # caller never having stated it themselves.
+        if "igenomes_ignore" not in caller_params and PipelineRunService._should_ignore_igenomes(
+            pipeline, merged_params
+        ):
+            merged_params["igenomes_ignore"] = True
+
+        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
+        # full key, not a substring: `scrnaseq` contains `rnaseq`.
+        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
+            merged_params = PipelineRunService._apply_10x_protocol(merged_params, caller_params, samples)
+
+        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
+        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
+        #
+        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
+        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
+        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
+        #    without it there is no miRNA annotation at all.
+        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
+        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
+        #    kit, which is always the case for somebody else's deposited data.
+        #
+        # All three are defaults, never policy: anything the scientist stated wins.
+        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
+            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
+            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
+            merged_params.setdefault("three_prime_adapter", "auto-detect")
+            # The genome is the more specific statement and the one the reads are aligned against,
+            # so it wins; the samples' organism is the fallback, and it is the one that actually
+            # answers for a paper that never named a build. Neither known means the parameter stays
+            # unset: a wrong species quantifies against the wrong miRBase and still produces a
+            # plausible-looking table.
+            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
+            if species is None:
+                organisms = {(s.organism or "").strip().lower() for s in samples}
+                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
+                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
+                # can be pointed at, and picking one of two would be a guess.
+                if len(codes) == 1:
+                    species = codes.pop()
+            if species is not None:
+                merged_params.setdefault("mirtrace_species", species)
+
+        return merged_params
+
+    @staticmethod
     async def launch_run(
         session: AsyncSession,
         org_id: int,
@@ -724,8 +834,15 @@ class PipelineRunService:
         data: PipelineRunLaunchRequest,
         *,
         via_assistant: bool = False,
+        recorded: RecordedLaunch | None = None,
     ) -> PipelineRun:
-        """Launch a pipeline run: the core orchestration method."""
+        """Launch a pipeline run: the core orchestration method.
+
+        ``recorded`` (reproduction) is what the original run recorded. Its parameters and reference
+        label are used as recorded, and the launch is refused, before anything is created or
+        submitted, unless the sheet it would submit is the recorded sheet; with
+        ``drop_samples_without_files`` it may instead be that sheet less some rows.
+        """
         # 1. Load pipeline from catalog
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
@@ -762,6 +879,7 @@ class PipelineRunService:
                 .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
             )
             samples = list(sample_result.scalars().all())
+        samples = PipelineRunService._in_requested_order(samples, data.sample_ids)
 
         # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
         # outputs are excluded by default so they are never fed back in as inputs
@@ -785,7 +903,7 @@ class PipelineRunService:
         samples = PipelineRunService._samples_with_inputs(pipeline, contract, samples, data.drop_samples_without_files)
 
         # 4. Check quota
-        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0, isolate_denial=True)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
 
@@ -798,71 +916,15 @@ class PipelineRunService:
             },
         )
 
-        # 6. Merge parameters (user params override defaults)
-        merged_params = dict(pipeline.default_params_json or {})
-        merged_params.update(data.parameters)
-
-        # reference_genome is the first-class control for the reference a run aligns against. See
-        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
-        # the caller stated beats both.
-        merged_params = PipelineRunService._apply_reference(
-            pipeline.pipeline_key, merged_params, data.parameters, data.reference_genome
-        )
-
-        # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
-        # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
-        # supply it. Derive macs_gsize from the genome so these runs work out of the box; an explicit
-        # macs_gsize/read_length wins.
-        if any(k in pipeline.pipeline_key for k in ("chipseq", "atacseq")):
-            if "macs_gsize" not in merged_params and "read_length" not in merged_params:
-                gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
-                if gsize is not None:
-                    merged_params["macs_gsize"] = gsize
-
-        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
-        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
-        # caller never having stated it themselves.
-        if "igenomes_ignore" not in data.parameters and PipelineRunService._should_ignore_igenomes(
-            pipeline, merged_params
-        ):
-            merged_params["igenomes_ignore"] = True
-
-        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
-        # full key, not a substring: `scrnaseq` contains `rnaseq`.
-        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
-            merged_params = PipelineRunService._apply_10x_protocol(merged_params, data.parameters, samples)
-
-        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
-        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
-        #
-        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
-        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
-        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
-        #    without it there is no miRNA annotation at all.
-        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
-        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
-        #    kit, which is always the case for somebody else's deposited data.
-        #
-        # All three are defaults, never policy: anything the scientist stated wins.
-        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
-            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
-            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
-            merged_params.setdefault("three_prime_adapter", "auto-detect")
-            # The genome is the more specific statement and the one the reads are aligned against,
-            # so it wins; the samples' organism is the fallback, and it is the one that actually
-            # answers for a paper that never named a build. Neither known means the parameter stays
-            # unset: a wrong species quantifies against the wrong miRBase and still produces a
-            # plausible-looking table.
-            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
-            if species is None:
-                organisms = {(s.organism or "").strip().lower() for s in samples}
-                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
-                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
-                # can be pointed at, and picking one of two would be a guess.
-                if len(codes) == 1:
-                    species = codes.pop()
-            if species is not None:
-                merged_params.setdefault("mirtrace_species", species)
+        # 6. Decide the run's parameters (user params override defaults). A reproduction runs the
+        # parameters the original was given: resolving them again would add any default the
+        # catalog has gained since, which no samplesheet check can see.
+        if recorded is not None:
+            merged_params = copy.deepcopy(recorded.parameters)
+        else:
+            merged_params = PipelineRunService.resolve_parameters(
+                pipeline, data.parameters, data.reference_genome, samples
+            )
 
         # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
         # is still free to do so. Deliberately BEFORE the run row, the sample
@@ -879,6 +941,28 @@ class PipelineRunService:
         if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
             SampleSheetService.check_contract_satisfiable(contract, samples, merged_params, sample_values)
 
+        # 6c. Generate the sample sheet, through the same call the review step
+        # used. One computation produces the CSV, the rows (each naming the
+        # sample it belongs to) and the column holding the name, so the sheet
+        # that runs and the record of what it emitted cannot disagree about
+        # either. Pure, so it is computed before anything is created: a
+        # reproduction checks it against the sheet the original recorded.
+        sheet = SampleSheetService.preview(
+            pipeline.pipeline_key,
+            samples,
+            merged_params,
+            contract=contract,
+            sample_values=sample_values,
+        )
+        sample_sheet_csv = sheet["csv"]
+        if recorded is not None and not PipelineRunService._sheet_matches(
+            recorded.samplesheet, sample_sheet_csv, allow_dropped_rows=data.drop_samples_without_files
+        ):
+            raise ValidationError(
+                "This run cannot be reproduced exactly: the samplesheet it would be given now differs from the "
+                "one the original run used, because its samples, their files, or the declared columns have changed."
+            )
+
         # 7. Create pipeline_runs record
         run = PipelineRun(
             organization_id=org_id,
@@ -886,9 +970,10 @@ class PipelineRunService:
             project_id=data.project_id,
             submitted_by_user_id=user_id,
             pipeline_name=pipeline.name,
+            pipeline_key=pipeline.pipeline_key,
             pipeline_version=pipeline.version,
             parameters_json=merged_params,
-            reference_genome=data.reference_genome,
+            reference_genome=recorded.reference_genome if recorded is not None else data.reference_genome,
             alignment_algorithm=data.alignment_algorithm,
             status="pending",
             work_dir="/data/working/nextflow/run-{id}",
@@ -921,20 +1006,6 @@ class PipelineRunService:
             run.input_files_json = sorted(seen_file_ids)
             await session.flush()
 
-        # 8. Generate the sample sheet, through the same call the review step
-        # used. One computation produces the CSV, the rows (each naming the
-        # sample it belongs to) and the column holding the name, so the sheet
-        # that runs and the record of what it emitted cannot disagree about
-        # either.
-        sheet = SampleSheetService.preview(
-            pipeline.pipeline_key,
-            samples,
-            merged_params,
-            contract=contract,
-            sample_values=sample_values,
-        )
-        sample_sheet_csv = sheet["csv"]
-
         # 8b. Keep what this run was actually given. Re-deriving the sheet later
         # reads today's samples, today's files and today's mapping, none of which
         # are what the run received, so defending a result means holding the
@@ -964,100 +1035,80 @@ class PipelineRunService:
             for field, value in field_updates.get(sample.id, {}).items():
                 setattr(sample, field, value)
 
-        # 9. Submit job via the compute adapter (BAL)
+        # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
+        # having refused the job; see launch_outcome for the case where it had in fact accepted it.
+        job_spec = NextflowJobSpec(
+            run_id=run.id,
+            pipeline_key=pipeline.pipeline_key,
+            pipeline_source=pipeline.source_url,
+            pipeline_version=pipeline.version,
+            parameters=merged_params,
+            sample_sheet=sample_sheet_csv,
+            experiment_id=data.experiment_id,
+            work_dir=run.work_dir,
+            resume_from_run_id=data.resume_from_run_id,
+            input_files=tuple(s.external_id or str(s.id) for s in samples),
+        )
         try:
-            compute_adapter = get_compute_adapter()
-            job_spec = {
-                "run_id": run.id,
-                "pipeline_name": pipeline.pipeline_key,
-                "pipeline_source": pipeline.source_url,
-                "pipeline_version": pipeline.version,
-                "parameters": merged_params,
-                "sample_sheet": sample_sheet_csv,
-                "experiment_id": data.experiment_id,
-                "work_dir": run.work_dir,
-                "resume_from_run_id": data.resume_from_run_id,
-                "input_files": [s.external_id or str(s.id) for s in samples],
-            }
-            job_result = await compute_adapter.submit_job(job_spec)
-
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            run.slurm_job_id = job_result.job_id
-            run.k8s_job_name = job_result.job_id
-            run.k8s_namespace = job_result.provider_details.get("namespace", "")
-            # Backend-neutral handle + provider detail (BAL Phase 4); dual-written
-            # alongside k8s_* until the old columns are dropped.
-            run.compute_job_ref = job_result.job_id
-            run.provider_metadata = {
-                k: v
-                for k, v in {"job_name": job_result.job_id, **(job_result.provider_details or {})}.items()
-                if v is not None
-            }
-
-            if job_result.estimated_cost:
-                run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
-
-            import asyncio
-
-            asyncio.create_task(
-                event_bus.emit(
-                    PIPELINE_STARTED,
-                    {
-                        "event_type": PIPELINE_STARTED,
-                        "org_id": org_id,
-                        "user_id": user_id,
-                        "target_user_id": user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{pipeline.name}' started",
-                        "message": f"Run {run.id} submitted for experiment {data.experiment_id}",
-                        "summary": f"Pipeline '{pipeline.name}' run {run.id} started",
-                    },
-                )
-            )
-
+            job_result = await get_compute_adapter().submit_job(job_spec)
         except Exception as e:
-            run.status = "failed"
-            run.error_message = str(e)
-            logger.error("Pipeline launch failed for run %d: %s", run.id, e)
+            mark_submission_failed(run, e, logger)
+        else:
+            record_submission_accepted(run, job_result)
 
-            import asyncio
-
-            asyncio.create_task(
-                event_bus.emit(
-                    PIPELINE_FAILED,
-                    {
-                        "event_type": PIPELINE_FAILED,
-                        "org_id": org_id,
-                        "user_id": user_id,
-                        "target_user_id": user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{pipeline.name}' failed to launch",
-                        "message": str(e),
-                        "severity": "critical",
-                        "summary": f"Pipeline run {run.id} failed to launch",
-                    },
-                )
+        submitted = run.status == "running"
+        # Announced once the caller commits the run; dropped if it never does.
+        if submitted:
+            defer_event(
+                session,
+                PIPELINE_STARTED,
+                {
+                    "event_type": PIPELINE_STARTED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{pipeline.name}' started",
+                    "message": f"Run {run.id} submitted for experiment {data.experiment_id}",
+                    "summary": f"Pipeline '{pipeline.name}' run {run.id} started",
+                },
+            )
+        else:
+            defer_event(
+                session,
+                PIPELINE_FAILED,
+                {
+                    "event_type": PIPELINE_FAILED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{pipeline.name}' failed to launch",
+                    "message": run.error_message,
+                    "severity": "critical",
+                    "summary": f"Pipeline run {run.id} failed to launch",
+                },
             )
 
         await session.flush()
 
-        # 11. Update experiment status to "processing"
-        try:
-            from app.services.experiment_service import ExperimentService
+        # 11. Advance the experiment to "processing", only for a run the provider accepted
+        if submitted:
+            try:
+                from app.services.experiment_service import ExperimentService
 
-            await ExperimentService.update_status(
-                session,
-                data.experiment_id,
-                org_id,
-                user_id,
-                "processing",
-            )
-        except Exception as e:
-            # Status transition may not be valid from current state: that's OK
-            logger.warning("Could not update experiment status: %s", e)
+                await ExperimentService.update_status(
+                    session,
+                    data.experiment_id,
+                    org_id,
+                    user_id,
+                    "processing",
+                )
+            except Exception as e:
+                # Status transition may not be valid from current state: that's OK
+                logger.warning("Could not update experiment status: %s", e)
 
         # 12. Write audit log
         launch_details: dict[str, object] = {
@@ -1086,8 +1137,9 @@ class PipelineRunService:
         except Exception as e:
             logger.warning("Reference linkage failed for run %d: %s", run.id, e)
 
-        # 14. Auto-populate reference_genome if not explicitly set
-        if not run.reference_genome:
+        # 14. Auto-populate reference_genome if not explicitly set. A reproduction keeps the
+        # original's label, even an empty one, rather than deriving it from today's datasets.
+        if recorded is None and not run.reference_genome:
             run.reference_genome = await PipelineRunService._resolve_reference_genome(
                 session, linked_ref_ids, merged_params
             )
@@ -1310,8 +1362,13 @@ class PipelineRunService:
             query = query.where(PipelineRun.experiment_id == experiment_id)
             count_query = count_query.where(PipelineRun.experiment_id == experiment_id)
         if pipeline_key:
-            query = query.where(PipelineRun.pipeline_name == pipeline_key)
-            count_query = count_query.where(PipelineRun.pipeline_name == pipeline_key)
+            # The stored key, or, for a run stored before keys were kept, its name.
+            matches_key = or_(
+                PipelineRun.pipeline_key == pipeline_key,
+                and_(PipelineRun.pipeline_key.is_(None), PipelineRun.pipeline_name == pipeline_key),
+            )
+            query = query.where(matches_key)
+            count_query = count_query.where(matches_key)
         if status:
             query = query.where(PipelineRun.status == status)
             count_query = count_query.where(PipelineRun.status == status)
@@ -1369,8 +1426,11 @@ class PipelineRunService:
     async def reproduce_run(
         session: AsyncSession,
         original_run_id: int,
+        org_id: int,
         user_id: int,
         drop_samples_without_files: bool = False,
+        *,
+        allow_custom: bool = False,
     ) -> PipelineRun:
         """Re-launch with identical parameters.
 
@@ -1378,33 +1438,138 @@ class PipelineRunService:
         subject to the same per-sample file requirement: a sample that has since
         lost its files raises SamplesMissingFilesError unless the caller opts to
         drop the offending samples.
+
+        ``org_id`` is the caller's Organization, and the only one this launches
+        in. The original is looked up inside it, so a run in another Organization
+        is not found, before anything is reconstructed or launched; the original
+        row's own Organization never authorizes anything.
+
+        A custom pipeline run goes back through the custom launcher, decided by the run's custom
+        version and never by its name. ``allow_custom`` is whether the caller may launch custom
+        pipelines (role grant and API-key scope); reproducing must not be a way around that.
         """
-        original = await PipelineRunService.get_run_model(session, original_run_id)
+        original = await PipelineRunService.get_run(session, original_run_id, org_id)
         if not original:
             raise NotFoundError("Original run not found")
 
-        # Reconstruct launch request from original
-        sample_ids = [s.id for s in original.samples] if original.samples else None
+        if original.custom_pipeline_version_id is not None:
+            if not allow_custom:
+                raise PermissionDeniedError(
+                    "Reproducing a custom pipeline run requires permission to launch custom pipelines."
+                )
+            from app.services.custom_pipeline_service import CustomPipelineService
 
-        # Find the pipeline_key from catalog
-        pipeline_key = original.pipeline_name
+            new_run = await CustomPipelineService.reproduce_run(session, original, org_id, user_id)
+            await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
+            return new_run
+
+        pipeline_key = await PipelineRunService._reproducible_catalog_key(session, original, org_id)
+
+        # Reconstruct the launch from what the original recorded: its resolved parameters and
+        # reference label are used as they are, and the result is held to the sheet the original
+        # was given. A run that did not record its sheet or its stated design cannot be
+        # checked, so it is refused rather than rebuilt from today's configuration.
+        if (
+            original.samplesheet_csv is None
+            or original.samplesheet_mapping_json is None
+            or original.parameters_json is None
+        ):
+            raise ValidationError(
+                "This run cannot be reproduced exactly: it was recorded before bioAF kept the samplesheet, "
+                "per-sample values and parameters a run was given."
+            )
+        sample_ids = PipelineRunService._recorded_sample_order(original)
 
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
             experiment_id=original.experiment_id,
+            project_id=original.project_id,
             sample_ids=sample_ids,
-            parameters=original.parameters_json or {},
+            parameters=original.parameters_json,
+            sample_values=PipelineRunService._stated_sample_values(original.samplesheet_mapping_json),
+            alignment_algorithm=original.alignment_algorithm,
+            include_derived_inputs=await PipelineRunService._used_derived_inputs(session, original.id),
             resume_from_run_id=original_run_id,
             drop_samples_without_files=drop_samples_without_files,
         )
 
         new_run = await PipelineRunService.launch_run(
             session,
-            original.organization_id,
+            org_id,
             user_id,
             data,
+            recorded=RecordedLaunch(
+                samplesheet=original.samplesheet_csv,
+                parameters=original.parameters_json,
+                reference_genome=original.reference_genome,
+            ),
         )
+        await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
+        return new_run
 
+    @staticmethod
+    def _recorded_sample_order(original: PipelineRun) -> list[int] | None:
+        """The original's samples in the order its sheet listed them.
+
+        Read from the rows the run recorded emitting, each naming its sample. A run recorded before
+        those were kept has its samples taken by id; if that is not the order its sheet used, the
+        sheet check refuses the reproduction rather than relaunching it reordered.
+        """
+        linked = {s.id for s in original.samples or []}
+        if not linked:
+            return None
+        ordered: list[int] = []
+        for row in original.samplesheet_emitted_json or []:
+            sample_id = row.get("sample_id") if isinstance(row, dict) else None
+            if sample_id in linked and sample_id not in ordered:
+                ordered.append(sample_id)
+        return ordered + sorted(linked - set(ordered))
+
+    @staticmethod
+    def _stated_sample_values(snapshot: dict) -> dict[str, dict[str, str]]:
+        """The per-sample values a run's frozen design recorded, without their authorship stamps."""
+        values: dict[str, dict[str, str]] = {}
+        for sample_id, columns in (snapshot.get("values") or {}).items():
+            if not isinstance(columns, dict):
+                continue
+            stated = {
+                str(column): str(entry.get("value", "")) if isinstance(entry, dict) else str(entry)
+                for column, entry in columns.items()
+            }
+            if stated:
+                values[str(sample_id)] = stated
+        return values
+
+    @staticmethod
+    async def _used_derived_inputs(session: AsyncSession, run_id: int) -> bool:
+        """Whether a run's recorded inputs include derived files, which a launch only uses on request."""
+        from app.models.file import File
+
+        derived = await session.execute(
+            select(func.count())
+            .select_from(PipelineRunInputFile)
+            .join(File, File.id == PipelineRunInputFile.file_id)
+            .where(
+                PipelineRunInputFile.pipeline_run_id == run_id,
+                File.source_type.in_(PipelineRunService.DERIVED_SOURCE_TYPES),
+            )
+        )
+        return bool(derived.scalar())
+
+    @staticmethod
+    def _sheet_matches(expected: str, actual: str, *, allow_dropped_rows: bool) -> bool:
+        """Whether ``actual`` is the recorded sheet, or (on a confirmed drop) that sheet less some rows."""
+        if actual == expected:
+            return True
+        if not allow_dropped_rows:
+            return False
+        expected_lines, actual_lines = expected.splitlines(), actual.splitlines()
+        if not expected_lines or not actual_lines or expected_lines[0] != actual_lines[0]:
+            return False
+        return Counter(actual_lines[1:]) <= Counter(expected_lines[1:])
+
+    @staticmethod
+    async def _audit_reproduction(session: AsyncSession, new_run: PipelineRun, original_run_id: int, user_id: int):
         await log_action(
             session,
             user_id=user_id,
@@ -1414,7 +1579,52 @@ class PipelineRunService:
             details={"original_run_id": original_run_id},
         )
 
-        return new_run
+    @staticmethod
+    async def _reproducible_catalog_key(session: AsyncSession, original: PipelineRun, org_id: int) -> str:
+        """The catalog key to relaunch ``original`` with, or a refusal before anything is created.
+
+        The stored key when there is one, and never a fallback from it. A row recorded before the
+        key was stored names its pipeline only by ``pipeline_name``, which is the display name; it
+        is accepted only when that is exactly a catalog key in this Organization (every nf-core
+        entry, whose name and key are the same), never matched as a display name. The launch path
+        runs the catalog's current version, so a run made on another version is refused rather than
+        silently relaunched on different code.
+        """
+        if original.pipeline_key:
+            key = original.pipeline_key
+            pipeline = await PipelineCatalogService.get_pipeline(session, org_id, key)
+            if pipeline is None:
+                raise ValidationError(
+                    f"This run cannot be reproduced: the pipeline it used ({key}) is no longer installed."
+                )
+        else:
+            key = original.pipeline_name
+            pipeline = await PipelineCatalogService.get_pipeline(session, org_id, key)
+            if pipeline is None:
+                raise ValidationError(
+                    f"This run cannot be reproduced automatically: it was recorded before bioAF stored "
+                    f"which catalog pipeline a run used, and '{original.pipeline_name}' does not name one. "
+                    "Launch it again from the pipeline catalog."
+                )
+
+        # A missing version on either side is not a match, even against another missing one: neither
+        # says which code the run used. Checked before the comparison, so None == None cannot pass.
+        recorded, installed = (original.pipeline_version or "").strip(), (pipeline.version or "").strip()
+        if not recorded:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: it did not record which version of {key} it used."
+            )
+        if not installed:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: the installed {key} has no version to compare with "
+                f"the {recorded} the run used."
+            )
+        if original.pipeline_version != pipeline.version:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: it used {key} version "
+                f"{original.pipeline_version}, and version {pipeline.version} is installed now."
+            )
+        return key
 
     @staticmethod
     async def _resolve_input_files(session: AsyncSession, run) -> list[dict]:

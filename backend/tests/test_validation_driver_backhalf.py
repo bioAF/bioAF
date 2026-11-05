@@ -534,6 +534,35 @@ async def test_setup_launches_analysis_and_advances_to_running(session, admin_us
     assert study.state == "running"
 
 
+@pytest.mark.asyncio
+async def test_a_refused_acquisition_launch_fails_the_study(session, admin_user, monkeypatch):
+    """launch_run returns (not raises) a failed run when the provider refuses the job; the driver
+    must read that as a failed launch, not as an acquisition in progress."""
+    monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy(status="failed"))
+    study = await _study(session, admin_user, state="acquiring_data")
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "error"
+    assert study.failure_reason == "data acquisition run failed to launch"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_analysis_launch_fails_the_study(session, admin_user, monkeypatch):
+    monkeypatch.setattr(PipelineRunService, "launch_run", _LaunchSpy(status="failed"))
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="setup", experiment_id=exp_id)
+    await _make_runnable_sample(session, admin_user, exp_id)
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "error"
+    assert study.failure_reason == "analysis run failed to launch"
+
+
 # ---- running ----
 
 

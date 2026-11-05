@@ -127,7 +127,7 @@ def _capturing_adapter(captured: dict):
     """A compute adapter that records the job spec instead of submitting it."""
 
     async def capture_submit(job_spec):
-        captured.update(job_spec)
+        captured["spec"] = job_spec
         return _job_submit_result_from_dict(
             {
                 "job_id": "bioaf-contract-test",
@@ -232,7 +232,7 @@ class TestRequiredFieldsMustBeSourceable:
             run = await PipelineRunService.launch_run(session, org.id, user.id, req)
 
         assert run is not None
-        sheet = captured["sample_sheet"]
+        sheet = captured["spec"].sample_sheet
         header = sheet.splitlines()[0].split(",")
         assert "patient" in header
         assert sheet.splitlines()[1].split(",")[header.index("patient")] == "DONOR_7"
@@ -257,4 +257,4 @@ class TestRequiredFieldsMustBeSourceable:
             run = await PipelineRunService.launch_run(session, org.id, user.id, req)
 
         assert run is not None
-        assert captured["sample_sheet"].splitlines()[0] == "sample,fastq_1,fastq_2"
+        assert captured["spec"].sample_sheet.splitlines()[0] == "sample,fastq_1,fastq_2"

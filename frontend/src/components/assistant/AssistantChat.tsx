@@ -53,6 +53,9 @@ function entityLinks(resp: AssistantConfirmResponse): EntityLink[] {
 /** A plain-language summary of a confirmed action, derived from the recognizable result fields. */
 function summarizeResult(resp: AssistantConfirmResponse): string {
   const r = resp.result ?? {};
+  // A run whose submission failed is still created, so it has an ID. Whether the cluster accepted
+  // the job is not known, so this must not claim it never ran.
+  if (resp.run_id && r.launched === false) return `Run #${resp.run_id} may not have started. Open it for details.`;
   if (resp.run_id) return `Run #${resp.run_id} started.`;
   if (typeof r.code === "string" && typeof r.name === "string") {
     return `Created experiment "${r.name}" (${r.code}).`;

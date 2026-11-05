@@ -282,7 +282,7 @@ async def launch_custom_pipeline(
     if pipeline is None:
         raise HTTPException(404, "Custom pipeline not found")
 
-    run = await CustomPipelineService.launch_run(session, org_id, user_id, data)
+    run = await CustomPipelineService.launch_run(session, org_id, user_id, data, pipeline_id=pipeline_id)
     await session.commit()
 
     result = await session.execute(

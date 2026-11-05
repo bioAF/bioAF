@@ -101,7 +101,7 @@ class TestLaunchRunJobSpec:
         captured_spec = {}
 
         async def capture_submit(job_spec):
-            captured_spec.update(job_spec)
+            captured_spec["spec"] = job_spec
             return _job_submit_result_from_dict(
                 {
                     "job_id": "bioaf-pipeline-test",
@@ -133,8 +133,7 @@ class TestLaunchRunJobSpec:
             )
 
         assert response.status_code == 200
-        assert "pipeline_name" in captured_spec, f"job_spec missing pipeline_name. Keys: {list(captured_spec.keys())}"
-        assert captured_spec["pipeline_name"] == "nf-core/scrnaseq"
+        assert captured_spec["spec"].pipeline_key == "nf-core/scrnaseq"
 
     @pytest.mark.asyncio
     async def test_job_spec_includes_pipeline_source_and_version(
@@ -144,7 +143,7 @@ class TestLaunchRunJobSpec:
         captured_spec = {}
 
         async def capture_submit(job_spec):
-            captured_spec.update(job_spec)
+            captured_spec["spec"] = job_spec
             return _job_submit_result_from_dict(
                 {
                     "job_id": "bioaf-pipeline-test",
@@ -175,8 +174,8 @@ class TestLaunchRunJobSpec:
             )
 
         assert response.status_code == 200
-        assert captured_spec.get("pipeline_source") == "https://github.com/nf-core/scrnaseq"
-        assert captured_spec.get("pipeline_version") == "2.7.1"
+        assert captured_spec["spec"].pipeline_source == "https://github.com/nf-core/scrnaseq"
+        assert captured_spec["spec"].pipeline_version == "2.7.1"
 
     @pytest.mark.asyncio
     async def test_job_spec_includes_sample_sheet(self, client, admin_token, experiment, samples, initialized_catalog):
@@ -184,7 +183,7 @@ class TestLaunchRunJobSpec:
         captured_spec = {}
 
         async def capture_submit(job_spec):
-            captured_spec.update(job_spec)
+            captured_spec["spec"] = job_spec
             return _job_submit_result_from_dict(
                 {
                     "job_id": "bioaf-pipeline-test",
@@ -216,6 +215,5 @@ class TestLaunchRunJobSpec:
             )
 
         assert response.status_code == 200
-        assert "sample_sheet" in captured_spec
-        assert captured_spec["sample_sheet"]  # non-empty
-        assert "JS_1" in captured_spec["sample_sheet"]  # sample ID present
+        assert captured_spec["spec"].sample_sheet  # non-empty
+        assert "JS_1" in captured_spec["spec"].sample_sheet  # sample ID present
