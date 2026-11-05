@@ -30,7 +30,7 @@ from app.services.auth_service import AuthService  # noqa: E402
 from tests.plugins.db_url import database_url  # noqa: E402
 from tests.support import lifecycle  # noqa: E402
 
-pytest_plugins = ["tests.plugins.phase_report", "tests.plugins.invocation"]
+pytest_plugins = ["tests.plugins.phase_report", "tests.plugins.invocation", "tests.plugins.shuffle"]
 
 TEST_DATABASE_URL = database_url()
 

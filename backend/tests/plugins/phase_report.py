@@ -168,6 +168,11 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     )
 
 
+def _shuffle_seed() -> int | None:
+    shuffle = sys.modules.get("tests.plugins.shuffle")
+    return getattr(shuffle, "_STATE", {}).get("seed") if shuffle else None
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     state = _OPEN.get("state")
     if state is None:
@@ -179,6 +184,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             "run_id": state["run_id"],
             "exitstatus": int(exitstatus),
             "wall_seconds": time.monotonic() - state["started"],
+            "shuffle_seed": _shuffle_seed(),
         },
     )
 
