@@ -80,8 +80,28 @@ def test_unreadable_requests_are_refused_in_plain_words(cpu, memory):
 # (NaN once raised a 500) and never be stored ("1_0m" was once kept as 10m).
 @pytest.mark.parametrize(
     "cpu",
-    ["NaN", "nan", "sNaN", "Infinity", "-Infinity", "inf", "1_0m", "1_000", "1e3", "1E0", "+1", "-1", "0", "0m",
-     "1.", ".5", "١", "1.5e2m", "m", "1 m"],
+    [
+        "NaN",
+        "nan",
+        "sNaN",
+        "Infinity",
+        "-Infinity",
+        "inf",
+        "1_0m",
+        "1_000",
+        "1e3",
+        "1E0",
+        "+1",
+        "-1",
+        "0",
+        "0m",
+        "1.",
+        ".5",
+        "١",
+        "1.5e2m",
+        "m",
+        "1 m",
+    ],
 )
 def test_cpu_outside_kubernetes_quantity_syntax_is_refused_as_unreadable(cpu):
     with pytest.raises(ValidationError, match="is not a CPU amount bioAF can read"):
