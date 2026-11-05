@@ -206,3 +206,68 @@ def test_a_trial_cannot_send_real_commit_files_through_rollback(monkeypatch):
     monkeypatch.setenv("BIOAF_FIXTURE_TRIAL", "rollback=real_commit")
     with pytest.raises(ValueError, match="rollback"):
         fixture_routes.route_for("test_auth.py")
+
+
+@pytest.mark.asyncio
+async def test_reset_clears_parent_and_child_rows_and_restarts_only_what_moved(scratch_worker_schema):
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with engine.begin() as conn:
+            org = (await conn.execute(text("INSERT INTO organizations (name) VALUES ('o') RETURNING id"))).scalar_one()
+            project = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO projects (name, organization_id, status) VALUES ('p', :o, 'active') RETURNING id"
+                    ),
+                    {"o": org},
+                )
+            ).scalar_one()
+            await conn.execute(
+                text("INSERT INTO experiments (name, organization_id, project_id, status) VALUES ('e', :o, :p, 'x')"),
+                {"o": org, "p": project},
+            )
+            # A row inserted and deleted again still moves the sequence; reset must restart it.
+            await conn.execute(
+                text("INSERT INTO roles (name, organization_id, is_system) VALUES ('r', :o, true)"), {"o": org}
+            )
+            await conn.execute(text("DELETE FROM roles"))
+
+        await worker_schema.reset(engine, ws)
+
+        async with engine.begin() as conn:
+            assert await _counts(conn, ws.schema) == MIGRATION_SEEDS
+            org = (await conn.execute(text("INSERT INTO organizations (name) VALUES ('o') RETURNING id"))).scalar_one()
+            role = (
+                await conn.execute(
+                    text("INSERT INTO roles (name, organization_id, is_system) VALUES ('r', :o, true) RETURNING id"),
+                    {"o": org},
+                )
+            ).scalar_one()
+            assert (org, role) == (1, 1)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reset_falls_back_to_truncating_everything_when_targeted_deletes_fail(scratch_worker_schema, monkeypatch):
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("INSERT INTO organizations (name) VALUES ('o')"))
+        # Parents before children: the targeted DELETE violates a foreign key.
+        monkeypatch.setattr(ws, "delete_order", tuple(reversed(ws.delete_order)))
+        async with engine.begin() as conn:
+            org = (await conn.execute(text("SELECT id FROM organizations"))).scalar_one()
+            await conn.execute(
+                text("INSERT INTO projects (name, organization_id, status) VALUES ('p', :o, 'active')"), {"o": org}
+            )
+
+        await worker_schema.reset(engine, ws)
+
+        async with engine.begin() as conn:
+            assert await _counts(conn, ws.schema) == MIGRATION_SEEDS
+        assert worker_schema.TIMINGS["fallback"], "the fallback was not taken"
+    finally:
+        await engine.dispose()

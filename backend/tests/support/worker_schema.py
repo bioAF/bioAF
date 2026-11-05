@@ -37,7 +37,7 @@ from tests.plugins.db_url import database_url
 ALEMBIC_DIR = Path(__file__).resolve().parent.parent.parent / "alembic"
 
 # Seconds spent per operation, for the runtime comparison (read by tests/support/fixture_routes).
-TIMINGS: dict[str, list[float]] = {"build": [], "reset": [], "rebuild": []}
+TIMINGS: dict[str, list[float]] = {"build": [], "reset": [], "rebuild": [], "fallback": []}
 
 
 @dataclass
@@ -47,8 +47,13 @@ class WorkerSchema:
     schema: str
     seed_schema: str
     tables: frozenset[str]
-    reset_sql: str
+    reset_sql: str  # the full TRUNCATE reset, used when the targeted one fails
     seeded: dict[str, int] = field(default_factory=dict)
+    # Children before parents, so deleting in this order never violates a foreign key.
+    delete_order: tuple[str, ...] = ()
+    # sequence -> (owning table, value after the empty upgrade or None if never used)
+    sequences: dict[str, tuple[str, int | None]] = field(default_factory=dict)
+    probe_sql: str = ""
 
 
 def _q(name: str) -> str:
@@ -121,6 +126,21 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
                     {"s": schema},
                 )
             ).all()
+            foreign_keys = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT child.relname, parent.relname
+                        FROM pg_constraint c
+                        JOIN pg_class child ON child.oid = c.conrelid
+                        JOIN pg_class parent ON parent.oid = c.confrelid
+                        JOIN pg_namespace n ON n.oid = child.relnamespace
+                        WHERE c.contype = 'f' AND n.nspname = :s AND child.oid <> parent.oid
+                        """
+                    ),
+                    {"s": schema},
+                )
+            ).all()
     finally:
         await engine.dispose()
         await admin.dispose()
@@ -135,6 +155,9 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
     for seq, table, last_value in sequences:
         if table in seeded and last_value is not None:
             statements.append(f"SELECT setval('{schema}.\"{seq}\"', {int(str(last_value))}, true)")
+    probe = " UNION ALL ".join(
+        f"SELECT '{t}'::text WHERE EXISTS (SELECT 1 FROM {_q(schema)}.\"{t}\")" for t in sorted(tables)
+    )
     return WorkerSchema(
         prefix=prefix,
         worker=worker,
@@ -143,7 +166,39 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
         tables=frozenset(tables),
         reset_sql=";\n".join(statements),
         seeded=seeded,
+        delete_order=_children_first(tables, foreign_keys),
+        sequences={str(seq): (str(table), None if v is None else int(str(v))) for seq, table, v in sequences},
+        probe_sql=probe,
     )
+
+
+def _children_first(tables, foreign_keys) -> tuple[str, ...]:
+    """Tables ordered so every child precedes its parents; a cycle is broken arbitrarily.
+
+    A broken cycle can make a targeted delete fail on a foreign key; ``reset`` then falls back to
+    truncating everything.
+    """
+    parents: dict[str, set[str]] = {t: set() for t in tables}
+    for child, parent in foreign_keys:
+        if child in parents and parent in parents:
+            parents[child].add(parent)
+    order: list[str] = []
+    done: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(t: str) -> None:  # depth-first: parents land in `order` before children
+        if t in done or t in visiting:
+            return
+        visiting.add(t)
+        for p in sorted(parents[t]):
+            visit(p)
+        visiting.discard(t)
+        done.add(t)
+        order.append(t)
+
+    for t in sorted(tables):
+        visit(t)
+    return tuple(reversed(order))
 
 
 def build(prefix: str, worker: str) -> WorkerSchema:
@@ -166,18 +221,52 @@ async def _current_tables(conn, schema: str) -> frozenset[str]:
     return frozenset(rows.scalars())
 
 
+def _targeted_sql(ws: WorkerSchema, dirty: set[str], moved: set[str]) -> str:
+    """Delete only tables holding rows, restart only sequences that moved, restore the seeds."""
+    schema = _q(ws.schema)
+    clear = dirty | set(ws.seeded)
+    statements = [f'DELETE FROM {schema}."{t}"' for t in ws.delete_order if t in clear]
+    for table in ws.seeded:
+        statements.append(f'INSERT INTO {schema}."{table}" SELECT * FROM {_q(ws.seed_schema)}."{table}"')
+    for seq, (table, baseline) in ws.sequences.items():
+        if table in ws.seeded and baseline is not None:
+            statements.append(f"SELECT setval('{ws.schema}.\"{seq}\"', {baseline}, true)")
+        elif seq in moved:
+            statements.append(f"SELECT setval('{ws.schema}.\"{seq}\"', 1, false)")
+    return ";\n".join(statements)
+
+
 async def reset(engine: AsyncEngine, ws: WorkerSchema) -> WorkerSchema:
-    """Return ``ws`` at its empty-upgrade baseline; rebuild (and return the new one) if its tables changed."""
+    """Return ``ws`` at its empty-upgrade baseline; rebuild (and return the new one) if its tables changed.
+
+    The targeted reset deletes only tables that hold rows and restarts only sequences that moved,
+    which is far cheaper than truncating ~150 tables. If it fails (a foreign-key cycle, say), the
+    full TRUNCATE ... RESTART IDENTITY CASCADE reset runs instead.
+    """
     started = time.perf_counter()
     async with engine.connect() as conn:
         if await _current_tables(conn, ws.schema) != ws.tables:
             rebuilt = await asyncio.to_thread(build, ws.prefix, ws.worker)
             TIMINGS["rebuild"].append(time.perf_counter() - started)
             return rebuilt
-        raw = await conn.get_raw_connection()
-        # One simple-protocol round trip for the whole reset.
-        await raw.driver_connection.execute(ws.reset_sql)  # type: ignore[union-attr]
+        dirty = set((await conn.execute(text(ws.probe_sql))).scalars()) if ws.probe_sql else set()
+        moved = set(
+            (
+                await conn.execute(
+                    text("SELECT sequencename FROM pg_sequences WHERE schemaname = :s AND last_value IS NOT NULL"),
+                    {"s": ws.schema},
+                )
+            ).scalars()
+        )
         await conn.commit()
+        raw = await conn.get_raw_connection()
+        driver = raw.driver_connection
+        try:
+            # One simple-protocol round trip; its statements run as one implicit transaction.
+            await driver.execute(_targeted_sql(ws, dirty, moved))  # type: ignore[union-attr]
+        except Exception:
+            TIMINGS["fallback"].append(time.perf_counter() - started)
+            await driver.execute(ws.reset_sql)  # type: ignore[union-attr]
     TIMINGS["reset"].append(time.perf_counter() - started)
     return ws
 
