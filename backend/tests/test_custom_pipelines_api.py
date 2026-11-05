@@ -427,6 +427,38 @@ async def test_create_version(client, admin_token, ready_env_version):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cpu", ["NaN", "1_0m", "Infinity"])
+async def test_create_version_with_unreadable_cpu_is_a_plain_400_and_stores_nothing(
+    client, admin_token, ready_env_version, cpu
+):
+    create_resp = await client.post(
+        "/api/v1/custom-pipelines",
+        json={"name": "Unreadable CPU"},
+        headers=_bearer(admin_token),
+    )
+    pipeline_id = create_resp.json()["id"]
+
+    response = await client.post(
+        f"/api/v1/custom-pipelines/{pipeline_id}/versions",
+        json={
+            "code_source_type": "inline",
+            "code_content": "print('hi')",
+            "entrypoint_command": "python script.py",
+            "environment_version_id": ready_env_version.id,
+            "cpu_request": cpu,
+        },
+        headers=_bearer(admin_token),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        f'CPU "{cpu}" is not a CPU amount bioAF can read. Use a number of CPUs, like 1 or 500m.'
+    )
+
+    detail = await client.get(f"/api/v1/custom-pipelines/{pipeline_id}", headers=_bearer(admin_token))
+    assert detail.json()["versions"] == []
+
+
+@pytest.mark.asyncio
 async def test_create_version_invalid_source(client, admin_token, ready_env_version):
     create_resp = await client.post(
         "/api/v1/custom-pipelines",

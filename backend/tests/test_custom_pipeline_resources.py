@@ -75,6 +75,25 @@ def test_unreadable_requests_are_refused_in_plain_words(cpu, memory):
     assert "cpu_request" not in str(refused.value) and "memory_request" not in str(refused.value)
 
 
+# Python's Decimal reads far more than a Kubernetes quantity: NaN, Infinity, digit-group underscores,
+# exponents, signs, and non-ASCII digits. Each of these must be refused as unreadable, never crash
+# (NaN once raised a 500) and never be stored ("1_0m" was once kept as 10m).
+@pytest.mark.parametrize(
+    "cpu",
+    ["NaN", "nan", "sNaN", "Infinity", "-Infinity", "inf", "1_0m", "1_000", "1e3", "1E0", "+1", "-1", "0", "0m",
+     "1.", ".5", "١", "1.5e2m", "m", "1 m"],
+)
+def test_cpu_outside_kubernetes_quantity_syntax_is_refused_as_unreadable(cpu):
+    with pytest.raises(ValidationError, match="is not a CPU amount bioAF can read"):
+        check_fits_head_pool(cpu, "1Gi")
+
+
+@pytest.mark.parametrize("memory", ["NaNGi", "InfinityGi", "1_0Gi", "1e3Mi", "+1Gi", "0Gi", "١Gi", "4Gi\n4Gi"])
+def test_memory_outside_kubernetes_quantity_syntax_is_refused_as_unreadable(memory):
+    with pytest.raises(ValidationError, match="is not a memory amount bioAF can read"):
+        check_fits_head_pool("1", memory)
+
+
 def _terraform_default(path: Path, variable: str) -> str:
     block = re.search(r'variable "' + variable + r'" \{(.*?)\n\}', path.read_text(), re.S)
     assert block, f"{variable} not found in {path}"
