@@ -20,10 +20,11 @@ from sqlalchemy import text as sa_text  # noqa: E402
 from app.adapters import registry as adapter_registry  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
-TEST_DATABASE_URL = os.environ.get(
-    "BIOAF_TEST_DATABASE_URL",
-    "postgresql+asyncpg://bioaf_app:devpassword@localhost:5432/bioaf_test",
-)
+from tests.plugins.db_url import database_url  # noqa: E402
+
+pytest_plugins = ["tests.plugins.phase_report"]
+
+TEST_DATABASE_URL = database_url()
 
 
 def _worker_schema(worker_id: str) -> str:
