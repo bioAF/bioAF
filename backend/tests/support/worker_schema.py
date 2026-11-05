@@ -134,7 +134,7 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
     # pg_sequences.last_value is NULL for a sequence never used; RESTART IDENTITY already covers those.
     for seq, table, last_value in sequences:
         if table in seeded and last_value is not None:
-            statements.append(f"SELECT setval('{schema}.\"{seq}\"', {int(last_value)}, true)")
+            statements.append(f"SELECT setval('{schema}.\"{seq}\"', {int(str(last_value))}, true)")
     return WorkerSchema(
         prefix=prefix,
         worker=worker,
