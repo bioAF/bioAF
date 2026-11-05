@@ -271,3 +271,11 @@ async def test_reset_falls_back_to_truncating_everything_when_targeted_deletes_f
         assert worker_schema.TIMINGS["fallback"], "the fallback was not taken"
     finally:
         await engine.dispose()
+
+
+def test_files_that_failed_on_a_migrated_route_stay_on_the_existing_one():
+    pilots = fixture_routes.MIGRATED_RESET_PILOT | fixture_routes.ROLLBACK_PILOT
+    assert not (fixture_routes.KEPT_EXISTING & pilots)
+    assert not (fixture_routes.MIGRATED_RESET_PILOT & fixture_routes.ROLLBACK_PILOT)
+    for name in fixture_routes.KEPT_EXISTING:
+        assert fixture_routes.route_for(name) == "existing"
