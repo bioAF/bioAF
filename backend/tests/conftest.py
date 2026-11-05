@@ -131,7 +131,7 @@ async def db_engine(worker_id, request):
         _WORKER_SCHEMAS["pilot"] = ws
         _WORKER_SCHEMA_DIRTY["value"] = route == "migrated_reset"
         if route == "rollback":
-            scope = worker_schema.rollback_scope(engine)
+            scope = worker_schema.rollback_scope(engine, ws)  # type: ignore[arg-type]
             test_factory = await scope.__aenter__()
             cleanup.append(lambda: scope.__aexit__(None, None, None))
         else:

@@ -7,13 +7,15 @@ records the empty-upgrade baseline: every table, the rows migrations seeded
 sequence positions. Both schemas are recorded in the invocation manifest and
 dropped when the worker's session ends.
 
-``reset`` puts a used schema back to that baseline in one round trip:
-TRUNCATE every table with RESTART IDENTITY, re-insert the seed rows, restore
-their sequences. If a test changed the set of tables, the schema is rebuilt.
+``reset`` puts a used schema back to that baseline: delete the rows tests left,
+re-insert the seed rows, restore sequences. If a test changed the structure
+(``fingerprint``: relations, columns, defaults, indexes, constraints, triggers,
+functions, enum labels), the schema is rebuilt instead.
 
 ``rollback_scope`` opens one connection and one outer transaction; sessions
 from the factory it yields join that transaction through savepoints, and the
-whole thing is rolled back on exit.
+whole thing is rolled back on exit. Sequences are not transactional, so it then
+puts back any sequence the rolled-back work advanced.
 
 Engines stay function-scoped: only the DDL is reused, so pooled connections
 never cross the per-test event loops.
@@ -54,10 +56,60 @@ class WorkerSchema:
     # sequence -> (owning table, value after the empty upgrade or None if never used)
     sequences: dict[str, tuple[str, int | None]] = field(default_factory=dict)
     probe_sql: str = ""
+    structure: str = ""  # fingerprint() of the empty upgrade
 
 
 def _q(name: str) -> str:
     return invocation.quote(name)
+
+
+# Everything a test could change about the structure of one schema, as one digest. Names are
+# printed with the schema on the search path, so set it locally for the duration.
+_FINGERPRINT_SQL = """
+WITH ns AS (SELECT oid FROM pg_namespace WHERE nspname = :s),
+parts AS (
+    SELECT 'rel ' || c.relname || ' ' || c.relkind::text AS part
+    FROM pg_class c WHERE c.relnamespace = (SELECT oid FROM ns)
+  UNION ALL
+    SELECT 'col ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+        || ' ' || a.attnotnull::text || ' ' || a.attidentity::text || a.attgenerated::text
+        || ' ' || coalesce(pg_get_expr(d.adbin, d.adrelid), '')
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid AND c.relnamespace = (SELECT oid FROM ns)
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+    WHERE a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL
+    SELECT 'con ' || c.relname || '.' || k.conname || ' ' || pg_get_constraintdef(k.oid)
+    FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+    WHERE k.connamespace = (SELECT oid FROM ns)
+  UNION ALL
+    SELECT 'idx ' || pg_get_indexdef(i.indexrelid)
+    FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid AND c.relnamespace = (SELECT oid FROM ns)
+  UNION ALL
+    SELECT 'trg ' || pg_get_triggerdef(t.oid)
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid AND c.relnamespace = (SELECT oid FROM ns)
+    WHERE NOT t.tgisinternal
+  UNION ALL
+    SELECT 'fn ' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') ' || md5(p.prosrc)
+    FROM pg_proc p WHERE p.pronamespace = (SELECT oid FROM ns)
+  UNION ALL
+    SELECT 'type ' || t.typname || ' ' || t.typtype::text
+        || ' ' || coalesce((SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+                            FROM pg_enum e WHERE e.enumtypid = t.oid), '')
+    FROM pg_type t WHERE t.typnamespace = (SELECT oid FROM ns) AND t.typtype IN ('e', 'd', 'c')
+        AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = t.typrelid AND c.relkind <> 'c')
+  UNION ALL
+    SELECT 'view ' || c.relname || ' ' || pg_get_viewdef(c.oid)
+    FROM pg_class c WHERE c.relnamespace = (SELECT oid FROM ns) AND c.relkind IN ('v', 'm')
+)
+SELECT md5(coalesce(string_agg(part, E'\\n' ORDER BY part), '')) FROM parts
+"""
+
+
+async def fingerprint(conn, schema: str) -> str:
+    """A digest of ``schema``'s structure; equal digests mean no test changed it."""
+    await conn.execute(text("SELECT set_config('search_path', :s, true)"), {"s": schema})
+    return str((await conn.execute(text(_FINGERPRINT_SQL), {"s": schema})).scalar_one())
 
 
 async def _build(prefix: str, worker: str) -> WorkerSchema:
@@ -86,6 +138,8 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
                 command.upgrade(cfg, "head")
 
             await conn.run_sync(_upgrade)
+            await conn.commit()
+            structure = await fingerprint(conn, schema)
             await conn.commit()
 
         async with admin.begin() as conn:
@@ -169,6 +223,7 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
         delete_order=_children_first(tables, foreign_keys),
         sequences={str(seq): (str(table), None if v is None else int(str(v))) for seq, table, v in sequences},
         probe_sql=probe,
+        structure=structure,
     )
 
 
@@ -213,14 +268,6 @@ def drop(ws: WorkerSchema) -> None:
     invocation.drop_schemas([ws.schema, ws.seed_schema])
 
 
-async def _current_tables(conn, schema: str) -> frozenset[str]:
-    rows = await conn.execute(
-        text("SELECT tablename FROM pg_tables WHERE schemaname = :s AND tablename <> 'alembic_version'"),
-        {"s": schema},
-    )
-    return frozenset(rows.scalars())
-
-
 def _targeted_sql(ws: WorkerSchema, dirty: set[str], moved: set[str]) -> str:
     """Delete only tables holding rows, restart only sequences that moved, restore the seeds."""
     schema = _q(ws.schema)
@@ -228,12 +275,33 @@ def _targeted_sql(ws: WorkerSchema, dirty: set[str], moved: set[str]) -> str:
     statements = [f'DELETE FROM {schema}."{t}"' for t in ws.delete_order if t in clear]
     for table in ws.seeded:
         statements.append(f'INSERT INTO {schema}."{table}" SELECT * FROM {_q(ws.seed_schema)}."{table}"')
+    statements.extend(_sequence_sql(ws, moved, all_seeded=True))
+    return ";\n".join(statements)
+
+
+def _sequence_sql(ws: WorkerSchema, moved: set[str], all_seeded: bool) -> list[str]:
+    """Put sequences back to their empty-upgrade positions: seeded tables' always (``all_seeded``) or if moved."""
+    statements = []
     for seq, (table, baseline) in ws.sequences.items():
         if table in ws.seeded and baseline is not None:
-            statements.append(f"SELECT setval('{ws.schema}.\"{seq}\"', {baseline}, true)")
+            if all_seeded or seq in moved:
+                statements.append(f"SELECT setval('{ws.schema}.\"{seq}\"', {baseline}, true)")
         elif seq in moved:
             statements.append(f"SELECT setval('{ws.schema}.\"{seq}\"', 1, false)")
-    return ";\n".join(statements)
+    return statements
+
+
+async def _moved(conn, ws: WorkerSchema) -> set[str]:
+    """Sequences no longer where the empty upgrade left them (a never-used one has a NULL last_value)."""
+    rows = await conn.execute(
+        text("SELECT sequencename, last_value FROM pg_sequences WHERE schemaname = :s"), {"s": ws.schema}
+    )
+    moved = set()
+    for name, value in rows:
+        baseline = ws.sequences.get(str(name), ("", None))[1]
+        if value is not None and (baseline is None or int(str(value)) != baseline):
+            moved.add(str(name))
+    return moved
 
 
 async def reset(engine: AsyncEngine, ws: WorkerSchema) -> WorkerSchema:
@@ -245,19 +313,13 @@ async def reset(engine: AsyncEngine, ws: WorkerSchema) -> WorkerSchema:
     """
     started = time.perf_counter()
     async with engine.connect() as conn:
-        if await _current_tables(conn, ws.schema) != ws.tables:
+        if await fingerprint(conn, ws.schema) != ws.structure:
+            await conn.commit()
             rebuilt = await asyncio.to_thread(build, ws.prefix, ws.worker)
             TIMINGS["rebuild"].append(time.perf_counter() - started)
             return rebuilt
         dirty = set((await conn.execute(text(ws.probe_sql))).scalars()) if ws.probe_sql else set()
-        moved = set(
-            (
-                await conn.execute(
-                    text("SELECT sequencename FROM pg_sequences WHERE schemaname = :s AND last_value IS NOT NULL"),
-                    {"s": ws.schema},
-                )
-            ).scalars()
-        )
+        moved = await _moved(conn, ws)
         await conn.commit()
         raw = await conn.get_raw_connection()
         driver = raw.driver_connection
@@ -272,8 +334,11 @@ async def reset(engine: AsyncEngine, ws: WorkerSchema) -> WorkerSchema:
 
 
 @contextlib.asynccontextmanager
-async def rollback_scope(engine: AsyncEngine) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """Sessions on one connection inside one outer transaction, rolled back on exit."""
+async def rollback_scope(engine: AsyncEngine, ws: WorkerSchema) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Sessions on one connection inside one outer transaction, rolled back on exit.
+
+    The rollback cannot return sequence values the test consumed, so those are set back afterwards.
+    """
     async with engine.connect() as conn:
         outer = await conn.begin()
         try:
@@ -283,3 +348,6 @@ async def rollback_scope(engine: AsyncEngine) -> AsyncIterator[async_sessionmake
         finally:
             if outer.is_active:
                 await outer.rollback()
+            async with conn.begin():
+                for statement in _sequence_sql(ws, await _moved(conn, ws), all_seeded=False):
+                    await conn.execute(text(statement))

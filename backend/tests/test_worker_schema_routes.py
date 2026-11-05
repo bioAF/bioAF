@@ -108,6 +108,53 @@ async def test_reset_rebuilds_when_a_test_changed_the_schema(scratch_worker_sche
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ddl",
+    [
+        "ALTER TABLE organizations ADD COLUMN stray int",
+        "ALTER TABLE organizations ALTER COLUMN name DROP NOT NULL",
+        "ALTER TABLE organizations ALTER COLUMN name SET DEFAULT 'x'",
+        "ALTER TABLE organizations ALTER COLUMN name TYPE text",
+        "CREATE INDEX stray_idx ON organizations (name)",
+        "ALTER TABLE organizations ADD CONSTRAINT stray_check CHECK (length(name) > 0)",
+        "CREATE FUNCTION stray_fn() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END' ;;"
+        " CREATE TRIGGER stray_trg BEFORE INSERT ON organizations FOR EACH ROW EXECUTE FUNCTION stray_fn()",
+        "CREATE SEQUENCE stray_seq",
+        "CREATE VIEW stray_view AS SELECT 1 AS one",
+        "CREATE TYPE stray_kind AS ENUM ('a')",
+    ],
+)
+async def test_reset_rebuilds_when_a_test_changed_a_table_without_renaming_one(scratch_worker_schema, ddl):
+    """Columns, defaults, types, indexes, constraints, triggers and other objects count, not only table names."""
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        async with engine.connect() as conn:
+            before = await worker_schema.fingerprint(conn, ws.schema)
+        async with engine.begin() as conn:
+            for statement in ddl.split(" ;; "):
+                await conn.execute(text(statement))
+        async with engine.connect() as conn:
+            assert await worker_schema.fingerprint(conn, ws.schema) != before
+
+        ws = await worker_schema.reset(engine, ws)
+
+        async with engine.connect() as conn:
+            assert await worker_schema.fingerprint(conn, ws.schema) == before
+            stray = await conn.execute(
+                text(
+                    "SELECT 1 FROM pg_class WHERE relnamespace = CAST(:s AS regnamespace) AND relname LIKE 'stray%'"
+                    " UNION ALL SELECT 1 FROM pg_attribute WHERE attrelid = 'organizations'::regclass"
+                    " AND attname = 'stray'"
+                ),
+                {"s": ws.schema},
+            )
+            assert stray.all() == []
+    finally:
+        await engine.dispose()
+
+
 # --- routing ------------------------------------------------------------------------------
 
 
@@ -145,7 +192,7 @@ async def test_rollback_route_keeps_commits_visible_inside_and_discards_them_aft
     ws = scratch_worker_schema
     engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
     try:
-        async with worker_schema.rollback_scope(engine) as factory:
+        async with worker_schema.rollback_scope(engine, ws) as factory:
             async with factory() as first:
                 await first.execute(text("INSERT INTO organizations (name) VALUES ('inside')"))
                 await first.commit()  # releases a savepoint; the outer transaction stays open
@@ -169,6 +216,27 @@ async def test_rollback_route_keeps_commits_visible_inside_and_discards_them_aft
 
 
 @pytest.mark.asyncio
+async def test_consecutive_rollback_scopes_start_from_the_same_sequence_positions(scratch_worker_schema):
+    """Sequences are not transactional: a scope must put back what its rolled-back inserts consumed."""
+    ws = scratch_worker_schema
+    engine = create_async_engine(database_url(), connect_args={"server_settings": {"search_path": ws.schema}})
+    try:
+        ids = []
+        for _ in range(2):
+            async with worker_schema.rollback_scope(engine, ws) as factory:
+                async with factory() as s:
+                    ids.append(
+                        (
+                            await s.execute(text("INSERT INTO organizations (name) VALUES ('o') RETURNING id"))
+                        ).scalar_one()
+                    )
+                    await s.commit()
+        assert ids == [1, 1]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_rollback_route_publishes_post_commit_events_for_the_session_commit(scratch_worker_schema):
     """The test session's commit is its outermost transaction, so after-commit hooks still fire."""
     from app.services.event_bus import event_bus
@@ -183,7 +251,7 @@ async def test_rollback_route_publishes_post_commit_events_for_the_session_commi
 
     event_bus.subscribe("route.probe", _record)
     try:
-        async with worker_schema.rollback_scope(engine) as factory:
+        async with worker_schema.rollback_scope(engine, ws) as factory:
             async with factory() as s:
                 defer_event(s, "route.probe", {"n": 1})
                 await s.commit()
