@@ -27,10 +27,18 @@ from app.adapters import registry as adapter_registry  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
 from tests.plugins.db_url import database_url  # noqa: E402
+from tests.support import lifecycle  # noqa: E402
 
 pytest_plugins = ["tests.plugins.phase_report", "tests.plugins.invocation"]
 
 TEST_DATABASE_URL = database_url()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state():
+    """In-process caches and registries start every test as they were after import."""
+    with lifecycle.isolated_state():
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -87,24 +95,31 @@ async def db_engine(worker_id):
         await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
         await conn.run_sync(Base.metadata.create_all)
 
-    # Redirect any code path that calls `app.database.async_session_factory`
-    # directly (auth middleware, webhook dispatcher and worker, etc.) to the
-    # test engine for the duration of this test.
+    # Route every database entry point to this test's engine: `app.database.async_session_factory`
+    # (auth middleware, webhook dispatcher and worker, etc.) and every module that copied it at import
+    # (stack_deploy, lab_documents, lab_glossary, agent_reviews). See tests/support/lifecycle.py.
     import app.database as database_module
 
-    original_session_factory = database_module.async_session_factory
-    database_module.async_session_factory = async_sessionmaker(  # type: ignore[assignment]
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
+    tasks_before = lifecycle.snapshot_tasks()
 
-    yield engine
+    async def _drop_schema():
+        async with engine.begin() as conn:
+            await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
 
-    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
-
-    async with engine.begin() as conn:
-        await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
-
-    await engine.dispose()
+    try:
+        yield engine
+    finally:
+        # While the test factory and schema still exist: let scheduled post-commit events finish,
+        # then cancel tasks the test started, so none keeps a transaction open (deadlocking the
+        # drop) or falls back to the production factory. Every step runs even if one fails.
+        await lifecycle.run_all(
+            lambda: lifecycle.drain_and_cancel(tasks_before),
+            restore_factories,
+            _drop_schema,
+            engine.dispose,
+        )
 
 
 @pytest_asyncio.fixture
@@ -127,50 +142,26 @@ async def client(db_engine):
     import app.database as database_module
     import app.main as main_module
 
-    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    # The test factory db_engine installed, so middleware and requests share one route.
+    factory = database_module.async_session_factory
 
     original_lifespan = main_module.app.router.lifespan_context
     main_module.app.router.lifespan_context = _test_lifespan
     rate_limit_requests.clear()
-
-    # Middleware paths that go through `async_session_factory` directly (e.g.
-    # the API-key authentication path) need to see the test schema.
-    original_session_factory = database_module.async_session_factory
-    database_module.async_session_factory = factory  # type: ignore[assignment]
 
     async def override_get_session():
         async with factory() as session:
             yield session
 
     main_module.app.dependency_overrides[get_session] = override_get_session
-    async with AsyncClient(transport=ASGITransport(app=main_module.app), base_url="http://test") as c:
-        yield c
-    main_module.app.dependency_overrides.clear()
-    main_module.app.router.lifespan_context = original_lifespan
-
-    # Cancel detached background tasks the test spawned via endpoints (e.g. the
-    # lit-review-run `_execute_run` task fired by `schedule_run`). Done while the
-    # test session factory is still active and BEFORE the worker schema is
-    # dropped, so a leaked task cannot (a) keep a transaction open and deadlock
-    # DROP SCHEMA, or (b) fall back to the restored production factory and fail
-    # auth. Only our own app-code coroutines are cancelled; pytest/asyncio
-    # internals are left alone.
-    import asyncio as _asyncio
-
-    lingering = []
-    for _t in _asyncio.all_tasks():
-        if _t is _asyncio.current_task() or _t.done():
-            continue
-        _code = getattr(_t.get_coro(), "cr_code", None)
-        _file = getattr(_code, "co_filename", "") or ""
-        if f"{os.sep}app{os.sep}" in _file:
-            lingering.append(_t)
-    for _t in lingering:
-        _t.cancel()
-    if lingering:
-        await _asyncio.gather(*lingering, return_exceptions=True)
-
-    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
+    try:
+        async with AsyncClient(transport=ASGITransport(app=main_module.app), base_url="http://test") as c:
+            yield c
+    finally:
+        # Background tasks the test spawned through endpoints are cancelled by db_engine's teardown,
+        # which runs after this and before the schema is dropped.
+        main_module.app.dependency_overrides.clear()
+        main_module.app.router.lifespan_context = original_lifespan
 
 
 @pytest_asyncio.fixture
