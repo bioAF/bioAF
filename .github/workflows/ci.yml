@@ -114,10 +114,53 @@ jobs:
 
       - name: Install dependencies
         run: |
+          echo "install_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           pip install -r requirements.txt -r requirements-dev.txt
+          echo "install_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+
+      # Runtime evidence (plan 4): per-phase timing, JUnit outcomes, pytest output and the
+      # environment, kept as an artifact even when the run fails.
+      - name: Record test environment
+        run: |
+          mkdir -p test-artifacts
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "python=$(python --version 2>&1)"
+            echo "cpus=$(nproc)"
+            echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
+            echo "pytest_command=pytest -x -n auto --tb=short --cov=app --cov-report=term-missing -q"
+          } > test-artifacts/environment.txt
+          pip freeze > test-artifacts/pip-freeze.txt
 
       - name: Run tests
-        run: pytest -x -n auto --tb=short --cov=app --cov-report=term-missing -q
+        run: |
+          # The default shell is bash -eo pipefail; capture the status so the finish time is still written.
+          echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          status=0
+          pytest -x -n auto --tb=short --cov=app --cov-report=term-missing -q \
+            --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
+            2>&1 | tee test-artifacts/pytest-output.txt || status=$?
+          echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          exit $status
+
+      - name: Summarize test timing
+        if: always()
+        run: |
+          cp "$RUNNER_TEMP/timings.env" test-artifacts/timings.env || true
+          {
+            echo '```'
+            cat test-artifacts/timings.env || true
+            python -m tests.plugins.phase_report test-artifacts/phases.jsonl || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-evidence
+          path: backend/test-artifacts/
+          if-no-files-found: warn
 
   # ──────────────────────────────────────────────
   # Next.js frontend

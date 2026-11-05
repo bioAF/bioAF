@@ -831,6 +831,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_disposable_pg.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_docker_compose_config.py": {
    "category": "no_database",
    "evidence": [],
