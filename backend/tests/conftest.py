@@ -40,6 +40,16 @@ def _worker_schema(worker_id: str) -> str:
     return f"test_{worker_id}"
 
 
+@pytest.fixture(autouse=True)
+def _service_bcrypt_rounds(monkeypatch):
+    """API-key and setup-code hashes use the test cost; each service owns its own seam."""
+    from app.services import api_key_service, setup_code_service
+
+    rounds = int(os.environ["BIOAF_TEST_BCRYPT_ROUNDS"])
+    monkeypatch.setattr(api_key_service, "HASH_ROUNDS", rounds)
+    monkeypatch.setattr(setup_code_service, "HASH_ROUNDS", rounds)
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _init_adapter_registry():
     """Initialize the BAL adapter registry for all tests (local/mock mode)."""
