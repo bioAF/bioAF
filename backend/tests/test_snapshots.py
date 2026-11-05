@@ -24,17 +24,6 @@ async def comp_bio_user(session, admin_user):
 
 
 @pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
-@pytest_asyncio.fixture
 async def bench_user(session, admin_user):
     password_hash = AuthService.hash_password("benchpass123")
     user = User(
@@ -49,13 +38,6 @@ async def bench_user(session, admin_user):
     await session.flush()
     await session.commit()
     return user
-
-
-@pytest_asyncio.fixture
-async def bench_token(bench_user) -> str:
-    return AuthService.create_token(
-        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
-    )
 
 
 @pytest_asyncio.fixture

@@ -3413,6 +3413,11 @@
    "evidence": [],
    "route": "none"
   },
+  "test_shuffle_plugin.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_slack_oauth.py": {
    "category": "real_commit",
    "evidence": [
