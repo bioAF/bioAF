@@ -34,14 +34,11 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
     start = end - timedelta(days=30)
     interval = f"{start.isoformat()}/{end.isoformat()}"
     url = f"{_BASE}/details/biorxiv/{interval}/0"
+    # Errors propagate so callers classify an outage as a failed attempt.
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        try:
-            r = await client.get(url)
-            r.raise_for_status()
-            payload = r.json()
-        except (httpx.HTTPError, ValueError) as e:
-            logger.warning("bioRxiv keyword search failed: %s", e)
-            return []
+        r = await client.get(url)
+        r.raise_for_status()
+        payload = r.json()
     records: list[PaperRecord] = []
     query_lower = query.lower()
     for entry in payload.get("collection", [])[:200]:
