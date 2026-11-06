@@ -65,12 +65,7 @@ def _is_public_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     (100.64.0.0/10), which ``is_global`` refuses. An address must pass both.
     """
     return ip.is_global and not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
     )
 
 
@@ -129,16 +124,8 @@ def _assert_public_url(url: str) -> None:
         # refuse, and the fetch went ahead against an address never checked.
         raise ValidationError("Could not resolve URL host")
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise ValidationError("URL host is not allowed (resolves to a non-public address)")
+        if not _is_public_address(ipaddress.ip_address(info[4][0])):
+            raise ValidationError(_NON_PUBLIC)
 
 
 # token -> pending upload metadata. In-memory, consistent with UploadService;

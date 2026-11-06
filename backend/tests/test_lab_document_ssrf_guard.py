@@ -5,12 +5,7 @@ is public before it returns, and any path that returns without having proved
 that is a hole. It raised inside its loop over ``getaddrinfo`` results, so an
 empty result skipped the body entirely and the URL was treated as safe. An empty
 result means "I learned nothing about this host", which is not "this host is
-fine".
-
-That is not hypothetical. ``test_import_from_url_blocks_ssrf_to_internal_hosts``
-failed on the full suite with a 202 and a background task that went on to make a
-real outbound request to the address that should have been refused. Probing
-every failure mode of the resolver found exactly one that produces a 202:
+fine". Probing each resolver failure mode found:
 
     getaddrinfo behaviour   guard result before this file existed
     normal resolution       blocked, 400
@@ -19,9 +14,19 @@ every failure mode of the resolver found exactly one that produces a 202:
     OSError (not gaierror)  uncaught, escaped as a 500
     UnicodeError            uncaught, escaped as a 500
 
-So these drive the resolver rather than the network. The four internal hosts in
-``test_lab_documents_api.py`` stay where they are: they cover the addresses, and
-these cover the ways the guard can fail to learn one.
+Empty resolution is a separate fail-closed case. It is not the demonstrated
+cause of the recorded incident, in which
+``test_import_from_url_blocks_ssrf_to_internal_hosts`` answered 202 for
+``10.0.0.5``: the resolver supplied ``2607:7700:0:50::a00:5`` for that literal
+and the guard accepted the public-looking answer. See
+``test_url_import_boundary.py``.
+
+The guard now judges an IP literal as written without resolving it, so the
+tests here, which use the literal ``10.0.0.5``, are refused before any resolver
+runs, and the ``socket.getaddrinfo`` patches below are not reached (conftest.py's
+``url_network`` replaces the guard's resolver for every test). The hostname
+cases in ``test_url_import_boundary.py`` are what exercise these resolver
+failure modes now.
 """
 
 import socket

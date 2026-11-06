@@ -28,6 +28,8 @@ Every test runs on the controlled network from conftest.py's ``url_network``
 fixture, so none of them can make a real DNS lookup or outbound request.
 """
 
+import socket
+
 import pytest
 
 from app.exceptions import ValidationError
@@ -122,5 +124,69 @@ def test_the_observed_answer_for_a_hostname_is_still_allowed(url_network):
     url_network.answers["files.example"] = [OBSERVED_ANSWER]
 
     _assert_public_url("http://files.example/x.pdf")
+
+    assert url_network.resolved == ["files.example"]
+
+
+# --- hostnames ---------------------------------------------------------------
+# These use a hostname, never a literal, so they reach the resolver: a refusal
+# here cannot come from literal validation and hide a resolver-handling bug.
+
+HOSTNAME_URL = "https://files.example/manual.pdf"
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [["93.184.216.34"], ["2606:2800:220:1:248:1893:25c8:1946"], ["93.184.216.34", "2606:4700:4700::1111"]],
+    ids=["ipv4", "ipv6", "both"],
+)
+def test_a_hostname_with_only_public_answers_is_allowed(url_network, answers):
+    url_network.answers["files.example"] = answers
+
+    _assert_public_url(HOSTNAME_URL)
+
+    assert url_network.resolved == ["files.example"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["10.0.0.5", "127.0.0.1", "169.254.169.254", "fd00:ec2::254", "100.64.0.1", "224.0.0.1", "64:ff9b::a00:5"],
+)
+@pytest.mark.parametrize("position", ["first", "last"])
+def test_one_non_public_answer_refuses_the_whole_hostname(url_network, bad, position):
+    public = ["93.184.216.34", "2606:4700:4700::1111"]
+    url_network.answers["files.example"] = [bad, *public] if position == "first" else [*public, bad]
+
+    with pytest.raises(ValidationError, match="non-public"):
+        _assert_public_url(HOSTNAME_URL)
+
+    assert url_network.resolved == ["files.example"]
+
+
+def test_an_empty_resolver_answer_for_a_hostname_is_refused(url_network):
+    """A separate fail-closed case, not the cause of the recorded incident: an
+    empty answer proves nothing about the host."""
+    url_network.answers["files.example"] = []
+
+    with pytest.raises(ValidationError, match="Could not resolve"):
+        _assert_public_url(HOSTNAME_URL)
+
+    assert url_network.resolved == ["files.example"]
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        socket.gaierror("Name or service not known"),
+        OSError("resolver unavailable"),
+        UnicodeError("label empty or too long"),
+    ],
+    ids=["gaierror", "oserror", "unicodeerror"],
+)
+def test_a_resolver_failure_for_a_hostname_is_refused(url_network, raised):
+    url_network.answers["files.example"] = raised
+
+    with pytest.raises(ValidationError, match="Could not resolve"):
+        _assert_public_url(HOSTNAME_URL)
 
     assert url_network.resolved == ["files.example"]
