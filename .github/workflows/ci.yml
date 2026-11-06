@@ -128,7 +128,7 @@ jobs:
             echo "python=$(python --version 2>&1)"
             echo "cpus=$(nproc)"
             echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
-            echo "pytest_command=pytest -x -n auto --tb=short --cov=app --cov-report=term-missing -q"
+            echo "pytest_command=pytest -x -n auto --tb=short --cov=app --cov-report=term-missing --cov-report=json -q"
           } > test-artifacts/environment.txt
           pip freeze > test-artifacts/pip-freeze.txt
 
@@ -137,10 +137,13 @@ jobs:
           # The default shell is bash -eo pipefail; capture the status so the finish time is still written.
           echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           status=0
-          pytest -x -n auto --tb=short --cov=app --cov-report=term-missing -q \
+          pytest -x -n auto --tb=short --cov=app --cov-report=term-missing \
+            --cov-report=json:test-artifacts/coverage.json -q \
             --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
             2>&1 | tee test-artifacts/pytest-output.txt || status=$?
           echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          # Read by the coverage comment: a failed run's coverage is partial.
+          echo "$status" > test-artifacts/exit-status
           exit $status
 
       - name: Summarize test timing
@@ -208,7 +211,82 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --passWithNoTests
+        run: |
+          status=0
+          npm test -- --passWithNoTests --coverage --coverageReporters=json --coverageReporters=text-summary \
+            || status=$?
+          mkdir -p coverage
+          echo "$status" > coverage/exit-status
+          exit $status
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: |
+            frontend/coverage/coverage-final.json
+            frontend/coverage/exit-status
+          if-no-files-found: warn
+
+  # One comment per pull request with backend and frontend line coverage, by area, and for the
+  # lines the pull request added; updated in place on every run. Fork pull requests get a
+  # read-only token, so for them the report goes to the job summary only.
+  coverage-comment:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: backend-test-evidence
+          path: coverage-in/backend
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: frontend-coverage
+          path: coverage-in/frontend
+
+      - name: Build report
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --unified=0 "$BASE_SHA...$HEAD_SHA" > coverage-in/pr.diff
+          python3 scripts/ci/coverage_report.py \
+            --backend coverage-in/backend/coverage.json \
+            --frontend coverage-in/frontend/coverage-final.json \
+            --diff coverage-in/pr.diff \
+            --commit "$HEAD_SHA" \
+            --backend-status "$(cat coverage-in/backend/exit-status 2>/dev/null)" \
+            --frontend-status "$(cat coverage-in/frontend/exit-status 2>/dev/null)" \
+            > coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post or update the pull request comment
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marker='<!-- bioaf-coverage-report -->'
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@coverage-report.md > /dev/null
+          else
+            gh pr comment "$PR" --body-file coverage-report.md
+          fi
 
   # ──────────────────────────────────────────────
   # Security & docs
