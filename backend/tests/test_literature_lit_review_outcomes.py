@@ -1371,3 +1371,37 @@ async def test_cancellation_right_after_terminal_commit_still_emits_terminal_eve
     assert run.status == "complete"
     assert run.recommendation_count == 1
     assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run_id, "recommendation_count": 1})]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_right_after_failed_outcome_commit_still_emits_failed_event(h):
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", ProviderError("overloaded", error_class="server"))
+    run_id = await h.create_run()
+    holder: dict = {}
+
+    def mark(session, flush_context, instances):
+        if any(isinstance(o, AuditLog) and o.action == "fail" for o in session.new):
+            session.info["cancel_after_commit"] = True
+
+    def cancel(session):
+        if session.info.pop("cancel_after_commit", False):
+            holder["task"].cancel()
+
+    event.listen(Session, "before_flush", mark)
+    event.listen(Session, "after_commit", cancel)
+    try:
+        holder["task"] = asyncio.create_task(h.execute(run_id))
+        with pytest.raises(asyncio.CancelledError):
+            await holder["task"]
+    finally:
+        event.remove(Session, "after_commit", cancel)
+        event.remove(Session, "before_flush", mark)
+
+    run = await h.load(run_id)
+    assert run.status == "failed"
+    assert run.error_message == "llm_ranking: overloaded"
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]

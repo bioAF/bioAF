@@ -259,35 +259,42 @@ async def _execute_run(run_id: int) -> None:
     """Run one review to a terminal state. Called by schedule_run (manual runs)
     and awaited directly by the scheduled sweep.
 
-    Every terminal path persists status and completed_at before emitting
-    exactly one terminal event. Cancellation persists a failure and is
-    re-raised; nothing overwrites an outcome that was already committed."""
+    Every terminal path persists status and completed_at before making one
+    terminal event emission attempt (subscriber delivery is the event bus's
+    concern). Cancellation persists a failure and is re-raised; nothing
+    overwrites an outcome that was already committed.
+
+    The cancellation handler wraps the failure handlers too, so cancellation
+    while a failure is being persisted still reaches recovery, which emits the
+    committed outcome's event if it has not gone out. Recovery is shielded so
+    a repeated cancellation cannot interrupt that handoff."""
     factory = _database.async_session_factory
     if factory is None:
         return
     execution = _Execution(run_id)
     try:
-        async with factory() as s:  # type: ignore[misc]
-            run = await _load_run(s, run_id)
-            if run is None:
-                return
-            run.status = SEARCH_RUNNING
-            run.started_at = datetime.now(UTC)
-            await s.commit()
+        try:
+            async with factory() as s:  # type: ignore[misc]
+                run = await _load_run(s, run_id)
+                if run is None:
+                    return
+                run.status = SEARCH_RUNNING
+                run.started_at = datetime.now(UTC)
+                await s.commit()
 
-        await _do_run(execution)
-    except _RunFailure as e:
-        await _fail(execution, str(e), audit_error=e.audit_error)
+            await _do_run(execution)
+        except _RunFailure as e:
+            await _fail(execution, str(e), audit_error=e.audit_error)
+        except Exception as e:
+            logger.exception("Lit Review Run %s failed", run_id)
+            await _fail(
+                execution,
+                f"unexpected_error: {type(e).__name__}: {e}",
+                audit_error=f"unexpected_error: {type(e).__name__}",
+            )
     except asyncio.CancelledError:
-        await _fail(execution, _CANCELLED)
+        await asyncio.shield(_fail(execution, _CANCELLED))
         raise
-    except Exception as e:
-        logger.exception("Lit Review Run %s failed", run_id)
-        await _fail(
-            execution,
-            f"unexpected_error: {type(e).__name__}: {e}",
-            audit_error=f"unexpected_error: {type(e).__name__}",
-        )
 
 
 @dataclass(frozen=True)
@@ -580,8 +587,8 @@ async def _persist_terminal(
 
 
 async def _emit_terminal(execution: _Execution, status: str, recommendation_count: int = 0) -> None:
-    """Emit the run's one terminal event. Marked sent before emitting, so a
-    delivery error is never answered with a second event."""
+    """Make the run's one terminal event emission attempt. Marked sent before
+    emitting, so a delivery error is never answered with a second attempt."""
     run_id = execution.run_id
     execution.terminal_event_sent = True
     if status == SEARCH_FAILED:
