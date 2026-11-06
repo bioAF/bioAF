@@ -40,23 +40,64 @@ URL_FETCH_TIMEOUT_SECONDS = 30.0
 MAX_URL_REDIRECTS = 5
 
 
+def _resolve_host(host: str, port: int) -> list:
+    """The guard's resolver. Replaced by a controlled resolver in tests."""
+    return socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+
+
+def _open_http_client():
+    """The downloader's HTTP client. Redirects are off so each hop can be checked
+    by hand. Replaced by a controlled transport in tests."""
+    import httpx
+
+    return httpx.AsyncClient(follow_redirects=False, timeout=URL_FETCH_TIMEOUT_SECONDS)
+
+
+_NON_PUBLIC = "URL host is not allowed (resolves to a non-public address)"
+
+
+def _is_public_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """One predicate for IP literals and resolver answers alike.
+
+    ``is_global`` alone is not the boundary: on Python 3.12 it is true for
+    multicast and for the well-known NAT64 prefix 64:ff9b::/96, which the explicit
+    exclusions refuse. The explicit exclusions alone missed shared address space
+    (100.64.0.0/10), which ``is_global`` refuses. An address must pass both.
+    """
+    return ip.is_global and not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 def _assert_public_url(url: str) -> None:
     """SSRF guard for server-side URL fetches.
 
-    Rejects anything that is not http(s) or whose host resolves to a non-public
-    address: loopback, private ranges, link-local (which includes the cloud
-    instance metadata endpoint 169.254.169.254 / fd00:ec2::254), reserved,
-    multicast, or unspecified. Raises ValidationError on any violation. Called for
-    the initial URL and again for every redirect target so an external host cannot
-    bounce the fetch onto an internal address.
+    Accepts only an http(s) URL with a host whose address is public under
+    ``_is_public_address``; everything else, including link-local (the cloud
+    instance metadata endpoint 169.254.169.254) and unique-local (fd00:ec2::254),
+    raises ValidationError. Called for the initial URL and again for every
+    redirect target so an external host cannot bounce the fetch onto an internal
+    address.
 
-    **This guard is an allowlist, not a denylist.** It must PROVE that every
-    resolved address is public before it returns, and any path that returns
-    without having proved that is a hole. It used to raise only from inside the
-    loop over the resolver's results, so a resolver that returned nothing at all
-    skipped the loop body and fell off the end, and the caller went on to fetch
-    an address the guard had learned nothing about. "I know nothing about this
-    host" is not "this host is fine", and neither is "the resolver failed".
+    An IP literal is judged as written and never resolved. A resolver can answer
+    a literal with a different address: one answered ``2607:7700:0:50::a00:5``
+    for ``10.0.0.5``, the guard checked only that public-looking answer, and the
+    fetch went ahead. Why the resolver did that is unproven.
+
+    A hostname must resolve, and every answer must pass. **This guard is an
+    allowlist, not a denylist**: it must prove every address is public before it
+    returns. An empty answer or a failed resolver proves nothing, so it refuses.
+
+    Known limits: httpx resolves the hostname again when it connects, so the
+    address checked here need not be the one fetched (a resolution/fetch
+    consistency gap, including DNS rebinding). A network-specific IPv6
+    translation prefix can make a public-looking answer reach a private IPv4 host;
+    only the well-known forms are refused.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -64,9 +105,17 @@ def _assert_public_url(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise ValidationError("URL has no host")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if not _is_public_address(literal):
+            raise ValidationError(_NON_PUBLIC)
+        return
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        infos = _resolve_host(host, port)
     except (OSError, UnicodeError):
         # gaierror subclasses OSError, so this one clause covers a name that does
         # not resolve, a resolver that failed transiently, and descriptor
@@ -197,7 +246,7 @@ class LabDocumentUploadService:
         try:
             # Redirects are disabled at the client; we follow them by hand so each
             # target passes the SSRF guard before we connect to it.
-            async with httpx.AsyncClient(follow_redirects=False, timeout=URL_FETCH_TIMEOUT_SECONDS) as http:
+            async with _open_http_client() as http:
                 for _ in range(MAX_URL_REDIRECTS + 1):
                     _assert_public_url(current)
                     async with http.stream("GET", current) as response:
