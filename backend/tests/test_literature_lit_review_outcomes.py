@@ -205,7 +205,7 @@ class Harness:
             q = select(LiteraturePaper).where(LiteraturePaper.organization_id == self.org_id)
             return list((await s.execute(q.order_by(LiteraturePaper.id))).scalars().all())
 
-    async def associations(self) -> list[tuple[int, str, int]]:
+    async def associations(self) -> list[tuple[int, str, int | None]]:
         async with _database.async_session_factory() as s:
             q = select(LiteratureAssociation).where(LiteratureAssociation.removed_at.is_(None))
             rows = (await s.execute(q)).scalars().all()
@@ -291,7 +291,7 @@ async def test_successful_run_auto_accepts_above_threshold_into_library(h):
 
     # Only kept papers are created, all in the Library with lit-review provenance,
     # each associated with the run's experiment.
-    assert sorted(p.doi for p in papers.values()) == sorted([a.doi, b.doi])
+    assert sorted(str(p.doi) for p in papers.values()) == sorted([str(a.doi), str(b.doi)])
     assert {p.in_library for p in papers.values()} == {True}
     assert {p.provenance for p in papers.values()} == {PROVENANCE_LIT_REVIEW_RUN}
     assert await h.associations() == sorted((pid, SCOPE_EXPERIMENT, h.experiment_id) for pid in papers)
@@ -350,7 +350,7 @@ async def test_library_and_dismissed_papers_are_excluded_but_cached_results_stay
 
     papers = await h.papers()
     # The cached paper is reused (no duplicate row) and joins the Library.
-    assert sorted(p.doi for p in papers) == sorted([in_lib.doi, dismissed.doi, cached.doi, fresh.doi])
+    assert sorted(str(p.doi) for p in papers) == sorted(str(r.doi) for r in (in_lib, dismissed, cached, fresh))
     by_doi = {p.doi: p for p in papers}
     assert by_doi[cached.doi].id == cached_id
     assert by_doi[cached.doi].in_library is True
@@ -796,6 +796,7 @@ async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, 
     assert [s["skipped_reason"] for s in sweeps] == ["no_literature_sources_enabled"]
     async with _database.async_session_factory() as s:
         next_run = await auto.get_next_run(s)
+    assert next_run is not None
     assert before + timedelta(hours=24) <= next_run <= after + timedelta(hours=24)
 
 
