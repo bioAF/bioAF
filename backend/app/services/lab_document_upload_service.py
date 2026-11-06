@@ -54,6 +54,7 @@ def _open_http_client():
 
 
 _NON_PUBLIC = "URL host is not allowed (resolves to a non-public address)"
+_MALFORMED = "URL is malformed"
 
 
 def _is_public_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -94,10 +95,16 @@ def _assert_public_url(url: str) -> None:
     translation prefix can make a public-looking answer reach a private IPv4 host;
     only the well-known forms are refused.
     """
-    parsed = urlparse(url)
+    try:
+        # urlparse raises for a malformed IPv6 bracket and .port for a nonnumeric
+        # or out-of-range port. Both are refusals, not server errors.
+        parsed = urlparse(url)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        raise ValidationError(_MALFORMED)
     if parsed.scheme not in ("http", "https"):
         raise ValidationError("URL must start with http:// or https://")
-    host = parsed.hostname
     if not host:
         raise ValidationError("URL has no host")
     try:
@@ -108,7 +115,7 @@ def _assert_public_url(url: str) -> None:
         if not _is_public_address(literal):
             raise ValidationError(_NON_PUBLIC)
         return
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    port = port or (443 if parsed.scheme == "https" else 80)
     try:
         infos = _resolve_host(host, port)
     except (OSError, UnicodeError):
@@ -241,7 +248,10 @@ class LabDocumentUploadService:
                             location = response.headers.get("location")
                             if not location:
                                 raise ValidationError("Redirect without a location")
-                            current = urljoin(current, location)
+                            try:
+                                current = urljoin(current, location)
+                            except ValueError:
+                                raise ValidationError(_MALFORMED)
                             continue
                         response.raise_for_status()
                         declared = response.headers.get("content-length")

@@ -29,11 +29,15 @@ fixture, so none of them can make a real DNS lookup or outbound request.
 """
 
 import socket
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from app.exceptions import ValidationError
-from app.services.lab_document_upload_service import _assert_public_url
+from app.services.lab_document_upload_service import LabDocumentUploadService, _assert_public_url
+
+UPLOAD = "app.services.lab_document_upload_service.LabDocumentUploadService"
 
 OBSERVED_ANSWER = "2607:7700:0:50::a00:5"
 
@@ -190,3 +194,139 @@ def test_a_resolver_failure_for_a_hostname_is_refused(url_network, raised):
         _assert_public_url(HOSTNAME_URL)
 
     assert url_network.resolved == ["files.example"]
+
+
+# --- malformed URLs and ports ------------------------------------------------
+
+MALFORMED = [
+    "http://[::1/x",  # unclosed IPv6 bracket
+    "http://[zz]/x",  # bracketed host that is not an IPv6 address
+    "http://files.example:abc/x",  # nonnumeric port
+    "http://files.example:99999/x",  # out-of-range port
+    "http://files.example:-1/x",  # negative port
+    "http://8.8.8.8:abc/x",  # nonnumeric port on a public literal
+    "http://[2606:4700:4700::1111]:99999/x",  # out-of-range port on a public IPv6 literal
+]
+
+
+@pytest.mark.parametrize("url", MALFORMED)
+def test_a_malformed_url_is_a_validation_error(url_network, url):
+    with pytest.raises(ValidationError, match="malformed"):
+        _assert_public_url(url)
+
+    assert url_network.resolved == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", MALFORMED)
+async def test_the_downloader_refuses_a_malformed_url_without_a_request(url_network, url):
+    with pytest.raises(ValidationError, match="malformed"):
+        await LabDocumentUploadService._fetch_url(url)
+
+    assert url_network.requests == []
+
+
+START = "https://files.example/start"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("location", "reason"),
+    [
+        # httpx vets the Location header itself and raises RemoteProtocolError,
+        # an httpx.HTTPError, which the downloader already turns into a refusal.
+        ("http://[::1/x", "Invalid URL in location header"),
+        ("http://[zz]/x", "Invalid URL in location header"),
+        ("http://files.example:abc/x", "Invalid URL in location header"),
+        ("http://8.8.8.8:abc/x", "Invalid URL in location header"),
+        # httpx accepts an out-of-range port; only the guard, after joining the
+        # location onto the current URL, finds it malformed.
+        ("//files.example:99999/x", "malformed"),
+    ],
+)
+async def test_a_malformed_redirect_is_refused_before_any_further_request(url_network, location, reason):
+    """Through the real httpx client with a controlled transport, to tell the
+    errors httpx already normalizes from the ones the application must catch."""
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[START] = httpx.Response(302, headers={"location": location})
+
+    with pytest.raises(ValidationError, match=reason):
+        await LabDocumentUploadService._fetch_url(START)
+
+    assert url_network.requests == [START]
+
+
+class _UnvettedRedirect:
+    """A client that hands back a redirect without vetting its Location, so the
+    downloader's own joining is what meets the malformed value."""
+
+    is_redirect = True
+
+    def __init__(self, location):
+        self.headers = {"location": location}
+
+
+class _UnvettingClient:
+    def __init__(self, location, requested):
+        self._location = location
+        self._requested = requested
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def stream(self, method, url):
+        self._requested.append(url)
+        response = _UnvettedRedirect(self._location)
+
+        class _Stream:
+            async def __aenter__(self):
+                return response
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Stream()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("location", ["http://[::1/x", "http://[zz]/x", "//files.example:abc/x"])
+async def test_a_malformed_redirect_the_client_did_not_vet_is_still_refused(url_network, monkeypatch, location):
+    from app.services import lab_document_upload_service
+
+    requested = []
+    monkeypatch.setattr(lab_document_upload_service, "_open_http_client", lambda: _UnvettingClient(location, requested))
+    url_network.answers["files.example"] = ["93.184.216.34"]
+
+    with pytest.raises(ValidationError, match="malformed"):
+        await LabDocumentUploadService._fetch_url(START)
+
+    assert requested == [START]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", [*MALFORMED, "ftp://files.example/x", "http:///no-host"])
+async def test_the_import_endpoint_rejects_a_bad_url_with_400_and_no_job(client, admin_token, url_network, url):
+    with patch(f"{UPLOAD}.run_url_import", new_callable=AsyncMock) as queued:
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": url, "tag_ids": []},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 400, resp.text
+    queued.assert_not_called()
+    assert url_network.requests == []
+    assert await _url_import_count() == 0
+
+
+async def _url_import_count() -> int:
+    from sqlalchemy import func, select
+
+    import app.database as database_module
+    from app.models.lab_document import LabDocumentUrlImport
+
+    async with database_module.async_session_factory() as session:
+        return (await session.execute(select(func.count()).select_from(LabDocumentUrlImport))).scalar_one()
