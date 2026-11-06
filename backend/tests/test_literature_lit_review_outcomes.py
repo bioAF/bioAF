@@ -1427,3 +1427,21 @@ async def test_rate_limited_source_makes_review_partial_not_complete(h, monkeypa
     assert run.error_message == "some_literature_sources_failed: semanticscholar 1/1 attempts failed"
     audit = [a for a in await h.audits(run.id) if a.action == "complete"]
     assert audit[0].details_json["sources"]["semanticscholar"]["failure_categories"] == ["HTTPStatusError"]
+
+
+@pytest.mark.asyncio
+async def test_authorless_candidate_reuses_existing_authorless_paper(h):
+    title = "8 Single Cell Transcriptomic Investigation of Renal Cell Carcinoma"
+    existing_id = await h.add_paper(
+        PaperRecord(source="europepmc", title=title, authors=[], doi=None), in_library=False
+    )
+    h.source("semanticscholar", always([PaperRecord(source="semanticscholar", title=title, authors=[], doi=None)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    run = await h.run()
+
+    assert run.status == "complete"
+    assert run.recommendation_count == 1
+    papers = await h.papers()
+    assert [(p.id, p.in_library) for p in papers] == [(existing_id, True)]
+    assert [r.paper_id for r in await h.recommendations(run.id)] == [existing_id]
