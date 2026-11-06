@@ -1626,16 +1626,6 @@
    ],
    "route": "rollback_candidate"
   },
-  "test_lab_document_ssrf_guard.py": {
-   "category": "real_commit",
-   "evidence": [
-    "fixture:client",
-    "fixture:db_engine",
-    "fixture:session",
-    "http requests use their own sessions"
-   ],
-   "route": "committed_reset_candidate"
-  },
   "test_lab_documents_api.py": {
    "category": "real_commit",
    "evidence": [
@@ -3729,6 +3719,17 @@
     "fixture:client",
     "fixture:db_engine",
     "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_url_import_boundary.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"

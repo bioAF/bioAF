@@ -40,8 +40,6 @@ class UrlNetwork:
         return [_addrinfo(address, port) for address in answer]
 
     def open_client(self) -> httpx.AsyncClient:
-        # httpx.AsyncClient is looked up at call time so a test that replaces it
-        # wholesale still gets its replacement.
         from app.services.lab_document_upload_service import URL_FETCH_TIMEOUT_SECONDS
 
         return httpx.AsyncClient(

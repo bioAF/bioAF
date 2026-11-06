@@ -18,6 +18,13 @@ with a controlled resolver. Why the resolver gave that answer is unproven (NAT64
 synthesis is a hypothesis), so these tests do not depend on it: the fix is that
 a literal is judged as written.
 
+A separate, earlier hole: the guard refused only from inside its loop over the
+resolver's answers, so an empty answer skipped the loop and the URL passed.
+Probing each resolver failure mode then found: an empty answer accepted,
+gaierror refused, and plain OSError and UnicodeError escaping as 500s. All four
+are now refusals, covered below with a hostname so that resolution is exercised.
+Empty resolution is not the cause of the recorded incident above.
+
 Known limits, deliberately not closed here: the guard resolves a hostname and
 httpx resolves it again when connecting (a resolution/fetch consistency gap,
 including DNS rebinding), and a network-specific translation prefix makes a
@@ -323,6 +330,34 @@ async def test_the_import_endpoint_rejects_a_bad_url_with_400_and_no_job(client,
 
     assert resp.status_code == 400, resp.text
     queued.assert_not_called()
+    assert url_network.requests == []
+    assert await _url_import_count() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer",
+    [[], socket.gaierror("Name or service not known"), ["10.0.0.5"], ["93.184.216.34", "100.64.0.1"]],
+    ids=["empty", "gaierror", "private", "mixed"],
+)
+async def test_the_import_endpoint_refuses_an_unproven_hostname_with_400_and_no_job(
+    client, admin_token, url_network, answer
+):
+    """End to end, because the empty-answer hole was visible only as a status
+    code: the endpoint answered 202, wrote the import row, and queued the
+    background fetch. A hostname, so the refusal comes from resolution."""
+    url_network.answers["files.example"] = answer
+
+    with patch(f"{UPLOAD}.run_url_import", new_callable=AsyncMock) as queued:
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": HOSTNAME_URL, "tag_ids": []},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 400, resp.text
+    queued.assert_not_called()
+    assert url_network.resolved == ["files.example"]
     assert url_network.requests == []
     assert await _url_import_count() == 0
 
