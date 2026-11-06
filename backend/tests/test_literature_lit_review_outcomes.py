@@ -8,6 +8,7 @@ fakes so each source/query attempt and each LLM response is chosen by the test.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from datetime import date
@@ -81,6 +82,8 @@ class FakeLlm:
         nxt = self.responses.pop(0)
         if isinstance(nxt, BaseException):
             raise nxt
+        if callable(nxt):
+            return await nxt()
         return nxt
 
 
@@ -824,3 +827,343 @@ async def test_query_generation_without_valid_queries_fails(h):
     assert run.completed_at is not None
     assert h.calls == []
     assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+# ---------------------------------------------------------------------------
+# Scoring validation
+# ---------------------------------------------------------------------------
+
+
+async def _scored_run(h, response, **kwargs) -> LiteratureReviewRun:
+    h.source("pubmed", always([paper(1), paper(2)]))
+    h.script_llm("q1", response)
+    return await h.run(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_scoring_provider_error_fails_without_recommendations(h):
+    run = await _scored_run(h, ProviderError("server overloaded", error_class="server"))
+
+    assert run.status == "failed"
+    assert run.error_message == "llm_ranking: server overloaded"
+    assert run.completed_at is not None
+    assert run.candidate_count == 2
+    assert run.recommendation_count == 0
+    assert await h.recommendations() == []
+    assert await h.papers() == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+@pytest.mark.parametrize(
+    ("response", "diagnostic"),
+    [
+        ("I could not score these papers.", "llm_ranking: response is not valid JSON"),
+        ("", "llm_ranking: response is not valid JSON"),
+        ("```json\n[{broken\n```", "llm_ranking: response is not valid JSON"),
+        (json.dumps({"index": 0, "score": 0.9}), "llm_ranking: response is not a JSON array"),
+        (json.dumps({"results": [{"index": 0, "score": 0.9}]}), "llm_ranking: response is not a JSON array"),
+        (json.dumps([{"idx": 0}, "text", 3, None, [0, 0.9]]), "llm_ranking: response has no usable entries"),
+        (json.dumps([{"index": 7, "score": 0.9}]), "llm_ranking: response has no usable entries"),
+        (
+            json.dumps([{"index": True, "score": 0.9}, {"index": 0, "score": True}]),
+            "llm_ranking: response has no usable entries",
+        ),
+        (
+            '[{"index": 0, "score": NaN}, {"index": 1, "score": Infinity}]',
+            "llm_ranking: response has no usable entries",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unusable_scoring_output_fails_the_run(h, response, diagnostic):
+    run = await _scored_run(h, response)
+
+    assert run.status == "failed"
+    assert run.error_message == diagnostic
+    assert run.completed_at is not None
+    assert await h.recommendations() == []
+    assert await h.papers() == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+@pytest.mark.parametrize("response", ["[]", "```json\n[]\n```", "None of these are relevant: []"])
+@pytest.mark.asyncio
+async def test_valid_empty_ranking_is_a_successful_review(h, response):
+    run = await _scored_run(h, response)
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.candidate_count == 2
+    assert run.recommendation_count == 0
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run.id, "recommendation_count": 0})]
+
+
+@pytest.mark.asyncio
+async def test_malformed_entries_are_skipped_when_valid_entries_remain(h):
+    response = (
+        '[{"index": 0, "score": 0.9, "reasoning": "good"}, "garbage", null, [1, 2],'
+        ' {"index": true, "score": 0.8}, {"index": 1, "score": NaN}, {"index": 1, "score": 0.7, "reasoning": 5}]'
+    )
+    run = await _scored_run(h, response, score_threshold=0.0)
+
+    assert run.status == "complete"
+    recs = await h.recommendations(run.id)
+    assert sorted((r.relevance_score, r.reasoning) for r in recs) == [(0.7, "5"), (0.9, "good")]
+
+
+@pytest.mark.asyncio
+async def test_scoring_failure_after_partial_sources_keeps_source_diagnostics_in_audit(h):
+    h.source("biorxiv", fail())
+    run = await _scored_run(h, "not json")
+
+    assert run.status == "failed"
+    assert run.error_message == "llm_ranking: response is not valid JSON"
+    audit = [a for a in await h.audits(run.id) if a.action == "fail"]
+    assert len(audit) == 1
+    assert audit[0].details_json["status"] == "failed"
+    assert audit[0].details_json["error"] == "llm_ranking: response is not valid JSON"
+    assert audit[0].details_json["sources"]["biorxiv"] == {
+        "attempts": 1,
+        "failed": 1,
+        "failure_categories": ["RuntimeError"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Terminal persistence, events, and cancellation
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for(predicate, timeout: float = 5.0) -> None:
+    async def poll():
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout)
+
+
+@pytest.mark.asyncio
+async def test_missing_experiment_in_run_org_fails_with_terminal_event(h):
+    from app.models.organization import Organization
+
+    run_id = await h.create_run()
+    other = Organization(name="Other Org", setup_complete=True)
+    h.session.add(other)
+    await h.session.flush()
+    await h.session.execute(
+        text("UPDATE experiments SET organization_id = :o WHERE id = :e").bindparams(o=other.id, e=h.experiment_id)
+    )
+    await h.session.commit()
+    h.script_llm("q1")
+
+    await h.execute(run_id)
+    run = await h.load(run_id)
+
+    assert run.status == "failed"
+    assert run.error_message == "experiment not found"
+    assert run.completed_at is not None
+    assert h.llm.payloads == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+    fail_audit = [a for a in await h.audits(run_id) if a.action == "fail"]
+    assert [a.details_json["error"] for a in fail_audit] == ["experiment not found"]
+
+
+@pytest.mark.asyncio
+async def test_missing_provider_configuration_fails_with_terminal_event(h):
+    from app.models.llm_provider_config import LlmProviderConfig
+
+    run_id = await h.create_run()
+    await h.session.execute(LlmProviderConfig.__table__.delete().where(LlmProviderConfig.organization_id == h.org_id))
+    await h.session.commit()
+
+    await h.execute(run_id)
+    run = await h.load(run_id)
+
+    assert run.status == "failed"
+    assert run.error_message == "llm provider configuration disappeared"
+    assert run.completed_at is not None
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+
+
+@pytest.mark.asyncio
+async def test_unexpected_exception_persists_failure_once(h, monkeypatch):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("database hiccup")
+
+    monkeypatch.setattr(lit_review_run_service.association_service, "get_or_create", explode)
+
+    run = await h.run()
+
+    assert run.status == "failed"
+    assert run.error_message == "unexpected_error: RuntimeError: database hiccup"
+    assert run.completed_at is not None
+    assert run.candidate_count == 1
+    assert run.recommendation_count == 0
+    assert await h.recommendations() == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+@pytest.mark.asyncio
+async def test_completed_event_failure_does_not_rewrite_outcome(h, monkeypatch):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+    recorded: list[str] = []
+
+    async def failing_emit(event_type, payload):
+        recorded.append(event_type)
+        if event_type == LITERATURE_REVIEW_RUN_COMPLETED:
+            raise RuntimeError("subscriber exploded")
+
+    monkeypatch.setattr(event_bus, "emit", failing_emit)
+
+    run = await h.run()
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.recommendation_count == 1
+    assert recorded == [LITERATURE_REVIEW_RUN_COMPLETED]
+
+
+@pytest.mark.asyncio
+async def test_notification_failure_after_commit_keeps_scheduled_run_complete(h, monkeypatch):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+    recorded: list[str] = []
+
+    async def failing_emit(event_type, payload):
+        recorded.append(event_type)
+        if event_type == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS:
+            raise RuntimeError("notification router down")
+
+    monkeypatch.setattr(event_bus, "emit", failing_emit)
+
+    run = await h.run(trigger=TRIGGER_SCHEDULED)
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.recommendation_count == 1
+    assert recorded == [LITERATURE_REVIEW_RUN_COMPLETED, LITERATURE_AUTO_REVIEW_RECOMMENDATIONS]
+
+
+@pytest.mark.asyncio
+async def test_partial_scheduled_run_with_picks_still_notifies(h):
+    h.source("pubmed", always([paper(1)]))
+    h.source("openalex", fail())
+    h.script_llm("q1", scores((0, 0.9)))
+
+    run = await h.run(trigger=TRIGGER_SCHEDULED)
+
+    assert run.status == "partial"
+    notes = [p for et, p in h.events if et == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS]
+    assert [n["metadata"]["recommendation_count"] for n in notes] == [1]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_source_collection_cleans_up_and_propagates(h):
+    started: set[str] = set()
+    cleaned: set[str] = set()
+
+    def hanging(name):
+        async def hang():
+            started.add(name)
+            try:
+                await asyncio.sleep(3600)
+            finally:
+                cleaned.add(name)
+            return []
+
+        return lambda query: hang()
+
+    for name in SOURCES:
+        h.source(name, hanging(name))
+    h.script_llm("q1\nq2", scores((0, 0.9)))
+    run_id = await h.create_run()
+
+    task = asyncio.create_task(h.execute(run_id))
+    await _wait_for(lambda: started == set(SOURCES))
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cleaned == set(SOURCES)
+    run = await h.load(run_id)
+    assert run.status == "failed"
+    assert run.error_message == "cancelled"
+    assert run.completed_at is not None
+    assert len(h.llm.payloads) == 1  # never reached scoring
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_scoring_fails_run_without_recommendations(h):
+    h.source("pubmed", always([paper(1)]))
+    scoring = asyncio.Event()
+
+    async def hang():
+        scoring.set()
+        await asyncio.sleep(3600)
+
+    h.script_llm("q1", hang)
+    run_id = await h.create_run()
+
+    task = asyncio.create_task(h.execute(run_id))
+    await asyncio.wait_for(scoring.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    run = await h.load(run_id)
+    assert run.status == "failed"
+    assert run.error_message == "cancelled"
+    assert run.completed_at is not None
+    assert await h.recommendations() == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_terminal_commit_keeps_committed_result(h, monkeypatch):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+    notifying = asyncio.Event()
+    recorded: list[str] = []
+
+    async def slow_emit(event_type, payload):
+        recorded.append(event_type)
+        if event_type == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS:
+            notifying.set()
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(event_bus, "emit", slow_emit)
+    run_id = await h.create_run(trigger=TRIGGER_SCHEDULED)
+
+    task = asyncio.create_task(h.execute(run_id))
+    await asyncio.wait_for(notifying.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    run = await h.load(run_id)
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.recommendation_count == 1
+    assert recorded == [LITERATURE_REVIEW_RUN_COMPLETED, LITERATURE_AUTO_REVIEW_RECOMMENDATIONS]
+
+
+@pytest.mark.asyncio
+async def test_every_failed_path_writes_one_fail_audit_with_status_and_error(h):
+    all_sources(h, fail())
+    h.script_llm("q1")
+
+    run = await h.run()
+
+    audits = await h.audits(run.id)
+    assert [a.action for a in audits] == ["create", "fail"]
+    details = audits[-1].details_json
+    assert details["status"] == "failed"
+    assert details["error"] == run.error_message
+    assert details["candidate_count"] == 0
+    assert details["recommendation_count"] == 0
+    assert set(details["sources"]) == set(SOURCES)

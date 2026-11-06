@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -73,6 +74,11 @@ class ReviewRunFailed(Exception):
 
 class NoActiveLlmProvider(Exception):
     pass
+
+
+class ScoringUnusable(Exception):
+    """The scoring response cannot be read as a ranking. A valid empty array is
+    not unusable: it means every candidate was omitted as irrelevant."""
 
 
 NO_SOURCES_ENABLED = "no_literature_sources_enabled"
@@ -213,10 +219,35 @@ async def schedule_run(*, run_id: int) -> None:
     asyncio.create_task(_execute_run(run_id))
 
 
+_TERMINAL_STATUSES = (SEARCH_COMPLETE, SEARCH_PARTIAL, SEARCH_FAILED)
+_CANCELLED = "cancelled"
+
+
+class _RunFailure(Exception):
+    """A phase ended the run. The message is the persisted diagnostic."""
+
+
+@dataclass
+class _Execution:
+    """What one execution has learned so far, so any terminal path (including
+    cancellation and unexpected errors) can record it."""
+
+    run_id: int
+    sources: SourceOutcome | None = None
+    candidate_count: int | None = None
+
+
 async def _execute_run(run_id: int) -> None:
+    """Run one review to a terminal state. Called by schedule_run (manual runs)
+    and awaited directly by the scheduled sweep.
+
+    Every terminal path persists status and completed_at before emitting
+    exactly one terminal event. Cancellation persists a failure and is
+    re-raised; nothing overwrites an outcome that was already committed."""
     factory = _database.async_session_factory
     if factory is None:
         return
+    execution = _Execution(run_id)
     try:
         async with factory() as s:  # type: ignore[misc]
             run = await _load_run(s, run_id)
@@ -226,20 +257,19 @@ async def _execute_run(run_id: int) -> None:
             run.started_at = datetime.now(UTC)
             await s.commit()
 
-        await _do_run(run_id)
-    except Exception as e:  # pragma: no cover
+        await _do_run(execution)
+    except _RunFailure as e:
+        await _fail(execution, str(e))
+    except asyncio.CancelledError:
+        await _fail(execution, _CANCELLED)
+        raise
+    except Exception as e:
         logger.exception("Lit Review Run %s failed", run_id)
-        async with factory() as s:  # type: ignore[misc]
-            run = await _load_run(s, run_id)
-            if run is not None:
-                run.status = SEARCH_FAILED
-                run.error_message = str(e)[:500]
-                run.completed_at = datetime.now(UTC)
-                await s.commit()
-        await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
+        await _fail(execution, f"unexpected_error: {type(e).__name__}: {e}")
 
 
-async def _do_run(run_id: int) -> None:
+async def _do_run(execution: _Execution) -> None:
+    run_id = execution.run_id
     factory = _database.async_session_factory
     assert factory is not None
 
@@ -248,36 +278,27 @@ async def _do_run(run_id: int) -> None:
         if run is None:
             return
         experiment = (
-            await s.execute(select(Experiment).where(Experiment.id == run.experiment_id))
+            await s.execute(
+                select(Experiment).where(
+                    Experiment.id == run.experiment_id,
+                    Experiment.organization_id == run.organization_id,
+                )
+            )
         ).scalar_one_or_none()
         if experiment is None:
-            run.status = SEARCH_FAILED
-            run.error_message = "experiment not found"
-            run.completed_at = datetime.now(UTC)
-            await s.commit()
-            return
+            raise _RunFailure("experiment not found")
 
         context_block = await _build_experiment_context(s, run, experiment)
         provider_cfg = await llm_provider_config_service.get_for_provider(s, run.organization_id, run.llm_provider)
         if provider_cfg is None:
-            run.status = SEARCH_FAILED
-            run.error_message = "llm provider configuration disappeared"
-            run.completed_at = datetime.now(UTC)
-            await s.commit()
-            return
+            raise _RunFailure("llm provider configuration disappeared")
         api_key = provider_cfg.api_key
 
         sources_by_name = {row.source: row for row in await sources_config_service.list_enabled(s, run.organization_id)}
         if not sources_by_name:
-            run.status = SEARCH_FAILED
-            run.error_message = NO_SOURCES_ENABLED
-            run.completed_at = datetime.now(UTC)
-            await s.commit()
-            await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
-            return
+            raise _RunFailure(NO_SOURCES_ENABLED)
 
     # 1. LLM generates expansion queries.
-    queries: list[str] = []
     try:
         queries = await _llm_generate_queries(
             provider=run.llm_provider,
@@ -286,12 +307,9 @@ async def _do_run(run_id: int) -> None:
             context_block=context_block,
         )
     except ProviderError as e:
-        await _mark_failed(run_id, f"llm_query_generation: {e}")
-        return
-
+        raise _RunFailure(f"llm_query_generation: {e}") from e
     if not queries:
-        await _mark_failed(run_id, "llm_generated_no_valid_queries")
-        return
+        raise _RunFailure("llm_generated_no_valid_queries")
 
     async with factory() as s:  # type: ignore[misc]
         run = await _load_run(s, run_id)
@@ -300,64 +318,47 @@ async def _do_run(run_id: int) -> None:
 
     # 2. Fan out across sources for each query, aggregate, dedupe.
     candidates: list[PaperRecord] = []
-    source_outcome = SourceOutcome()
+    source_outcome = execution.sources = SourceOutcome()
     seen_keys: set[str] = set()
     for q in queries:
         per_query_tasks = {
             src: asyncio.create_task(_safe_source_search(src, q, sources_by_name[src].api_key))
             for src in sources_by_name
         }
-        for src, t in per_query_tasks.items():
-            try:
-                records = await t
-            except Exception as e:
-                logger.warning("source %s failed during query '%s': %s", src, q, type(e).__name__)
-                source_outcome.record(src, e)
-                continue
-            source_outcome.record(src)
-            for rec in records:
-                key = (rec.doi or "").lower() or rec.title.lower()
-                if key in seen_keys:
+        try:
+            for src, t in per_query_tasks.items():
+                try:
+                    records = await t
+                except Exception as e:
+                    logger.warning("source %s failed during query '%s': %s", src, q, type(e).__name__)
+                    source_outcome.record(src, e)
                     continue
-                seen_keys.add(key)
-                candidates.append(rec)
+                source_outcome.record(src)
+                for rec in records:
+                    key = (rec.doi or "").lower() or rec.title.lower()
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    candidates.append(rec)
+        finally:
+            # On cancellation, stop and await every outstanding source call.
+            pending = [t for t in per_query_tasks.values() if not t.done()]
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     # 3. Drop library and dismissed.
-    candidates = await _exclude_library_and_dismissed(run_id, candidates)
+    candidates = (await _exclude_library_and_dismissed(run_id, candidates))[:_DEFAULT_CANDIDATE_CAP]
+    execution.candidate_count = len(candidates)
 
     if not candidates:
+        if source_outcome.status == SEARCH_FAILED:
+            raise _RunFailure(source_outcome.summary())
         async with factory() as s:  # type: ignore[misc]
             run = await _load_run(s, run_id)
-            run.candidate_count = 0
-            run.recommendation_count = 0
-            run.status = source_outcome.status
-            run.error_message = source_outcome.summary()
-            run.completed_at = datetime.now(UTC)
-            run_status = run.status
-            await audit_service.log_action(
-                s,
-                user_id=run.triggered_by_user_id,
-                entity_type="literature_review_run",
-                entity_id=run.id,
-                action="complete" if run_status != SEARCH_FAILED else "fail",
-                details={
-                    "candidate_count": 0,
-                    "recommendation_count": 0,
-                    "status": run_status,
-                    "sources": source_outcome.audit_details(),
-                },
-            )
-            await s.commit()
-        if run_status == SEARCH_FAILED:
-            await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
-        else:
-            await event_bus.emit(
-                LITERATURE_REVIEW_RUN_COMPLETED,
-                {"run_id": run_id, "recommendation_count": 0},
-            )
+            await _persist_terminal(s, run, execution, status=source_outcome.status, recommendation_count=0)
+        await _emit_terminal(run_id, source_outcome.status, 0)
         return
-
-    candidates = candidates[:_DEFAULT_CANDIDATE_CAP]
 
     # 4. LLM scoring pass.
     try:
@@ -368,9 +369,8 @@ async def _do_run(run_id: int) -> None:
             context_block=context_block,
             candidates=candidates,
         )
-    except ProviderError as e:
-        await _mark_failed(run_id, f"llm_ranking: {e}")
-        return
+    except (ProviderError, ScoringUnusable) as e:
+        raise _RunFailure(f"llm_ranking: {e}") from e
 
     # 5. Persist recommendations. Each surviving candidate is auto-accepted:
     # the paper is added to the Library, associated with the source experiment,
@@ -378,7 +378,6 @@ async def _do_run(run_id: int) -> None:
     # is surfaced on the paper detail page as an AI Lit Review note.
     async with factory() as s:  # type: ignore[misc]
         run = await _load_run(s, run_id)
-        run.candidate_count = len(candidates)
 
         # Sort by score desc, keep those above threshold, cap at max_recommendations.
         scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
@@ -426,12 +425,6 @@ async def _do_run(run_id: int) -> None:
             )
             rec_count += 1
 
-        run.recommendation_count = rec_count
-        # Candidates exist, so at least one attempt succeeded: complete or partial.
-        run.status = source_outcome.status
-        run.error_message = source_outcome.summary()
-        run.completed_at = datetime.now(UTC)
-
         # Capture fields for the per-user notification before the session closes.
         run_trigger = run.trigger
         run_org_id = run.organization_id
@@ -440,25 +433,10 @@ async def _do_run(run_id: int) -> None:
             await s.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
         ).scalar_one_or_none() or f"experiment #{run.experiment_id}"
 
-        await audit_service.log_action(
-            s,
-            user_id=run.triggered_by_user_id,
-            entity_type="literature_review_run",
-            entity_id=run.id,
-            action="complete",
-            details={
-                "candidate_count": run.candidate_count,
-                "recommendation_count": rec_count,
-                "status": run.status,
-                "sources": source_outcome.audit_details(),
-            },
-        )
-        await s.commit()
+        # Candidates exist, so at least one attempt succeeded: complete or partial.
+        await _persist_terminal(s, run, execution, status=source_outcome.status, recommendation_count=rec_count)
 
-    await event_bus.emit(
-        LITERATURE_REVIEW_RUN_COMPLETED,
-        {"run_id": run_id, "recommendation_count": rec_count},
-    )
+    await _emit_terminal(run_id, source_outcome.status, rec_count)
 
     # Automated cadence runs surface their picks as a per-user in-app
     # notification (the notification router fans this out to all active users
@@ -486,6 +464,74 @@ async def _do_run(run_id: int) -> None:
                 },
             },
         )
+
+
+async def _persist_terminal(
+    s: AsyncSession,
+    run: LiteratureReviewRun,
+    execution: _Execution,
+    *,
+    status: str,
+    recommendation_count: int | None,
+    error: str | None = None,
+) -> None:
+    """Write the terminal status, counts, diagnostics, and audit entry, then
+    commit. A failure's own diagnostic takes precedence over the source summary;
+    source diagnostics stay in the audit details either way."""
+    sources = execution.sources
+    run.status = status
+    message = error or (sources.summary() if sources else None)
+    run.error_message = message[:500] if message else None
+    run.completed_at = datetime.now(UTC)
+    if execution.candidate_count is not None:
+        run.candidate_count = execution.candidate_count
+    if recommendation_count is not None:
+        run.recommendation_count = recommendation_count
+    details: dict[str, Any] = {
+        "status": status,
+        "candidate_count": run.candidate_count,
+        "recommendation_count": run.recommendation_count,
+    }
+    if run.error_message:
+        details["error"] = run.error_message
+    if sources is not None:
+        details["sources"] = sources.audit_details()
+    await audit_service.log_action(
+        s,
+        user_id=run.triggered_by_user_id,
+        entity_type="literature_review_run",
+        entity_id=run.id,
+        action="fail" if status == SEARCH_FAILED else "complete",
+        details=details,
+    )
+    await s.commit()
+
+
+async def _emit_terminal(run_id: int, status: str, recommendation_count: int = 0) -> None:
+    if status == SEARCH_FAILED:
+        await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
+    else:
+        await event_bus.emit(
+            LITERATURE_REVIEW_RUN_COMPLETED,
+            {"run_id": run_id, "recommendation_count": recommendation_count},
+        )
+
+
+async def _fail(execution: _Execution, error: str) -> None:
+    """Persist a failure in a fresh session unless a terminal outcome is
+    already committed (for example, a notification error after completion)."""
+    factory = _database.async_session_factory
+    if factory is None:
+        return
+    async with factory() as s:  # type: ignore[misc]
+        run = await _load_run(s, execution.run_id)
+        if run is None or run.status in _TERMINAL_STATUSES:
+            return
+        recommendation_count = 0 if execution.candidate_count is not None else None
+        await _persist_terminal(
+            s, run, execution, status=SEARCH_FAILED, recommendation_count=recommendation_count, error=error
+        )
+    await _emit_terminal(execution.run_id, SEARCH_FAILED)
 
 
 async def _safe_source_search(src: str, query: str, api_key: str | None) -> list[PaperRecord]:
@@ -612,50 +658,60 @@ async def _llm_score_candidates(
     results: list[tuple[PaperRecord, float, str]] = []
     seen_indices: set[int] = set()
     for entry in parsed:
-        try:
-            idx = int(entry["index"])
-            score = float(entry["score"])
-        except (KeyError, ValueError, TypeError):
+        usable = _usable_score_entry(entry, len(candidates))
+        if usable is None:
             continue
-        if idx in seen_indices or idx < 0 or idx >= len(candidates):
+        idx, score = usable
+        if idx in seen_indices:
             continue
         seen_indices.add(idx)
-        score = max(0.0, min(1.0, score))
         reasoning = str(entry.get("reasoning") or "")[:500]
-        results.append((candidates[idx], score, reasoning))
+        results.append((candidates[idx], max(0.0, min(1.0, score)), reasoning))
+    if parsed and not results:
+        raise ScoringUnusable("response has no usable entries")
     return results
 
 
-def _parse_scoring_response(text: str) -> list[dict[str, Any]]:
-    if not text:
-        return []
-    text = text.strip()
-    # Try direct JSON parse first.
+def _usable_score_entry(entry: Any, candidate_count: int) -> tuple[int, float] | None:
+    """(index, score) for an entry naming a real candidate with a finite score,
+    else None. Booleans are rejected even though Python treats them as ints."""
+    if not isinstance(entry, dict):
+        return None
+    raw_index, raw_score = entry.get("index"), entry.get("score")
+    if isinstance(raw_index, bool) or isinstance(raw_score, bool):
+        return None
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    # Strip markdown fences.
-    m = re.search(r"```(?:json)?\s*(.+?)```", text, flags=re.DOTALL)
-    if m:
+        idx = int(raw_index)  # type: ignore[arg-type]
+        score = float(raw_score)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return None
+    if not math.isfinite(score) or idx < 0 or idx >= candidate_count:
+        return None
+    return idx, score
+
+
+def _parse_scoring_response(text: str | None) -> list[Any]:
+    """Return the scoring array from a response that is bare JSON, fenced JSON,
+    or an array embedded in prose. Raises ScoringUnusable when no JSON can be
+    read or the JSON found is not an array."""
+    text = (text or "").strip()
+    attempts = [text]
+    fence = re.search(r"```(?:json)?\s*(.+?)```", text, flags=re.DOTALL)
+    if fence:
+        attempts.append(fence.group(1))
+    for pattern in (r"\[.*\]", r"\[\s*\{.*\}\s*\]"):
+        embedded = re.search(pattern, text, flags=re.DOTALL)
+        if embedded:
+            attempts.append(embedded.group(0))
+    for candidate in attempts:
         try:
-            parsed = json.loads(m.group(1))
-            if isinstance(parsed, list):
-                return parsed
+            parsed = json.loads(candidate)
         except json.JSONDecodeError:
-            pass
-    # Find the first JSON array in the text.
-    m = re.search(r"\[\s*\{.*\}\s*\]", text, flags=re.DOTALL)
-    if m:
-        try:
-            parsed = json.loads(m.group(0))
-            if isinstance(parsed, list):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-    return []
+            continue
+        if not isinstance(parsed, list):
+            raise ScoringUnusable("response is not a JSON array")
+        return parsed
+    raise ScoringUnusable("response is not valid JSON")
 
 
 async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperRecord]) -> list[PaperRecord]:
@@ -734,21 +790,6 @@ async def _upsert_lit_review_paper(
 async def _load_run(session: AsyncSession, run_id: int) -> LiteratureReviewRun | None:
     rs = await session.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.id == run_id))
     return rs.scalar_one_or_none()
-
-
-async def _mark_failed(run_id: int, error: str) -> None:
-    factory = _database.async_session_factory
-    if factory is None:
-        return
-    async with factory() as s:  # type: ignore[misc]
-        run = await _load_run(s, run_id)
-        if run is None:
-            return
-        run.status = SEARCH_FAILED
-        run.error_message = error[:500]
-        run.completed_at = datetime.now(UTC)
-        await s.commit()
-    await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
 
 
 # ---------------------------------------------------------------------------
