@@ -85,8 +85,10 @@ def load_backend(path: Path) -> Side:
         side.available = False
         return side
     for name, data in json.loads(path.read_text())["files"].items():
-        executed = set(data.get("executed_lines", []))
-        side.files[name] = (executed | set(data.get("missing_lines", [])), executed)
+        excluded = set(data.get("excluded_lines", []))
+        executed = set(data.get("executed_lines", [])) - excluded
+        executable = (executed | set(data.get("missing_lines", []))) - excluded
+        side.files[name] = (executable, executed)
     return side
 
 
@@ -165,10 +167,29 @@ def _status_note(side: Side, status: str) -> str | None:
     return None
 
 
-def render(backend: Side, frontend: Side, diff: str, commit: str, backend_status: str, frontend_status: str) -> str:
+def render(
+    backend: Side,
+    frontend: Side,
+    diff: str,
+    commit: str,
+    backend_status: str,
+    frontend_status: str,
+) -> str:
     sides = (backend, frontend)
     out = [MARKER, "## Coverage", "", f"Line coverage for `{commit[:7]}`.", ""]
-    notes = [n for n in (_status_note(backend, backend_status), _status_note(frontend, frontend_status)) if n]
+    out += [
+        "Backend: executable statement lines (coverage.py). Frontend: line coverage (Jest/Istanbul).",
+        "Area totals measure execution, not assertion quality or branch coverage.",
+        "",
+    ]
+    notes = [
+        n
+        for n in (
+            _status_note(backend, backend_status),
+            _status_note(frontend, frontend_status),
+        )
+        if n
+    ]
     if notes:
         out += [f"> **Partial:** {n}" for n in notes] + [""]
 
@@ -189,7 +210,11 @@ def render(backend: Side, frontend: Side, diff: str, commit: str, backend_status
         for side, (_, _, uncovered) in changed:
             if not uncovered:
                 continue
-            out += ["", f"<details><summary>{side.name}: changed lines not covered</summary>", ""]
+            out += [
+                "",
+                f"<details><summary>{side.name}: changed lines not covered</summary>",
+                "",
+            ]
             for path in sorted(uncovered)[:MAX_FILES]:
                 listed = ranges(uncovered[path])
                 if len(listed) > MAX_RANGES:
@@ -202,7 +227,11 @@ def render(backend: Side, frontend: Side, diff: str, commit: str, backend_status
     for side in sides:
         if not side.available:
             continue
-        out += ["", f"<details><summary>{side.name} by area (<code>{side.area_root}</code>)</summary>", ""]
+        out += [
+            "",
+            f"<details><summary>{side.name} by area (<code>{side.area_root}</code>)</summary>",
+            "",
+        ]
         out += ["| Area | Lines | Covered / total |", "| --- | --- | --- |"]
         out += [_row(area, c, t) for area, (c, t) in side.by_area().items()]
         out += ["", "</details>"]

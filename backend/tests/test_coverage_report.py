@@ -175,3 +175,65 @@ def test_the_comment_stays_under_githubs_size_limit(report, tmp_path):
     assert len(body) <= report.MAX_BODY + 100
     assert body.count("<details>") == body.count("</details>")
     assert "| Backend | 0.0% | 0 / 80000 |" in body
+
+
+def test_backend_coverage_excludes_pragma_no_cover_lines(report, tmp_path):
+    path = tmp_path / "excluded.json"
+    path.write_text(
+        json.dumps(
+            {
+                "files": {
+                    "app/services/example.py": {
+                        "executed_lines": [1, 2, 3],
+                        "missing_lines": [4],
+                        "excluded_lines": [2],
+                    }
+                }
+            }
+        )
+    )
+    side = report.load_backend(path)
+    assert side.total() == (2, 3)
+    assert side.changed({"backend/app/services/example.py": {2, 3, 4}}) == (1, 2, {"app/services/example.py": [4]})
+
+
+def test_backend_default_coverage_traces_greenlets(tmp_path):
+    """The config CI discovers must trace execution after a greenlet switches back."""
+    import os
+    import subprocess
+
+    backend = Path(__file__).resolve().parents[1]
+    from coverage import Coverage
+
+    configuration = Coverage(config_file=str(backend / "pyproject.toml"))
+    assert {"thread", "greenlet"} <= set(configuration.config.concurrency)
+    probe = tmp_path / "greenlet_probe.py"
+    probe.write_text(
+        "from greenlet import greenlet, getcurrent\n"
+        "def work():\n"
+        "    getcurrent().parent.switch()\n"
+        "    result = 42\n"
+        "    return result\n"
+        "g = greenlet(work)\n"
+        "g.switch()\n"
+        "g.switch()\n"
+    )
+    env = dict(os.environ)
+    for key in list(env):
+        if key.startswith(("COV_CORE_", "COVERAGE_")):
+            env.pop(key)
+    env["COVERAGE_FILE"] = str(tmp_path / ".coverage")
+    result = subprocess.run(
+        [sys.executable, "-m", "coverage", "run", "--rcfile", str(backend / "pyproject.toml"), str(probe)],
+        env=env,
+        cwd=backend,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    from coverage import CoverageData
+
+    data = CoverageData(basename=env["COVERAGE_FILE"])
+    data.read()
+    assert {3, 4, 5} <= set(data.lines(str(probe)) or [])
