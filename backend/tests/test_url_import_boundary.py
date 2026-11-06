@@ -330,3 +330,103 @@ async def _url_import_count() -> int:
 
     async with database_module.async_session_factory() as session:
         return (await session.execute(select(func.count()).select_from(LabDocumentUrlImport))).scalar_one()
+
+
+# --- redirects ---------------------------------------------------------------
+
+
+def _pdf():
+    return httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"%PDF-1.4 body")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://10.0.0.5/internal",
+        "http://169.254.169.254/computeMetadata/v1/",
+        "http://[::1]/secret",
+        "http://100.64.0.1/x",
+        "http://[64:ff9b::a00:5]/x",
+        "http://[::ffff:10.0.0.5]/x",
+        "http://internal.example/x",  # a hostname whose answer is private
+    ],
+)
+async def test_a_redirect_to_a_non_public_destination_is_refused_before_it_is_requested(url_network, target):
+    """The denied target has a working route, so if the hop were not checked the
+    fetch would succeed and record the request: this fails on a disabled guard,
+    not on the redirect limit or a connection error."""
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.answers["internal.example"] = ["10.0.0.5"]
+    # The recorded resolver behaviour, for the literal target.
+    url_network.answers["10.0.0.5"] = [OBSERVED_ANSWER]
+    url_network.routes[START] = httpx.Response(302, headers={"location": target})
+    url_network.routes[target] = _pdf()
+
+    with pytest.raises(ValidationError, match="non-public"):
+        await LabDocumentUploadService._fetch_url(START)
+
+    assert url_network.requests == [START]
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_to_a_hostname_answering_the_observed_address_is_followed(url_network):
+    """The documented limitation again, on the redirect path."""
+    target = "http://translated.example/x.pdf"
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.answers["translated.example"] = [OBSERVED_ANSWER]
+    url_network.routes[START] = httpx.Response(302, headers={"location": target})
+    url_network.routes[target] = _pdf()
+
+    content, _, _ = await LabDocumentUploadService._fetch_url(START)
+
+    assert content == b"%PDF-1.4 body"
+    assert url_network.requests == [START, target]
+
+
+def _chain(url_network, hops):
+    """START redirects through ``hops`` public hosts; the last one serves a PDF."""
+    urls = [START] + [f"https://hop{i}.example/x" for i in range(1, hops + 1)]
+    for i, url in enumerate(urls):
+        url_network.answers[httpx.URL(url).host] = ["93.184.216.34"]
+        url_network.routes[url] = (
+            httpx.Response(302, headers={"location": urls[i + 1]}) if i + 1 < len(urls) else _pdf()
+        )
+    return urls
+
+
+@pytest.mark.asyncio
+async def test_a_public_redirect_chain_within_the_limit_is_followed(url_network):
+    from app.services.lab_document_upload_service import MAX_URL_REDIRECTS
+
+    urls = _chain(url_network, MAX_URL_REDIRECTS)
+
+    content, file_name, mime_type = await LabDocumentUploadService._fetch_url(START)
+
+    assert (content, file_name, mime_type) == (b"%PDF-1.4 body", "x", "application/pdf")
+    assert url_network.requests == urls
+
+
+@pytest.mark.asyncio
+async def test_a_public_redirect_chain_beyond_the_limit_is_refused(url_network):
+    from app.services.lab_document_upload_service import MAX_URL_REDIRECTS
+
+    urls = _chain(url_network, MAX_URL_REDIRECTS + 1)
+
+    with pytest.raises(ValidationError, match="Too many redirects"):
+        await LabDocumentUploadService._fetch_url(START)
+
+    assert url_network.requests == urls[:-1]
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_loop_is_refused_at_the_limit(url_network):
+    from app.services.lab_document_upload_service import MAX_URL_REDIRECTS
+
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[START] = httpx.Response(302, headers={"location": START})
+
+    with pytest.raises(ValidationError, match="Too many redirects"):
+        await LabDocumentUploadService._fetch_url(START)
+
+    assert url_network.requests == [START] * (MAX_URL_REDIRECTS + 1)
