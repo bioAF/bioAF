@@ -1231,3 +1231,143 @@ async def test_scheduled_sweep_runs_pipeline_to_terminal_outcome_and_notifies(h)
     notes = [p for et, p in h.events if et == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS]
     assert [n["entity_id"] for n in notes] == [runs[0].id]
     assert len(h.terminal_events()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups: cancellation cleanup, numeric overflow, safe audit, event handoff
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancellation_retrieves_already_failed_source_exceptions(h):
+    import gc
+
+    loop = asyncio.get_running_loop()
+    unretrieved: list[dict] = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unretrieved.append(context))
+    try:
+        hanging = asyncio.Event()
+
+        async def hang():
+            hanging.set()
+            await asyncio.sleep(3600)
+
+        # Sources run in name order: biorxiv is awaited first and hangs while
+        # pubmed has already failed with a message carrying a credential.
+        h.source("biorxiv", lambda q: hang())
+        h.source("pubmed", fail(RuntimeError("GET /search?api_key=SECRET-KEY failed")))
+        h.script_llm("q1")
+        run_id = await h.create_run()
+
+        task = asyncio.create_task(h.execute(run_id))
+        await asyncio.wait_for(hanging.wait(), 5)
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        del task
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous)
+
+    assert [c.get("message") for c in unretrieved] == []
+    assert (await h.load(run_id)).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_overflowing_index_is_skipped_without_discarding_valid_entries(h):
+    response = '[{"index": 0, "score": 0.9, "reasoning": "ok"}, {"index": 1e400, "score": 0.8}]'
+    run = await _scored_run(h, response, score_threshold=0.0)
+
+    assert run.status == "complete"
+    assert run.recommendation_count == 1
+
+
+@pytest.mark.asyncio
+async def test_overflow_only_ranking_is_unusable(h):
+    run = await _scored_run(h, '[{"index": 1e400, "score": 0.8}]')
+
+    assert run.status == "failed"
+    assert run.error_message == "llm_ranking: response has no usable entries"
+
+
+@pytest.mark.parametrize(
+    ("phase_responses", "audit_error"),
+    [
+        (
+            [ProviderError('HTTP 500 body={"echo": "SECRET-PAYLOAD"}', error_class="server")],
+            "llm_query_generation: provider_error (server)",
+        ),
+        (
+            ["q1", ProviderError('HTTP 401 body={"key": "SECRET-PAYLOAD"}', error_class="auth")],
+            "llm_ranking: provider_error (auth)",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_provider_error_bodies_stay_out_of_audit(h, phase_responses, audit_error):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm(*phase_responses)
+
+    run = await h.run()
+
+    assert run.status == "failed"
+    audit = [a for a in await h.audits(run.id) if a.action == "fail"]
+    assert len(audit) == 1
+    assert audit[0].details_json["error"] == audit_error
+    assert "SECRET" not in json.dumps(audit[0].details_json)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_text_stays_out_of_audit(h, monkeypatch):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("response body SECRET-PAYLOAD")
+
+    monkeypatch.setattr(lit_review_run_service.association_service, "get_or_create", explode)
+
+    run = await h.run()
+
+    assert run.error_message == "unexpected_error: RuntimeError: response body SECRET-PAYLOAD"
+    audit = [a for a in await h.audits(run.id) if a.action == "fail"]
+    assert audit[0].details_json["error"] == "unexpected_error: RuntimeError"
+    assert "SECRET" not in json.dumps(audit[0].details_json)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_right_after_terminal_commit_still_emits_terminal_event(h):
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+    run_id = await h.create_run()
+    holder: dict = {}
+
+    def mark(session, flush_context, instances):
+        if any(isinstance(o, AuditLog) and o.action == "complete" for o in session.new):
+            session.info["cancel_after_commit"] = True
+
+    def cancel(session):
+        if session.info.pop("cancel_after_commit", False):
+            holder["task"].cancel()
+
+    event.listen(Session, "before_flush", mark)
+    event.listen(Session, "after_commit", cancel)
+    try:
+        holder["task"] = asyncio.create_task(h.execute(run_id))
+        with pytest.raises(asyncio.CancelledError):
+            await holder["task"]
+    finally:
+        event.remove(Session, "after_commit", cancel)
+        event.remove(Session, "before_flush", mark)
+
+    run = await h.load(run_id)
+    assert run.status == "complete"
+    assert run.recommendation_count == 1
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run_id, "recommendation_count": 1})]

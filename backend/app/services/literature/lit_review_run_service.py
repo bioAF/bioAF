@@ -231,7 +231,17 @@ _CANCELLED = "cancelled"
 
 
 class _RunFailure(Exception):
-    """A phase ended the run. The message is the persisted diagnostic."""
+    """A phase ended the run. The message is the run's error_message;
+    audit_error is the audit-safe form (no provider bodies or raw exception
+    text), and defaults to the message when the message is built locally."""
+
+    def __init__(self, message: str, *, audit_error: str | None = None) -> None:
+        super().__init__(message)
+        self.audit_error = audit_error or message
+
+
+def _provider_failure(phase: str, error: ProviderError) -> _RunFailure:
+    return _RunFailure(f"{phase}: {error}", audit_error=f"{phase}: provider_error ({error.error_class})")
 
 
 @dataclass
@@ -242,6 +252,7 @@ class _Execution:
     run_id: int
     sources: SourceOutcome | None = None
     candidate_count: int | None = None
+    terminal_event_sent: bool = False
 
 
 async def _execute_run(run_id: int) -> None:
@@ -266,13 +277,17 @@ async def _execute_run(run_id: int) -> None:
 
         await _do_run(execution)
     except _RunFailure as e:
-        await _fail(execution, str(e))
+        await _fail(execution, str(e), audit_error=e.audit_error)
     except asyncio.CancelledError:
         await _fail(execution, _CANCELLED)
         raise
     except Exception as e:
         logger.exception("Lit Review Run %s failed", run_id)
-        await _fail(execution, f"unexpected_error: {type(e).__name__}: {e}")
+        await _fail(
+            execution,
+            f"unexpected_error: {type(e).__name__}: {e}",
+            audit_error=f"unexpected_error: {type(e).__name__}",
+        )
 
 
 @dataclass(frozen=True)
@@ -313,7 +328,7 @@ async def _do_run(execution: _Execution) -> None:
         raise _RunFailure(execution.sources.summary())
     scored = await _score(ctx, candidates) if candidates else []
     rec_count = await _persist_recommendations(ctx, execution, scored, status=status)
-    await _emit_terminal(ctx.run_id, status, rec_count)
+    await _emit_terminal(execution, status, rec_count)
     await _notify_scheduled_picks(ctx, rec_count)
 
 
@@ -366,7 +381,7 @@ async def _generate_queries(ctx: _RunContext) -> list[str]:
             provider=ctx.provider, model=ctx.model, api_key=ctx.api_key, context_block=ctx.context_block
         )
     except ProviderError as e:
-        raise _RunFailure(f"llm_query_generation: {e}") from e
+        raise _provider_failure("llm_query_generation", e) from e
     if not queries:
         raise _RunFailure("llm_generated_no_valid_queries")
     factory = _database.async_session_factory
@@ -404,11 +419,13 @@ async def _collect_candidates(ctx: _RunContext, queries: list[str], outcome: Sou
                     seen_keys.add(key)
                     candidates.append(rec)
         finally:
-            # On cancellation, stop and await every outstanding source call.
-            pending = [t for t in tasks.values() if not t.done()]
-            for t in pending:
-                t.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            # On cancellation, stop outstanding source calls, then collect every
+            # task's outcome so no already-failed source's exception (which may
+            # carry a credential-bearing URL) is reported as never retrieved.
+            for t in tasks.values():
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
     return candidates
 
 
@@ -421,7 +438,9 @@ async def _score(ctx: _RunContext, candidates: list[PaperRecord]) -> list[tuple[
             context_block=ctx.context_block,
             candidates=candidates,
         )
-    except (ProviderError, ScoringUnusable) as e:
+    except ProviderError as e:
+        raise _provider_failure("llm_ranking", e) from e
+    except ScoringUnusable as e:
         raise _RunFailure(f"llm_ranking: {e}") from e
 
 
@@ -525,10 +544,12 @@ async def _persist_terminal(
     status: str,
     recommendation_count: int | None,
     error: str | None = None,
+    audit_error: str | None = None,
 ) -> None:
     """Write the terminal status, counts, diagnostics, and audit entry, then
     commit. A failure's own diagnostic takes precedence over the source summary;
-    source diagnostics stay in the audit details either way."""
+    source diagnostics stay in the audit details either way. The audit gets
+    audit_error (the safe form) when the error text may hold provider output."""
     sources = execution.sources
     run.status = status
     message = error or (sources.summary() if sources else None)
@@ -544,7 +565,7 @@ async def _persist_terminal(
         "recommendation_count": run.recommendation_count,
     }
     if run.error_message:
-        details["error"] = run.error_message
+        details["error"] = (audit_error or run.error_message)[:500]
     if sources is not None:
         details["sources"] = sources.audit_details()
     await audit_service.log_action(
@@ -558,7 +579,11 @@ async def _persist_terminal(
     await s.commit()
 
 
-async def _emit_terminal(run_id: int, status: str, recommendation_count: int = 0) -> None:
+async def _emit_terminal(execution: _Execution, status: str, recommendation_count: int = 0) -> None:
+    """Emit the run's one terminal event. Marked sent before emitting, so a
+    delivery error is never answered with a second event."""
+    run_id = execution.run_id
+    execution.terminal_event_sent = True
     if status == SEARCH_FAILED:
         await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
     else:
@@ -568,21 +593,35 @@ async def _emit_terminal(run_id: int, status: str, recommendation_count: int = 0
         )
 
 
-async def _fail(execution: _Execution, error: str) -> None:
+async def _fail(execution: _Execution, error: str, *, audit_error: str | None = None) -> None:
     """Persist a failure in a fresh session unless a terminal outcome is
-    already committed (for example, a notification error after completion)."""
+    already committed (for example, a notification error after completion).
+
+    If the outcome was committed but its event never went out (cancellation
+    landed between the commit and the emit), emit the committed outcome's
+    event instead, so persistence and events still agree."""
     factory = _database.async_session_factory
     if factory is None:
         return
     async with factory() as s:  # type: ignore[misc]
         run = await _load_run(s, execution.run_id)
-        if run is None or run.status in _TERMINAL_STATUSES:
+        if run is None:
+            return
+        if run.status in _TERMINAL_STATUSES:
+            if not execution.terminal_event_sent:
+                await _emit_terminal(execution, run.status, run.recommendation_count or 0)
             return
         recommendation_count = 0 if execution.candidate_count is not None else None
         await _persist_terminal(
-            s, run, execution, status=SEARCH_FAILED, recommendation_count=recommendation_count, error=error
+            s,
+            run,
+            execution,
+            status=SEARCH_FAILED,
+            recommendation_count=recommendation_count,
+            error=error,
+            audit_error=audit_error,
         )
-    await _emit_terminal(execution.run_id, SEARCH_FAILED)
+    await _emit_terminal(execution, SEARCH_FAILED)
 
 
 async def _safe_source_search(src: str, query: str, api_key: str | None) -> list[PaperRecord]:
@@ -734,7 +773,7 @@ def _usable_score_entry(entry: Any, candidate_count: int) -> tuple[int, float] |
     try:
         idx = int(raw_index)  # type: ignore[arg-type]
         score = float(raw_score)  # type: ignore[arg-type]
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return None
     if not math.isfinite(score) or idx < 0 or idx >= candidate_count:
         return None
