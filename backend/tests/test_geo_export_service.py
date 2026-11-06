@@ -5,25 +5,6 @@ from io import BytesIO
 
 import pytest
 import pytest_asyncio
-from app.services.auth_service import AuthService
-
-
-@pytest_asyncio.fixture
-async def comp_bio_user(session, admin_user):
-    from app.models.user import User
-
-    password_hash = AuthService.hash_password("compbiopass123")
-    user = User(
-        email="compbio@test.com",
-        password_hash=password_hash,
-        role_id=admin_user._test_role_map["comp_bio"],
-        organization_id=admin_user.organization_id,
-        status="active",
-    )
-    session.add(user)
-    await session.flush()
-    await session.commit()
-    return user
 
 
 @pytest_asyncio.fixture

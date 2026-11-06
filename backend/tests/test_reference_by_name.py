@@ -24,17 +24,6 @@ async def comp_bio_user(session, admin_user):
     return user
 
 
-@pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
 REF_BASE = {
     "name": "GRCh38 GENCODE",
     "category": "genome",

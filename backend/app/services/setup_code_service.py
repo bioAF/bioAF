@@ -15,6 +15,8 @@ from app.models.user import User
 SETUP_CODE_CHARSET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 SETUP_CODE_LENGTH = 6
 SETUP_CODE_TTL = timedelta(hours=1)
+# bcrypt cost for setup-code hashes. The test suite lowers it per test; production keeps 12.
+HASH_ROUNDS = 12
 
 
 class SetupCodeService:
@@ -25,7 +27,7 @@ class SetupCodeService:
         Returns the plaintext code (shown in the terminal).
         """
         code = "".join(secrets.choice(SETUP_CODE_CHARSET) for _ in range(SETUP_CODE_LENGTH))
-        code_hash = bcrypt.hashpw(code.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        code_hash = bcrypt.hashpw(code.encode("utf-8"), bcrypt.gensalt(rounds=HASH_ROUNDS)).decode("utf-8")
 
         org.setup_code_hash = code_hash
         org.setup_code_expires_at = datetime.now(timezone.utc) + SETUP_CODE_TTL

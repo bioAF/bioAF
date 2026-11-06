@@ -9,6 +9,13 @@ os.environ.setdefault(
     "yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=,RULBtMyNqzJbIBpDe1gwY2YCCYkBI0UqjJsdAP-41AU=",
 )
 
+# Test-only password hashing cost (default 4; BIOAF_TEST_BCRYPT_ROUNDS=12 for an
+# unchanged baseline). Overwrites BIOAF_BCRYPT_ROUNDS; see tests/plugins/bcrypt_rounds.py.
+from tests.plugins.bcrypt_rounds import apply_test_bcrypt_rounds  # noqa: E402
+
+apply_test_bcrypt_rounds(os.environ)
+
+import asyncio  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
 import pytest  # noqa: E402
@@ -20,17 +27,29 @@ from sqlalchemy import text as sa_text  # noqa: E402
 from app.adapters import registry as adapter_registry  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
 
-TEST_DATABASE_URL = os.environ.get(
-    "BIOAF_TEST_DATABASE_URL",
-    "postgresql+asyncpg://bioaf_app:devpassword@localhost:5432/bioaf_test",
-)
+from tests.plugins.db_url import database_url  # noqa: E402
+from tests.support import lifecycle  # noqa: E402
+
+pytest_plugins = ["tests.plugins.phase_report", "tests.plugins.invocation", "tests.plugins.shuffle"]
+
+TEST_DATABASE_URL = database_url()
 
 
-def _worker_schema(worker_id: str) -> str:
-    """Return a per-worker schema name for pytest-xdist isolation."""
-    if worker_id == "master":
-        return "public"
-    return f"test_{worker_id}"
+@pytest.fixture(autouse=True)
+def _isolated_state():
+    """In-process caches and registries start every test as they were after import."""
+    with lifecycle.isolated_state():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _service_bcrypt_rounds(monkeypatch):
+    """API-key and setup-code hashes use the test cost; each service owns its own seam."""
+    from app.services import api_key_service, setup_code_service
+
+    rounds = int(os.environ["BIOAF_TEST_BCRYPT_ROUNDS"])
+    monkeypatch.setattr(api_key_service, "HASH_ROUNDS", rounds)
+    monkeypatch.setattr(setup_code_service, "HASH_ROUNDS", rounds)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -41,103 +60,111 @@ async def _init_adapter_registry():
     adapter_registry.reset_registry()
 
 
-@pytest_asyncio.fixture
-async def db_engine(worker_id):
-    """Create engine, set up tables in a per-worker schema, yield, tear down."""
-    import app.models  # noqa: F401 -- register all models with Base.metadata
-    from app.database import Base
+# Migration-built worker schemas, one per pilot prefix, built on first use (tests/support/worker_schema.py).
+_WORKER_SCHEMAS: dict[str, object] = {}
+# Set when a migrated_reset test has run since the worker schema was last reset.
+_WORKER_SCHEMA_DIRTY = {"value": False}
 
-    schema = _worker_schema(worker_id)
 
-    # For per-worker (xdist) schemas, pin search_path at the asyncpg protocol
-    # level via connect_args so EVERY connection lands in the worker schema. The
-    # "connect" event listener below sets it too, but that runs a SET through the
-    # greenlet bridge and can miss a freshly-created connection under concurrent
-    # connection creation (e.g. tests that spawn a background DB task during a
-    # request); that connection then resolves tables in the wrong schema and
-    # raises "relation ... does not exist". server_settings is race-free.
-    connect_args = {} if schema == "public" else {"server_settings": {"search_path": schema}}
-
-    engine = create_async_engine(
+def _engine_for(schema: str):
+    # Pin search_path at the asyncpg protocol level via connect_args so EVERY
+    # connection lands in the test's schema. A "connect" event listener running a
+    # SET through the greenlet bridge can miss a freshly-created connection under
+    # concurrent connection creation (e.g. tests that spawn a background DB task
+    # during a request); that connection then resolves tables in the wrong schema
+    # and raises "relation ... does not exist". server_settings is race-free.
+    return create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=5,
-        connect_args=connect_args,
+        connect_args={"server_settings": {"search_path": schema}},
     )
 
-    if schema != "public":
+
+@pytest_asyncio.fixture
+async def db_engine(worker_id, request):
+    """An engine on this test's database, every session factory routed to it, torn down after.
+
+    The route comes from tests/support/fixture_routes.py:
+
+    - ``existing`` (default): a fresh create_all schema ``test_<invocation>_<worker>``, dropped after.
+    - ``migrated_reset``: the worker's migration-built schema, reset to its empty-upgrade baseline.
+    - ``rollback``: the worker's migration-built schema inside one outer transaction, rolled back.
+
+    Schemas are per invocation and worker (tests/plugins/invocation.py), serial runs included, so
+    concurrent invocations never share one and nothing here touches ``public``.
+    """
+    import app.models  # noqa: F401 -- register all models with Base.metadata
+    from app.database import Base
+    from tests.plugins import invocation  # imported here so pytest registers the plugin first
+    from tests.support import fixture_routes, worker_schema
+
+    route = fixture_routes.route_for(request.node.path.name)
+    cleanup: list = []
+
+    if route == "existing":
+        schema = invocation.claim_schema("test", worker_id)
+        quoted = invocation.quote(schema)
+        engine = _engine_for(schema)
         async with engine.begin() as conn:
-            await conn.execute(sa_text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-            await conn.execute(sa_text(f"SET search_path TO {schema}"))
+            # A schema left by an interrupted test in this same invocation is stale.
+            await conn.execute(sa_text(f"DROP SCHEMA IF EXISTS {quoted} CASCADE"))
+            await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
             await conn.run_sync(Base.metadata.create_all)
-    else:
-        # Drop all tables individually, then drop user-defined enum types
-        # that survive table drops and cause IntegrityError on create_all.
-        async with engine.begin() as conn:
-            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
-            tables = [row[0] for row in rows.fetchall()]
-        for table in tables:
+
+        async def _drop_schema():
             async with engine.begin() as conn:
-                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-        async with engine.begin() as conn:
-            rows = await conn.execute(
-                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
-            )
-            for (name,) in rows.fetchall():
-                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
 
-    # Set search_path for all connections from this engine
-    if schema != "public":
-        from sqlalchemy import event
+        test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        cleanup.append(_drop_schema)
+    else:
+        ws = _WORKER_SCHEMAS.get("pilot")
+        if ws is None:
+            ws = await asyncio.to_thread(worker_schema.build, "pilot", worker_id)
+            _WORKER_SCHEMA_DIRTY["value"] = False
+        engine = _engine_for(ws.schema)  # type: ignore[attr-defined]
+        if route == "migrated_reset" or _WORKER_SCHEMA_DIRTY["value"]:
+            ws = await worker_schema.reset(engine, ws)  # type: ignore[arg-type]
+        _WORKER_SCHEMAS["pilot"] = ws
+        _WORKER_SCHEMA_DIRTY["value"] = route == "migrated_reset"
+        if route == "rollback":
+            scope = worker_schema.rollback_scope(engine, ws)  # type: ignore[arg-type]
+            test_factory = await scope.__aenter__()
+            cleanup.append(lambda: scope.__aexit__(None, None, None))
+        else:
+            test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-        @event.listens_for(engine.sync_engine, "connect")
-        def set_search_path(dbapi_conn, connection_record):
-            cursor = dbapi_conn.cursor()
-            cursor.execute(f"SET search_path TO {schema}")
-            cursor.close()
-
-    # Redirect any code path that calls `app.database.async_session_factory`
-    # directly (auth middleware, webhook dispatcher and worker, etc.) to the
-    # test engine for the duration of this test.
+    # Route every database entry point to this test's engine: `app.database.async_session_factory`
+    # (auth middleware, webhook dispatcher and worker, etc.) and every module that copied it at import
+    # (stack_deploy, lab_documents, lab_glossary, agent_reviews). See tests/support/lifecycle.py.
     import app.database as database_module
 
-    original_session_factory = database_module.async_session_factory
-    database_module.async_session_factory = async_sessionmaker(  # type: ignore[assignment]
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
+    tasks_before = lifecycle.snapshot_tasks()
 
-    yield engine
-
-    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
-
-    if schema != "public":
-        async with engine.begin() as conn:
-            await conn.execute(sa_text(f"DROP SCHEMA {schema} CASCADE"))
-    else:
-        async with engine.begin() as conn:
-            rows = await conn.execute(sa_text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
-            tables = [row[0] for row in rows.fetchall()]
-        for table in tables:
-            async with engine.begin() as conn:
-                await conn.execute(sa_text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-        async with engine.begin() as conn:
-            rows = await conn.execute(
-                sa_text("SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typtype = 'e'")
-            )
-            for (name,) in rows.fetchall():
-                await conn.execute(sa_text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
-
-    await engine.dispose()
+    try:
+        yield engine
+    finally:
+        # While the test factory and schema still exist: let scheduled post-commit events finish,
+        # then cancel tasks the test started, so none keeps a transaction open (deadlocking the
+        # drop) or falls back to the production factory. Every step runs even if one fails.
+        await lifecycle.run_all(
+            lambda: lifecycle.drain_and_cancel(tasks_before),
+            restore_factories,
+            *cleanup,
+            engine.dispose,
+        )
 
 
 @pytest_asyncio.fixture
 async def session(db_engine):
-    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as session:
+    # The factory db_engine routed for this test (on the rollback route it joins the outer transaction).
+    import app.database as database_module
+
+    async with database_module.async_session_factory() as session:
         yield session
 
 
@@ -154,50 +181,26 @@ async def client(db_engine):
     import app.database as database_module
     import app.main as main_module
 
-    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    # The test factory db_engine installed, so middleware and requests share one route.
+    factory = database_module.async_session_factory
 
     original_lifespan = main_module.app.router.lifespan_context
     main_module.app.router.lifespan_context = _test_lifespan
     rate_limit_requests.clear()
-
-    # Middleware paths that go through `async_session_factory` directly (e.g.
-    # the API-key authentication path) need to see the test schema.
-    original_session_factory = database_module.async_session_factory
-    database_module.async_session_factory = factory  # type: ignore[assignment]
 
     async def override_get_session():
         async with factory() as session:
             yield session
 
     main_module.app.dependency_overrides[get_session] = override_get_session
-    async with AsyncClient(transport=ASGITransport(app=main_module.app), base_url="http://test") as c:
-        yield c
-    main_module.app.dependency_overrides.clear()
-    main_module.app.router.lifespan_context = original_lifespan
-
-    # Cancel detached background tasks the test spawned via endpoints (e.g. the
-    # lit-review-run `_execute_run` task fired by `schedule_run`). Done while the
-    # test session factory is still active and BEFORE the worker schema is
-    # dropped, so a leaked task cannot (a) keep a transaction open and deadlock
-    # DROP SCHEMA, or (b) fall back to the restored production factory and fail
-    # auth. Only our own app-code coroutines are cancelled; pytest/asyncio
-    # internals are left alone.
-    import asyncio as _asyncio
-
-    lingering = []
-    for _t in _asyncio.all_tasks():
-        if _t is _asyncio.current_task() or _t.done():
-            continue
-        _code = getattr(_t.get_coro(), "cr_code", None)
-        _file = getattr(_code, "co_filename", "") or ""
-        if f"{os.sep}app{os.sep}" in _file:
-            lingering.append(_t)
-    for _t in lingering:
-        _t.cancel()
-    if lingering:
-        await _asyncio.gather(*lingering, return_exceptions=True)
-
-    database_module.async_session_factory = original_session_factory  # type: ignore[assignment]
+    try:
+        async with AsyncClient(transport=ASGITransport(app=main_module.app), base_url="http://test") as c:
+            yield c
+    finally:
+        # Background tasks the test spawned through endpoints are cancelled by db_engine's teardown,
+        # which runs after this and before the schema is dropped.
+        main_module.app.dependency_overrides.clear()
+        main_module.app.router.lifespan_context = original_lifespan
 
 
 @pytest_asyncio.fixture
@@ -265,6 +268,62 @@ async def viewer_user(session, admin_user):
 async def viewer_token(viewer_user) -> str:
     return AuthService.create_token(
         viewer_user.id, viewer_user.email, viewer_user.role_id, viewer_user.organization_id, role_name="viewer"
+    )
+
+
+# Shared role builders. A test file that needs a different user (another Organization, extra
+# credentials, a different commit pattern) defines its own fixture of the same name, which wins.
+@pytest_asyncio.fixture
+async def comp_bio_user(session, admin_user):
+    from app.models.user import User
+
+    password_hash = AuthService.hash_password("compbiopass123")
+    user = User(
+        email="compbio@test.com",
+        password_hash=password_hash,
+        role_id=admin_user._test_role_map["comp_bio"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def comp_bio_token(comp_bio_user) -> str:
+    return AuthService.create_token(
+        comp_bio_user.id,
+        comp_bio_user.email,
+        comp_bio_user.role_id,
+        comp_bio_user.organization_id,
+        role_name="comp_bio",
+    )
+
+
+@pytest_asyncio.fixture
+async def bench_user(session, admin_user):
+    from app.models.user import User
+
+    password_hash = AuthService.hash_password("benchpass123")
+    user = User(
+        email="bench@test.com",
+        password_hash=password_hash,
+        role_id=admin_user._test_role_map["bench"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return user
+
+
+@pytest_asyncio.fixture
+async def bench_token(bench_user) -> str:
+    return AuthService.create_token(
+        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
     )
 
 

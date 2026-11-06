@@ -172,17 +172,6 @@ async def admin_test_token(admin_user) -> str:
 
 
 @pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
-@pytest_asyncio.fixture
 async def session_credentials(session, comp_bio_user):
     """Seed session credentials so work-node launch passes its precondition."""
     from app.models.session_credential import SessionCredential

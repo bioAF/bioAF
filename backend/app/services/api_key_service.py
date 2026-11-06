@@ -51,8 +51,12 @@ def _generate_secret() -> str:
     return "".join(secrets.choice(_ALPHABET) for _ in range(_SECRET_LEN))
 
 
+# bcrypt cost for key hashes. The test suite lowers it per test; production keeps 12.
+HASH_ROUNDS = 12
+
+
 def _hash(presented: str) -> str:
-    return bcrypt.hashpw(presented.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(presented.encode("utf-8"), bcrypt.gensalt(rounds=HASH_ROUNDS)).decode("utf-8")
 
 
 def _verify_hash(presented: str, hashed: str) -> bool:
