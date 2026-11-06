@@ -29,42 +29,6 @@ async def comp_bio_user(session, admin_user):
     return user
 
 
-@pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
-@pytest_asyncio.fixture
-async def bench_user(session, admin_user):
-    from app.models.user import User
-
-    password_hash = AuthService.hash_password("benchpass123")
-    user = User(
-        email="bench@test.com",
-        password_hash=password_hash,
-        role_id=admin_user._test_role_map["bench"],
-        organization_id=admin_user.organization_id,
-        status="active",
-    )
-    session.add(user)
-    await session.flush()
-    await session.commit()
-    return user
-
-
-@pytest_asyncio.fixture
-async def bench_token(bench_user) -> str:
-    return AuthService.create_token(
-        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
-    )
-
-
 @pytest.mark.asyncio
 async def test_session_launch(client, comp_bio_token):
     """Session launch creates session and job records."""

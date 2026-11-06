@@ -48,17 +48,6 @@ async def comp_bio_user(session, admin_user):
 
 
 @pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
-@pytest_asyncio.fixture
 async def comp_bio_auth(comp_bio_token):
     return {"Authorization": f"Bearer {comp_bio_token}"}
 

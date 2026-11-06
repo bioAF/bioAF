@@ -1,0 +1,114 @@
+name: Backend test benchmark
+
+# Manually triggered runtime comparison (plan 4). Never runs on pull requests: the
+# ordinary CI job keeps default durability and remains the correctness gate.
+# Run once per variant, at least twice each, and compare with
+# `python -m tests.plugins.phase_report` over the downloaded phases.jsonl files.
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_bcrypt_rounds:
+        description: "Test password hashing cost (12 = unchanged baseline)"
+        type: choice
+        options: ["4", "12"]
+        default: "4"
+      durability:
+        description: "PostgreSQL durability on the disposable service container"
+        type: choice
+        options: ["default", "tuned"]
+        default: "default"
+      scope:
+        description: "Representative subset or the full backend suite"
+        type: choice
+        options: ["subset", "full"]
+        default: "subset"
+      workers:
+        description: "pytest-xdist worker count (-n)"
+        type: string
+        default: "auto"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Benchmark (${{ inputs.scope }}, rounds ${{ inputs.test_bcrypt_rounds }}, ${{ inputs.durability }}, -n ${{ inputs.workers }})
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bioaf_test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: bioaf_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test
+      BIOAF_TEST_BCRYPT_ROUNDS: ${{ inputs.test_bcrypt_rounds }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          echo "install_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          pip install -r requirements.txt -r requirements-dev.txt
+          echo "install_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+
+      # GitHub service options cannot pass postgres command arguments, so the candidate
+      # settings are applied with ALTER SYSTEM and verified from a new connection.
+      - name: Tune the service container
+        if: inputs.durability == 'tuned'
+        run: python -m tests.support.disposable_pg tune-ci-service
+
+      - name: Run tests
+        run: |
+          mkdir -p test-artifacts
+          pip freeze > test-artifacts/pip-freeze.txt
+          if [ "${{ inputs.scope }}" = "subset" ]; then
+            targets=$(grep -v '^#' tests/benchmark_subset.txt | tr '\n' ' ')
+          else
+            targets=tests
+          fi
+          echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          status=0
+          # No -x: a comparison needs every outcome, not the first failure.
+          # $targets is a word list on purpose.
+          # shellcheck disable=SC2086
+          pytest -n "${{ inputs.workers }}" --tb=short --cov=app --cov-report=term-missing -q $targets \
+            --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
+            2>&1 | tee test-artifacts/pytest-output.txt || status=$?
+          echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          exit $status
+
+      - name: Summarize
+        if: always()
+        run: |
+          cp "$RUNNER_TEMP/timings.env" test-artifacts/timings.env || true
+          {
+            echo '```'
+            echo "scope=${{ inputs.scope }} rounds=${{ inputs.test_bcrypt_rounds }} durability=${{ inputs.durability }} workers=${{ inputs.workers }} cpus=$(nproc)"
+            cat test-artifacts/timings.env || true
+            python -m tests.plugins.phase_report test-artifacts/phases.jsonl || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ inputs.scope }}-r${{ inputs.test_bcrypt_rounds }}-${{ inputs.durability }}-n${{ inputs.workers }}-${{ github.run_id }}
+          path: backend/test-artifacts/

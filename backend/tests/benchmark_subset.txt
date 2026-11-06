@@ -1,0 +1,17 @@
+# Representative subset for screening runtime candidates (plan 4, stage 1).
+# Keep this list fixed across a comparison so baseline and candidate run the same tests.
+# Covers: database setup, password fixtures, API-key and setup-code hashing,
+# independent sessions, post-commit events, background work, migrations, plain CRUD.
+tests/test_auth.py
+tests/test_api_keys.py
+tests/test_setup_code_service.py
+tests/test_bootstrap_setup_code.py
+tests/test_post_commit_events.py
+tests/test_pipeline_launch_failure.py
+tests/test_terraform_routes_interruption.py
+tests/test_migrations_apply.py
+tests/test_notifications.py
+tests/test_notebooks.py
+tests/test_audit.py
+tests/test_batches.py
+tests/test_costs.py

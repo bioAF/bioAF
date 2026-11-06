@@ -6,31 +6,6 @@ from app.services.auth_service import AuthService
 
 
 @pytest_asyncio.fixture
-async def bench_user(session, admin_user):
-    from app.models.user import User
-
-    password_hash = AuthService.hash_password("benchpass123")
-    user = User(
-        email="bench@test.com",
-        password_hash=password_hash,
-        role_id=admin_user._test_role_map["bench"],
-        organization_id=admin_user.organization_id,
-        status="active",
-    )
-    session.add(user)
-    await session.flush()
-    await session.commit()
-    return user
-
-
-@pytest_asyncio.fixture
-async def bench_token(bench_user) -> str:
-    return AuthService.create_token(
-        bench_user.id, bench_user.email, bench_user.role_id, bench_user.organization_id, role_name="bench"
-    )
-
-
-@pytest_asyncio.fixture
 async def other_org_user(session):
     from app.models.organization import Organization
     from app.models.user import User

@@ -73,17 +73,6 @@ async def comp_bio_user(session, admin_user):
     return user
 
 
-@pytest_asyncio.fixture
-async def comp_bio_token(comp_bio_user) -> str:
-    return AuthService.create_token(
-        comp_bio_user.id,
-        comp_bio_user.email,
-        comp_bio_user.role_id,
-        comp_bio_user.organization_id,
-        role_name="comp_bio",
-    )
-
-
 async def _seed_notebook(session, *, user_id, org_id, status, created_at=None):
     from app.models.notebook_session import NotebookSession
 

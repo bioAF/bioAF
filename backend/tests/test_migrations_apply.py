@@ -30,13 +30,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.database import Base
 import app.models  # noqa: F401 -- registers every model on Base.metadata
 
+from tests.plugins import invocation
+
 from .conftest import TEST_DATABASE_URL
 
 ALEMBIC_DIR = Path(__file__).resolve().parent.parent / "alembic"
 
 # Its own schema, so applying 100+ migrations cannot disturb the create_all
-# tables the rest of the suite is using in `public` (or in a per-xdist-worker
-# schema). Named per worker for the same reason.
+# tables the rest of the suite is using. Named per invocation and worker for the
+# same reason.
 SCHEMA = "migration_check"
 
 # Drift categories that mean the models and the migrations genuinely disagree.
@@ -82,7 +84,8 @@ def _drift_key(diff) -> tuple | None:
 
 
 def _schema_for(worker_id: str) -> str:
-    return SCHEMA if worker_id == "master" else f"{SCHEMA}_{worker_id}"
+    """``migration_check_<invocation>_<worker>``: unique per invocation and worker, recorded for cleanup."""
+    return invocation.claim_schema(SCHEMA, worker_id)
 
 
 @pytest_asyncio.fixture
@@ -97,8 +100,8 @@ async def migrated_schema(worker_id):
 
     async with engine.begin() as conn:
         # Start from nothing, so this measures the chain and not leftovers.
-        await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
-        await conn.execute(text(f"CREATE SCHEMA {schema}"))
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
+        await conn.execute(text(f"CREATE SCHEMA {invocation.quote(schema)}"))
 
     cfg = Config(str(ALEMBIC_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(ALEMBIC_DIR))
@@ -121,7 +124,7 @@ async def migrated_schema(worker_id):
         yield conn, schema
 
     async with engine.begin() as conn:
-        await conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
     await engine.dispose()
 
 
@@ -256,3 +259,176 @@ async def test_running_migrations_leaves_test_logging_alone(root_capture_handler
     """
     assert not _APP_LOGGER.disabled
     assert root_capture_handler in logging.getLogger().handlers
+
+
+# --- rules beyond tables and columns (plan 4 stage 5, shared with plan 9) -------------------
+#
+# Compared through the catalogs by what they enforce, not by name. Each entry is drift that
+# exists today; anything not listed fails, and a listed entry that disappears fails too.
+
+# Uniqueness only the migration chain enforces: every create_all-backed test runs without these.
+UNIQUE_ONLY_IN_MIGRATIONS = {
+    ("experiments", "btree (organization_id, external_id) WHERE (external_id IS NOT NULL)"),
+    ("lab_glossary_terms", "btree (organization_id, lower((term)::text))"),
+    ("notification_preferences", "btree (user_id, event_type, channel)"),
+    ("notification_rules", "btree (organization_id, event_type, channel)"),
+    ("pipeline_catalog", "btree (organization_id, pipeline_key)"),
+    ("projects", "btree (organization_id, external_id) WHERE (external_id IS NOT NULL)"),
+    # Migration 080.
+    ("samples", "btree (experiment_id, external_id) WHERE (external_id IS NOT NULL)"),
+    (
+        "samples",
+        "btree (sequencing_batch_id, sequencing_batch_position) "
+        "WHERE ((sequencing_batch_id IS NOT NULL) AND (sequencing_batch_position IS NOT NULL))",
+    ),
+    ("session_credentials", "btree (organization_id, username)"),
+}
+
+# NOT NULL only the models declare: production accepts NULL here, create_all-backed tests do not.
+NOT_NULL_ONLY_IN_MODELS = {
+    ("custom_pipeline_versions", "created_at"),
+    ("custom_pipelines", "created_at"),
+    ("custom_pipelines", "updated_at"),
+    ("entity_snapshots", "created_at"),
+    ("environment_versions", "created_at"),
+    ("environments", "created_at"),
+    ("environments", "updated_at"),
+    ("experiment_auto_runs", "created_at"),
+    ("experiment_auto_runs", "updated_at"),
+    ("manifest_entries", "created_at"),
+    ("notebook_session_files", "access_type"),
+    ("notebook_session_files", "accessed_at"),
+    ("notebook_session_files", "file_id"),
+    ("notebook_session_files", "session_id"),
+    ("pending_auto_runs", "created_at"),
+    ("pipeline_run_input_files", "created_at"),
+    ("platform_config", "value"),
+    ("roles", "created_at"),
+    ("sample_batches", "created_at"),
+    ("sample_batches", "updated_at"),
+    ("samplesheet_mappings", "created_at"),
+    ("samplesheet_mappings", "updated_at"),
+    ("sequencing_batches", "created_at"),
+    ("sequencing_batches", "updated_at"),
+    ("session_credentials", "created_at"),
+    ("session_credentials", "updated_at"),
+    ("slack_channel_mappings", "created_at"),
+    ("slack_installations", "created_at"),
+}
+
+# Rows an empty-schema upgrade leaves behind. All global; migrations that backfill per
+# Organization (roles in 036, permissions in later ones) find no Organization and insert nothing,
+# so roles come only from seed_builtin_roles when a test or install creates an Organization.
+MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 42}
+
+
+@pytest_asyncio.fixture
+async def create_all_schema(worker_id):
+    """The schema every other test in the suite uses, built the same way, in its own namespace."""
+    schema = invocation.claim_schema("createall_check", worker_id)
+    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"server_settings": {"search_path": schema}})
+    async with engine.begin() as conn:
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
+        await conn.execute(text(f"CREATE SCHEMA {invocation.quote(schema)}"))
+        await conn.run_sync(Base.metadata.create_all)
+    yield schema
+    async with engine.begin() as conn:
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {invocation.quote(schema)} CASCADE"))
+    await engine.dispose()
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_constraint_drift_between_migrations_and_models_is_exactly_the_recorded_drift(
+    migrated_schema, create_all_schema
+):
+    """Uniqueness, foreign keys, checks and NOT NULL agree except for the recorded entries."""
+    from tests.support import schema_catalog
+
+    conn, schema = migrated_schema
+    migrated = await schema_catalog.read(conn, schema, count_rows=False)
+    created = await schema_catalog.read(conn, create_all_schema, count_rows=False)
+    diff = schema_catalog.differences(migrated, created)
+
+    assert set(diff["unique"]["migrations_only"]) == UNIQUE_ONLY_IN_MIGRATIONS
+    assert diff["unique"]["models_only"] == []
+    assert diff["foreign_keys"] == {"migrations_only": [], "models_only": []}
+    assert diff["checks"] == {"migrations_only": [], "models_only": []}
+    assert diff["not_null"]["migrations_only"] == []
+    assert set(diff["not_null"]["models_only"]) == NOT_NULL_ONLY_IN_MODELS
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_an_empty_schema_upgrade_seeds_only_global_rows(migrated_schema):
+    from tests.support import schema_catalog
+
+    conn, schema = migrated_schema
+    catalog = await schema_catalog.read(conn, schema)
+    assert catalog["seeded"] == MIGRATION_SEEDS
+    assert "roles" not in catalog["seeded"], "roles are per Organization; seed_builtin_roles owns them"
+
+
+async def _org_and_experiment(conn) -> int:
+    org = (await conn.execute(text("INSERT INTO organizations (name) VALUES ('o') RETURNING id"))).scalar_one()
+    project = (
+        await conn.execute(
+            text("INSERT INTO projects (name, organization_id, status) VALUES ('p', :o, 'active') RETURNING id"),
+            {"o": org},
+        )
+    ).scalar_one()
+    return (
+        await conn.execute(
+            text(
+                "INSERT INTO experiments (name, organization_id, project_id, status) "
+                "VALUES ('e', :o, :p, 'registered') RETURNING id"
+            ),
+            {"o": org, "p": project},
+        )
+    ).scalar_one()
+
+
+async def _add_sample(conn, experiment_id: int, external_id: str | None) -> None:
+    await conn.execute(
+        text("INSERT INTO samples (experiment_id, external_id, status) VALUES (:e, :x, 'registered')"),
+        {"e": experiment_id, "x": external_id},
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_migration_080_refuses_a_repeated_external_id_within_one_experiment(migrated_schema):
+    from sqlalchemy.exc import IntegrityError
+
+    conn, _ = migrated_schema
+    experiment = await _org_and_experiment(conn)
+    other = await _org_and_experiment(conn)
+    await _add_sample(conn, experiment, "S-1")
+    await _add_sample(conn, other, "S-1")  # another experiment may reuse it
+    await _add_sample(conn, experiment, None)
+    await _add_sample(conn, experiment, None)  # the index is partial: unnamed samples never collide
+    await conn.commit()
+
+    with pytest.raises(IntegrityError, match="uq_samples_experiment_external_id"):
+        await _add_sample(conn, experiment, "S-1")
+
+    # The caller recovers: after rolling back, the connection is usable and earlier work is intact.
+    await conn.rollback()
+    await _add_sample(conn, experiment, "S-2")
+    await conn.commit()
+    names = (
+        await conn.execute(
+            text("SELECT external_id FROM samples WHERE experiment_id = :e ORDER BY external_id"),
+            {"e": experiment},
+        )
+    ).scalars()
+    assert list(names) == ["S-1", "S-2", None, None]
