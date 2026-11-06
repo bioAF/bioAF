@@ -628,6 +628,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_coverage_report.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_create_admin.py": {
    "category": "single_connection",
    "evidence": [
