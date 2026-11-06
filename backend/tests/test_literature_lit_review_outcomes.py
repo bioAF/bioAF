@@ -44,6 +44,7 @@ from app.services.literature.sources import ADAPTERS, PaperRecord
 from app.services.llm_provider_clients import ProviderError
 
 SOURCES = sorted(ADAPTERS)
+REAL_SEARCH = {name: module.search for name, module in ADAPTERS.items()}
 TERMINAL_EVENTS = (LITERATURE_REVIEW_RUN_COMPLETED, LITERATURE_REVIEW_RUN_FAILED)
 
 
@@ -1405,3 +1406,24 @@ async def test_cancellation_right_after_failed_outcome_commit_still_emits_failed
     assert run.status == "failed"
     assert run.error_message == "llm_ranking: overloaded"
     assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_source_makes_review_partial_not_complete(h, monkeypatch):
+    import respx
+
+    from app.services.literature.sources import semanticscholar
+
+    # Real Semantic Scholar adapter against a mocked 429, as seen live on blackbird.
+    monkeypatch.setattr(semanticscholar, "search", REAL_SEARCH["semanticscholar"])
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(f"{semanticscholar._BASE}/paper/search").respond(status_code=429)
+        run = await h.run()
+
+    assert run.status == "partial"
+    assert run.error_message == "some_literature_sources_failed: semanticscholar 1/1 attempts failed"
+    audit = [a for a in await h.audits(run.id) if a.action == "complete"]
+    assert audit[0].details_json["sources"]["semanticscholar"]["failure_categories"] == ["HTTPStatusError"]

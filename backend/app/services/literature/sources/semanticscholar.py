@@ -28,14 +28,11 @@ def get_rate_limit(has_api_key: bool) -> RateLimit:
 async def search(query: str, max_results: int, api_key: str | None) -> list[PaperRecord]:
     params = {"query": query, "limit": str(min(max_results, 100)), "fields": _FIELDS}
     headers = {"x-api-key": api_key} if api_key else {}
+    # Errors propagate so callers classify an outage as a failed attempt.
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        try:
-            r = await client.get(f"{_BASE}/paper/search", params=params, headers=headers)
-            r.raise_for_status()
-            data = r.json()
-        except (httpx.HTTPError, ValueError) as e:
-            logger.warning("Semantic Scholar search failed: %s", e)
-            return []
+        r = await client.get(f"{_BASE}/paper/search", params=params, headers=headers)
+        r.raise_for_status()
+        data = r.json()
     return [_parse_result(item) for item in data.get("data", [])]
 
 
