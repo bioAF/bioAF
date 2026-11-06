@@ -255,8 +255,13 @@ class LabDocumentUploadService:
                             continue
                         response.raise_for_status()
                         declared = response.headers.get("content-length")
-                        if declared is not None and int(declared) > MAX_URL_DOWNLOAD_BYTES:
-                            raise ValidationError("File at URL exceeds the 100 MB import limit")
+                        if declared is not None:
+                            try:
+                                declared_bytes = int(declared)
+                            except ValueError:
+                                raise ValidationError("Could not fetch URL: unreadable Content-Length")
+                            if declared_bytes > MAX_URL_DOWNLOAD_BYTES:
+                                raise ValidationError("File at URL exceeds the 100 MB import limit")
                         chunks: list[bytes] = []
                         total = 0
                         async for chunk in response.aiter_bytes():

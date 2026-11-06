@@ -35,7 +35,12 @@ import httpx
 import pytest
 
 from app.exceptions import ValidationError
-from app.services.lab_document_upload_service import LabDocumentUploadService, _assert_public_url
+from app.services.lab_document_upload_service import (
+    URL_FETCH_TIMEOUT_SECONDS,
+    LabDocumentUploadService,
+    _assert_public_url,
+)
+from app.services.lab_document_upload_service import _open_http_client as _real_open_http_client
 
 UPLOAD = "app.services.lab_document_upload_service.LabDocumentUploadService"
 
@@ -430,3 +435,158 @@ async def test_a_redirect_loop_is_refused_at_the_limit(url_network):
         await LabDocumentUploadService._fetch_url(START)
 
     assert url_network.requests == [START] * (MAX_URL_REDIRECTS + 1)
+
+
+# --- allowed downloads and their limits --------------------------------------
+
+DOC = "https://files.example/policy.pdf"
+
+
+@pytest.mark.asyncio
+async def test_a_public_download_returns_its_bytes_name_and_type(url_network):
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = _pdf()
+
+    assert await LabDocumentUploadService._fetch_url(DOC) == (b"%PDF-1.4 body", "policy.pdf", "application/pdf")
+    assert url_network.requests == [DOC]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_size_over_the_limit_is_refused(url_network, monkeypatch):
+    from app.services import lab_document_upload_service
+
+    monkeypatch.setattr(lab_document_upload_service, "MAX_URL_DOWNLOAD_BYTES", 8)
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = httpx.Response(200, headers={"content-length": "9"}, content=b"123456789")
+
+    with pytest.raises(ValidationError, match="import limit"):
+        await LabDocumentUploadService._fetch_url(DOC)
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_body_over_the_limit_is_refused(url_network, monkeypatch):
+    from app.services import lab_document_upload_service
+
+    monkeypatch.setattr(lab_document_upload_service, "MAX_URL_DOWNLOAD_BYTES", 8)
+
+    async def body():
+        for _ in range(3):
+            yield b"1234"
+
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = lambda request: httpx.Response(200, content=body())
+
+    with pytest.raises(ValidationError, match="import limit"):
+        await LabDocumentUploadService._fetch_url(DOC)
+
+
+@pytest.mark.asyncio
+async def test_a_body_at_the_limit_is_accepted(url_network, monkeypatch):
+    from app.services import lab_document_upload_service
+
+    monkeypatch.setattr(lab_document_upload_service, "MAX_URL_DOWNLOAD_BYTES", 8)
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = httpx.Response(200, content=b"%PDF-1.4")
+
+    content, _, _ = await LabDocumentUploadService._fetch_url(DOC)
+
+    assert content == b"%PDF-1.4"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_declared_size_is_refused(url_network):
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = httpx.Response(200, headers={"content-length": "lots"}, content=b"%PDF-1.4")
+
+    with pytest.raises(ValidationError, match="Content-Length"):
+        await LabDocumentUploadService._fetch_url(DOC)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "reason"),
+    [
+        (httpx.ReadTimeout("timed out"), "Could not fetch URL"),
+        (httpx.ConnectError("connection refused"), "Could not fetch URL"),
+        (httpx.Response(404), r"HTTP 404"),
+        (httpx.Response(200, content=b""), "empty file"),
+    ],
+    ids=["timeout", "transport", "http-status", "empty"],
+)
+async def test_a_failed_download_is_a_validation_error(url_network, route, reason):
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = route
+
+    with pytest.raises(ValidationError, match=reason):
+        await LabDocumentUploadService._fetch_url(DOC)
+
+
+@pytest.mark.asyncio
+async def test_the_download_client_times_out_and_does_not_follow_redirects_itself():
+    async with _real_open_http_client() as http:
+        assert http.timeout == httpx.Timeout(URL_FETCH_TIMEOUT_SECONDS)
+        assert http.follow_redirects is False
+
+
+@pytest.mark.asyncio
+async def test_an_allowed_import_completes_through_the_real_guard_and_downloader(client, admin_token, url_network):
+    import app.database as database_module
+
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = _pdf()
+
+    with patch(f"{UPLOAD}.run_url_import", new_callable=AsyncMock):
+        resp = await client.post(
+            "/api/lab-knowledge/documents/import-url",
+            json={"url": DOC, "tag_ids": []},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 202, resp.text
+    import_id = resp.json()["id"]
+
+    with (
+        patch(f"{UPLOAD}._get_working_bucket", new_callable=AsyncMock, return_value="wb"),
+        patch(f"{UPLOAD}._upload_bytes", new_callable=AsyncMock, return_value=None),
+        patch(
+            f"{UPLOAD}.read_metadata",
+            new_callable=AsyncMock,
+            return_value={"file_name": "policy.pdf", "mime_type": "application/pdf", "size_bytes": 13, "md5": "m"},
+        ),
+        patch(
+            f"{UPLOAD}.place", new_callable=AsyncMock, return_value="gs://wb/lab-knowledge/documents/1/v1/policy.pdf"
+        ),
+    ):
+        await LabDocumentUploadService.run_url_import(database_module.async_session_factory, import_id=import_id)
+
+    status = await client.get(
+        f"/api/lab-knowledge/documents/url-imports/{import_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert status.json()["status"] == "complete", status.text
+    assert url_network.requests == [DOC]
+
+
+# --- the literature open-access consumer ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_literature_downloader_skips_refused_and_malformed_copies_for_a_usable_one(url_network, monkeypatch):
+    from app.services.literature import fulltext_service
+
+    async def parse(pdf_bytes):
+        return {"page_count": 1}
+
+    monkeypatch.setattr(fulltext_service, "parse_pdf", parse)
+    url_network.answers["files.example"] = ["93.184.216.34"]
+    url_network.routes[DOC] = _pdf()
+    locations = [
+        {"pdf_url": "http://10.0.0.5/a.pdf", "version": "publishedVersion"},
+        {"pdf_url": "http://files.example:abc/b.pdf", "version": "acceptedVersion"},
+        {"pdf_url": DOC, "version": "submittedVersion"},
+    ]
+
+    copy = await fulltext_service.fetch_open_access_pdf(locations)
+
+    assert copy is not None
+    assert copy.location["pdf_url"] == DOC
+    assert url_network.requests == [DOC]
