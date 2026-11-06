@@ -27,6 +27,12 @@ async def list_for_org(session: AsyncSession, org_id: int) -> list[LiteratureSou
     return list(result.scalars().all())
 
 
+async def list_enabled(session: AsyncSession, org_id: int) -> list[LiteratureSourcesConfig]:
+    """The org's currently enabled sources. Every AI Literature Review boundary
+    (creation, execution, scheduled sweep) reads configuration through here."""
+    return [row for row in await list_for_org(session, org_id) if row.enabled]
+
+
 async def get_or_create(session: AsyncSession, org_id: int, source: str) -> LiteratureSourcesConfig:
     if source not in EXTERNAL_SOURCES:
         raise UnknownSource(f"unknown source: {source}")

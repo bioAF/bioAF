@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,7 +37,6 @@ from app.models.literature import (
     LiteraturePaperDismissal,
     LiteratureRecommendation,
     LiteratureReviewRun,
-    LiteratureSourcesConfig,
     PROVENANCE_LIT_REVIEW_RUN,
     REC_ACCEPTED,
     SCOPE_EXPERIMENT,
@@ -55,7 +55,7 @@ from app.services.event_types import (
     LITERATURE_REVIEW_RUN_COMPLETED,
     LITERATURE_REVIEW_RUN_FAILED,
 )
-from app.services.literature import association_service, paper_service
+from app.services.literature import association_service, paper_service, sources_config_service
 from app.services.literature.sources import PaperRecord, get_adapter
 from app.services.llm_provider_clients import ProviderError, get_client
 
@@ -73,6 +73,69 @@ class ReviewRunFailed(Exception):
 
 class NoActiveLlmProvider(Exception):
     pass
+
+
+NO_SOURCES_ENABLED = "no_literature_sources_enabled"
+
+
+class NoLiteratureSourcesEnabled(Exception):
+    pass
+
+
+@dataclass
+class _SourceAttempts:
+    attempts: int = 0
+    failed: int = 0
+    failure_categories: set[str] = field(default_factory=set)
+
+
+@dataclass
+class SourceOutcome:
+    """Per-source attempt counts across every expansion query.
+
+    Every source/query attempt counts, including successful attempts that
+    return zero papers. Failure categories are exception class names only, so
+    diagnostics never carry credentials or raw provider payloads."""
+
+    sources: dict[str, _SourceAttempts] = field(default_factory=dict)
+
+    def record(self, source: str, error: BaseException | None = None) -> None:
+        entry = self.sources.setdefault(source, _SourceAttempts())
+        entry.attempts += 1
+        if error is not None:
+            entry.failed += 1
+            entry.failure_categories.add(type(error).__name__)
+
+    @property
+    def status(self) -> str:
+        attempts = sum(e.attempts for e in self.sources.values())
+        failed = sum(e.failed for e in self.sources.values())
+        if failed == 0:
+            return SEARCH_COMPLETE
+        if failed == attempts:
+            return SEARCH_FAILED
+        return SEARCH_PARTIAL
+
+    def summary(self) -> str | None:
+        """Stable error_message naming each affected source, or None when no attempt failed."""
+        status = self.status
+        if status == SEARCH_COMPLETE:
+            return None
+        prefix = "all_literature_sources_failed" if status == SEARCH_FAILED else "some_literature_sources_failed"
+        parts = [
+            f"{name} {e.failed}/{e.attempts} attempts failed" for name, e in sorted(self.sources.items()) if e.failed
+        ]
+        return f"{prefix}: {'; '.join(parts)}"
+
+    def audit_details(self) -> dict[str, dict]:
+        return {
+            name: {
+                "attempts": e.attempts,
+                "failed": e.failed,
+                "failure_categories": sorted(e.failure_categories),
+            }
+            for name, e in sorted(self.sources.items())
+        }
 
 
 async def create_run(
@@ -104,6 +167,9 @@ async def create_run(
     experiment = rs.scalar_one_or_none()
     if experiment is None or experiment.organization_id != org_id:
         raise ReviewRunFailed("experiment not found in this org")
+
+    if not await sources_config_service.list_enabled(session, org_id):
+        raise NoLiteratureSourcesEnabled(NO_SOURCES_ENABLED)
 
     if score_threshold is None:
         from app.models.organization import Organization
@@ -201,19 +267,14 @@ async def _do_run(run_id: int) -> None:
             return
         api_key = provider_cfg.api_key
 
-        sources_cfg = (
-            (
-                await s.execute(
-                    select(LiteratureSourcesConfig).where(
-                        LiteratureSourcesConfig.organization_id == run.organization_id,
-                        LiteratureSourcesConfig.enabled == True,  # noqa: E712
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        sources_by_name = {row.source: row for row in sources_cfg}
+        sources_by_name = {row.source: row for row in await sources_config_service.list_enabled(s, run.organization_id)}
+        if not sources_by_name:
+            run.status = SEARCH_FAILED
+            run.error_message = NO_SOURCES_ENABLED
+            run.completed_at = datetime.now(UTC)
+            await s.commit()
+            await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
+            return
 
     # 1. LLM generates expansion queries.
     queries: list[str] = []
@@ -239,8 +300,7 @@ async def _do_run(run_id: int) -> None:
 
     # 2. Fan out across sources for each query, aggregate, dedupe.
     candidates: list[PaperRecord] = []
-    failed_sources = 0
-    succeeded_sources = 0
+    source_outcome = SourceOutcome()
     seen_keys: set[str] = set()
     for q in queries:
         per_query_tasks = {
@@ -250,11 +310,11 @@ async def _do_run(run_id: int) -> None:
         for src, t in per_query_tasks.items():
             try:
                 records = await t
-                succeeded_sources += 1
-            except Exception as e:  # pragma: no cover
-                logger.warning("source %s failed during query '%s': %s", src, q, e)
-                failed_sources += 1
+            except Exception as e:
+                logger.warning("source %s failed during query '%s': %s", src, q, type(e).__name__)
+                source_outcome.record(src, e)
                 continue
+            source_outcome.record(src)
             for rec in records:
                 key = (rec.doi or "").lower() or rec.title.lower()
                 if key in seen_keys:
@@ -270,13 +330,31 @@ async def _do_run(run_id: int) -> None:
             run = await _load_run(s, run_id)
             run.candidate_count = 0
             run.recommendation_count = 0
-            run.status = SEARCH_COMPLETE
+            run.status = source_outcome.status
+            run.error_message = source_outcome.summary()
             run.completed_at = datetime.now(UTC)
+            run_status = run.status
+            await audit_service.log_action(
+                s,
+                user_id=run.triggered_by_user_id,
+                entity_type="literature_review_run",
+                entity_id=run.id,
+                action="complete" if run_status != SEARCH_FAILED else "fail",
+                details={
+                    "candidate_count": 0,
+                    "recommendation_count": 0,
+                    "status": run_status,
+                    "sources": source_outcome.audit_details(),
+                },
+            )
             await s.commit()
-        await event_bus.emit(
-            LITERATURE_REVIEW_RUN_COMPLETED,
-            {"run_id": run_id, "recommendation_count": 0},
-        )
+        if run_status == SEARCH_FAILED:
+            await event_bus.emit(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})
+        else:
+            await event_bus.emit(
+                LITERATURE_REVIEW_RUN_COMPLETED,
+                {"run_id": run_id, "recommendation_count": 0},
+            )
         return
 
     candidates = candidates[:_DEFAULT_CANDIDATE_CAP]
@@ -349,13 +427,9 @@ async def _do_run(run_id: int) -> None:
             rec_count += 1
 
         run.recommendation_count = rec_count
-        if failed_sources and not succeeded_sources:
-            run.status = SEARCH_FAILED
-            run.error_message = "all sources failed"
-        elif failed_sources:
-            run.status = SEARCH_PARTIAL
-        else:
-            run.status = SEARCH_COMPLETE
+        # Candidates exist, so at least one attempt succeeded: complete or partial.
+        run.status = source_outcome.status
+        run.error_message = source_outcome.summary()
         run.completed_at = datetime.now(UTC)
 
         # Capture fields for the per-user notification before the session closes.
@@ -376,7 +450,7 @@ async def _do_run(run_id: int) -> None:
                 "candidate_count": run.candidate_count,
                 "recommendation_count": rec_count,
                 "status": run.status,
-                "failed_sources": failed_sources,
+                "sources": source_outcome.audit_details(),
             },
         )
         await s.commit()

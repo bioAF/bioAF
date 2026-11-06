@@ -40,6 +40,7 @@ from app.services.event_types import (
 )
 from app.services.literature import lit_review_run_service
 from app.services.literature.sources import ADAPTERS, PaperRecord
+from app.services.llm_provider_clients import ProviderError
 
 SOURCES = sorted(ADAPTERS)
 TERMINAL_EVENTS = (LITERATURE_REVIEW_RUN_COMPLETED, LITERATURE_REVIEW_RUN_FAILED)
@@ -470,3 +471,356 @@ async def test_manual_run_sends_no_auto_review_notification(h):
     await h.run()
 
     assert [et for et, _ in h.events if et == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS] == []
+
+
+# ---------------------------------------------------------------------------
+# Source outcome classification
+# ---------------------------------------------------------------------------
+
+
+def fail(exc: BaseException = None):
+    return lambda query: exc or RuntimeError("upstream exploded token=SECRET-TOKEN")
+
+
+def all_sources(h, behavior) -> None:
+    for name in SOURCES:
+        h.source(name, behavior)
+
+
+@pytest.mark.asyncio
+async def test_every_attempt_failing_fails_the_run_without_scoring(h):
+    all_sources(h, fail())
+    h.script_llm("q1\nq2")
+
+    run = await h.run()
+
+    assert run.status == "failed"
+    assert run.completed_at is not None
+    assert run.candidate_count == 0
+    assert run.recommendation_count == 0
+    expected = "; ".join(f"{name} 2/2 attempts failed" for name in SOURCES)
+    assert run.error_message == f"all_literature_sources_failed: {expected}"
+    assert len(h.llm.payloads) == 1  # query generation only, no scoring call
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+@pytest.mark.asyncio
+async def test_partial_outage_without_candidates_is_partial_not_complete(h):
+    h.source("pubmed", fail())
+    h.script_llm("q1\nq2")
+
+    run = await h.run()
+
+    assert run.status == "partial"
+    assert run.completed_at is not None
+    assert run.candidate_count == 0
+    assert run.recommendation_count == 0
+    assert run.error_message == "some_literature_sources_failed: pubmed 2/2 attempts failed"
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run.id, "recommendation_count": 0})]
+
+
+@pytest.mark.asyncio
+async def test_partial_outage_with_candidates_explains_failed_sources(h):
+    h.source("europepmc", fail())
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    run = await h.run()
+
+    assert run.status == "partial"
+    assert run.recommendation_count == 1
+    assert run.error_message == "some_literature_sources_failed: europepmc 1/1 attempts failed"
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run.id, "recommendation_count": 1})]
+
+
+@pytest.mark.asyncio
+async def test_source_failing_one_query_and_succeeding_another_makes_run_partial(h):
+    h.source("pubmed", lambda q: RuntimeError("down") if q == "q1" else [paper(1)])
+    h.script_llm("q1\nq2", scores((0, 0.9)))
+
+    run = await h.run()
+
+    assert run.status == "partial"
+    assert run.recommendation_count == 1
+    assert run.error_message == "some_literature_sources_failed: pubmed 1/2 attempts failed"
+
+
+@pytest.mark.asyncio
+async def test_all_attempts_succeeding_with_zero_results_is_complete(h):
+    h.script_llm("q1\nq2")
+
+    run = await h.run()
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.candidate_count == 0
+    assert run.recommendation_count == 0
+    assert len(h.calls) == 2 * len(SOURCES)
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run.id, "recommendation_count": 0})]
+
+
+@pytest.mark.asyncio
+async def test_all_candidates_excluded_with_complete_sources_is_complete(h):
+    known = paper(1)
+    await h.add_paper(known, in_library=True)
+    h.source("pubmed", always([known]))
+    h.script_llm("q1")
+
+    run = await h.run()
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.candidate_count == 0
+    assert len(h.llm.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_all_candidates_excluded_with_partial_sources_is_partial(h):
+    known = paper(1)
+    await h.add_paper(known, in_library=True)
+    h.source("pubmed", always([known]))
+    h.source("biorxiv", fail())
+    h.script_llm("q1")
+
+    run = await h.run()
+
+    assert run.status == "partial"
+    assert run.error_message == "some_literature_sources_failed: biorxiv 1/1 attempts failed"
+
+
+@pytest.mark.asyncio
+async def test_no_scores_above_threshold_is_complete(h):
+    h.source("pubmed", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.1)))
+
+    run = await h.run(score_threshold=0.5)
+
+    assert run.status == "complete"
+    assert run.error_message is None
+    assert run.recommendation_count == 0
+
+
+@pytest.mark.asyncio
+async def test_source_diagnostics_in_audit_are_safe(h):
+    async with _database.async_session_factory() as s:
+        row = (
+            await s.execute(
+                select(LiteratureSourcesConfig).where(
+                    LiteratureSourcesConfig.organization_id == h.org_id, LiteratureSourcesConfig.source == "pubmed"
+                )
+            )
+        ).scalar_one()
+        row.api_key = "SECRET-API-KEY"
+        await s.commit()
+    h.source("pubmed", lambda q: TimeoutError() if q == "q1" else RuntimeError("payload token=SECRET-TOKEN"))
+    h.script_llm("q1\nq2")
+
+    run = await h.run()
+
+    audit = [a for a in await h.audits(run.id) if a.action == "complete"]
+    assert len(audit) == 1
+    details = audit[0].details_json
+    assert details["status"] == "partial"
+    assert details["sources"]["pubmed"] == {
+        "attempts": 2,
+        "failed": 2,
+        "failure_categories": ["RuntimeError", "TimeoutError"],
+    }
+    assert details["sources"]["europepmc"] == {"attempts": 2, "failed": 0, "failure_categories": []}
+    flat = json.dumps(details) + (run.error_message or "")
+    assert "SECRET" not in flat
+
+
+# ---------------------------------------------------------------------------
+# No enabled sources: creation, execution race, scheduled sweep
+# ---------------------------------------------------------------------------
+
+
+async def _set_sources_enabled(h, enabled: bool) -> None:
+    async with _database.async_session_factory() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(LiteratureSourcesConfig).where(LiteratureSourcesConfig.organization_id == h.org_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            row.enabled = enabled
+        await s.commit()
+
+
+async def _run_count(h) -> int:
+    async with _database.async_session_factory() as s:
+        rows = await s.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.organization_id == h.org_id))
+        return len(rows.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_manual_creation_without_enabled_sources_is_rejected(h, client, admin_token, monkeypatch):
+    await _set_sources_enabled(h, False)
+    scheduled: list[int] = []
+
+    async def record_schedule(*, run_id):
+        scheduled.append(run_id)
+
+    monkeypatch.setattr(lit_review_run_service, "schedule_run", record_schedule)
+
+    resp = await client.post(
+        f"/api/literature/experiments/{h.experiment_id}/lit-review-runs",
+        json={},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "no_literature_sources_enabled"
+    assert await _run_count(h) == 0
+    assert scheduled == []
+    assert h.llm.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_create_run_service_rejects_without_enabled_sources(h):
+    await _set_sources_enabled(h, False)
+
+    with pytest.raises(lit_review_run_service.NoLiteratureSourcesEnabled):
+        await h.create_run()
+
+    await h.session.rollback()
+    assert await _run_count(h) == 0
+
+
+@pytest.mark.asyncio
+async def test_sources_disabled_after_creation_fail_before_llm_spend(h):
+    run_id = await h.create_run()
+    await _set_sources_enabled(h, False)
+    h.script_llm("q1", scores((0, 0.9)))
+
+    await h.execute(run_id)
+    run = await h.load(run_id)
+
+    assert run.status == "failed"
+    assert run.error_message == "no_literature_sources_enabled"
+    assert run.completed_at is not None
+    assert h.llm.payloads == []
+    assert h.calls == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+
+
+async def _make_due(h) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.organization import Organization
+    from app.models.sample import Sample
+
+    org = (await h.session.execute(select(Organization).where(Organization.id == h.org_id))).scalar_one()
+    org.lit_review_auto_enabled = True
+    org.lit_review_auto_cadence = "daily"
+    h.session.add(
+        Sample(experiment_id=h.experiment_id, status="registered", created_at=datetime.now(UTC) - timedelta(days=1))
+    )
+    await h.session.commit()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sweep_skips_org_without_enabled_sources(h):
+    from app.services.literature import lit_review_auto_service
+
+    await _make_due(h)
+    await _set_sources_enabled(h, False)
+
+    result = await lit_review_auto_service.run_due_sweep(h.session, h.org_id)
+
+    assert result["skipped_reason"] == "no_literature_sources_enabled"
+    assert result["ran"] == []
+    assert await _run_count(h) == 0
+    assert h.llm.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, monkeypatch):
+    import types
+    from datetime import UTC, datetime, timedelta
+
+    import app.main as main_mod
+    from app.services.literature import lit_review_auto_service as auto
+
+    await _make_due(h)
+    await _set_sources_enabled(h, False)
+
+    # The loop is hard-wired to org 1; route its calls to this test's org.
+    real_sweep, real_advance = auto.run_due_sweep, auto.advance_next_run
+    sweeps: list[dict] = []
+
+    async def due(session, org_id, **kw):
+        return True
+
+    async def seeded(session, org_id, **kw):
+        return None
+
+    async def sweep(session, org_id, **kw):
+        sweeps.append(await real_sweep(session, h.org_id, **kw))
+        return sweeps[-1]
+
+    async def advance(session, org_id, **kw):
+        await real_advance(session, h.org_id, **kw)
+
+    monkeypatch.setattr(auto, "is_tick_due", due)
+    monkeypatch.setattr(auto, "ensure_next_run_seeded", seeded)
+    monkeypatch.setattr(auto, "run_due_sweep", sweep)
+    monkeypatch.setattr(auto, "advance_next_run", advance)
+
+    import asyncio as real_asyncio
+
+    ticks = {"n": 0}
+
+    async def fake_sleep(seconds):
+        ticks["n"] += 1
+        if ticks["n"] > 1:
+            raise real_asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        main_mod, "asyncio", types.SimpleNamespace(sleep=fake_sleep, CancelledError=real_asyncio.CancelledError)
+    )
+
+    before = datetime.now(UTC)
+    await main_mod._lit_review_auto_loop()
+    after = datetime.now(UTC)
+
+    assert [s["skipped_reason"] for s in sweeps] == ["no_literature_sources_enabled"]
+    async with _database.async_session_factory() as s:
+        next_run = await auto.get_next_run(s)
+    assert before + timedelta(hours=24) <= next_run <= after + timedelta(hours=24)
+
+
+# ---------------------------------------------------------------------------
+# Query generation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_query_generation_provider_error_fails_before_source_calls(h):
+    h.script_llm(ProviderError("rate limited", error_class="rate_limit"))
+
+    run = await h.run()
+
+    assert run.status == "failed"
+    assert run.error_message == "llm_query_generation: rate limited"
+    assert run.completed_at is not None
+    assert h.calls == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]
+
+
+@pytest.mark.asyncio
+async def test_query_generation_without_valid_queries_fails(h):
+    h.script_llm("\n  - \n1.\n")
+
+    run = await h.run()
+
+    assert run.status == "failed"
+    assert run.error_message == "llm_generated_no_valid_queries"
+    assert run.completed_at is not None
+    assert h.calls == []
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run.id})]

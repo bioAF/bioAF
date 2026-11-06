@@ -37,6 +37,10 @@ async def _make_experiment(session, admin_user):
 
 async def _seed_llm_provider(session, admin_user):
     from app.services import llm_provider_config_service
+    from app.services.bootstrap_literature import seed_literature_sources
+
+    # Real orgs get their sources at bootstrap; a review needs at least one enabled.
+    await seed_literature_sources(session, admin_user.organization_id)
 
     await llm_provider_config_service.upsert(
         session,
