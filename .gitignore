@@ -35,6 +35,7 @@ build/
 # Node
 .next/
 node_modules/
+frontend/coverage/
 *.tsbuildinfo
 
 # Update system
