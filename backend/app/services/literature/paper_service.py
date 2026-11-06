@@ -62,8 +62,8 @@ async def find_duplicate(
     """Return an existing paper that matches the org-scoped dedup keys, or None.
 
     DOI is the strong key (case-insensitive, prefix-stripped via lower()).
-    Fallback uses normalized title plus first/last author keys, all scoped
-    to the organization. Pass exclude_paper_id to skip a known row (used when
+    Fallback uses normalized title plus first/last author keys (empty for an
+    author-less paper), all scoped to the organization. Pass exclude_paper_id to skip a known row (used when
     checking whether a PDF upload to paper X collides with a *different*
     paper).
     """
@@ -83,7 +83,9 @@ async def find_duplicate(
         if existing is not None:
             return existing
 
-    if title_norm and first_key:
+    # Mirrors uq_literature_papers_org_fallback, where empty author keys still
+    # count: an author-less paper matches another author-less paper by title.
+    if title_norm:
         conditions = [
             LiteraturePaper.organization_id == org_id,
             LiteraturePaper.title_normalized == title_norm,

@@ -57,7 +57,11 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
             fetch_params["api_key"] = api_key
         fr = await client.get(f"{_BASE}/efetch.fcgi", params=fetch_params)
         fr.raise_for_status()
-        results = _parse_efetch_xml(fr.text)
+        try:
+            results = _parse_efetch_xml(fr.text)
+        except ET.ParseError as e:
+            logger.warning("PubMed efetch parse error: %s", e)
+            return None
         return results[0] if results else None
 
 
@@ -69,12 +73,10 @@ def _text(el: ET.Element | None) -> str | None:
 
 
 def _parse_efetch_xml(xml_text: str) -> list[PaperRecord]:
+    """Raises ET.ParseError on unreadable XML, so search() callers classify it
+    as a failed attempt rather than a search that found nothing."""
     results: list[PaperRecord] = []
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        logger.warning("PubMed efetch parse error: %s", e)
-        return results
+    root = ET.fromstring(xml_text)
     for article in root.findall(".//PubmedArticle"):
         title = sanitize_source_text(_text(article.find(".//ArticleTitle"))) or ""
         if not title:

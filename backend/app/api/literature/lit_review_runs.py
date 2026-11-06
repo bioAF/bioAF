@@ -55,6 +55,8 @@ async def create_lit_review_run_endpoint(
         )
     except lit_review_run_service.NoActiveLlmProvider:
         raise HTTPException(409, "no_active_llm_provider")
+    except lit_review_run_service.NoLiteratureSourcesEnabled:
+        raise HTTPException(409, lit_review_run_service.NO_SOURCES_ENABLED)
     except lit_review_run_service.ReviewRunFailed as e:
         raise HTTPException(400, str(e))
     await session.commit()

@@ -32,7 +32,7 @@ from app.models.role import Role
 from app.models.sample import Sample
 from app.models.user import User
 from app.services import llm_provider_config_service
-from app.services.literature import lit_review_run_service
+from app.services.literature import lit_review_run_service, sources_config_service
 from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.literature.lit_review_auto_service")
@@ -246,6 +246,9 @@ async def run_due_sweep(session: AsyncSession, org_id: int, *, triggered_by_user
     if await llm_provider_config_service.get_active(session, org_id) is None:
         logger.info("Automated Lit Review skipped: no active LLM provider for org %s", org_id)
         return {"ran": [], "due": [], "skipped_reason": "no_active_llm_provider"}
+    if not await sources_config_service.list_enabled(session, org_id):
+        logger.info("Automated Lit Review skipped: no enabled literature sources for org %s", org_id)
+        return {"ran": [], "due": [], "skipped_reason": lit_review_run_service.NO_SOURCES_ENABLED}
 
     actor = triggered_by_user_id
     if actor is None:
