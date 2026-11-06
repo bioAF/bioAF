@@ -1167,3 +1167,67 @@ async def test_every_failed_path_writes_one_fail_audit_with_status_and_error(h):
     assert details["candidate_count"] == 0
     assert details["recommendation_count"] == 0
     assert set(details["sources"]) == set(SOURCES)
+
+
+# ---------------------------------------------------------------------------
+# Both callers run the same pipeline
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_manual_launch_through_schedule_run_reaches_partial_with_diagnostics(h, client, admin_token):
+    h.source("pubmed", always([paper(1)]))
+    h.source("semanticscholar", fail())
+    h.script_llm("q1", scores((0, 0.9)))
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        f"/api/literature/experiments/{h.experiment_id}/lit-review-runs",
+        json={"score_threshold": 0.5},
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    run_id = resp.json()["id"]
+
+    body: dict = {}
+
+    async def finished():
+        nonlocal body
+        while True:
+            body = (await client.get(f"/api/literature/lit-review-runs/{run_id}", headers=headers)).json()
+            if body["status"] not in ("queued", "running"):
+                return
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(finished(), 10)
+    assert body["status"] == "partial"
+    assert body["error_message"] == "some_literature_sources_failed: semanticscholar 1/1 attempts failed"
+    assert body["recommendation_count"] == 1
+    assert body["completed_at"] is not None
+    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_COMPLETED, {"run_id": run_id, "recommendation_count": 1})]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sweep_runs_pipeline_to_terminal_outcome_and_notifies(h):
+    from app.services.literature import lit_review_auto_service
+
+    await _make_due(h)
+    h.source("pubmed", always([paper(1)]))
+    h.source("biorxiv", fail())
+    h.script_llm("q1", scores((0, 0.9)))
+
+    result = await lit_review_auto_service.run_due_sweep(h.session, h.org_id)
+
+    assert result["skipped_reason"] is None
+    assert result["ran"] == [h.experiment_id]
+    async with _database.async_session_factory() as s:
+        runs = (
+            (await s.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.organization_id == h.org_id)))
+            .scalars()
+            .all()
+        )
+    assert [(r.trigger, r.status, r.recommendation_count) for r in runs] == [(TRIGGER_SCHEDULED, "partial", 1)]
+    assert runs[0].error_message == "some_literature_sources_failed: biorxiv 1/1 attempts failed"
+    notes = [p for et, p in h.events if et == LITERATURE_AUTO_REVIEW_RECOMMENDATIONS]
+    assert [n["entity_id"] for n in notes] == [runs[0].id]
+    assert len(h.terminal_events()) == 1

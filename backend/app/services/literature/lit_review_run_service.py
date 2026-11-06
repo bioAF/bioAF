@@ -1,16 +1,23 @@
 """Lit Review Run: on-demand LLM-driven paper recommendation pipeline.
 
-The flow per SPEC-literature-lit-review-run.md:
-  1. Build a compact experiment context block.
-  2. Ask the org's active LLM to generate up to 5 expansion queries.
-  3. Run each query across all enabled sources (in-process via the search
-     adapter machinery), dedupe candidates, drop library + dismissed.
-  4. Ask the LLM to score the remaining candidates 0.0-1.0 with one-line
-     reasoning.
-  5. Persist the top N (above score_threshold) as pending
-     literature_recommendations, creating Paper rows on the fly with
-     provenance=lit_review_run.
-  6. Emit LITERATURE_REVIEW_RUN_COMPLETED.
+The flow per SPEC-literature-lit-review-run.md, one phase function each:
+  1. _prepare: build a compact experiment context block after confirming the
+     experiment, LLM provider, and at least one enabled source still exist.
+  2. _generate_queries: ask the org's active LLM for up to 5 expansion queries.
+  3. _collect_candidates: run each query across all enabled sources, counting
+     every source/query attempt, and dedupe; then drop library + dismissed.
+  4. _score: ask the LLM to score the remaining candidates 0.0-1.0 with
+     one-line reasoning. Unusable output fails the run; a valid empty
+     ranking does not.
+  5. _persist_recommendations: auto-accept the top N (above score_threshold)
+     into the Library, creating Paper rows with provenance=lit_review_run,
+     and commit the terminal outcome in the same transaction.
+  6. Emit one terminal event: LITERATURE_REVIEW_RUN_COMPLETED for complete
+     and partial runs, LITERATURE_REVIEW_RUN_FAILED for failed runs.
+
+Source outcomes decide the status: every attempt failing fails the run, some
+failing makes it partial (with error_message naming the sources), none
+failing makes it complete even when nothing was found.
 
 LLM calls go through the existing provider client abstraction
 (`app.services.llm_provider_clients.get_client`).
@@ -268,15 +275,58 @@ async def _execute_run(run_id: int) -> None:
         await _fail(execution, f"unexpected_error: {type(e).__name__}: {e}")
 
 
+@dataclass(frozen=True)
+class _RunContext:
+    """Everything the phases need, read once while the run is loaded."""
+
+    run_id: int
+    org_id: int
+    experiment_id: int
+    experiment_name: str
+    user_id: int
+    trigger: str
+    provider: str
+    model: str
+    api_key: str | None
+    context_block: str
+    source_api_keys: dict[str, str | None]
+    score_threshold: float
+    max_recommendations: int
+
+
 async def _do_run(execution: _Execution) -> None:
-    run_id = execution.run_id
+    """The review phases in order. A phase that ends the run raises
+    _RunFailure; every successful path finishes through _persist_terminal."""
+    ctx = await _prepare(execution.run_id)
+    if ctx is None:
+        return
+    queries = await _generate_queries(ctx)
+    execution.sources = SourceOutcome()
+    candidates = await _collect_candidates(ctx, queries, execution.sources)
+    candidates = (await _exclude_library_and_dismissed(ctx.org_id, candidates))[:_DEFAULT_CANDIDATE_CAP]
+    execution.candidate_count = len(candidates)
+
+    # Source classification decides the outcome from here on, including when
+    # nothing is left to score.
+    status = execution.sources.status
+    if status == SEARCH_FAILED:
+        raise _RunFailure(execution.sources.summary())
+    scored = await _score(ctx, candidates) if candidates else []
+    rec_count = await _persist_recommendations(ctx, execution, scored, status=status)
+    await _emit_terminal(ctx.run_id, status, rec_count)
+    await _notify_scheduled_picks(ctx, rec_count)
+
+
+async def _prepare(run_id: int) -> _RunContext | None:
+    """Load the run and check, against current configuration, that its
+    experiment, LLM provider, and at least one enabled source still exist.
+    Runs before any LLM spend."""
     factory = _database.async_session_factory
     assert factory is not None
-
     async with factory() as s:  # type: ignore[misc]
         run = await _load_run(s, run_id)
         if run is None:
-            return
+            return None
         experiment = (
             await s.execute(
                 select(Experiment).where(
@@ -287,53 +337,66 @@ async def _do_run(execution: _Execution) -> None:
         ).scalar_one_or_none()
         if experiment is None:
             raise _RunFailure("experiment not found")
-
-        context_block = await _build_experiment_context(s, run, experiment)
         provider_cfg = await llm_provider_config_service.get_for_provider(s, run.organization_id, run.llm_provider)
         if provider_cfg is None:
             raise _RunFailure("llm provider configuration disappeared")
-        api_key = provider_cfg.api_key
-
-        sources_by_name = {row.source: row for row in await sources_config_service.list_enabled(s, run.organization_id)}
-        if not sources_by_name:
+        sources = await sources_config_service.list_enabled(s, run.organization_id)
+        if not sources:
             raise _RunFailure(NO_SOURCES_ENABLED)
-
-    # 1. LLM generates expansion queries.
-    try:
-        queries = await _llm_generate_queries(
+        return _RunContext(
+            run_id=run.id,
+            org_id=run.organization_id,
+            experiment_id=run.experiment_id,
+            experiment_name=experiment.name or f"experiment #{run.experiment_id}",
+            user_id=run.triggered_by_user_id,
+            trigger=run.trigger,
             provider=run.llm_provider,
             model=run.llm_model,
-            api_key=api_key,
-            context_block=context_block,
+            api_key=provider_cfg.api_key,
+            context_block=await _build_experiment_context(s, run, experiment),
+            source_api_keys={row.source: row.api_key for row in sources},
+            score_threshold=run.score_threshold,
+            max_recommendations=run.max_recommendations,
+        )
+
+
+async def _generate_queries(ctx: _RunContext) -> list[str]:
+    try:
+        queries = await _llm_generate_queries(
+            provider=ctx.provider, model=ctx.model, api_key=ctx.api_key, context_block=ctx.context_block
         )
     except ProviderError as e:
         raise _RunFailure(f"llm_query_generation: {e}") from e
     if not queries:
         raise _RunFailure("llm_generated_no_valid_queries")
-
+    factory = _database.async_session_factory
+    assert factory is not None
     async with factory() as s:  # type: ignore[misc]
-        run = await _load_run(s, run_id)
+        run = await _load_run(s, ctx.run_id)
         run.expansion_queries_json = queries
         await s.commit()
+    return queries
 
-    # 2. Fan out across sources for each query, aggregate, dedupe.
+
+async def _collect_candidates(ctx: _RunContext, queries: list[str], outcome: SourceOutcome) -> list[PaperRecord]:
+    """Run every query against every enabled source, recording each attempt in
+    `outcome`, and return candidates deduplicated by DOI (else title)."""
     candidates: list[PaperRecord] = []
-    source_outcome = execution.sources = SourceOutcome()
     seen_keys: set[str] = set()
     for q in queries:
-        per_query_tasks = {
-            src: asyncio.create_task(_safe_source_search(src, q, sources_by_name[src].api_key))
-            for src in sources_by_name
+        tasks = {
+            src: asyncio.create_task(_safe_source_search(src, q, api_key))
+            for src, api_key in ctx.source_api_keys.items()
         }
         try:
-            for src, t in per_query_tasks.items():
+            for src, t in tasks.items():
                 try:
                     records = await t
                 except Exception as e:
                     logger.warning("source %s failed during query '%s': %s", src, q, type(e).__name__)
-                    source_outcome.record(src, e)
+                    outcome.record(src, e)
                     continue
-                source_outcome.record(src)
+                outcome.record(src)
                 for rec in records:
                     key = (rec.doi or "").lower() or rec.title.lower()
                     if key in seen_keys:
@@ -342,128 +405,116 @@ async def _do_run(execution: _Execution) -> None:
                     candidates.append(rec)
         finally:
             # On cancellation, stop and await every outstanding source call.
-            pending = [t for t in per_query_tasks.values() if not t.done()]
+            pending = [t for t in tasks.values() if not t.done()]
             for t in pending:
                 t.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
+    return candidates
 
-    # 3. Drop library and dismissed.
-    candidates = (await _exclude_library_and_dismissed(run_id, candidates))[:_DEFAULT_CANDIDATE_CAP]
-    execution.candidate_count = len(candidates)
 
-    if not candidates:
-        if source_outcome.status == SEARCH_FAILED:
-            raise _RunFailure(source_outcome.summary())
-        async with factory() as s:  # type: ignore[misc]
-            run = await _load_run(s, run_id)
-            await _persist_terminal(s, run, execution, status=source_outcome.status, recommendation_count=0)
-        await _emit_terminal(run_id, source_outcome.status, 0)
-        return
-
-    # 4. LLM scoring pass.
+async def _score(ctx: _RunContext, candidates: list[PaperRecord]) -> list[tuple[PaperRecord, float, str]]:
     try:
-        scored = await _llm_score_candidates(
-            provider=run.llm_provider,
-            model=run.llm_model,
-            api_key=api_key,
-            context_block=context_block,
+        return await _llm_score_candidates(
+            provider=ctx.provider,
+            model=ctx.model,
+            api_key=ctx.api_key,
+            context_block=ctx.context_block,
             candidates=candidates,
         )
     except (ProviderError, ScoringUnusable) as e:
         raise _RunFailure(f"llm_ranking: {e}") from e
 
-    # 5. Persist recommendations. Each surviving candidate is auto-accepted:
-    # the paper is added to the Library, associated with the source experiment,
-    # and recorded as a recommendation with status='accepted'. The reasoning
-    # is surfaced on the paper detail page as an AI Lit Review note.
-    async with factory() as s:  # type: ignore[misc]
-        run = await _load_run(s, run_id)
 
-        # Sort by score desc, keep those above threshold, cap at max_recommendations.
-        scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
-        kept = [tup for tup in scored_sorted if tup[1] >= run.score_threshold][: run.max_recommendations]
+async def _persist_recommendations(
+    ctx: _RunContext,
+    execution: _Execution,
+    scored: list[tuple[PaperRecord, float, str]],
+    *,
+    status: str,
+) -> int:
+    """Auto-accept the top scored candidates and commit them together with the
+    terminal outcome. Each kept paper joins the Library, is associated with the
+    run's experiment, and gets an accepted recommendation whose reasoning shows
+    on the paper detail page. Returns the number of recommendations added."""
+    kept = [tup for tup in sorted(scored, key=lambda x: x[1], reverse=True) if tup[1] >= ctx.score_threshold]
+    factory = _database.async_session_factory
+    assert factory is not None
+    async with factory() as s:  # type: ignore[misc]
         rec_count = 0
         decided_at = datetime.now(UTC)
-        for candidate, score, reasoning in kept:
-            paper_id = await _upsert_lit_review_paper(
-                s, org_id=run.organization_id, user_id=run.triggered_by_user_id, rec=candidate
-            )
+        for candidate, score, reasoning in kept[: ctx.max_recommendations]:
+            paper_id = await _upsert_lit_review_paper(s, org_id=ctx.org_id, user_id=ctx.user_id, rec=candidate)
             existing = (
                 await s.execute(
                     select(LiteratureRecommendation).where(
-                        LiteratureRecommendation.organization_id == run.organization_id,
+                        LiteratureRecommendation.organization_id == ctx.org_id,
                         LiteratureRecommendation.paper_id == paper_id,
-                        LiteratureRecommendation.experiment_id == run.experiment_id,
+                        LiteratureRecommendation.experiment_id == ctx.experiment_id,
                     )
                 )
             ).scalar_one_or_none()
             if existing is not None:
+                # An earlier recommendation and its user decision stand.
                 continue
             s.add(
                 LiteratureRecommendation(
-                    organization_id=run.organization_id,
+                    organization_id=ctx.org_id,
                     paper_id=paper_id,
-                    experiment_id=run.experiment_id,
-                    review_run_id=run.id,
+                    experiment_id=ctx.experiment_id,
+                    review_run_id=ctx.run_id,
                     relevance_score=score,
                     relevance_bucket=derive_bucket(score),
                     reasoning=reasoning,
                     status=REC_ACCEPTED,
-                    decided_by_user_id=run.triggered_by_user_id,
+                    decided_by_user_id=ctx.user_id,
                     decided_at=decided_at,
                 )
             )
-            paper = await paper_service.get_paper(s, run.organization_id, paper_id)
+            paper = await paper_service.get_paper(s, ctx.org_id, paper_id)
             if not paper.in_library:
                 paper.in_library = True
             await association_service.get_or_create(
                 s,
                 paper=paper,
-                user_id=run.triggered_by_user_id,
+                user_id=ctx.user_id,
                 scope_type=SCOPE_EXPERIMENT,
-                scope_id=run.experiment_id,
+                scope_id=ctx.experiment_id,
             )
             rec_count += 1
 
-        # Capture fields for the per-user notification before the session closes.
-        run_trigger = run.trigger
-        run_org_id = run.organization_id
-        run_experiment_id = run.experiment_id
-        experiment_name = (
-            await s.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
-        ).scalar_one_or_none() or f"experiment #{run.experiment_id}"
+        run = await _load_run(s, ctx.run_id)
+        await _persist_terminal(s, run, execution, status=status, recommendation_count=rec_count)
+    return rec_count
 
-        # Candidates exist, so at least one attempt succeeded: complete or partial.
-        await _persist_terminal(s, run, execution, status=source_outcome.status, recommendation_count=rec_count)
 
-    await _emit_terminal(run_id, source_outcome.status, rec_count)
-
-    # Automated cadence runs surface their picks as a per-user in-app
-    # notification (the notification router fans this out to all active users
-    # via the seeded in_app rule). Manual runs are surfaced in the UI the user
-    # is already looking at, so they emit nothing extra. A zero-pick run is
-    # silent either way.
-    if run_trigger == TRIGGER_SCHEDULED and rec_count > 0:
-        plural = "s" if rec_count != 1 else ""
-        await event_bus.emit(
-            LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
-            {
-                "event_type": LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
-                "org_id": run_org_id,
-                "title": f"AI Lit Review added {rec_count} paper{plural} to {experiment_name}",
-                "message": (
-                    f"An automated AI Literature Review added {rec_count} new paper{plural} "
-                    f"to the Library for {experiment_name}."
-                ),
-                "entity_type": "literature_review_run",
-                "entity_id": run_id,
-                "metadata": {
-                    "experiment_id": run_experiment_id,
-                    "run_id": run_id,
-                    "recommendation_count": rec_count,
-                },
+async def _notify_scheduled_picks(ctx: _RunContext, rec_count: int) -> None:
+    """Automated cadence runs surface their picks as a per-user in-app
+    notification (the notification router fans this out to all active users
+    via the seeded in_app rule). Manual runs are surfaced in the UI the user is
+    already looking at, so they emit nothing extra. A zero-pick run is silent
+    either way."""
+    if ctx.trigger != TRIGGER_SCHEDULED or rec_count <= 0:
+        return
+    plural = "s" if rec_count != 1 else ""
+    await event_bus.emit(
+        LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
+        {
+            "event_type": LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
+            "org_id": ctx.org_id,
+            "title": f"AI Lit Review added {rec_count} paper{plural} to {ctx.experiment_name}",
+            "message": (
+                f"An automated AI Literature Review added {rec_count} new paper{plural} "
+                f"to the Library for {ctx.experiment_name}."
+            ),
+            "entity_type": "literature_review_run",
+            "entity_id": ctx.run_id,
+            "metadata": {
+                "experiment_id": ctx.experiment_id,
+                "run_id": ctx.run_id,
+                "recommendation_count": rec_count,
             },
-        )
+        },
+    )
 
 
 async def _persist_terminal(
@@ -714,7 +765,7 @@ def _parse_scoring_response(text: str | None) -> list[Any]:
     raise ScoringUnusable("response is not valid JSON")
 
 
-async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperRecord]) -> list[PaperRecord]:
+async def _exclude_library_and_dismissed(org_id: int, candidates: list[PaperRecord]) -> list[PaperRecord]:
     """Drop candidates already in the org's Literature Library or dismissed.
 
     Papers that exist in literature_papers but only as cached search results
@@ -727,15 +778,12 @@ async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperReco
     factory = _database.async_session_factory
     assert factory is not None
     async with factory() as s:  # type: ignore[misc]
-        run = await _load_run(s, run_id)
-        if run is None:
-            return []
         dois = [c.doi for c in candidates if c.doi]
         if not dois:
             return candidates
         rs = await s.execute(
             select(LiteraturePaper.doi).where(
-                LiteraturePaper.organization_id == run.organization_id,
+                LiteraturePaper.organization_id == org_id,
                 LiteraturePaper.in_library.is_(True),
                 LiteraturePaper.doi.in_(dois),
             )
@@ -748,7 +796,7 @@ async def _exclude_library_and_dismissed(run_id: int, candidates: list[PaperReco
                 LiteraturePaperDismissal.paper_id == LiteraturePaper.id,
             )
             .where(
-                LiteraturePaperDismissal.organization_id == run.organization_id,
+                LiteraturePaperDismissal.organization_id == org_id,
                 LiteraturePaperDismissal.reversed_at.is_(None),
                 LiteraturePaper.doi.in_(dois),
             )
