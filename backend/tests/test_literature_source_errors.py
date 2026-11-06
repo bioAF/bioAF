@@ -80,3 +80,60 @@ async def test_fetch_by_doi_still_returns_none_on_failure(name, url):
     with respx.mock:
         respx.get(url).respond(status_code=429)
         assert await get_adapter(name).fetch_by_doi("10.1/x", None) is None
+
+
+# PubMed: esearch (JSON) then efetch (XML).
+
+_ESEARCH = {"esearchresult": {"idlist": ["123"]}}
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_raises_on_unreadable_efetch_xml():
+    from xml.etree.ElementTree import ParseError
+
+    from app.services.literature.sources import pubmed
+
+    with respx.mock:
+        respx.get(f"{pubmed._BASE}/esearch.fcgi").respond(json=_ESEARCH)
+        respx.get(f"{pubmed._BASE}/efetch.fcgi").respond(status_code=200, text="<html>maintenance")
+        with pytest.raises(ParseError):
+            await get_adapter("pubmed").search("tgf-beta", 5, None)
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_raises_on_unreadable_esearch_json():
+    from app.services.literature.sources import pubmed
+
+    with respx.mock:
+        respx.get(f"{pubmed._BASE}/esearch.fcgi").respond(status_code=200, text="<html>maintenance</html>")
+        with pytest.raises(ValueError):
+            await get_adapter("pubmed").search("tgf-beta", 5, None)
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_with_no_ids_still_returns_empty():
+    from app.services.literature.sources import pubmed
+
+    with respx.mock:
+        respx.get(f"{pubmed._BASE}/esearch.fcgi").respond(json={"esearchresult": {"idlist": []}})
+        assert await get_adapter("pubmed").search("tgf-beta", 5, None) == []
+
+
+@pytest.mark.asyncio
+async def test_pubmed_search_with_valid_xml_and_no_articles_returns_empty():
+    from app.services.literature.sources import pubmed
+
+    with respx.mock:
+        respx.get(f"{pubmed._BASE}/esearch.fcgi").respond(json=_ESEARCH)
+        respx.get(f"{pubmed._BASE}/efetch.fcgi").respond(text="<PubmedArticleSet></PubmedArticleSet>")
+        assert await get_adapter("pubmed").search("tgf-beta", 5, None) == []
+
+
+@pytest.mark.asyncio
+async def test_pubmed_fetch_by_doi_still_returns_none_on_unreadable_xml():
+    from app.services.literature.sources import pubmed
+
+    with respx.mock:
+        respx.get(f"{pubmed._BASE}/esearch.fcgi").respond(json=_ESEARCH)
+        respx.get(f"{pubmed._BASE}/efetch.fcgi").respond(status_code=200, text="<html>maintenance")
+        assert await get_adapter("pubmed").fetch_by_doi("10.1/x", None) is None

@@ -1445,3 +1445,25 @@ async def test_authorless_candidate_reuses_existing_authorless_paper(h):
     papers = await h.papers()
     assert [(p.id, p.in_library) for p in papers] == [(existing_id, True)]
     assert [r.paper_id for r in await h.recommendations(run.id)] == [existing_id]
+
+
+@pytest.mark.asyncio
+async def test_unreadable_pubmed_metadata_makes_review_partial_not_complete(h, monkeypatch):
+    import respx
+
+    from app.services.literature.sources import pubmed
+
+    # Real PubMed adapter: esearch finds ids, efetch returns unreadable XML.
+    monkeypatch.setattr(pubmed, "search", REAL_SEARCH["pubmed"])
+    h.source("openalex", always([paper(1)]))
+    h.script_llm("q1", scores((0, 0.9)))
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(f"{pubmed._BASE}/esearch.fcgi").respond(json={"esearchresult": {"idlist": ["123"]}})
+        mock.get(f"{pubmed._BASE}/efetch.fcgi").respond(status_code=200, text="<html>maintenance")
+        run = await h.run()
+
+    assert run.status == "partial"
+    assert run.error_message == "some_literature_sources_failed: pubmed 1/1 attempts failed"
+    audit = [a for a in await h.audits(run.id) if a.action == "complete"]
+    assert audit[0].details_json["sources"]["pubmed"]["failure_categories"] == ["ParseError"]
