@@ -10,7 +10,7 @@ through cannot give its steps different dates.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def _utc_now() -> datetime:
@@ -31,6 +31,10 @@ class BillingPeriod:
     @property
     def days_in_month(self) -> int:
         return (self.next_month_start - self.month_start).days
+
+    @property
+    def previous_month_start(self) -> date:
+        return (self.month_start - timedelta(days=1)).replace(day=1)
 
 
 def billing_period(reference: datetime | None = None) -> BillingPeriod:

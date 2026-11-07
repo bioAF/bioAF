@@ -89,3 +89,15 @@ def test_default_reference_is_the_current_utc_instant(monkeypatch):
     p = billing_period()
     assert p.today == date(2026, 10, 31)
     assert p.reference == _utc(2026, 10, 31, 23, 0)
+
+
+@pytest.mark.parametrize(
+    "reference, previous_month_start",
+    [
+        (_utc(2026, 11, 6, 12, 0), date(2026, 10, 1)),
+        (_utc(2027, 1, 1, 0, 0), date(2026, 12, 1)),
+        (_utc(2028, 3, 1, 0, 0), date(2028, 2, 1)),
+    ],
+)
+def test_previous_month_start(reference, previous_month_start):
+    assert billing_period(reference).previous_month_start == previous_month_start
