@@ -27,7 +27,7 @@ def host_tz(request, monkeypatch):
 
 
 def _utc(*args) -> datetime:
-    return datetime(*args, tzinfo=timezone.utc)
+    return datetime(*args).replace(tzinfo=timezone.utc)
 
 
 def test_mid_month_period(host_tz):
