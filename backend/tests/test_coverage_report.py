@@ -142,8 +142,8 @@ def test_ranges_collapse_consecutive_lines(report):
     assert report.ranges([1, 2, 3, 5, 7, 8]) == "1-3, 5, 7-8"
 
 
-def test_only_the_backend_note_says_the_run_stopped_early(report, tmp_path):
-    """The backend runs with -x; Jest runs every suite, so its failures do not cut coverage short."""
+def test_no_failure_note_claims_the_run_stopped_early(report, tmp_path):
+    """Neither stack runs fail-fast (plan 8 removed backend -x), so a failed run is partial, not cut short."""
     kwargs = dict(
         backend=report.load_backend(_backend(tmp_path)),
         frontend=report.load_frontend(_frontend(tmp_path)),
@@ -152,9 +152,9 @@ def test_only_the_backend_note_says_the_run_stopped_early(report, tmp_path):
     )
     backend_failed = report.render(**kwargs, backend_status="1", frontend_status="0")
     frontend_failed = report.render(**kwargs, backend_status="0", frontend_status="1")
-    assert "stops at the first failure" in backend_failed
-    assert "stops at the first failure" not in frontend_failed
-    assert "Frontend: tests failed" in frontend_failed
+    assert "Backend: tests failed, so coverage is partial." in backend_failed
+    assert "Frontend: tests failed, so coverage is partial." in frontend_failed
+    assert "stops at the first failure" not in backend_failed + frontend_failed
 
 
 def test_the_comment_stays_under_githubs_size_limit(report, tmp_path):

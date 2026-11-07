@@ -484,6 +484,11 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_ci_coverage_workflow.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_cloud_logging.py": {
    "category": "no_database",
    "evidence": [],

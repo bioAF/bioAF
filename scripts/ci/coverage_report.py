@@ -1,16 +1,20 @@
-"""Build the coverage comment CI posts on a pull request.
+"""Build the coverage comment CI posts on a pull request, and enforce the coverage gates.
 
 Reads the backend's coverage.py JSON (``--cov-report=json``), the frontend's
-Istanbul JSON (``jest --coverage --coverageReporters=json``) and a unified diff
-against the base branch, and prints one markdown comment: line coverage for
-each half, the same split by top-level area, and coverage of the lines the pull
-request added.
+Istanbul JSON (``jest --coverage --coverageReporters=json``), optionally the
+reviewed unit selection's coverage.py JSON, and a unified diff against the base
+branch. Prints one markdown comment: line and branch coverage for each half
+(separate measures, never averaged), the gates from the policy file, the unit
+selection in its own table, coverage of the lines the pull request added, and
+the same split by top-level area.
 
 Standard library only, so it runs on a bare runner:
 
     python scripts/ci/coverage_report.py --backend coverage.json \\
         --frontend coverage-final.json --diff pr.diff --commit "$SHA" \\
-        --backend-status 0 --frontend-status 0
+        --backend-status 0 --frontend-status 0 \\
+        --backend-unit unit-coverage.json --backend-unit-status 0 \\
+        --policy scripts/ci/coverage_policy.json --enforce --output report.md
 """
 
 from __future__ import annotations
@@ -40,7 +44,6 @@ class Side:
     name: str
     repo_prefix: str  # path of this half from the repo root, e.g. "backend/"
     area_root: str  # path segment areas are taken under, e.g. "app/"
-    stops_on_failure: bool = False  # the backend runs pytest -x; Jest runs every suite
     # path -> (executable lines, covered lines)
     files: dict[str, tuple[set[int], set[int]]] = field(default_factory=dict)
     # path -> (covered branches, branches); empty when the run did not measure branches
@@ -95,7 +98,7 @@ class Side:
 
 
 def load_backend(path: Path) -> Side:
-    return _load_coverage_py(Side("Backend", "backend/", "app/", stops_on_failure=True), path)
+    return _load_coverage_py(Side("Backend", "backend/", "app/"), path)
 
 
 def load_unit(path: Path) -> Side:
@@ -276,8 +279,7 @@ def _status_note(side: Side, status: str) -> str | None:
     if not side.available:
         return f"{side.name}: no coverage data (the job did not produce it)."
     if status not in ("", "0"):
-        why = " (the run stops at the first failure)" if side.stops_on_failure else ""
-        return f"{side.name}: tests failed, so coverage is partial{why}."
+        return f"{side.name}: tests failed, so coverage is partial."
     return None
 
 
