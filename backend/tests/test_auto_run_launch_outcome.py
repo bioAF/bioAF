@@ -141,3 +141,41 @@ async def test_an_auto_run_batch_that_rolls_back_announces_nothing(session, due_
     await wait_for_deferred_events()
 
     assert launched_events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_month_spend, gated", [("85.00", False), ("95.00", True)])
+async def test_the_budget_gate_counts_only_the_utc_usage_month(
+    session, admin_user, due_pending_run, billing_clock, in_month_spend, gated
+):
+    """The 90% gate reads the summary's UTC usage month: neighbouring months do not count.
+
+    20:00 UTC on October 31 is already November 1 on a Tokyo host.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from app.models.budget_config import BudgetConfig
+    from app.models.cost_record import CostRecord
+
+    billing_clock(datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc), "Asia/Tokyo")
+    org_id = admin_user.organization_id
+    session.add(BudgetConfig(organization_id=org_id, monthly_budget=Decimal("100.00")))
+    for record_date, amount in [
+        (date(2026, 9, 30), "500.00"),
+        (date(2026, 10, 31), in_month_spend),
+        (date(2026, 11, 1), "500.00"),
+    ]:
+        session.add(
+            CostRecord(
+                organization_id=org_id, record_date=record_date, component="compute", cost_amount=Decimal(amount)
+            )
+        )
+    await session.commit()
+
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=_adapter(accept=False)):
+        await AutoRunService.process_pending_runs(session)
+    await session.commit()
+
+    pending = await session.get(PendingAutoRun, due_pending_run)
+    assert (pending.cancelled_reason == "budget_limit") is gated
