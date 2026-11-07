@@ -230,7 +230,7 @@ async def test_completion_collects_outputs_from_the_runs_outdir_through_storage(
         ("gs://lab-results/experiments/1/pipeline-runs/45", {"id": run.id, "experiment_id": experiment.id})
     ]
     assert completed.status == "completed"
-    assert completed.output_files_json["files"] == ["multiqc_report.html"]
+    assert (completed.output_files_json or {}).get("files") == ["multiqc_report.html"]
 
 
 @pytest.mark.asyncio
