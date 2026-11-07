@@ -52,7 +52,12 @@ class _CountingListener:
 def _run_selection(*args: str, port: int, tmp_path: Path) -> subprocess.CompletedProcess:
     url = f"postgresql+asyncpg://nobody:nothing@127.0.0.1:{port}/no_database"
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))}
-    env.update(BIOAF_TEST_DATABASE_URL=url, BIOAF_DATABASE_URL=url, BIOAF_TEST_MANIFEST_DIR=str(tmp_path / "manifests"))
+    env.update(
+        BIOAF_TEST_DATABASE_URL=url,
+        BIOAF_DATABASE_URL=url,
+        BIOAF_TEST_MANIFEST_DIR=str(tmp_path / "manifests"),
+        COVERAGE_FILE=str(tmp_path / ".coverage"),  # never in backend/, where the enclosing run combines
+    )
     env.pop("BIOAF_TEST_INVOCATION_ID", None)  # the outer run's id; the selection is its own invocation
     return subprocess.run(
         [sys.executable, "-m", "tests.support.unit_selection", *args],
@@ -88,6 +93,7 @@ def test_the_selection_with_coverage_and_workers_still_opens_no_connection(tmp_p
     """The measured command (coverage, xdist) adds plugins; none of them may reach the database."""
     listener = _CountingListener()
     report = tmp_path / "unit-coverage.json"
+    before = set(BACKEND_DIR.glob(".coverage*"))
     try:
         result = _run_selection(
             "-q",
@@ -104,6 +110,9 @@ def test_the_selection_with_coverage_and_workers_still_opens_no_connection(tmp_p
         listener.close()
     assert result.returncode == 0, (result.stdout + result.stderr)[-4000:]
     assert report.is_file()
+    # Data files left in backend/ are combined into the enclosing suite's measurement, and statement
+    # data cannot combine with branch data: the outer run fails after every test passed.
+    assert set(BACKEND_DIR.glob(".coverage*")) == before, "the unit run left coverage data in backend/"
     assert listener.connections == 0, f"the measured unit command opened {listener.connections} connection(s)"
 
 
