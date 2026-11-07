@@ -246,6 +246,16 @@
    "evidence": [],
    "route": "none"
   },
+  "test_backfill_costs_cli.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "async_sessionmaker",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_backups.py": {
    "category": "real_commit",
    "evidence": [
@@ -328,6 +338,24 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_billing_import.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_sessionmaker",
+    "create_task",
+    "http requests use their own sessions",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_billing_period.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_billing_provider.py": {
    "category": "no_database",
@@ -455,6 +483,11 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_ci_coverage_workflow.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_cloud_logging.py": {
    "category": "no_database",
@@ -614,6 +647,14 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_cost_billing_dates.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
   },
   "test_costs.py": {
    "category": "real_commit",
@@ -1765,6 +1806,16 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_literature_authorless_duplicates.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_literature_automation.py": {
    "category": "real_commit",
    "evidence": [
@@ -1787,6 +1838,18 @@
     "fixture:client",
     "fixture:db_engine",
     "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_literature_lit_review_outcomes.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "create_task",
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
@@ -1847,6 +1910,11 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_literature_source_errors.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_literature_upload_api.py": {
    "category": "real_commit",
@@ -2294,11 +2362,6 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
-  },
-  "test_phase22_terraform.py": {
-   "category": "no_database",
-   "evidence": [],
-   "route": "none"
   },
   "test_phase23_files.py": {
    "category": "real_commit",
@@ -3334,6 +3397,14 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_service_adapter_calls.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_service_bal_integration.py": {
    "category": "no_database",
    "evidence": [],
@@ -3689,6 +3760,11 @@
     "create_task"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_unit_selection.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_upgrades.py": {
    "category": "real_commit",

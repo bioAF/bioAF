@@ -38,6 +38,8 @@ asyncio_mode = "strict"
 # SQLAlchemy's async bridge switches greenlets. Without this, CI undercounts
 # API/service execution even when all tests pass. Used by pytest-cov by default.
 concurrency = ["thread", "greenlet"]
+# Line and branch results are reported and gated separately (scripts/ci/coverage_report.py).
+branch = true
 
 [tool.ruff]
 target-version = "py312"

@@ -288,3 +288,90 @@ async def test_poll_image_build_writes_uri_on_success(session, seed_build_config
     row = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'bioaf_scrna_image'"))).fetchone()
     assert row is not None
     assert row[0] == "us-central1-docker.pkg.dev/test-project/bioaf-images/bioaf-scrna:latest"
+
+
+class _RecordingRegistry:
+    """The image registry provider: records each repository ensure, in call order with the build."""
+
+    def __init__(self, events: list):
+        self.events = events
+
+    def ensure_repository(self, credentials, config, image_name):
+        self.events.append(("ensure_repository", credentials, dict(config), image_name))
+        return f"projects/{config.get('project_id')}/locations/{config.get('region')}/repositories/bioaf-images"
+
+
+async def _build_with_recording_registry(session, cloud: str):
+    from unittest.mock import AsyncMock
+
+    events: list = []
+    credentials = object()
+
+    async def submit(session, platform):
+        events.append(("submit_image_build", platform.cloud_provider))
+        return "build-1"
+
+    with (
+        patch("app.services.image_build_platform.get_cloud_provider", AsyncMock(return_value=cloud)),
+        patch("app.services.notebook_image_service._get_credentials", AsyncMock(return_value=credentials)),
+        patch(
+            "app.services.notebook_image_service.get_image_registry_provider", return_value=_RecordingRegistry(events)
+        ),
+        patch("app.services.notebook_image_service.submit_image_build", side_effect=submit),
+    ):
+        build_id = await build_notebook_image(session)
+    return build_id, events, credentials
+
+
+async def _config(session, key):
+    row = (await session.execute(text("SELECT value FROM platform_config WHERE key = :k"), {"k": key})).fetchone()
+    return row[0] if row else None
+
+
+@pytest.mark.asyncio
+async def test_gcp_build_ensures_the_docker_repository_before_submitting_and_records_its_path(
+    session, seed_build_config
+):
+    build_id, events, credentials = await _build_with_recording_registry(session, "gcp")
+
+    assert build_id == "build-1"
+    assert events == [
+        (
+            "ensure_repository",
+            credentials,
+            {"project_id": "test-project", "region": "us-central1"},
+            "bioaf-scrna",
+        ),
+        ("submit_image_build", "gcp"),
+    ]
+    assert await _config(session, "artifact_registry_repo") == "us-central1-docker.pkg.dev/test-project/bioaf-images"
+
+
+@pytest.mark.asyncio
+async def test_aws_build_ensures_the_ecr_repository_and_records_no_artifact_registry_path(session):
+    for key, value in [
+        ("aws_account_id", "043671579834"),
+        ("aws_region", "us-west-1"),
+        ("aws_codebuild_project", "bioaf-image-build"),
+    ]:
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ),
+            {"k": key, "v": value},
+        )
+    await session.commit()
+
+    _, events, _ = await _build_with_recording_registry(session, "aws")
+
+    assert events == [
+        (
+            "ensure_repository",
+            None,
+            {"account_id": "043671579834", "region": "us-west-1", "codebuild_project": "bioaf-image-build"},
+            "bioaf-scrna",
+        ),
+        ("submit_image_build", "aws"),
+    ]
+    assert await _config(session, "artifact_registry_repo") in (None, "null")
