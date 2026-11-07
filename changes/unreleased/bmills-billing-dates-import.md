@@ -1,0 +1,8 @@
+### Cost Center
+
+- With the BigQuery billing export configured, a day's costs now include every charge for that day's usage, even when Google bills part of it on the next month's invoice. Previously only the current invoice month was read, so a day split across two invoices could show only part of its cost, and late charges for last month were never picked up.
+- Each billing sync now refreshes the previous and current months (UTC), excluding today. Charges that arrive late for those months now update the day they were used. They stay out of the current month's total when that day belongs to an earlier month.
+- Once a day is two days old (UTC), its costs are rebuilt from the billing export. Estimates that the export no longer reports, such as a stale node estimate, stop counting toward spend, budget alerts, and the automatic-run budget check. Days the export has no data for keep their existing figures. Days from before this change in the refreshed months are repaired automatically on the next sync.
+- New operator command for older dates: `python -m app.cli.backfill_costs --org-id <id> --start YYYY-MM-DD --end YYYY-MM-DD` re-imports those usage days the same way and lists any day the export has no data for.
+- The billing-export query now scans only partitions from the start of the requested window onward. It refuses a table it cannot limit this way, rather than scanning the whole table.
+- Known limit: billing-export costs are the whole configured export's total. On a multi-organization installation each organization's Cost Center shows that same total; costs are not yet divided by organization.
