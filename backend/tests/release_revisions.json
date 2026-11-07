@@ -1,0 +1,760 @@
+{
+ "_about": "Release tag -> installed Alembic head and migration-tree fingerprint. Regenerate with `python -m tests.support.releases --write`.",
+ "equivalent_edits": {
+  "2ff2018a": "comment/docstring edits only",
+  "912bb4bd": "comment/docstring edits; 076 helper import paths moved (same behavior)",
+  "604f9aa8": "038 scopes a catalog query to current_schema(); same result in a dedicated database"
+ },
+ "releases": [
+  {
+   "tag": "v0.4.0",
+   "commit": "d47fbb854728816baeff5ee36adf557ef07825b9",
+   "head": "055",
+   "migration_tree": "ab8b26cec2baedbb6d7a2fba6f26b0883fa2d138"
+  },
+  {
+   "tag": "v0.5.0",
+   "commit": "caef37eca25578f5930ec4a57b819532b5e0530a",
+   "head": "057",
+   "migration_tree": "0d0c79b4f3558fea273218bd038d5638c986bc19"
+  },
+  {
+   "tag": "v0.5.1",
+   "commit": "25608d8fd5f9be9441bc1035c9edc3f72f3bea5a",
+   "head": "057",
+   "migration_tree": "0d0c79b4f3558fea273218bd038d5638c986bc19"
+  },
+  {
+   "tag": "v0.5.2",
+   "commit": "4fbf21be967455d68fc4e01adca113a346547f18",
+   "head": "060",
+   "migration_tree": "6142cf3168af385001a71eb62c465cc237c2c0fc"
+  },
+  {
+   "tag": "v0.5.3",
+   "commit": "14880ef7a11c94b83a50d6caa4e4c8d61175001d",
+   "head": "061",
+   "migration_tree": "649274495f648b5efa78caea0f699b1320579474"
+  },
+  {
+   "tag": "v0.5.4",
+   "commit": "95be89a31e06b0ef53736a48593cc29b9e0c1acd",
+   "head": "061",
+   "migration_tree": "649274495f648b5efa78caea0f699b1320579474"
+  },
+  {
+   "tag": "v0.5.5",
+   "commit": "c4a0c80f65f89205df1cd1c5e203b2ef92827be3",
+   "head": "062",
+   "migration_tree": "3cd56e4ef3e85b48a0b22d0c2124294e9b330e37"
+  },
+  {
+   "tag": "v0.6.0",
+   "commit": "b3e2335c0635ac94859fdf3dae281f31e39f55a7",
+   "head": "063",
+   "migration_tree": "c2f26ecce4d308e0c3d47027114f8d43b2da05aa"
+  },
+  {
+   "tag": "v0.6.1",
+   "commit": "5457e2f2b61b3e625f63fe35d26dc484bf973e0d",
+   "head": "063",
+   "migration_tree": "c2f26ecce4d308e0c3d47027114f8d43b2da05aa"
+  },
+  {
+   "tag": "v0.6.2",
+   "commit": "5f70ad75df867c2e46d41f035c3381b8a207606c",
+   "head": "063",
+   "migration_tree": "c2f26ecce4d308e0c3d47027114f8d43b2da05aa"
+  },
+  {
+   "tag": "v0.6.3",
+   "commit": "1e8a51c27aef8cc33a580020f2dadc2ea82bfaa4",
+   "head": "064",
+   "migration_tree": "45fb4445eaa99246d59c1197715daecee7067574"
+  },
+  {
+   "tag": "v0.6.4",
+   "commit": "7d510097a4c89a9a3b24100b9b25e5552555183e",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.6.5",
+   "commit": "4ab9889a7b3d9bdf7cc25c2a501ba07b7d548fe3",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.6.6",
+   "commit": "e7e574fc1a6521d1cd41de2ad4b99eb66fc5f933",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.7.0",
+   "commit": "065458881545601578426cb2967ab5787b351141",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.7.1",
+   "commit": "a8999d8abe03e64d9b038ea8c848bcd3f8db780d",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.7.2",
+   "commit": "900c3f33859f39412d9f333f71ca9204592a71a7",
+   "head": "065",
+   "migration_tree": "038c504c6f7bae28aec00382dbf35d5b7dcf3f0c"
+  },
+  {
+   "tag": "v0.7.3",
+   "commit": "d9b3d1462e1b5ba130bdfd1ce1afe677d626940b",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.7.4",
+   "commit": "d397a2274b2a787c9fafbf9c124e21254ccd6e32",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.7.5",
+   "commit": "ecf10d3a911879061868f78359fcc73290d9ce18",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.8.0",
+   "commit": "2fa4057a2b590ea34809595c98aa05175d216583",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.8.1",
+   "commit": "41e493730d73194e087460ec1da725aa53925bf3",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.8.2",
+   "commit": "380b428c0e038650ccbaa6d84ed86b9c1ddeba42",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.8.3",
+   "commit": "cfe10516a9fabc373ca245bc3eab8b7eeb099af4",
+   "head": "066",
+   "migration_tree": "919d1c7a6984edc126728ebe0456cde72101fca9"
+  },
+  {
+   "tag": "v0.9.0",
+   "commit": "bbdebeef3a7a2274d53f7c9d672cd89ec2a33892",
+   "head": "067",
+   "migration_tree": "4c152648b5e623877a58fc393cf5ba79d0977d46"
+  },
+  {
+   "tag": "v0.10.0",
+   "commit": "cb9cd755dc9733d1ed686716acc1f2f45087c2b8",
+   "head": "068",
+   "migration_tree": "1bd48bf06d1c611e476d24d3b12511848256aa83"
+  },
+  {
+   "tag": "v0.10.1",
+   "commit": "3b9606d9e5a2dea61fd1da663991bd943bf28de0",
+   "head": "069",
+   "migration_tree": "72875cba02c0210d5f3f5b24cbb5679a6e66bc83"
+  },
+  {
+   "tag": "v0.10.2",
+   "commit": "9a607cb2c9568bb83fd1cfecacf8e04e7faa1ad0",
+   "head": "070",
+   "migration_tree": "5e96845ee956021af03cb288f4e8f4b2f60ec041"
+  },
+  {
+   "tag": "v0.10.3",
+   "commit": "2181161957383906ec83af8f168af99e1487d5a3",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.1",
+   "commit": "bf5c9ae8e47bf3bfce2313c260632a9e6afe80e4",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.2",
+   "commit": "695836f4c680982ded40c5047dc23d887ffc00e7",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.3",
+   "commit": "fcece7b160a5a8334053568b695aad93e5af1617",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.4",
+   "commit": "4c80cb14fa30aa86f595694b05796a76d98d0e5a",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.5",
+   "commit": "9c3ba8a9529374eb1f87b2fb7eccdb3fac4003a8",
+   "head": "073",
+   "migration_tree": "1b8aa5e24e23457ca2cf93e6b5dab743fec70eb5"
+  },
+  {
+   "tag": "v0.11.6",
+   "commit": "9f0676ede2792656df7afa5da40f42fb9465f961",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.7",
+   "commit": "7e2c0e2029b71902ff55320e6be6591aca7a9b16",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.8",
+   "commit": "7e059c669eb6f20983b720c5cda9e7f26ae494d2",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.9",
+   "commit": "dee58af185cec0910491414ee6d1a60241339386",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.10",
+   "commit": "35d9a5080f48a747d27e6d50b305d03cb9bb9d09",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.11",
+   "commit": "e7c44851ad712683a0700c307206654a33fdf4c3",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.13",
+   "commit": "2cb80ee7b9faabd5e6ebcee78722117c9e0c88d1",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.14",
+   "commit": "a883e0652b0714aebc6636aca41e5b552c533c6e",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.11.15",
+   "commit": "4f9275b6c151a2223b4da955cdb23769ff1be9de",
+   "head": "074",
+   "migration_tree": "649818d0c467c22696cf6a7654914b87d84b41f9"
+  },
+  {
+   "tag": "v0.12.0",
+   "commit": "7dfe7537f151bf20e3e4d54ae55cf74694568960",
+   "head": "075",
+   "migration_tree": "b1d988698402f2324a3539c9e21b3d0b20aa5739"
+  },
+  {
+   "tag": "v0.12.1",
+   "commit": "0859da9a6d0c34141f53e913f38ec5c582cb0907",
+   "head": "075",
+   "migration_tree": "b1d988698402f2324a3539c9e21b3d0b20aa5739"
+  },
+  {
+   "tag": "v0.13.0",
+   "commit": "49f9a6e3e8a7c95e5d85c76ed89add4d0773a2b8",
+   "head": "076",
+   "migration_tree": "bc438b2ddcdf2b7b9825e4135985f2c5f3e5e2ec"
+  },
+  {
+   "tag": "v0.13.1",
+   "commit": "2743f60ff90fc688dec705a13953ecadb2125142",
+   "head": "076",
+   "migration_tree": "bc438b2ddcdf2b7b9825e4135985f2c5f3e5e2ec"
+  },
+  {
+   "tag": "v0.13.2",
+   "commit": "1b2a4d1894ff1b05ac61b81a02af37af5ad18ba9",
+   "head": "076",
+   "migration_tree": "bc438b2ddcdf2b7b9825e4135985f2c5f3e5e2ec"
+  },
+  {
+   "tag": "v0.15.0",
+   "commit": "47374ffd5fcbd6aeafc8e3f8a3c1492d72b4df2a",
+   "head": "080",
+   "migration_tree": "31e8c0569cd68da11110d8e48116e7622c8ebe0f"
+  },
+  {
+   "tag": "v0.15.1",
+   "commit": "10e38eb23accdf01af9315dc0bd4bbe2decc4f4f",
+   "head": "080",
+   "migration_tree": "31e8c0569cd68da11110d8e48116e7622c8ebe0f"
+  },
+  {
+   "tag": "v2026.5.0",
+   "commit": "247c0d64b2ff9e3607f36413f4f129b0ec0fbdb6",
+   "head": "080",
+   "migration_tree": "31e8c0569cd68da11110d8e48116e7622c8ebe0f"
+  },
+  {
+   "tag": "v2026.5.1",
+   "commit": "5a64dc5842d82d15c023696eb509be6abb0f64e9",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.2",
+   "commit": "1b5fac1d5a048789184418d432d30b0e5c47f174",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.3",
+   "commit": "488a149d28d2ac1a7193659d71ce243cdcdaae36",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.4",
+   "commit": "5f0119a6f83d5fc0cbe20f334fc04801d0cf5ddc",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.5",
+   "commit": "6134b67a91d1f3dbb0a0c5122610b1950f59f0e4",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.6",
+   "commit": "3b027d103aee1e1d6a83586c1e25fb4bbca3ac6b",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.7",
+   "commit": "06c0854630485f29112c7c1b8050722eb77cfe5d",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.8",
+   "commit": "5318c25413c765efed0d70d8caa5cab39d0e07bf",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.9",
+   "commit": "7ef7ab22f4285b11ad8729bb15bbaceeb828646e",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.10",
+   "commit": "646b4b490773475a8c4cccab54b1134252b53d1e",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.11",
+   "commit": "25848bbad4073f814a4e0704d28d0b0d717eb4b9",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.12",
+   "commit": "3274f79c348312bd4ea4ecc2bf41faa099dbfe44",
+   "head": "082",
+   "migration_tree": "c5099aed11938da18e2c6c28dd38e82f5c619e6a"
+  },
+  {
+   "tag": "v2026.5.13",
+   "commit": "cc34555213e275f1701e134ec863ae4eeb87dca4",
+   "head": "086",
+   "migration_tree": "433f1b58283f1cda151dc920ce5f10c407d5986a"
+  },
+  {
+   "tag": "v2026.5.14",
+   "commit": "36cc73569ec409ea80d364b7cd27cd8ad3b5864a",
+   "head": "086",
+   "migration_tree": "433f1b58283f1cda151dc920ce5f10c407d5986a"
+  },
+  {
+   "tag": "v2026.5.15",
+   "commit": "80bc81b5a4a3ddabffaa389f6694726bb63e0060",
+   "head": "086",
+   "migration_tree": "433f1b58283f1cda151dc920ce5f10c407d5986a"
+  },
+  {
+   "tag": "v2026.5.16",
+   "commit": "d55cf7fe3f21002e93c21f05f91b06973201f46e",
+   "head": "087",
+   "migration_tree": "fce587135b2830a610876d604582b9a853f226dc"
+  },
+  {
+   "tag": "v2026.5.17",
+   "commit": "40b7ad9463e8dabb2db98bca9e6424bedd3b7045",
+   "head": "087",
+   "migration_tree": "fce587135b2830a610876d604582b9a853f226dc"
+  },
+  {
+   "tag": "v2026.5.18",
+   "commit": "ee90332fc338c3a4d7b915bca4644bf1f51dbd96",
+   "head": "087",
+   "migration_tree": "fce587135b2830a610876d604582b9a853f226dc"
+  },
+  {
+   "tag": "v2026.5.19",
+   "commit": "61c0337e02529b8879105562abc6dcaf9cd21840",
+   "head": "087",
+   "migration_tree": "fce587135b2830a610876d604582b9a853f226dc"
+  },
+  {
+   "tag": "v2026.5.20",
+   "commit": "12a5849be04834f21f0bfd7b48356d5a29c4f031",
+   "head": "088",
+   "migration_tree": "bb5a37eda53260a4f3314bc8aec106f6258eb27b"
+  },
+  {
+   "tag": "v2026.5.21",
+   "commit": "67af339d4f99e81c95741d720e1bc087a5c2af41",
+   "head": "089",
+   "migration_tree": "6b12196a39d36789727123c655139ed274a8fd54"
+  },
+  {
+   "tag": "v2026.5.22",
+   "commit": "edbabba120605fe6951dfbcf8d35b350296393d0",
+   "head": "089",
+   "migration_tree": "6b12196a39d36789727123c655139ed274a8fd54"
+  },
+  {
+   "tag": "v2026.5.23",
+   "commit": "44093e7456e62b0a9948a6e29762029b6359e1d9",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.5.24",
+   "commit": "12b81d6c25ff365426b5ea956d85e12bf3e8602a",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.5.25",
+   "commit": "ac7a9cd7b6c4caae9820b71a06df69f9907fb75b",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.5.26",
+   "commit": "19d26318d18148c78e637ea713e97938497d6d59",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.5.27",
+   "commit": "66d093e2b990f529dc8929965f3d1ef0ccc68feb",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.6.0",
+   "commit": "ab17ead841cf804018d97a08c1ac4fee1c318395",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.6.1",
+   "commit": "350b34abc7294a9ac6367ab6613884912c52b631",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.6.2",
+   "commit": "93ab1280a126be853fb6c79f6a12721eaee7071e",
+   "head": "090",
+   "migration_tree": "62bbb6c4990e9d1ac5733129854008790c9fb4ad"
+  },
+  {
+   "tag": "v2026.6.3",
+   "commit": "154dfacdab219d11b3e8a4448dbedb6fb9665993",
+   "head": "092",
+   "migration_tree": "c77bfa195d1e4c25b91b763142121cef687ad37a"
+  },
+  {
+   "tag": "v2026.6.4",
+   "commit": "b8c3cdbd3a562bd26e99175cdfbfb4e0a4973e91",
+   "head": "092",
+   "migration_tree": "c77bfa195d1e4c25b91b763142121cef687ad37a"
+  },
+  {
+   "tag": "v2026.6.5",
+   "commit": "a39a34d529afc2e4bd21e17f1fd55ea89ad34e7f",
+   "head": "092",
+   "migration_tree": "c77bfa195d1e4c25b91b763142121cef687ad37a"
+  },
+  {
+   "tag": "v2026.6.6",
+   "commit": "a00b98fb226a63fa681a956fb6248056b21c6193",
+   "head": "092",
+   "migration_tree": "c77bfa195d1e4c25b91b763142121cef687ad37a"
+  },
+  {
+   "tag": "v2026.6.7",
+   "commit": "6edaa84077353300527974549057e160109d4f71",
+   "head": "094",
+   "migration_tree": "9c4fc1ac686ddd1e92cad29d1ec636a7c70d60ca"
+  },
+  {
+   "tag": "v2026.6.8",
+   "commit": "d6ca452cee7944f7d3593ca77773b283219f52e7",
+   "head": "094",
+   "migration_tree": "9c4fc1ac686ddd1e92cad29d1ec636a7c70d60ca"
+  },
+  {
+   "tag": "v2026.6.9",
+   "commit": "75196a112978b9921fe6a1cfe842b0a20b80988c",
+   "head": "100",
+   "migration_tree": "be5a30771a0ee3047071700d9e1b2332db919f66"
+  },
+  {
+   "tag": "v2026.6.10",
+   "commit": "f6a49cd77280579e7ab3818c55591b6c07a0ab0d",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.11",
+   "commit": "8526ffd3cf6ee44128ebaffc8d1087a5a751fb00",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.12",
+   "commit": "344fd64b9890abc4b73324bc5cadea90d3e1f4f7",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.13",
+   "commit": "e24c5aa08dae3bf346ce9659e6f21962050d0f96",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.14",
+   "commit": "29b7c7b811434c3833fe67b003a24c92b0ea0a97",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.15",
+   "commit": "4ffc1d200220367fdede9aa67736bd9035e67dcf",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.16",
+   "commit": "e8f4387ca56a4b97e1c2f1b068f9750f6fe3d9d6",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.17",
+   "commit": "2d3bca652dec690b37896545da78a42c853ab961",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.18",
+   "commit": "ea220063714ef67cf8244878241a72594490c391",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.19",
+   "commit": "b417f3fab9c6479695a2a15c610a29b4101bbeff",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.6.20",
+   "commit": "775f77b0e77d70bdd9ad313e214bd8c949009d4d",
+   "head": "102",
+   "migration_tree": "5d8b9cbc1c631061299744cd2792bcc51d5c473e"
+  },
+  {
+   "tag": "v2026.7.0",
+   "commit": "225400037d005cdef57b9b27be74dc8874f00b07",
+   "head": "107",
+   "migration_tree": "b2daf556fe47c47c14a5a241d1c14bf868a1d030"
+  },
+  {
+   "tag": "v2026.7.1",
+   "commit": "4ca942b02f135d77387608a03ad0fee0e17a22fb",
+   "head": "110",
+   "migration_tree": "05266f83a62067577123555573c33d137201d1f8"
+  },
+  {
+   "tag": "v2026.7.2",
+   "commit": "9a320f7acede31b16a86a4281f10a26e4ff27b76",
+   "head": "112",
+   "migration_tree": "095ce01622473dea1e7ef1333da58d34f1e70d76"
+  },
+  {
+   "tag": "v2026.8.0",
+   "commit": "1b9f6a4844e2f6a72d4ff294a89b7200009ff65f",
+   "head": "112",
+   "migration_tree": "92ed53625ab5e6062fca4c3974c86479c0930ef7"
+  },
+  {
+   "tag": "v2026.8.1",
+   "commit": "9203de72988a9b052c497e9fbfb93a2caf8a71b1",
+   "head": "112",
+   "migration_tree": "8ff3c694782eb01e880b59848e852143523a6690"
+  },
+  {
+   "tag": "v2026.8.2",
+   "commit": "f4710997804405e2150c3bb4e51062c5951bfd02",
+   "head": "112",
+   "migration_tree": "8ff3c694782eb01e880b59848e852143523a6690"
+  },
+  {
+   "tag": "v2026.8.3",
+   "commit": "427d215787aeadad927d0e7c4d19bbeacc290fa2",
+   "head": "112",
+   "migration_tree": "8ff3c694782eb01e880b59848e852143523a6690"
+  },
+  {
+   "tag": "v2026.8.4",
+   "commit": "9f307bf87df07a62770b98435f25b4f8aa638489",
+   "head": "123",
+   "migration_tree": "4c8b83863136d863c2cf2c7600b54979a3a1997c"
+  },
+  {
+   "tag": "v2026.8.5",
+   "commit": "603ff42ca366ade33ad96d1e109579fcb64e5e4d",
+   "head": "123",
+   "migration_tree": "4c8b83863136d863c2cf2c7600b54979a3a1997c"
+  },
+  {
+   "tag": "v2026.8.6",
+   "commit": "35aef25f3b8169fcfd7941288c0fd96cd7fea96b",
+   "head": "123",
+   "migration_tree": "4c8b83863136d863c2cf2c7600b54979a3a1997c"
+  },
+  {
+   "tag": "v2026.8.7",
+   "commit": "63f057927a83825dbd768d67386b6b9c7f585ee7",
+   "head": "123",
+   "migration_tree": "4c8b83863136d863c2cf2c7600b54979a3a1997c"
+  },
+  {
+   "tag": "v2026.8.8",
+   "commit": "42b16db4d20d1c878a3164a20fbb966808652936",
+   "head": "123",
+   "migration_tree": "4c8b83863136d863c2cf2c7600b54979a3a1997c"
+  },
+  {
+   "tag": "v2026.8.9",
+   "commit": "0a0ec7b4aa4afb40eaaedab5859c59e3dd94cb30",
+   "head": "124",
+   "migration_tree": "c76bf120e852046d2da71ce366665fc0a287a3ec"
+  },
+  {
+   "tag": "v2026.9.0",
+   "commit": "2d22c0d08855e11d9385e665b8beaa3c7ef9fb14",
+   "head": "127",
+   "migration_tree": "f9b8db3699fa2f14d8827f42f86de00106074efc"
+  },
+  {
+   "tag": "v2026.9.1",
+   "commit": "b5af40acf89725093bf22305e28937d74707b180",
+   "head": "127",
+   "migration_tree": "f9b8db3699fa2f14d8827f42f86de00106074efc"
+  },
+  {
+   "tag": "v2026.10.0",
+   "commit": "a31f70810142456f0c47e1530418053e19608680",
+   "head": "127",
+   "migration_tree": "f9b8db3699fa2f14d8827f42f86de00106074efc"
+  },
+  {
+   "tag": "v2026.10.1",
+   "commit": "7582571d5acfe5485fb100440bd30ede8e77ed65",
+   "head": "127",
+   "migration_tree": "f9b8db3699fa2f14d8827f42f86de00106074efc"
+  },
+  {
+   "tag": "v2026.10.2",
+   "commit": "18421671ec10e57af6351e4d3f0f6a066e64c35f",
+   "head": "129",
+   "migration_tree": "d4787991bc2f5660bf1bea0db6d79d9a61215d71"
+  },
+  {
+   "tag": "v2026.11.0",
+   "commit": "f3a88136e1b853d9dcb265860388c2eeb201b8f9",
+   "head": "129",
+   "migration_tree": "d4787991bc2f5660bf1bea0db6d79d9a61215d71"
+  },
+  {
+   "tag": "v2026.11.1",
+   "commit": "bc26a7a0541814bcd894d4e4f9884372ab2de381",
+   "head": "129",
+   "migration_tree": "d4787991bc2f5660bf1bea0db6d79d9a61215d71"
+  },
+  {
+   "tag": "v2026.11.2",
+   "commit": "413ed66546c6ee4cacf07875a84b0ff6ab452d18",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  },
+  {
+   "tag": "v2026.11.3",
+   "commit": "2e1d203ef70ac543ee8089b758c7815497305b5e",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  },
+  {
+   "tag": "v2026.11.4",
+   "commit": "d232446e95a8db853ee6599f980be5b1aad382af",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  },
+  {
+   "tag": "v2026.11.5",
+   "commit": "46eb93b1328f5eaf865e8f02ab27ca014aeb890a",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  },
+  {
+   "tag": "v2026.11.6",
+   "commit": "eeb241137e1d102ce083771f66ba89c0fd12a7ec",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  },
+  {
+   "tag": "v2026.11.7",
+   "commit": "1abb685210644282dcd8be3a274717daf3500d3e",
+   "head": "131",
+   "migration_tree": "9b48989c46e87f50b42dd3ec67bb3daeceb55e47"
+  }
+ ]
+}

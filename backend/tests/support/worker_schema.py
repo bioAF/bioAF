@@ -106,6 +106,18 @@ SELECT md5(coalesce(string_agg(part, E'\\n' ORDER BY part), '')) FROM parts
 """
 
 
+_PARTS_SQL = _FINGERPRINT_SQL.replace(
+    "SELECT md5(coalesce(string_agg(part, E'\\n' ORDER BY part), '')) FROM parts",
+    "SELECT part FROM parts ORDER BY part",
+)
+
+
+async def structure(conn, schema: str) -> list[str]:
+    """The lines ``fingerprint`` digests, for reporting what differs between two schemas."""
+    await conn.execute(text("SELECT set_config('search_path', :s, true)"), {"s": schema})
+    return list((await conn.execute(text(_PARTS_SQL), {"s": schema})).scalars())
+
+
 async def fingerprint(conn, schema: str) -> str:
     """A digest of ``schema``'s structure; equal digests mean no test changed it."""
     await conn.execute(text("SELECT set_config('search_path', :s, true)"), {"s": schema})
