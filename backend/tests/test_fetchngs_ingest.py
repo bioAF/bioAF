@@ -7,8 +7,11 @@ Sample per fetched run on the run's experiment. These tests pin the parser, the 
 the safety properties (best-effort, idempotent, fetchngs-only).
 """
 
+import logging
+
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -16,6 +19,7 @@ from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample, sample_files
 from app.services import sample_sheet_service
 from app.services.fetchngs_ingest_service import FetchngsIngestService
+from app.services.sample_service import SampleService
 
 # A representative nf-core/fetchngs samplesheet (subset of the real columns).
 _FETCHNGS_SAMPLESHEET = (
@@ -423,9 +427,8 @@ async def test_ingest_failure_does_not_poison_caller_transaction(session, admin_
 
     async def _boom(sess, experiment_id, user_id, samples_data):
         # Force a real, schema-enforced DB failure mid-ingest (a FK violation: no such experiment).
-        # The production failure was a duplicate external_id, but that unique index lives only in a
-        # migration, not on the model, so it is absent from the create_all test schema; a FK
-        # violation poisons the transaction the same way and is enforced in tests.
+        # The production failure was a duplicate external_id; that case, rejected by the real
+        # uq_samples_experiment_external_id index, is test_ingest_survives_a_duplicate_inserted_by_a_racing_writer.
         sess.add(Sample(experiment_id=10**9, external_id="orphan", status="registered"))
         await sess.flush()
 
@@ -444,3 +447,47 @@ async def test_ingest_failure_does_not_poison_caller_transaction(session, admin_
         (await session.execute(select(Sample.external_id).where(Sample.experiment_id == exp.id))).scalars()
     )
     assert external_ids == ["AFTER"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_survives_a_duplicate_inserted_by_a_racing_writer(
+    session, db_engine, admin_user, monkeypatch, caplog
+):
+    """Another writer commits one of the fetched accessions after ingest's existing-ID check and
+    before it creates samples. PostgreSQL's uq_samples_experiment_external_id rejects ingest's
+    insert; ingest returns [] and undoes only its own writes, so the caller's earlier pending work
+    survives and the caller can still commit."""
+    exp = await _experiment(session, admin_user)
+    run = await _fetchngs_run(session, admin_user, exp)
+    storage = _FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+
+    # The caller (the pipeline monitor) has uncommitted work of its own in the same session.
+    session.add(Sample(experiment_id=exp.id, external_id="CALLER-PENDING", status="registered"))
+    await session.flush()
+
+    real_bulk_create = SampleService.bulk_create_samples
+
+    async def _race_then_create(sess, experiment_id, user_id, samples_data):
+        # The racing writer: its own connection, committed before ingest inserts.
+        async with async_sessionmaker(db_engine)() as other:
+            other.add(Sample(experiment_id=experiment_id, external_id="GSM7777_SRR1", status="registered"))
+            await other.commit()
+        return await real_bulk_create(sess, experiment_id, user_id, samples_data)
+
+    monkeypatch.setattr("app.services.sample_service.SampleService.bulk_create_samples", _race_then_create)
+
+    with caplog.at_level(logging.WARNING, logger="bioaf.fetchngs_ingest"):
+        created = await FetchngsIngestService.ingest_for_run(
+            session, run, outdir=run.parameters_json["outdir"], storage_adapter=storage
+        )
+
+    assert created == []
+    assert "uq_samples_experiment_external_id" in caplog.text, "the rejection must come from the 080 index"
+
+    session.add(Sample(experiment_id=exp.id, external_id="AFTER", status="registered"))
+    await session.commit()
+    external_ids = sorted(
+        (await session.execute(select(Sample.external_id).where(Sample.experiment_id == exp.id))).scalars()
+    )
+    # Ingest's own SRR2 insert was rolled back with its savepoint; the racer's row and the caller's work stand.
+    assert external_ids == ["AFTER", "CALLER-PENDING", "GSM7777_SRR1"]

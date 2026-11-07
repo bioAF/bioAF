@@ -1022,12 +1022,14 @@
    "route": "none"
   },
   "test_fetchngs_ingest.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "async_sessionmaker",
+    "uses db_engine directly"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_file_asset_identity.py": {
    "category": "single_connection",

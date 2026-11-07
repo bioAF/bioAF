@@ -268,7 +268,6 @@ ROLLBACK_PILOT: frozenset[str] = frozenset(
         "test_data_search_service.py",
         "test_emitted_name_matching.py",
         "test_environment_build_aws.py",
-        "test_fetchngs_ingest.py",
         "test_file_asset_identity.py",
         "test_file_global_scope.py",
         "test_file_inheritance.py",
