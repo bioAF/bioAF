@@ -117,6 +117,7 @@ async def test_query_usage_costs_returns_raw_rows():
     client = MagicMock()
     client.query.return_value = job
     client.get_table.return_value.time_partitioning.field = None
+    client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=client):
         result = await GcpBillingProvider(credentials=None).query_usage_costs(
@@ -139,6 +140,7 @@ async def test_query_usage_costs_passes_credentials_to_client():
     client = MagicMock()
     client.query.return_value = job
     client.get_table.return_value.time_partitioning.field = None
+    client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=client) as ctor:
         await GcpBillingProvider(credentials=creds).query_usage_costs(
@@ -277,4 +279,58 @@ async def test_usage_query_refuses_a_table_it_cannot_prune(partitioning):
     table = _export(partitioning=partitioning)
     with pytest.raises(UnsupportedBillingExport):
         await _query(table, date(2026, 10, 1), date(2026, 11, 6))
+    assert table.queries == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "partitioning, partition_start",
+    [
+        ("ingestion_hour", datetime(2026, 9, 15, tzinfo=UTC)),
+        ("ingestion_day", datetime(2026, 9, 15, tzinfo=UTC)),
+        ("ingestion_month", datetime(2026, 9, 1, tzinfo=UTC)),
+        ("ingestion_year", datetime(2026, 1, 1, tzinfo=UTC)),
+    ],
+)
+async def test_usage_query_rounds_the_partition_bound_down_to_the_tables_granularity(partitioning, partition_start):
+    """A September 15 window on a monthly table must still read September's partition (stamped September 1)."""
+    from tests.support.billing_export_table import ExportRow
+
+    table = _export(
+        [
+            ExportRow(
+                "Compute Engine",
+                30.0,
+                datetime(2026, 9, 15, 10, tzinfo=UTC),
+                "202609",
+                datetime(2026, 9, 15, 20, tzinfo=UTC),
+            ),
+            ExportRow(
+                "Compute Engine",
+                20.0,
+                datetime(2026, 9, 15, 22, tzinfo=UTC),
+                "202610",
+                datetime(2026, 10, 2, tzinfo=UTC),
+            ),
+        ],
+        partitioning=partitioning,
+    )
+    rows = await _query(table, date(2026, 9, 15), date(2026, 9, 17))
+
+    assert rows == [{"service_name": "Compute Engine", "net_cost": 50.0, "usage_date": date(2026, 9, 15)}]
+    [(_, params)] = table.queries
+    assert params["partition_start"] == partition_start
+    assert params["usage_start"] == datetime(2026, 9, 15, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_usage_query_refuses_an_unknown_partition_granularity():
+    from types import SimpleNamespace
+
+    from app.adapters.billing.base import UnsupportedBillingExport
+
+    table = _export()
+    table.get_table = lambda ref: SimpleNamespace(time_partitioning=SimpleNamespace(type_="DECADE", field=None))
+    with pytest.raises(UnsupportedBillingExport):
+        await _query(table, date(2026, 9, 15), date(2026, 9, 17))
     assert table.queries == []

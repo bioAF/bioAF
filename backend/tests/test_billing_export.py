@@ -275,6 +275,7 @@ async def test_query_usage_costs_returns_mapped_data():
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
     mock_bq_client.get_table.return_value.time_partitioning.field = None
+    mock_bq_client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client):
         results = await BillingExportService.query_usage_costs(
@@ -333,6 +334,7 @@ async def test_query_usage_costs_passes_credentials_to_bq_client():
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
     mock_bq_client.get_table.return_value.time_partitioning.field = None
+    mock_bq_client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
         await BillingExportService.query_usage_costs(

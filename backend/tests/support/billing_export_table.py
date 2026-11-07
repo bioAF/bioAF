@@ -10,7 +10,7 @@ Each predicate is applied only when the SQL states it, so a query that drops a
 filter returns the rows that filter would have excluded:
 
     ``invoice.month = @invoice_month``           row.invoice_month == param
-    ``_PARTITIONTIME >= @partition_start``       ingestion day >= param
+    ``_PARTITIONTIME >= @partition_start``       ingestion partition start >= param
     ``usage_start_time >= @usage_start``         row.usage_start_time >= param
     ``usage_start_time < @usage_end``            row.usage_start_time < param
     ``DATE(usage_start_time) < CURRENT_DATE()``  usage day < today (UTC wall clock)
@@ -37,15 +37,25 @@ class ExportRow:
     credits: list[float] = field(default_factory=list)
 
 
-def _day(ts: datetime) -> datetime:
+_GRANULARITY = {"ingestion_hour": "HOUR", "ingestion_day": "DAY", "ingestion_month": "MONTH", "ingestion_year": "YEAR"}
+
+
+def _partition_time(ts: datetime, granularity: str) -> datetime:
+    """_PARTITIONTIME for a row ingested at ``ts``: the start of its UTC partition."""
     ts = ts.astimezone(timezone.utc)
+    if granularity == "HOUR":
+        return datetime(ts.year, ts.month, ts.day, ts.hour, tzinfo=timezone.utc)
+    if granularity == "MONTH":
+        return datetime(ts.year, ts.month, 1, tzinfo=timezone.utc)
+    if granularity == "YEAR":
+        return datetime(ts.year, 1, 1, tzinfo=timezone.utc)
     return datetime(ts.year, ts.month, ts.day, tzinfo=timezone.utc)
 
 
 class BillingExportTable:
     def __init__(self, rows: list[ExportRow] | None = None, partitioning: str = "ingestion_day") -> None:
         self.rows = list(rows or [])
-        # "ingestion_day", "column" (partitioned on a column), or "none".
+        # "ingestion_hour" / "_day" / "_month" / "_year", "column" (partitioned on a column), or "none".
         self.partitioning = partitioning
         self.queries: list[tuple[str, dict]] = []
         self.fail_after: int | None = None
@@ -62,7 +72,7 @@ class BillingExportTable:
         elif self.partitioning == "column":
             tp = SimpleNamespace(type_="DAY", field="usage_start_time")
         else:
-            tp = SimpleNamespace(type_="DAY", field=None)
+            tp = SimpleNamespace(type_=_GRANULARITY[self.partitioning], field=None)
         return SimpleNamespace(time_partitioning=tp)
 
     def query(self, sql: str, job_config=None):
@@ -93,11 +103,12 @@ class BillingExportTable:
         if self.fail_after is not None:
             raise self.fail_with or RuntimeError("query failed while reading results")
 
-    @staticmethod
-    def _matches(r: ExportRow, sql: str, params: dict) -> bool:
+    def _matches(self, r: ExportRow, sql: str, params: dict) -> bool:
         if "invoice.month = @invoice_month" in sql and r.invoice_month != params["invoice_month"]:
             return False
-        if "_PARTITIONTIME >= @partition_start" in sql and _day(r.export_time) < params["partition_start"]:
+        if "_PARTITIONTIME >= @partition_start" in sql and (
+            _partition_time(r.export_time, _GRANULARITY.get(self.partitioning, "DAY")) < params["partition_start"]
+        ):
             return False
         if "usage_start_time >= @usage_start" in sql and r.usage_start_time < params["usage_start"]:
             return False

@@ -13,6 +13,21 @@ from app.adapters.billing.base import BillingProvider, UnsupportedBillingExport
 _EXPORT_TABLE_PREFIXES = ("gcp_billing_export_v1_", "gcp_billing_export_resource_v1_")
 
 
+def _partition_start(usage_start: date, granularity: str) -> datetime:
+    """The start of the UTC ingestion partition containing ``usage_start``.
+
+    _PARTITIONTIME is the start of a row's partition, so a lower bound inside a
+    MONTH or YEAR partition would exclude that partition entirely.
+    """
+    if granularity in ("HOUR", "DAY"):
+        return datetime(usage_start.year, usage_start.month, usage_start.day, tzinfo=timezone.utc)
+    if granularity == "MONTH":
+        return datetime(usage_start.year, usage_start.month, 1, tzinfo=timezone.utc)
+    if granularity == "YEAR":
+        return datetime(usage_start.year, 1, 1, tzinfo=timezone.utc)
+    raise UnsupportedBillingExport(f"unsupported partition granularity {granularity!r}")
+
+
 class GcpBillingProvider(BillingProvider):
     """Queries the BigQuery billing export for historical cost data."""
 
@@ -38,9 +53,9 @@ class GcpBillingProvider(BillingProvider):
         usage_end: date,
     ) -> list[dict]:
         # The export is partitioned by ingestion time. Rows for a usage day are
-        # ingested on or after that day, so partitions before the window start
-        # are pruned; there is no upper partition bound because late exports and
-        # corrections for in-window usage land in later partitions.
+        # ingested on or after that day, so partitions before the one containing
+        # the window start are pruned; there is no upper partition bound because
+        # late exports and corrections for in-window usage land in later partitions.
         start = datetime(usage_start.year, usage_start.month, usage_start.day, tzinfo=timezone.utc)
         end = datetime(usage_end.year, usage_end.month, usage_end.day, tzinfo=timezone.utc)
         table_ref = f"{project_id}.{dataset_id}.{table_id}"
@@ -67,9 +82,10 @@ class GcpBillingProvider(BillingProvider):
                 raise UnsupportedBillingExport(
                     f"{table_ref} is not partitioned by ingestion time; refusing an unbounded scan"
                 )
+            partition_start = _partition_start(usage_start, partitioning.type_)
             job_config = bigquery.QueryJobConfig(
                 query_parameters=[
-                    bigquery.ScalarQueryParameter("partition_start", "TIMESTAMP", start),
+                    bigquery.ScalarQueryParameter("partition_start", "TIMESTAMP", partition_start),
                     bigquery.ScalarQueryParameter("usage_start", "TIMESTAMP", start),
                     bigquery.ScalarQueryParameter("usage_end", "TIMESTAMP", end),
                 ]
