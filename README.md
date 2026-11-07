@@ -217,15 +217,12 @@ bioAF manages these infrastructure components through its UI:
 
 ```text
 bioAF/
-  backend/           FastAPI application
+  backend/           FastAPI application, migrations, and the GCP/AWS Terraform modules (backend/terraform/)
   frontend/          Next.js 14 application
   docker/            Dockerfiles, compose, and nginx config
-  terraform/         GCP infrastructure as code
-  helm/              Kubernetes deployment chart
   decisions/         Architecture Decision Records
   ai_guides/         Working model for humans and AI agents (process, domain language, TDD)
   docs/              User-facing documentation
-  cli/               bioaf in-session CLI (provenance + heartbeat)
   sdk/               Python and R analysis SDKs
   templates/         Example pipeline/workflow templates
   installer/         Installer helper scripts and roles manifest

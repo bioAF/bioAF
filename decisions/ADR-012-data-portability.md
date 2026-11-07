@@ -28,6 +28,11 @@ All data, infrastructure state, and configuration are stored in resources owned 
 
 ### Teardown Flow
 
+> **Note (2026-11):** the `bioaf destroy` command below belonged to the retired deployment
+> package and was never part of the supported install. The current teardown is the compute
+> **Teardown** action on Infrastructure > Components (storage is kept), then `./bioaf stop` on the
+> host; see `docs/life-after-bioaf.md`.
+
 `bioaf destroy --keep-data` removes the bioAF control plane and compute infrastructure while preserving:
 
 - All GCS buckets (raw data, working data, results, config backups)

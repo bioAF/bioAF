@@ -23,10 +23,11 @@ set -e
 #
 # Skipped (no-op) when:
 #   - BIOAF_ENCRYPTION_KEYS is already set (fresh installs, normal upgrades,
-#     Kubernetes deployments where the Secret provides the value).
-#   - /host/.env is not present (Kubernetes path; the Secret handles it).
+#     or a container started with the value supplied externally).
 #
 # Fails loudly when:
+#   - The variable is empty AND /host/.env is not mounted (a container started
+#     outside the Compose stack must be given the value by its caller).
 #   - The variable is empty AND /host/.env is present but not writable
 #     (the upgrade would be silently incomplete otherwise; better to fail).
 # ---------------------------------------------------------------------------
@@ -37,11 +38,11 @@ bootstrap_encryption_key() {
     fi
 
     if [ ! -e /host/.env ]; then
-        # No host env file mounted: this is the Kubernetes (Helm) path where
-        # the Secret should already have supplied BIOAF_ENCRYPTION_KEYS. If
-        # we get here, the operator misconfigured the chart. Fail clearly.
+        # No host env file mounted: the container was started outside the
+        # Compose stack, so BIOAF_ENCRYPTION_KEYS must be supplied by whoever
+        # started it. Generating a key here would not persist. Fail clearly.
         echo "FATAL: BIOAF_ENCRYPTION_KEYS is unset and no host .env is mounted." >&2
-        echo "  On Kubernetes, ensure the chart's encryption Secret exists." >&2
+        echo "  Outside docker/docker-compose.yml, supply BIOAF_ENCRYPTION_KEYS yourself." >&2
         echo "  See decisions/ADR-047-data-at-rest-encryption.md." >&2
         return 1
     fi

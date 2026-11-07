@@ -1,0 +1,3 @@
+### Deployment
+
+- Remove the unused Python deployment package (`cli/`, installed as `bioaf` with `deploy` and `destroy` commands) and the application Helm chart (`helm/bioaf/`) from the source tree. No installer, update path, or CI job used them. Supported management stays with the repository-root `./bioaf` script (`setup`, `update`, `backup`, `stop`) and the Infrastructure > Components page (compute Teardown, Destroy Storage). Older release tags still contain both for anyone reconstructing a historical install. Updating does not uninstall anything, delete cluster resources or Secrets, or change your database.

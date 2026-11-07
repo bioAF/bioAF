@@ -33,7 +33,7 @@ body:
         - Auth / Users
         - Backup / Recovery
         - Terraform / Infrastructure
-        - CLI (bioaf deploy / upgrade / destroy)
+        - Management script (./bioaf setup / update / backup)
         - Other
     validations:
       required: true
