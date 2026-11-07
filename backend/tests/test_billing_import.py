@@ -676,3 +676,54 @@ async def test_a_backfill_waits_for_a_running_sync(billing_clock, admin_user, db
         await first.commit()
         await asyncio.wait_for(task, timeout=10)
         await second.commit()
+
+
+# ---------------------------------------------------------------------------
+# Reporting the import outcome
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_manual_sync_reports_the_import_result(
+    billing_clock, client, admin_token, admin_user, session, export_table
+):
+    billing_clock(NOV_6)
+    export_table.rows.append(_export_row("Compute Engine", 4.0, date(2026, 11, 2), exported=date(2026, 11, 3)))
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    ok = (await client.post("/api/costs/sync", headers=headers)).json()
+    assert ok["status"] == "sync_initiated"
+    assert ok["billing_import"]["status"] == "imported"
+    assert ok["billing_import"]["usage_start"] == "2026-10-01"
+    assert ok["billing_import"]["usage_end"] == "2026-11-06"
+    assert ok["billing_import"]["rebuilt_days"] == ["2026-11-02"]
+    assert "2026-11-01" in ok["billing_import"]["days_without_actuals"]
+
+    export_table.fail_with = RuntimeError("quota exceeded")
+    failed = (await client.post("/api/costs/sync", headers=headers)).json()
+    assert failed["status"] == "sync_initiated"
+    assert failed["billing_import"]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_manual_sync_without_an_export_has_no_import_result(billing_clock, client, admin_token):
+    billing_clock(NOV_6)
+    body = (await client.post("/api/costs/sync", headers={"Authorization": f"Bearer {admin_token}"})).json()
+    assert body == {"status": "sync_initiated", "billing_import": None}
+
+
+@pytest.mark.asyncio
+async def test_daily_pass_warns_when_an_import_fails(billing_clock, admin_user, session, export_table, caplog):
+    import logging
+
+    from app.main import _cost_billing_sync_once
+
+    billing_clock(NOV_6)
+    export_table.fail_with = RuntimeError("quota exceeded")
+
+    with caplog.at_level(logging.WARNING):
+        await _cost_billing_sync_once()
+
+    failures = [r for r in caplog.records if r.levelno == logging.WARNING and "import failed" in r.getMessage()]
+    assert len(failures) == 1
+    assert str(admin_user.organization_id) in failures[0].getMessage()

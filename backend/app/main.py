@@ -656,7 +656,15 @@ async def _cost_billing_sync_once():
         orgs = list(result.scalars().all())
         for org in orgs:
             try:
-                await CostService.sync_billing_data(session, org.id, period)
+                report = await CostService.sync_billing_data(session, org.id, period)
+                if report is not None and report.status != "imported":
+                    logger.warning(
+                        "Billing export import %s for org %d (usage %s to %s, end exclusive); existing cost records kept",
+                        report.status,
+                        org.id,
+                        report.usage_start,
+                        report.usage_end,
+                    )
                 await CostService.check_budget_thresholds(session, org.id, period)
                 # Per org, so one org's failure cannot discard another's sync.
                 await session.commit()

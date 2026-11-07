@@ -57,6 +57,16 @@ class UsageImport:
     # Kept as they were; for an older backfill these are not reconstructable.
     days_without_actuals: list[date] = field(default_factory=list)
 
+    def as_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "usage_start": self.usage_start.isoformat(),
+            "usage_end": self.usage_end.isoformat(),
+            "rebuilt_days": [d.isoformat() for d in self.rebuilt_days],
+            "provisional_days": [d.isoformat() for d in self.provisional_days],
+            "days_without_actuals": [d.isoformat() for d in self.days_without_actuals],
+        }
+
 
 async def _billing_export_config(session: AsyncSession) -> dict | None:
     """The billing-export platform config, or None when the export is not configured."""
