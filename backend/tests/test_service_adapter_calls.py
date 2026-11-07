@@ -349,3 +349,185 @@ async def test_an_idle_session_is_stopped_even_when_termination_fails(session, c
 
     await session.refresh(long_idle)
     assert long_idle.status == "stopped"
+
+
+# --- A stopped session's outputs are kept: registered, then moved to the results bucket ---
+
+
+@dataclass
+class InMemoryBuckets:
+    """A storage adapter over in-memory buckets: uri -> size. copy can be told to fail."""
+
+    objects: dict[str, int] = field(default_factory=dict)
+    fail_copy: bool = False
+
+    def build_uri(self, bucket: str, key: str) -> str:
+        return f"gs://{bucket}/{key.lstrip('/')}"
+
+    def parse_uri(self, uri: str) -> tuple[str, str]:
+        bucket, _, key = uri.removeprefix("gs://").partition("/")
+        return bucket, key
+
+    async def list_objects(self, prefix: str):
+        return [
+            StoredObject(filename=uri.rsplit("/", 1)[1], storage_uri=uri, size_bytes=size)
+            for uri, size in sorted(self.objects.items())
+            if uri.startswith(prefix)
+        ]
+
+    async def copy(self, src: str, dst: str):
+        if self.fail_copy:
+            raise RuntimeError("copy refused")
+        self.objects[dst] = self.objects[src]
+
+    async def delete(self, uri: str):
+        del self.objects[uri]
+
+
+async def _stop_with_outputs(session, user, buckets: InMemoryBuckets):
+    from app.models.file import File
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, "working_bucket_name", "lab-working")
+    await PlatformConfigService.set(session, "results_bucket_name", "lab-results")
+    ns = await _notebook(session, user)
+    prefix = f"gs://lab-working/sessions/{ns.id}/"
+    buckets.objects.update({f"{prefix}umap.png": 2048, f"{prefix}clusters.h5ad": 9000})
+    outputs = [
+        StoredObject(filename=u.rsplit("/", 1)[1], storage_uri=u, size_bytes=s) for u, s in buckets.objects.items()
+    ]
+    notebooks = RecordingNotebooks(result=TerminationResult(output_files=outputs, output_prefix=prefix))
+
+    with (
+        patch("app.services.notebook_service.get_notebook_adapter", return_value=notebooks),
+        patch("app.adapters.registry.get_storage_adapter", return_value=buckets),
+    ):
+        stopped = await NotebookService.stop_session(session, ns.id, user.id)
+    await session.commit()
+    files = (
+        (await session.execute(select(File).where(File.source_notebook_session_id == ns.id).order_by(File.filename)))
+        .scalars()
+        .all()
+    )
+    return ns.id, stopped, files
+
+
+@pytest.mark.asyncio
+async def test_stopping_registers_the_sessions_outputs_and_moves_them_to_results(session, comp_bio_user):
+    buckets = InMemoryBuckets()
+    session_id, stopped, files = await _stop_with_outputs(session, comp_bio_user, buckets)
+
+    results = f"gs://lab-results/sessions/{session_id}/"
+    assert [(f.filename, f.storage_uri, f.size_bytes) for f in files] == [
+        ("clusters.h5ad", f"{results}clusters.h5ad", 9000),
+        ("umap.png", f"{results}umap.png", 2048),
+    ]
+    assert sorted(buckets.objects) == [f"{results}clusters.h5ad", f"{results}umap.png"]  # working copies removed
+    assert stopped.gcs_output_prefix == results
+    assert stopped.status == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_move_keeps_the_outputs_registered_where_they_are(session, comp_bio_user):
+    buckets = InMemoryBuckets(fail_copy=True)
+    session_id, stopped, files = await _stop_with_outputs(session, comp_bio_user, buckets)
+
+    working = f"gs://lab-working/sessions/{session_id}/"
+    assert [f.storage_uri for f in files] == [f"{working}clusters.h5ad", f"{working}umap.png"]
+    assert sorted(buckets.objects) == [f"{working}clusters.h5ad", f"{working}umap.png"]  # nothing deleted
+    assert stopped.gcs_output_prefix == working
+    assert stopped.status == "stopped"
+
+
+# --- A notebook launch the adapter refuses ---
+
+
+@dataclass
+class RefusingNotebooks:
+    error: str
+
+    async def launch_session(self, spec):
+        raise RuntimeError(self.error)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_launch_leaves_a_failed_session_with_a_reason(session, comp_bio_user):
+    with patch(
+        "app.services.notebook_service.get_notebook_adapter",
+        return_value=RefusingNotebooks("ZONE_RESOURCE_POOL_EXHAUSTED: no capacity in us-central1-a"),
+    ):
+        ns = await NotebookService.launch_session(
+            session,
+            user_id=comp_bio_user.id,
+            org_id=comp_bio_user.organization_id,
+            session_type="jupyter",
+            resource_profile="small",
+        )
+
+    assert ns.status == "failed"
+    assert ns.failure_reason
+    assert ns.failure_message
+
+
+@pytest.mark.asyncio
+async def test_a_launch_on_an_inaccessible_image_is_raised_to_the_caller(session, comp_bio_user):
+    with (
+        patch(
+            "app.services.notebook_service.get_notebook_adapter",
+            return_value=RefusingNotebooks("image registry/p:1 not found or not accessible"),
+        ),
+        pytest.raises(RuntimeError, match="not found or not accessible"),
+    ):
+        await NotebookService.launch_session(
+            session,
+            user_id=comp_bio_user.id,
+            org_id=comp_bio_user.organization_id,
+            session_type="jupyter",
+            resource_profile="small",
+        )
+
+
+# --- Smaller edges of the same promises ---
+
+
+@pytest.mark.asyncio
+async def test_cancelling_an_unknown_run_is_not_found(session, admin_user):
+    from app.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        await PipelineRunService.cancel_run(session, 999999, admin_user.id)
+
+
+@pytest.mark.asyncio
+async def test_completion_without_an_outdir_or_results_bucket_collects_from_local_results(
+    session, admin_user, experiment
+):
+    run = await _run(
+        session, admin_user, experiment, compute_job_ref="bioaf-pipeline-47", k8s_job_name="bioaf-pipeline-47"
+    )
+    storage = RecordingStorage()
+
+    await _complete(session, run, storage)
+
+    assert [outdir for outdir, _ in storage.collected_from] == [
+        f"/data/results/experiments/{experiment.id}/pipeline-runs/{run.id}"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_idle_session_with_no_compute_job_is_stopped_without_calling_the_adapter(session, comp_bio_user):
+    orphan = await _notebook(
+        session,
+        comp_bio_user,
+        compute_job_ref=None,
+        status="idle",
+        idle_since=datetime.now(timezone.utc) - timedelta(hours=5),
+    )
+    notebooks = RecordingNotebooks()
+
+    with patch("app.services.notebook_service.get_notebook_adapter", return_value=notebooks):
+        await NotebookService.check_idle_sessions(session, idle_timeout_hours=4)
+
+    await session.refresh(orphan)
+    assert orphan.status == "stopped"
+    assert notebooks.terminations == []
