@@ -84,11 +84,6 @@ async def test_auto_populate_reference_genome_from_linked_dataset(
     """When parameters reference a path matching a reference dataset, reference_genome is auto-populated."""
     with (
         patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
-        patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
         ),
@@ -116,11 +111,6 @@ async def test_auto_populate_reference_genome_fallback_to_params_genome_key(
 ):
     """When no reference dataset is linked but parameters contain a genome key, use that value."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
@@ -150,11 +140,6 @@ async def test_auto_populate_reference_genome_fallback_to_reference_genome_key(
     """Fallback to parameters_json reference_genome key."""
     with (
         patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
-        patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
         ),
@@ -182,11 +167,6 @@ async def test_explicit_reference_genome_not_overwritten(
 ):
     """When reference_genome is explicitly provided, it is not overwritten by auto-population."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,

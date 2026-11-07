@@ -1,8 +1,8 @@
 """Pipeline and notebook services reach compute, storage and notebooks through the BAL adapters.
 
-Executed counterparts of the source checks in test_service_bal_integration.py: each test runs the
-service operation against a recording adapter and asserts what the adapter was asked to do and the
-state the operation leaves behind, including when the adapter fails.
+Each test runs the service operation against a recording adapter and asserts what the adapter was
+asked to do and the state the operation leaves behind, including when the adapter fails. (These
+replaced checks that only read the services' source for the adapter getter names.)
 """
 
 from __future__ import annotations
