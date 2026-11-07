@@ -339,3 +339,45 @@ def test_the_comment_shows_line_and_branch_results_in_separate_columns(report, t
     assert "| Backend | 75.0% | 3 / 4 | 50.0% | 3 / 6 |" in body
     assert "| Frontend | 100.0% | 1 / 1 | 60.0% | 3 / 5 |" in body
     assert "| services | 66.7% | 2 / 3 | 75.0% | 3 / 4 |" in body
+
+
+# --- The reviewed unit selection, labeled apart from the combined suite ---
+
+
+def _render(report, tmp_path, **overrides):
+    kwargs = dict(
+        backend=report.load_backend(_backend_with_branches(tmp_path)),
+        frontend=report.load_frontend(_frontend_with_branches(tmp_path)),
+        diff="",
+        commit="abcdef1",
+        backend_status="0",
+        frontend_status="0",
+    )
+    kwargs.update(overrides)
+    return report.render(**kwargs)
+
+
+def test_the_unit_selection_is_reported_in_its_own_labeled_table(report, tmp_path):
+    unit = report.load_unit(_backend(tmp_path))
+    body = _render(report, tmp_path, unit=unit, unit_status="0")
+    assert "### Unit selection" in body
+    assert "| Backend unit selection | 64.3% | 9 / 14 | not measured | |" in body
+    # The combined row is untouched by the unit result.
+    assert "| Backend | 75.0% | 3 / 4 | 50.0% | 3 / 6 |" in body
+    assert "all of `backend/app/`" in body
+
+
+def test_a_failed_or_missing_unit_run_is_called_out_as_partial(report, tmp_path):
+    failed = _render(report, tmp_path, unit=report.load_unit(_backend(tmp_path)), unit_status="1")
+    assert "Backend unit selection: tests failed, so coverage is partial." in failed
+    missing = _render(
+        report,
+        tmp_path,
+        unit=report.load_unit(tmp_path / "none.json"),
+        unit_status="",
+    )
+    assert "Backend unit selection: no coverage data" in missing
+
+
+def test_without_a_unit_run_there_is_no_unit_table(report, tmp_path):
+    assert "Unit selection" not in _render(report, tmp_path)

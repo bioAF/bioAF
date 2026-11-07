@@ -94,7 +94,15 @@ class Side:
 
 
 def load_backend(path: Path) -> Side:
-    side = Side("Backend", "backend/", "app/", stops_on_failure=True)
+    return _load_coverage_py(Side("Backend", "backend/", "app/", stops_on_failure=True), path)
+
+
+def load_unit(path: Path) -> Side:
+    """The reviewed unit selection's coverage.py JSON; the selection runs every test it holds."""
+    return _load_coverage_py(Side("Backend unit selection", "backend/", "app/"), path)
+
+
+def _load_coverage_py(side: Side, path: Path) -> Side:
     if not path.is_file():
         side.available = False
         return side
@@ -200,6 +208,8 @@ def render(
     commit: str,
     backend_status: str,
     frontend_status: str,
+    unit: Side | None = None,
+    unit_status: str = "",
 ) -> str:
     sides = (backend, frontend)
     out = [MARKER, "## Coverage", "", f"Line coverage for `{commit[:7]}`.", ""]
@@ -214,6 +224,7 @@ def render(
         for n in (
             _status_note(backend, backend_status),
             _status_note(frontend, frontend_status),
+            _status_note(unit, unit_status) if unit else None,
         )
         if n
     ]
@@ -226,6 +237,22 @@ def render(
             out.append(_row_with_branches(side.name, side.total(), side.branch_total()))
         else:
             out.append(f"| {side.name} | not available | | | |")
+
+    if unit is not None:
+        out += [
+            "",
+            "### Unit selection",
+            "",
+            "The reviewed unit selection (`backend/tests/support/unit_selection.py`) run on its own. Its"
+            " denominator is all of `backend/app/`, the same as the combined suite's, not only the code it imports.",
+            "",
+            "| Part | Lines | Covered / total | Branches | Covered / total |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        if unit.available:
+            out.append(_row_with_branches(unit.name, unit.total(), unit.branch_total()))
+        else:
+            out.append(f"| {unit.name} | not available | | | |")
 
     added = added_lines(diff)
     changed = [(side, side.changed(added)) for side in sides if side.available]
@@ -286,6 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--backend-status", default="")
     parser.add_argument("--frontend-status", default="")
+    parser.add_argument("--backend-unit", type=Path, help="coverage.py JSON from the unit selection run")
+    parser.add_argument("--backend-unit-status", default="")
     args = parser.parse_args(argv)
     diff = args.diff.read_text() if args.diff.is_file() else ""
     print(
@@ -296,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
             args.commit,
             args.backend_status.strip(),
             args.frontend_status.strip(),
+            load_unit(args.backend_unit) if args.backend_unit else None,
+            args.backend_unit_status.strip(),
         ),
         end="",
     )
