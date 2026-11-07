@@ -1,0 +1,9 @@
+{
+  "_about": "Coverage gates (plan 8, agreed 2026-11-07): combined-suite line and branch coverage, per stack, never averaged. Floors are the a3f966c0 baseline rounded down to whole points. Raise a floor by hand when the report says a metric is 1 point or more above it; lowering one needs owner approval. The unit selection is reported, not gated.",
+  "gates": [
+    {"part": "Backend", "metric": "lines", "floor": 83},
+    {"part": "Backend", "metric": "branches", "floor": 69},
+    {"part": "Frontend", "metric": "lines", "floor": 75},
+    {"part": "Frontend", "metric": "branches", "floor": 77}
+  ]
+}

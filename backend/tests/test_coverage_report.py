@@ -462,3 +462,23 @@ def test_gate_results_are_rendered_and_enforcement_sets_the_exit_status(report, 
     assert "| Backend | branches | 90.0% | 50.0% (3 / 6) | **fail** |" in body
 
     assert report.main([*args, "--output", str(reported), "--enforce"]) == 1
+
+
+def test_a_metric_clear_of_its_floor_by_a_point_is_flagged_for_the_ratchet(report, tmp_path):
+    sides = _sides(report, tmp_path)  # backend lines 75.0%, branches 50.0%
+    results = report.evaluate_gates(
+        _policy(("Backend", "lines", 74.0), ("Backend", "branches", 49.5)),
+        parts={"Backend": (sides["backend"], "0")},
+    )
+    body = _render(report, tmp_path, gates=results)
+    assert "Backend lines is 1.0 points above its 74.0% floor; raise it in `scripts/ci/coverage_policy.json`" in body
+    assert "Backend branches is" not in body  # 0.5 points is not enough headroom to ask
+
+
+def test_the_repository_policy_gates_each_stacks_lines_and_branches(report):
+    """The agreed policy (2026-11-07): combined suite only, every stack, both metrics, floors in whole points."""
+    policy = json.loads((SCRIPT.parent / "coverage_policy.json").read_text())
+    gated = {(g["part"], g["metric"]) for g in policy["gates"]}
+    assert gated == {("Backend", "lines"), ("Backend", "branches"), ("Frontend", "lines"), ("Frontend", "branches")}
+    assert all(float(g["floor"]).is_integer() and 0 < g["floor"] <= 100 for g in policy["gates"])
+    report.evaluate_gates(policy, parts={})  # every metric is one the report knows

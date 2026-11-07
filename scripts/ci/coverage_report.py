@@ -189,6 +189,10 @@ def _row(label: str, covered: int, total: int) -> str:
 
 METRICS = ("lines", "branches")
 
+# Floors only rise, by hand: a metric this many points above its floor is flagged for raising it.
+RATCHET_POINTS = 1
+POLICY_PATH = "scripts/ci/coverage_policy.json"
+
 
 @dataclass
 class GateResult:
@@ -198,6 +202,7 @@ class GateResult:
     passed: bool
     measured: str  # e.g. "75.0% (3 / 4)", or "" when nothing was measured
     detail: str
+    headroom: Fraction | None = None  # points above the floor, for a passing gate
 
 
 def evaluate_gates(policy: dict, parts: dict[str, tuple[Side, str]]) -> list[GateResult]:
@@ -235,7 +240,9 @@ def evaluate_gates(policy: dict, parts: dict[str, tuple[Side, str]]) -> list[Gat
             )
             continue
         if total and Fraction(covered * 100, total) >= Fraction(str(floor)):
-            results.append(result(True, "", measured))
+            passing = result(True, "", measured)
+            passing.headroom = Fraction(covered * 100, total) - Fraction(str(floor))
+            results.append(passing)
         else:
             results.append(result(False, f"{part} {metric}: {measured} is below the {floor:.1f}% floor", measured))
     return results
@@ -249,6 +256,13 @@ def _gate_lines(results: list[GateResult]) -> list[str]:
     failures = [r.detail for r in results if not r.passed]
     if failures:
         out += [""] + [f"- {d}" for d in failures]
+    raisable = [r for r in results if r.headroom is not None and r.headroom >= RATCHET_POINTS]
+    if raisable:
+        out += [""] + [
+            f"- {r.part} {r.metric} is {float(r.headroom):.1f} points above its {r.floor:.1f}% floor;"
+            f" raise it in `{POLICY_PATH}`."
+            for r in raisable
+        ]
     return out
 
 
@@ -279,7 +293,7 @@ def render(
     gates: list[GateResult] | None = None,
 ) -> str:
     sides = (backend, frontend)
-    out = [MARKER, "## Coverage", "", f"Line coverage for `{commit[:7]}`.", ""]
+    out = [MARKER, "## Coverage", "", f"Coverage for `{commit[:7]}`.", ""]
     out += [
         "Backend: executable statement lines and branch arcs (coverage.py). Frontend: lines and branch paths"
         " (Jest, V8). Line and branch results are separate measures; neither is folded into the other.",
