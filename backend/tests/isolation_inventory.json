@@ -3397,6 +3397,14 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_service_adapter_calls.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_service_bal_integration.py": {
    "category": "no_database",
    "evidence": [],
