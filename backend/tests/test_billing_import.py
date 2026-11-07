@@ -616,3 +616,63 @@ async def test_an_overstated_stale_estimate_no_longer_counts(
     summary = await CostService.get_cost_summary(session, org_id)
     assert summary["current_month_spend"] == Decimal("45.0000")
     assert budget_events == []
+
+
+# ---------------------------------------------------------------------------
+# Atomicity under the per-org lock
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_is_invisible_until_it_commits(billing_clock, admin_user, session, db_engine, export_table):
+    """Another reader sees the original day, never an empty or half-rebuilt one, until the sync commits."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.services.cost_service import CostService
+
+    billing_clock(NOV_6)
+    org_id = admin_user.organization_id
+    await _seed_legacy(session, org_id)
+    export_table.rows += [
+        _export_row("Compute Engine", 4.0, LEGACY_DAYS[0], exported=date(2026, 11, 3)),
+        _export_row("Cloud Storage", 1.0, LEGACY_DAYS[0], exported=date(2026, 11, 3)),
+    ]
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as writer, factory() as reader:
+        await CostService.sync_billing_data(writer, org_id)
+        assert _amounts(await _day(reader, org_id, LEGACY_DAYS[0])) == {
+            "compute": Decimal("40.0000"),
+            "storage": Decimal("5.0000"),
+            "node": Decimal("10.0000"),
+        }
+        await writer.commit()
+        await reader.rollback()
+        assert _amounts(await _day(reader, org_id, LEGACY_DAYS[0])) == {
+            "compute": Decimal("4.0000"),
+            "storage": Decimal("1.0000"),
+        }
+
+
+@pytest.mark.asyncio
+async def test_a_backfill_waits_for_a_running_sync(billing_clock, admin_user, db_engine, export_table):
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.services.cost_service import CostService
+
+    billing_clock(NOV_6)
+    org_id = admin_user.organization_id
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as first, factory() as second:
+        await CostService.sync_billing_data(first, org_id)
+
+        task = asyncio.create_task(
+            CostService.backfill_billing_data(second, org_id, date(2026, 9, 1), date(2026, 9, 30))
+        )
+        await asyncio.sleep(0.5)
+        assert not task.done(), "a backfill ran while a sync for the same org was still open"
+
+        await first.commit()
+        await asyncio.wait_for(task, timeout=10)
+        await second.commit()
