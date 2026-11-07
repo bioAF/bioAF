@@ -237,3 +237,25 @@ def test_backend_default_coverage_traces_greenlets(tmp_path):
     data = CoverageData(basename=env["COVERAGE_FILE"])
     data.read()
     assert {3, 4, 5} <= set(data.lines(str(probe)) or [])
+
+
+def test_backend_default_coverage_measures_branches(tmp_path):
+    """The config CI discovers records which way each branch went, so branch results exist beside lines."""
+    import os
+    import subprocess
+
+    backend = Path(__file__).resolve().parents[1]
+    probe = tmp_path / "branch_probe.py"
+    probe.write_text("value = 1\nif value:\n    value = 2\nprint(value)\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE_", "COVERAGE_"))}
+    env["COVERAGE_FILE"] = str(tmp_path / ".coverage")
+    rcfile = str(backend / "pyproject.toml")
+    for args in (["run", "--rcfile", rcfile, str(probe)], ["json", "--rcfile", rcfile, "-o", str(tmp_path / "c.json")]):
+        result = subprocess.run(
+            [sys.executable, "-m", "coverage", *args], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30
+        )
+        assert result.returncode == 0, result.stderr
+    measured = json.loads((tmp_path / "c.json").read_text())["files"]["branch_probe.py"]
+    # The if was only ever true: its false arc (line 2 to line 4) is the one missed branch.
+    assert measured["summary"]["num_branches"] == 2
+    assert measured["missing_branches"] == [[2, 4]]
