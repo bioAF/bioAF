@@ -24,7 +24,7 @@ export interface Role {
   organization_id: number;
   is_system: boolean;
   permissions: PermissionEntry[];
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface RoleListResponse {
@@ -293,7 +293,7 @@ export interface SampleBatchBrief {
   id: number;
   name: string;
   sample_count: number;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface FieldDefaultValue {
@@ -367,8 +367,8 @@ export interface SampleBatch {
   operator: UserSummary | null;
   notes: string | null;
   sample_count: number;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export type SequencingBatchStatus = "pending" | "ingesting" | "complete" | "partial_complete" | "failed";
@@ -387,8 +387,8 @@ export interface SequencingBatch {
   expected_file_count: number | null;
   ingested_file_count: number;
   notes: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ManifestEntry {
@@ -403,7 +403,7 @@ export interface ManifestEntry {
   last_check_at: string | null;
   retry_count: number;
   error_message: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface SequencingBatchDetail extends SequencingBatch {
@@ -1037,7 +1037,7 @@ export interface CustomPipelineVersion {
   version_trigger: CustomPipelineVersionTrigger;
   status: CustomPipelineVersionStatus;
   created_by_user_id: number;
-  created_at: string;
+  created_at: string | null;
   variables: CustomPipelineVariable[];
   qc_template: string | null;
   qc_config_json: Record<string, unknown> | null;
@@ -1049,8 +1049,8 @@ export interface CustomPipeline {
   description: string | null;
   pipeline_key: string;
   created_by_user_id: number;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface CustomPipelineDetail extends CustomPipeline {
@@ -1527,7 +1527,7 @@ export interface EnvironmentVersionSummary {
   status: "draft" | "building" | "ready" | "failed";
   definition_format: "dockerfile" | "conda";
   image_uri: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface EnvironmentResponse {
@@ -1539,8 +1539,8 @@ export interface EnvironmentResponse {
   version_count: number;
   latest_version: EnvironmentVersionSummary | null;
   created_by: UserSummary | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface EnvironmentListResponse {
@@ -1556,8 +1556,8 @@ export interface EnvironmentDetailResponse {
   environment_type: "notebook" | "work_node" | "pipeline";
   versions: EnvironmentVersionSummary[];
   created_by: UserSummary | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface EnvironmentVersionResponse {
@@ -1570,7 +1570,7 @@ export interface EnvironmentVersionResponse {
   build_id: string | null;
   image_uri: string | null;
   created_by: UserSummary | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface BuildLogsResponse {
@@ -1991,8 +1991,8 @@ export interface AutoRunConfig {
   delay_minutes: number;
   enabled: boolean;
   configured_by_user_id: number;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface AutoRunConfigCreate {
@@ -2021,7 +2021,7 @@ export interface PendingAutoRun {
   status: "waiting" | "launched" | "cancelled";
   pipeline_run_id: number | null;
   cancelled_reason: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface VocabularyValue {

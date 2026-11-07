@@ -24,6 +24,7 @@ import type {
   GitHubRepo,
   GitHubRepoListResponse,
 } from "@/lib/types";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 interface EnvVersionOption {
   env_id: number;
@@ -611,7 +612,7 @@ export default function CustomPipelineDetailPage() {
                           {version.status}
                         </span>
                         <span className="text-xs text-gray-500">
-                          {new Date(version.created_at).toLocaleString()}
+                          {formatRecordedTime(version.created_at)}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">

@@ -10,7 +10,7 @@ interface CustomPipeline {
   id: number;
   name: string;
   pipeline_key: string;
-  updated_at: string;
+  updated_at: string | null;
 }
 
 export function MyCustomPipelinesWidget() {
