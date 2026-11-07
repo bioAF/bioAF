@@ -11,6 +11,19 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.6
+
+### Cost Center
+
+- Cost Center spend, its daily trend and component breakdown, the month-end projection, budget alerts, and the 90% budget check that pauses automatic pipeline runs now all count costs by UTC usage date for the current UTC calendar month. Previously a server whose clock was not in UTC could record today's costs under a different date than the summary read. Around midnight and month boundaries, spend could briefly disappear from the summary or be counted in the wrong month. Costs dated in the next month no longer count toward this month's total.
+- With the BigQuery billing export configured, a day's costs now include every charge for that day's usage, even when Google bills part of it on the next month's invoice. Previously only the current invoice month was read, so a day split across two invoices could show only part of its cost, and late charges for last month were never picked up.
+- Each billing sync now refreshes the previous and current months (UTC), excluding today. Charges that arrive late for those months now update the day they were used. They stay out of the current month's total when that day belongs to an earlier month.
+- Once a day is two days old (UTC), its costs are rebuilt from the billing export. Estimates that the export no longer reports, such as a stale node estimate, stop counting toward spend, budget alerts, and the automatic-run budget check. Days the export has no data for keep their existing figures. Days from before this change in the refreshed months are repaired automatically on the next sync.
+- New operator command for older dates: `python -m app.cli.backfill_costs --org-id <id> --start YYYY-MM-DD --end YYYY-MM-DD` re-imports those usage days the same way and lists any day the export has no data for.
+- The billing-export query now scans only partitions from the one containing the start of the requested window onward, for daily, hourly, monthly, or yearly partitioned exports. It refuses a table it cannot limit this way, rather than scanning the whole table.
+- `POST /api/costs/sync` now also returns `billing_import`, the outcome of the billing-export import (imported or failed, the dates covered, and which days were rebuilt or had no export data). The daily sync logs a warning for each organization whose import did not complete.
+- Known limit: billing-export costs are the whole configured export's total. On a multi-organization installation each organization's Cost Center shows that same total; costs are not yet divided by organization.
+
 ## v2026.11.5
 
 ### Security
