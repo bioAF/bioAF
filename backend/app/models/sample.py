@@ -79,6 +79,10 @@ class Sample(Base):
     sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
     sequencing_batch_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The source label a sample had before migration 080 introduced external_id. Retained, not dead:
+    # where an experiment held one label more than once, 080 gave those samples new external IDs and
+    # this is how they are still found (SampleExternalIdTransition). Never drop or rewrite it.
+    sample_id_external: Mapped[str | None] = mapped_column(String(255), nullable=True)
     organism: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tissue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     donor_source: Mapped[str | None] = mapped_column(String(255), nullable=True)

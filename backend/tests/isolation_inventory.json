@@ -1322,7 +1322,8 @@
   "test_historical_upgrades.py": {
    "category": "schema",
    "evidence": [
-    "alembic"
+    "alembic",
+    "ddl"
    ],
    "route": "dedicated_schema"
   },

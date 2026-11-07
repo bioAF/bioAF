@@ -57,8 +57,10 @@ STRUCTURAL_DIFFS = {"add_table", "remove_table", "add_column", "remove_column"}
 #                      app/models/__init__.py, so it is dead either way.
 #   *.github_repo_name  columns on experiments/projects; the live one lives on
 #                      gitops_repos.
-#   samples.sample_id_external / samples.batch_id
-#                      left over from the batch split above.
+#   samples.batch_id   left over from the batch split above.
+#
+# samples.sample_id_external is no longer drift: plan 9 declared it on the model as the retained
+# source label that migration 080's identifier transition depends on.
 #
 # Recorded rather than fixed: dropping a table or column from a production
 # database destroys data and is the owner's call, not a side effect of adding a
@@ -68,7 +70,6 @@ KNOWN_DRIFT = {
     ("remove_table", "batches"),
     ("remove_column", "experiments", "github_repo_name"),
     ("remove_column", "projects", "github_repo_name"),
-    ("remove_column", "samples", "sample_id_external"),
     ("remove_column", "samples", "batch_id"),
 }
 
