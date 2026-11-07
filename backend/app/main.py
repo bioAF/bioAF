@@ -643,17 +643,29 @@ async def _lit_review_auto_loop():
 async def _cost_billing_sync_once():
     """One pass of the billing sync: every org, committed per org."""
     from app.database import async_session_factory
+    from app.services.billing_period import billing_period
     from app.services.cost_service import CostService
     from app.models.organization import Organization
     from sqlalchemy import select
 
+    # One billing period for the whole pass, so every org is synced and checked
+    # against the same UTC usage month even if the pass runs past midnight.
+    period = billing_period()
     async with async_session_factory() as session:
         result = await session.execute(select(Organization))
         orgs = list(result.scalars().all())
         for org in orgs:
             try:
-                await CostService.sync_billing_data(session, org.id)
-                await CostService.check_budget_thresholds(session, org.id)
+                report = await CostService.sync_billing_data(session, org.id, period)
+                if report is not None and report.status != "imported":
+                    logger.warning(
+                        "Billing export import %s for org %d (usage %s to %s, end exclusive); existing cost records kept",
+                        report.status,
+                        org.id,
+                        report.usage_start,
+                        report.usage_end,
+                    )
+                await CostService.check_budget_thresholds(session, org.id, period)
                 # Per org, so one org's failure cannot discard another's sync.
                 await session.commit()
             except Exception as e:

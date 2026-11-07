@@ -141,3 +141,129 @@ async def test_an_auto_run_batch_that_rolls_back_announces_nothing(session, due_
     await wait_for_deferred_events()
 
     assert launched_events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("in_month_spend, gated", [("85.00", False), ("95.00", True)])
+async def test_the_budget_gate_counts_only_the_utc_usage_month(
+    session, admin_user, due_pending_run, billing_clock, in_month_spend, gated
+):
+    """The 90% gate reads the summary's UTC usage month: neighbouring months do not count.
+
+    20:00 UTC on October 31 is already November 1 on a Tokyo host.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from app.models.budget_config import BudgetConfig
+    from app.models.cost_record import CostRecord
+
+    billing_clock(datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc), "Asia/Tokyo")
+    org_id = admin_user.organization_id
+    session.add(BudgetConfig(organization_id=org_id, monthly_budget=Decimal("100.00")))
+    for record_date, amount in [
+        (date(2026, 9, 30), "500.00"),
+        (date(2026, 10, 31), in_month_spend),
+        (date(2026, 11, 1), "500.00"),
+    ]:
+        session.add(
+            CostRecord(
+                organization_id=org_id, record_date=record_date, component="compute", cost_amount=Decimal(amount)
+            )
+        )
+    await session.commit()
+
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=_adapter(accept=False)):
+        await AutoRunService.process_pending_runs(session)
+    await session.commit()
+
+    pending = await session.get(PendingAutoRun, due_pending_run)
+    assert (pending.cancelled_reason == "budget_limit") is gated
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case, gated",
+    [
+        # One invoice slice ($20 of a $50 usage day) would have read 36% of $55.
+        ("understated", True),
+        # A stale $50 node estimate surviving beside $45 of actuals would have read 95%.
+        ("overstated", False),
+    ],
+)
+async def test_the_budget_gate_follows_corrected_provider_imports(
+    session, admin_user, due_pending_run, billing_clock, monkeypatch, case, gated
+):
+    from datetime import date
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from sqlalchemy import text
+
+    from app.models.budget_config import BudgetConfig
+    from app.models.cost_record import CostRecord
+    from app.services import cost_service
+    from app.services.cost_service import CostService
+    from tests.support.billing_export_table import BillingExportTable, ExportRow
+
+    utc = timezone.utc
+    billing_clock(datetime(2026, 11, 6, 12, 0, tzinfo=utc))
+    org_id = admin_user.organization_id
+    for key, value in {
+        "billing_export_configured": "true",
+        "billing_export_dataset": "billing_export",
+        "billing_export_table": "gcp_billing_export_v1_ABC123",
+        "gcp_project_id": "test-project",
+    }.items():
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=key, v=value)
+        )
+
+    async def no_cluster_cost():
+        return SimpleNamespace(node_pools=[])
+
+    async def no_storage_cost():
+        return SimpleNamespace(total_cost_monthly_usd=0.0)
+
+    monkeypatch.setattr(
+        cost_service, "get_compute_adapter", lambda: SimpleNamespace(get_cluster_metrics=no_cluster_cost)
+    )
+    monkeypatch.setattr(
+        cost_service, "get_storage_adapter", lambda: SimpleNamespace(get_storage_metrics=no_storage_cost)
+    )
+
+    nov_2 = date(2026, 11, 2)
+    exported = datetime(2026, 11, 3, 20, tzinfo=utc)
+    used = datetime(2026, 11, 2, 12, tzinfo=utc)
+    if case == "understated":
+        budget = "55.00"
+        rows = [
+            ExportRow("Compute Engine", 30.0, used, "202610", exported),
+            ExportRow("Compute Engine", 20.0, used, "202611", exported),
+        ]
+    else:
+        budget = "100.00"
+        for component, amount in [("compute", "40.00"), ("storage", "5.00"), ("node", "50.00")]:
+            session.add(
+                CostRecord(organization_id=org_id, record_date=nov_2, component=component, cost_amount=Decimal(amount))
+            )
+        rows = [
+            ExportRow("Compute Engine", 40.0, used, "202611", exported),
+            ExportRow("Cloud Storage", 5.0, used, "202611", exported),
+        ]
+    session.add(BudgetConfig(organization_id=org_id, monthly_budget=Decimal(budget)))
+    await session.commit()
+
+    table = BillingExportTable(rows)
+    with patch("app.adapters.billing.gcp.bigquery.Client", side_effect=table.client):
+        await CostService.sync_billing_data(session, org_id)
+        await session.commit()
+        with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=_adapter(accept=False)):
+            await AutoRunService.process_pending_runs(session)
+        await session.commit()
+
+    pending = await session.get(PendingAutoRun, due_pending_run)
+    assert (pending.cancelled_reason == "budget_limit") is gated
