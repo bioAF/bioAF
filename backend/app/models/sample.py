@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -51,6 +52,23 @@ SAMPLE_ASSAYS = ["bulk_rna", "scrna", "other"]
 
 class Sample(Base):
     __tablename__ = "samples"
+    # Built by migrations 062 and 080; declared here so create_all and autogenerate see them.
+    __table_args__ = (
+        Index(
+            "uq_sample_seq_batch_position",
+            "sequencing_batch_id",
+            "sequencing_batch_position",
+            unique=True,
+            postgresql_where=text("sequencing_batch_id IS NOT NULL AND sequencing_batch_position IS NOT NULL"),
+        ),
+        Index(
+            "uq_samples_experiment_external_id",
+            "experiment_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uuid: Mapped[uuid_pkg.UUID] = mapped_column(

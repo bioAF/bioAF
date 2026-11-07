@@ -85,6 +85,31 @@ async def read(conn: AsyncConnection, schema: str, *, count_rows: bool = True) -
     }
 
 
+async def named_unique(conn: AsyncConnection, schema: str) -> dict[tuple[str, str], tuple[str, str]]:
+    """Every unique rule by ``(table, name)``: ``("constraint" | "index", "btree (cols) WHERE pred")``.
+
+    ``read`` ignores names on purpose; this is for checking that a model declares a migration's
+    rule under the same name and as the same kind of object, which autogenerate compares by name.
+    """
+    rows = await conn.execute(
+        text(
+            """
+            SELECT t.relname, ic.relname,
+                   CASE WHEN con.oid IS NULL THEN 'index' ELSE 'constraint' END,
+                   regexp_replace(pg_get_indexdef(i.indexrelid), '^.* USING ', '')
+            FROM pg_index i
+            JOIN pg_class t ON t.oid = i.indrelid
+            JOIN pg_class ic ON ic.oid = i.indexrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid AND con.contype = 'u'
+            WHERE n.nspname = :s AND i.indisunique AND NOT i.indisprimary
+            """
+        ),
+        {"s": schema},
+    )
+    return {(t, name): (kind, _strip(schema, d)) for t, name, kind, d in rows.all()}
+
+
 def differences(migrated: dict[str, Any], created: dict[str, Any]) -> dict[str, dict[str, list]]:
     """Per rule kind, what only the migrated schema enforces and what only create_all enforces.
 

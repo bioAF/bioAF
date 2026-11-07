@@ -20,9 +20,11 @@ class ExperimentAutoRun(Base):
     delay_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     configured_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True
     )
 
     organization = relationship("Organization")

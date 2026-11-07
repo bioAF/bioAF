@@ -382,11 +382,16 @@ class SampleService:
                 session, exp.organization_id, data.sequencing_batch_code
             )
             batch_changed = new_batch_id != sample.sequencing_batch_id
-            sample.sequencing_batch_id = new_batch_id
+            # Choose the position before moving the sample: the query autoflushes, and flushing the
+            # new batch with the old position collides with uq_sample_seq_batch_position.
             if data.sequencing_batch_position is not None:
-                sample.sequencing_batch_position = data.sequencing_batch_position
+                new_position = data.sequencing_batch_position
             elif batch_changed:
-                sample.sequencing_batch_position = await SampleService._next_batch_position(session, new_batch_id)
+                new_position = await SampleService._next_batch_position(session, new_batch_id)
+            else:
+                new_position = sample.sequencing_batch_position
+            sample.sequencing_batch_id = new_batch_id
+            sample.sequencing_batch_position = new_position
             updates["sequencing_batch_code"] = data.sequencing_batch_code
             updates["sequencing_batch_position"] = str(sample.sequencing_batch_position)
         elif data.sequencing_batch_position is not None:
