@@ -19,6 +19,7 @@ import argparse
 import json
 import re
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 
 # The first line of every comment; CI finds and updates the comment by it.
@@ -186,6 +187,71 @@ def _row(label: str, covered: int, total: int) -> str:
     return f"| {label} | {_pct(covered, total)} | {covered} / {total} |"
 
 
+METRICS = ("lines", "branches")
+
+
+@dataclass
+class GateResult:
+    part: str
+    metric: str
+    floor: float
+    passed: bool
+    measured: str  # e.g. "75.0% (3 / 4)", or "" when nothing was measured
+    detail: str
+
+
+def evaluate_gates(policy: dict, parts: dict[str, tuple[Side, str]]) -> list[GateResult]:
+    """Check each policy gate against one part's one metric.
+
+    ``parts`` maps a part name to its coverage and its run's exit status. A gate passes only on a
+    complete, successful run (status "0") whose metric was measured and is at or above the floor,
+    compared on the raw counts.
+    """
+    results = []
+    for gate in policy.get("gates", []):
+        part, metric, floor = gate["part"], gate["metric"], float(gate["floor"])
+        if metric not in METRICS:
+            raise ValueError(f"unknown coverage metric {metric!r} in the policy; expected one of {METRICS}")
+
+        def result(passed: bool, detail: str, measured: str = "") -> GateResult:
+            return GateResult(part, metric, floor, passed, measured, detail)
+
+        if part not in parts:
+            results.append(result(False, f"no such part in this report: {part}"))
+            continue
+        side, status = parts[part]
+        if not side.available:
+            results.append(result(False, f"{part}: no coverage data"))
+            continue
+        counts = side.total() if metric == "lines" else side.branch_total()
+        if counts is None:
+            results.append(result(False, f"{part}: branches were not measured"))
+            continue
+        covered, total = counts
+        measured = f"{_pct(covered, total)} ({covered} / {total})"
+        if status != "0":
+            results.append(
+                result(False, f"{part}: not a complete, successful run (exit status {status or 'unknown'})", measured)
+            )
+            continue
+        if total and Fraction(covered * 100, total) >= Fraction(str(floor)):
+            results.append(result(True, "", measured))
+        else:
+            results.append(result(False, f"{part} {metric}: {measured} is below the {floor:.1f}% floor", measured))
+    return results
+
+
+def _gate_lines(results: list[GateResult]) -> list[str]:
+    out = ["", "### Gates", "", "| Part | Metric | Floor | Measured | Result |", "| --- | --- | --- | --- | --- |"]
+    for r in results:
+        verdict = "pass" if r.passed else "**fail**"
+        out.append(f"| {r.part} | {r.metric} | {r.floor:.1f}% | {r.measured or 'none'} | {verdict} |")
+    failures = [r.detail for r in results if not r.passed]
+    if failures:
+        out += [""] + [f"- {d}" for d in failures]
+    return out
+
+
 def _row_with_branches(label: str, lines: tuple[int, int], branches: tuple[int, int] | None) -> str:
     if branches is None:
         return f"{_row(label, *lines)} not measured | |"
@@ -210,6 +276,7 @@ def render(
     frontend_status: str,
     unit: Side | None = None,
     unit_status: str = "",
+    gates: list[GateResult] | None = None,
 ) -> str:
     sides = (backend, frontend)
     out = [MARKER, "## Coverage", "", f"Line coverage for `{commit[:7]}`.", ""]
@@ -237,6 +304,9 @@ def render(
             out.append(_row_with_branches(side.name, side.total(), side.branch_total()))
         else:
             out.append(f"| {side.name} | not available | | | |")
+
+    if gates:
+        out += _gate_lines(gates)
 
     if unit is not None:
         out += [
@@ -315,22 +385,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frontend-status", default="")
     parser.add_argument("--backend-unit", type=Path, help="coverage.py JSON from the unit selection run")
     parser.add_argument("--backend-unit-status", default="")
+    parser.add_argument("--policy", type=Path, help="gate floors (scripts/ci/coverage_policy.json)")
+    parser.add_argument("--enforce", action="store_true", help="exit 1 when any gate fails")
+    parser.add_argument("--output", type=Path, help="write the report here instead of stdout")
     args = parser.parse_args(argv)
     diff = args.diff.read_text() if args.diff.is_file() else ""
-    print(
-        render(
-            load_backend(args.backend),
-            load_frontend(args.frontend),
-            diff,
-            args.commit,
-            args.backend_status.strip(),
-            args.frontend_status.strip(),
-            load_unit(args.backend_unit) if args.backend_unit else None,
-            args.backend_unit_status.strip(),
-        ),
-        end="",
-    )
-    return 0
+    backend, frontend = load_backend(args.backend), load_frontend(args.frontend)
+    unit = load_unit(args.backend_unit) if args.backend_unit else None
+    statuses = (args.backend_status.strip(), args.frontend_status.strip(), args.backend_unit_status.strip())
+    parts = {backend.name: (backend, statuses[0]), frontend.name: (frontend, statuses[1])}
+    if unit is not None:
+        parts[unit.name] = (unit, statuses[2])
+    gates = evaluate_gates(json.loads(args.policy.read_text()), parts) if args.policy else None
+    body = render(backend, frontend, diff, args.commit, statuses[0], statuses[1], unit, statuses[2], gates)
+    if args.output:
+        args.output.write_text(body)
+    else:
+        print(body, end="")
+    return 1 if args.enforce and gates and not all(g.passed for g in gates) else 0
 
 
 if __name__ == "__main__":

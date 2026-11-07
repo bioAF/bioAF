@@ -381,3 +381,84 @@ def test_a_failed_or_missing_unit_run_is_called_out_as_partial(report, tmp_path)
 
 def test_without_a_unit_run_there_is_no_unit_table(report, tmp_path):
     assert "Unit selection" not in _render(report, tmp_path)
+
+
+# --- Gates: floors per part and metric, met only by a complete, successful run ---
+
+
+def _policy(*gates):
+    return {"gates": [dict(zip(("part", "metric", "floor"), g)) for g in gates]}
+
+
+def _sides(report, tmp_path):
+    return {
+        "backend": report.load_backend(_backend_with_branches(tmp_path)),  # lines 3/4, branches 3/6
+        "frontend": report.load_frontend(_frontend_with_branches(tmp_path)),  # lines 1/1, branches 3/5
+    }
+
+
+def test_each_gate_compares_one_parts_one_metric_against_its_floor(report, tmp_path):
+    sides = _sides(report, tmp_path)
+    results = report.evaluate_gates(
+        _policy(("Backend", "lines", 75.0), ("Backend", "branches", 51.0), ("Frontend", "branches", 60.0)),
+        parts={"Backend": (sides["backend"], "0"), "Frontend": (sides["frontend"], "0")},
+    )
+    assert [(r.part, r.metric, r.passed) for r in results] == [
+        ("Backend", "lines", True),  # exactly at the floor passes
+        ("Backend", "branches", False),
+        ("Frontend", "branches", True),
+    ]
+    assert "50.0% (3 / 6) is below the 51.0% floor" in results[1].detail
+
+
+def test_a_floor_is_compared_on_raw_counts_not_a_rounded_percentage(report, tmp_path):
+    sides = _sides(report, tmp_path)
+    # 3 / 6 is exactly 50%; 50.0000001 must fail even though both round to 50.0%.
+    [result] = report.evaluate_gates(
+        _policy(("Backend", "branches", 50.0000001)), parts={"Backend": (sides["backend"], "0")}
+    )
+    assert not result.passed
+
+
+@pytest.mark.parametrize("status", ["1", "", "143"])
+def test_a_failed_interrupted_or_unknown_run_never_satisfies_a_gate(report, tmp_path, status):
+    sides = _sides(report, tmp_path)
+    [result] = report.evaluate_gates(_policy(("Backend", "lines", 0.0)), parts={"Backend": (sides["backend"], status)})
+    assert not result.passed
+    assert "not a complete, successful run" in result.detail
+
+
+def test_missing_data_or_an_unmeasured_metric_fails_its_gate(report, tmp_path):
+    missing = report.load_backend(tmp_path / "absent.json")
+    no_branches = report.load_backend(_backend(tmp_path))
+    results = report.evaluate_gates(
+        _policy(("Backend", "lines", 0.0), ("Line-only", "branches", 0.0), ("Nowhere", "lines", 0.0)),
+        parts={"Backend": (missing, "0"), "Line-only": (no_branches, "0")},
+    )
+    assert [r.passed for r in results] == [False, False, False]
+    assert "no coverage data" in results[0].detail
+    assert "branches were not measured" in results[1].detail
+    assert "no such part" in results[2].detail
+
+
+def test_an_unknown_metric_in_the_policy_is_refused(report):
+    with pytest.raises(ValueError, match="functions"):
+        report.evaluate_gates(_policy(("Backend", "functions", 50.0)), parts={})
+
+
+def test_gate_results_are_rendered_and_enforcement_sets_the_exit_status(report, tmp_path):
+    backend = tmp_path / "b.json"
+    backend.write_text(_backend_with_branches(tmp_path).read_text())
+    policy = tmp_path / "policy.json"
+    policy.write_text(json.dumps(_policy(("Backend", "lines", 75.0), ("Backend", "branches", 90.0))))
+    args = ["--backend", str(backend), "--frontend", str(tmp_path / "none.json"), "--diff", str(tmp_path / "none")]
+    args += ["--commit", "abcdef1", "--backend-status", "0", "--policy", str(policy)]
+
+    reported = tmp_path / "report.md"
+    assert report.main([*args, "--output", str(reported)]) == 0  # reported, not enforced
+    body = reported.read_text()
+    assert "### Gates" in body
+    assert "| Backend | lines | 75.0% | 75.0% (3 / 4) | pass |" in body
+    assert "| Backend | branches | 90.0% | 50.0% (3 / 6) | **fail** |" in body
+
+    assert report.main([*args, "--output", str(reported), "--enforce"]) == 1
