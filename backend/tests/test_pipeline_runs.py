@@ -87,11 +87,6 @@ async def pipeline_run(session, admin_user, experiment, samples, initialized_cat
     """Create a pipeline run via API."""
     with (
         patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
-        patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
         ),
@@ -114,11 +109,6 @@ async def pipeline_run(session, admin_user, experiment, samples, initialized_cat
 async def test_launch_run(client, admin_token, experiment, samples, initialized_catalog):
     """Launch a pipeline run creates record, links samples, updates experiment."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
@@ -152,11 +142,6 @@ async def test_launch_run_translates_reference_genome_to_genome_param(
     no genome and nf-core fails validation ("Missing required parameter: --fasta"). scrnaseq has no
     genome default, so it exercises the translation cleanly."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         response = await client.post(
@@ -180,11 +165,6 @@ async def test_launch_run_explicit_genome_param_wins_over_reference_genome(
 ):
     """An explicit `genome` param (from defaults or the caller) is not overridden by reference_genome."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         response = await client.post(
@@ -225,11 +205,6 @@ async def test_launch_run_chipseq_derives_macs_gsize_from_genome(
     await session.commit()
 
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         response = await client.post(
@@ -282,33 +257,23 @@ async def test_launch_run_validates_pipeline(client, admin_token, experiment, in
 @pytest.mark.asyncio
 async def test_launch_run_validates_samples(client, admin_token, experiment, samples, initialized_catalog):
     """Launch fails if sample IDs don't belong to the experiment."""
-    with patch(
-        "app.services.slurm_service.SlurmService._run_ssh_command",
-        new_callable=AsyncMock,
-        return_value="12345",
-    ):
-        response = await client.post(
-            "/api/pipeline-runs",
-            json={
-                "pipeline_key": "nf-core/scrnaseq",
-                "experiment_id": experiment.id,
-                "sample_ids": [99999],
-                "parameters": {},
-            },
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert response.status_code == 400
+    response = await client.post(
+        "/api/pipeline-runs",
+        json={
+            "pipeline_key": "nf-core/scrnaseq",
+            "experiment_id": experiment.id,
+            "sample_ids": [99999],
+            "parameters": {},
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_launch_run_creates_audit_entry(client, admin_token, experiment, samples, initialized_catalog, session):
     """Launch creates an audit log entry."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
@@ -341,33 +306,23 @@ async def test_launch_run_creates_audit_entry(client, admin_token, experiment, s
 @pytest.mark.asyncio
 async def test_cancel_run(client, admin_token, pipeline_run):
     """Cancel a running pipeline."""
-    with patch(
-        "app.services.slurm_service.SlurmService._run_ssh_command",
-        new_callable=AsyncMock,
-        return_value="",
-    ):
-        response = await client.post(
-            f"/api/pipeline-runs/{pipeline_run['id']}/cancel",
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "cancelled"
+    response = await client.post(
+        f"/api/pipeline-runs/{pipeline_run['id']}/cancel",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "cancelled"
 
 
 @pytest.mark.asyncio
 async def test_cancel_run_creates_audit_entry(client, admin_token, pipeline_run, session):
     """Cancel writes an audit log entry."""
-    with patch(
-        "app.services.slurm_service.SlurmService._run_ssh_command",
-        new_callable=AsyncMock,
-        return_value="",
-    ):
-        response = await client.post(
-            f"/api/pipeline-runs/{pipeline_run['id']}/cancel",
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert response.status_code == 200
+    response = await client.post(
+        f"/api/pipeline-runs/{pipeline_run['id']}/cancel",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
 
     from sqlalchemy import select
     from app.models.audit_log import AuditLog
@@ -426,11 +381,6 @@ async def test_reproduce_run(client, admin_token, pipeline_run):
     """Reproduce creates a new run with same params."""
     with (
         patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="67890",
-        ),
-        patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
         ),
@@ -473,11 +423,6 @@ async def test_provenance_export(client, admin_token, pipeline_run):
 async def test_compare_runs(client, admin_token, experiment, samples, initialized_catalog):
     """Compare runs shows parameter diffs."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch(
             "app.services.experiment_service.ExperimentService.update_status",
             new_callable=AsyncMock,
@@ -543,11 +488,6 @@ async def _install_smrnaseq(session, admin_user):
 
 async def _launch_smrnaseq(client, admin_token, experiment, samples, parameters=None, genome="GRCh38"):
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         return await client.post(
@@ -646,11 +586,6 @@ async def test_launch_run_rnaseq_gains_no_small_rna_parameters(
 ):
     """Regression: `smrnaseq` contains `rnaseq`, the same substring trap the Level-3 wiring hit."""
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         r = await client.post(
@@ -768,11 +703,6 @@ async def test_launch_run_smrnaseq_refuses_to_pick_between_two_organisms(
 
 async def _launch(client, admin_token, experiment, samples, key, parameters=None, genome="GRCh38"):
     with (
-        patch(
-            "app.services.slurm_service.SlurmService._run_ssh_command",
-            new_callable=AsyncMock,
-            return_value="12345",
-        ),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
     ):
         return await client.post(

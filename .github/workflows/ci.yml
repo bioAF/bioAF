@@ -128,22 +128,39 @@ jobs:
             echo "python=$(python --version 2>&1)"
             echo "cpus=$(nproc)"
             echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
-            echo "pytest_command=pytest -x -n auto --tb=short --cov=app --cov-report=term-missing --cov-report=json -q"
+            echo "pytest_command=pytest -n auto --tb=short --cov=app --cov-report=term-missing --cov-report=json -q"
+            echo "unit_command=python -m tests.support.unit_selection -q -n 0 --cov=app --cov-report=json"
           } > test-artifacts/environment.txt
           pip freeze > test-artifacts/pip-freeze.txt
 
       - name: Run tests
         run: |
           # The default shell is bash -eo pipefail; capture the status so the finish time is still written.
+          # Not fail-fast (plan 8): every test runs, so a failed run still reports every failure.
           echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           status=0
-          pytest -x -n auto --tb=short --cov=app --cov-report=term-missing \
+          pytest -n auto --tb=short --cov=app --cov-report=term-missing \
             --cov-report=json:test-artifacts/coverage.json -q \
             --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
             2>&1 | tee test-artifacts/pytest-output.txt || status=$?
           echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           # Read by the coverage comment: a failed run's coverage is partial.
           echo "$status" > test-artifacts/exit-status
+          exit $status
+
+      # The reviewed unit selection (tests/support/unit_selection.py), measured on its own and reported
+      # in its own table; not gated. It gets an unreachable database URL: it must not need PostgreSQL.
+      - name: Run the unit selection
+        if: always()
+        env:
+          BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://unit:none@127.0.0.1:9/no_database
+          COVERAGE_FILE: ${{ runner.temp }}/unit-coverage/.coverage
+        run: |
+          mkdir -p "$(dirname "$COVERAGE_FILE")"
+          status=0
+          python -m tests.support.unit_selection -q -n 0 --cov=app \
+            --cov-report=json:test-artifacts/unit-coverage.json || status=$?
+          echo "$status" > test-artifacts/unit-exit-status
           exit $status
 
       - name: Summarize test timing
@@ -229,9 +246,10 @@ jobs:
             frontend/coverage/exit-status
           if-no-files-found: warn
 
-  # One comment per pull request with backend and frontend line coverage, by area, and for the
-  # lines the pull request added; updated in place on every run. Fork pull requests get a
-  # read-only token, so for them the report goes to the job summary only.
+  # One comment per pull request with backend and frontend line and branch coverage, the gates, the
+  # unit selection, the same by area, and for the lines the pull request added; updated in place on
+  # every run. Fork pull requests get a read-only token, so for them the report goes to the job
+  # summary only. A failed gate fails this job after the comment is posted.
   coverage-comment:
     name: Coverage Report
     runs-on: ubuntu-latest
@@ -263,14 +281,21 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git diff --unified=0 "$BASE_SHA...$HEAD_SHA" > coverage-in/pr.diff
+          # Gates (scripts/ci/coverage_policy.json) pass only on complete, successful runs. The status
+          # is kept for the enforce step so the comment is still posted when a gate fails.
+          status=0
           python3 scripts/ci/coverage_report.py \
             --backend coverage-in/backend/coverage.json \
             --frontend coverage-in/frontend/coverage-final.json \
+            --backend-unit coverage-in/backend/unit-coverage.json \
             --diff coverage-in/pr.diff \
             --commit "$HEAD_SHA" \
             --backend-status "$(cat coverage-in/backend/exit-status 2>/dev/null)" \
             --frontend-status "$(cat coverage-in/frontend/exit-status 2>/dev/null)" \
-            > coverage-report.md
+            --backend-unit-status "$(cat coverage-in/backend/unit-exit-status 2>/dev/null)" \
+            --policy scripts/ci/coverage_policy.json --enforce \
+            --output coverage-report.md || status=$?
+          echo "$status" > gate-status
           cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post or update the pull request comment
@@ -286,6 +311,15 @@ jobs:
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@coverage-report.md > /dev/null
           else
             gh pr comment "$PR" --body-file coverage-report.md
+          fi
+
+      - name: Enforce coverage gates
+        if: always()
+        run: |
+          status=$(cat gate-status 2>/dev/null || echo missing)
+          if [ "$status" != "0" ]; then
+            echo "::error::Coverage gates failed (report status: $status). See the Gates table in the job summary."
+            exit 1
           fi
 
   # ──────────────────────────────────────────────
