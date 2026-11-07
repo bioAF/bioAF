@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
@@ -36,6 +37,144 @@ async def _usage_month_spend(session: AsyncSession, org_id: int, period: Billing
         select(func.coalesce(func.sum(CostRecord.cost_amount), 0)).where(*_in_usage_month(org_id, period))
     )
     return result.scalar() or Decimal("0")
+
+
+# A usage day this many UTC days old or older is replacement-eligible: its
+# records are rebuilt from the provider's daily aggregate. An application
+# heuristic, not a provider finality guarantee; later corrections still apply.
+_REPLACEMENT_AGE = timedelta(days=2)
+
+
+@dataclass
+class UsageImport:
+    """What one provider import over ``[usage_start, usage_end)`` did."""
+
+    usage_start: date
+    usage_end: date
+    status: str = "imported"  # "imported", "failed", or "not_configured"
+    rebuilt_days: list[date] = field(default_factory=list)
+    provisional_days: list[date] = field(default_factory=list)
+    # Kept as they were; for an older backfill these are not reconstructable.
+    days_without_actuals: list[date] = field(default_factory=list)
+
+
+async def _billing_export_config(session: AsyncSession) -> dict | None:
+    """The billing-export platform config, or None when the export is not configured."""
+    from app.platform.platform_config_service import PlatformConfigService
+
+    bq_config = await PlatformConfigService.get_many(
+        session,
+        [
+            "billing_export_configured",
+            "billing_export_dataset",
+            "billing_export_table",
+            "gcp_project_id",
+            "gcp_credential_source",
+            "gcp_service_account_key",
+            "gcp_service_account_email",
+        ],
+    )
+    if bq_config.get("billing_export_configured", "false") != "true":
+        return None
+    return bq_config
+
+
+async def _import_usage(
+    session: AsyncSession,
+    org_id: int,
+    bq_config: dict,
+    usage_start: date,
+    usage_end: date,
+    period: BillingPeriod,
+) -> UsageImport:
+    """Import provider actuals for UTC usage days in ``[usage_start, usage_end)``.
+
+    The whole result is read before anything is written. For each usage day the
+    provider returned actuals for: an eligible day (``_REPLACEMENT_AGE`` or
+    older) has all of its records replaced by the provider's component
+    aggregates, including legacy rows with empty metadata; a younger day has
+    only the returned components replaced, so estimates for components without
+    actuals yet still count. Days without actuals, and every day when the query
+    fails, keep their records: missing export data is not a zero-cost day.
+    All replacements happen in one savepoint, so a failed write leaves every
+    day as it was.
+    """
+    from app.services.billing_export_service import BillingExportService
+
+    report = UsageImport(usage_start=usage_start, usage_end=usage_end)
+    project_id = bq_config.get("gcp_project_id", "")
+    dataset_id = bq_config.get("billing_export_dataset", "")
+    table_id = bq_config.get("billing_export_table", "")
+    if not (project_id and dataset_id and table_id):
+        report.status = "not_configured"
+        return report
+
+    try:
+        from app.adapters.credentials.credential_injector import load_gcp_credentials
+
+        try:
+            creds = load_gcp_credentials(bq_config)
+        except Exception:
+            logger.warning("Failed to load GCP credentials for BQ sync, using ADC")
+            creds = None
+        rows = await BillingExportService.query_usage_costs(
+            project_id, dataset_id, table_id, usage_start, usage_end, credentials=creds
+        )
+    except Exception:
+        logger.exception("Failed to query BQ billing export; existing cost records kept")
+        report.status = "failed"
+        return report
+
+    daily: dict[date, dict[str, Decimal]] = {}
+    for row in rows:
+        usage_date = row["usage_date"]
+        if not usage_start <= usage_date < usage_end:
+            continue
+        components = daily.setdefault(usage_date, {})
+        components[row["component"]] = components.get(row["component"], Decimal("0")) + Decimal(str(row["net_cost"]))
+
+    cutoff = period.today - _REPLACEMENT_AGE
+    rebuilt: list[date] = []
+    provisional: list[date] = []
+    try:
+        async with session.begin_nested():
+            for usage_date, components in sorted(daily.items()):
+                stale = delete(CostRecord).where(
+                    CostRecord.organization_id == org_id,
+                    CostRecord.record_date == usage_date,
+                )
+                if usage_date <= cutoff:
+                    replacement = "full_day"
+                    rebuilt.append(usage_date)
+                else:
+                    stale = stale.where(CostRecord.component.in_(components))
+                    replacement = "component"
+                    provisional.append(usage_date)
+                await session.execute(stale)
+                session.add_all(
+                    CostRecord(
+                        organization_id=org_id,
+                        record_date=usage_date,
+                        component=component,
+                        cost_amount=amount,
+                        metadata_json={"source": "actual", "replacement": replacement},
+                    )
+                    for component, amount in components.items()
+                )
+            await session.flush()
+    except Exception:
+        logger.exception("Failed to store BQ billing export costs; existing cost records kept")
+        report.status = "failed"
+        return report
+
+    report.rebuilt_days = rebuilt
+    report.provisional_days = provisional
+    report.days_without_actuals = [
+        usage_start + timedelta(days=i)
+        for i in range((usage_end - usage_start).days)
+        if usage_start + timedelta(days=i) not in daily
+    ]
+    return report
 
 
 class CostService:
@@ -150,13 +289,16 @@ class CostService:
         return records, total
 
     @staticmethod
-    async def sync_billing_data(session: AsyncSession, org_id: int, period: BillingPeriod | None = None) -> None:
+    async def sync_billing_data(
+        session: AsyncSession, org_id: int, period: BillingPeriod | None = None
+    ) -> UsageImport | None:
         """Sync cost data into cost_records.
 
-        When BigQuery billing export is configured, queries BQ for historical
-        MTD data (excluding today, which lags up to 24h) and uses adapter
-        estimates for today only. When not configured, uses the adapter path
-        for all data.
+        When BigQuery billing export is configured, imports provider actuals for
+        the previous and current UTC usage months, excluding today (see
+        ``_import_usage`` for the replacement rule), and uses adapter estimates
+        for today only. When not configured, uses the adapter path for all data
+        and returns None.
 
         Serialised per org by a transaction-scoped advisory lock. Every writer
         here is a select-then-insert and cost_records has no unique constraint,
@@ -167,87 +309,47 @@ class CostService:
         logger.info("Syncing billing data for org %d", org_id)
         period = period or billing_period()
 
-        # Check if BQ billing export is configured
-        from app.platform.platform_config_service import PlatformConfigService
-
-        bq_config = await PlatformConfigService.get_many(
-            session,
-            [
-                "billing_export_configured",
-                "billing_export_dataset",
-                "billing_export_table",
-                "gcp_project_id",
-                "gcp_credential_source",
-                "gcp_service_account_key",
-                "gcp_service_account_email",
-            ],
-        )
-
-        bq_configured = bq_config.get("billing_export_configured", "false") == "true"
-
-        if bq_configured:
-            await CostService._sync_from_bigquery(session, org_id, bq_config, period)
-        else:
+        bq_config = await _billing_export_config(session)
+        if bq_config is None:
             await CostService._sync_from_adapters(session, org_id, period)
+            return None
 
-    @staticmethod
-    async def _sync_from_bigquery(
-        session: AsyncSession,
-        org_id: int,
-        bq_config: dict,
-        period: BillingPeriod,
-    ) -> None:
-        """Sync historical MTD from BQ, today from adapters (intraday bridge)."""
-        from app.services.billing_export_service import BillingExportService
-
-        project_id = bq_config.get("gcp_project_id", "")
-        dataset_id = bq_config.get("billing_export_dataset", "")
-        table_id = bq_config.get("billing_export_table", "")
-
-        # Historical data from BQ (excludes today due to export lag)
-        if project_id and dataset_id and table_id:
-            try:
-                from app.adapters.credentials.credential_injector import load_gcp_credentials
-
-                try:
-                    creds = load_gcp_credentials(bq_config)
-                except Exception:
-                    logger.warning("Failed to load GCP credentials for BQ sync, using ADC")
-                    creds = None
-                bq_results = await BillingExportService.query_mtd_costs(
-                    project_id, dataset_id, table_id, credentials=creds
-                )
-                # Aggregate by date + component
-                daily_components: dict[tuple[date, str], Decimal] = {}
-                for row in bq_results:
-                    key = (row["usage_date"], row["component"])
-                    daily_components[key] = daily_components.get(key, Decimal("0")) + Decimal(str(row["net_cost"]))
-
-                for (record_date, component), amount in daily_components.items():
-                    existing_rec = await session.execute(
-                        select(CostRecord).where(
-                            CostRecord.organization_id == org_id,
-                            CostRecord.record_date == record_date,
-                            CostRecord.component == component,
-                        )
-                    )
-                    record = existing_rec.scalar_one_or_none()
-                    if record:
-                        record.cost_amount = amount
-                    else:
-                        session.add(
-                            CostRecord(
-                                organization_id=org_id,
-                                record_date=record_date,
-                                component=component,
-                                cost_amount=amount,
-                            )
-                        )
-            except Exception:
-                logger.exception("Failed to query BQ billing export, falling back to adapters")
-
+        # Historical data from the export (excludes today due to export lag)
+        report = await _import_usage(session, org_id, bq_config, period.previous_month_start, period.today, period)
         # Today's costs from adapters (intraday bridge)
         await CostService._sync_from_adapters(session, org_id, period)
+        return report
+
+    @staticmethod
+    async def backfill_billing_data(
+        session: AsyncSession,
+        org_id: int,
+        start_date: date,
+        end_date: date,
+        period: BillingPeriod | None = None,
+    ) -> UsageImport:
+        """Re-import provider costs for usage days ``start_date..end_date`` (inclusive).
+
+        The operator path for days outside the routine refresh window: the same
+        query and replacement rule as ``sync_billing_data``, never reaching
+        today. Days the provider has no actuals for keep their records and are
+        listed in ``days_without_actuals``. Takes the same per-org lock; the
+        caller commits.
+        """
+        from app.exceptions import ValidationError
+
+        period = period or billing_period()
+        if start_date > end_date:
+            raise ValidationError("start_date must not be after end_date")
+        usage_end = min(end_date + timedelta(days=1), period.today)
+        if start_date >= usage_end:
+            raise ValidationError(f"a backfill must end before today ({period.today.isoformat()}, UTC)")
+
+        await session.execute(select(func.pg_advisory_xact_lock(_COST_SYNC_LOCK_NAMESPACE, org_id)))
+        bq_config = await _billing_export_config(session)
+        if bq_config is None:
+            raise ValidationError("billing export is not configured")
+        return await _import_usage(session, org_id, bq_config, start_date, usage_end, period)
 
     @staticmethod
     async def _sync_from_adapters(
@@ -291,6 +393,7 @@ class CostService:
             record = existing_rec.scalar_one_or_none()
             if record:
                 record.cost_amount = amount
+                record.metadata_json = {"source": "estimated"}
             else:
                 session.add(
                     CostRecord(
@@ -298,6 +401,7 @@ class CostService:
                         record_date=today,
                         component=component,
                         cost_amount=amount,
+                        metadata_json={"source": "estimated"},
                     )
                 )
 
