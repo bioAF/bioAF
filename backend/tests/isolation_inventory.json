@@ -2363,11 +2363,6 @@
    ],
    "route": "rollback_candidate"
   },
-  "test_phase22_terraform.py": {
-   "category": "no_database",
-   "evidence": [],
-   "route": "none"
-  },
   "test_phase23_files.py": {
    "category": "real_commit",
    "evidence": [

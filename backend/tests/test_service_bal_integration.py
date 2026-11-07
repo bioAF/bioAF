@@ -1,4 +1,10 @@
-"""Tests verifying that refactored services call through the BAL adapter interfaces."""
+"""The local-mode BAL adapters' submit, cancel, status, metrics and session flows.
+
+That the pipeline and notebook services reach compute, storage and notebooks through these adapters
+is executed in test_service_adapter_calls.py (cancel, logs, completion, stop, idle check),
+test_pipeline_run_jobspec.py and test_pipeline_launch_failure.py (launch), test_pipeline_monitor.py
+(status sync) and test_notebook_file_mounting.py (notebook launch).
+"""
 
 import pytest
 
@@ -15,93 +21,6 @@ def init_registry(monkeypatch):
     registry.initialize_adapters_sync("kubernetes")
     yield
     registry.reset_registry()
-
-
-class TestPipelineRunServiceUsesAdapter:
-    @pytest.mark.asyncio
-    async def test_launch_run_calls_compute_adapter(self):
-        """Verify pipeline_run_service imports from adapters.registry."""
-        from app.services.pipeline_run_service import PipelineRunService
-
-        # Verify the module references the adapter, not SlurmService directly
-        import inspect
-
-        source = inspect.getsource(PipelineRunService.launch_run)
-        assert "get_compute_adapter" in source
-        assert "SlurmService._run_ssh_command" not in source
-
-    @pytest.mark.asyncio
-    async def test_cancel_run_calls_compute_adapter(self):
-        """Verify cancel_run uses the compute adapter."""
-        from app.services.pipeline_run_service import PipelineRunService
-
-        import inspect
-
-        source = inspect.getsource(PipelineRunService.cancel_run)
-        assert "get_compute_adapter" in source
-        assert "SlurmService._run_ssh_command" not in source
-
-
-class TestPipelineMonitorServiceUsesAdapter:
-    @pytest.mark.asyncio
-    async def test_sync_uses_compute_adapter(self):
-        """Verify pipeline_monitor_service imports from adapters.registry."""
-        from app.services.pipeline_monitor_service import PipelineMonitorService
-
-        import inspect
-
-        source = inspect.getsource(PipelineMonitorService._sync_single_run)
-        assert "get_compute_adapter" in source
-
-    @pytest.mark.asyncio
-    async def test_get_run_logs_uses_adapter(self):
-        from app.services.pipeline_monitor_service import PipelineMonitorService
-
-        import inspect
-
-        source = inspect.getsource(PipelineMonitorService.get_run_logs)
-        assert "get_compute_adapter" in source
-
-    @pytest.mark.asyncio
-    async def test_handle_completion_uses_storage_adapter(self):
-        from app.services.pipeline_monitor_service import PipelineMonitorService
-
-        import inspect
-
-        source = inspect.getsource(PipelineMonitorService._handle_completion)
-        assert "get_storage_adapter" in source
-
-
-class TestNotebookServiceUsesAdapter:
-    @pytest.mark.asyncio
-    async def test_launch_session_calls_notebook_adapter(self):
-        """Verify notebook_service uses the notebook adapter."""
-        from app.services.notebook_service import NotebookService
-
-        import inspect
-
-        source = inspect.getsource(NotebookService.launch_session)
-        assert "get_notebook_adapter" in source
-        assert "SlurmService" not in source
-
-    @pytest.mark.asyncio
-    async def test_stop_session_calls_notebook_adapter(self):
-        from app.services.notebook_service import NotebookService
-
-        import inspect
-
-        source = inspect.getsource(NotebookService.stop_session)
-        assert "get_notebook_adapter" in source
-
-    @pytest.mark.asyncio
-    async def test_check_idle_uses_notebook_adapter(self):
-        from app.services.notebook_service import NotebookService
-
-        import inspect
-
-        source = inspect.getsource(NotebookService.check_idle_sessions)
-        assert "get_notebook_adapter" in source
-        assert "SlurmService" not in source
 
 
 class TestComputeAdapterLocalMode:
