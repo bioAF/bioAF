@@ -56,6 +56,7 @@ def _sample_response(s) -> SampleResponse:
     return SampleResponse(
         id=s.id,
         external_id=s.external_id,
+        relabeled_from=s.relabeled_from,
         organism=s.organism,
         tissue_type=s.tissue_type,
         donor_source=s.donor_source,

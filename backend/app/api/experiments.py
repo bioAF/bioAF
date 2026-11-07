@@ -266,6 +266,7 @@ async def list_experiment_samples(
         SampleResponse(
             id=s.id,
             external_id=s.external_id,
+            relabeled_from=s.relabeled_from,
             organism=s.organism,
             tissue_type=s.tissue_type,
             donor_source=s.donor_source,
@@ -314,6 +315,7 @@ async def create_sample(
     return SampleResponse(
         id=sample.id,
         external_id=sample.external_id,
+        relabeled_from=sample.relabeled_from,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,

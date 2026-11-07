@@ -29,6 +29,7 @@ from app.services.event_types import (
 from app.services.file_type_utils import detect_file_type
 from app.services.naming_profile_parser import match_filename, resolve_entities
 from app.services.naming_profile_service import NamingProfileService
+from app.services.sample_service import SampleService
 
 logger = logging.getLogger("bioaf.ingest_service")
 
@@ -147,6 +148,18 @@ async def resolve_or_create_sample(
     existing = result.scalar_one_or_none()
     if existing:
         return existing.id
+
+    # A label migration 080 split across several samples names none of them; creating another
+    # sample under it would add a fourth identity for the same label. Leave it unresolved.
+    candidates = await SampleService.ambiguous_label_candidates(db, experiment_id, external_id)
+    if candidates:
+        logger.warning(
+            "Not resolving sample label %r in experiment %d: it was relabelled to %s",
+            external_id,
+            experiment_id,
+            ", ".join(candidates),
+        )
+        return None
 
     sample = Sample(
         experiment_id=experiment_id,

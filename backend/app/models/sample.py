@@ -18,6 +18,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -121,3 +122,17 @@ class Sample(Base):
     parent_sample = relationship("Sample", remote_side="Sample.id", foreign_keys=[parent_sample_id])
     derived_samples = relationship("Sample", foreign_keys=[parent_sample_id], overlaps="parent_sample")
     custom_fields = relationship("SampleCustomField", back_populates="sample", cascade="all, delete-orphan")
+    # Set only for samples migration 080 relabelled (written by the migration, never by the app).
+    external_id_transition = relationship("SampleExternalIdTransition", uselist=False, lazy="selectin", viewonly=True)
+
+    @property
+    def relabeled_from(self) -> str | None:
+        """The source label 080 replaced with a new external ID, or None.
+
+        Loaded with every sample read from the database (selectin). A sample this process created
+        has no transition and may not have the relationship loaded; that is None too, not a query.
+        """
+        if "external_id_transition" in sa_inspect(self).unloaded:
+            return None
+        transition = self.external_id_transition
+        return transition.source_label if transition is not None else None

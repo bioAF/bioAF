@@ -22,107 +22,26 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import sys
-import uuid
-from pathlib import Path
 
 import asyncpg
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
-from tests.plugins.db_url import database_url
+from tests.support.case_db import CaseDatabase, case_database, code_head, plain
 from tests.support import historical_data, releases, schema_catalog, worker_schema
 from tests.support import historical_runner as runner
 
-BACKEND = Path(__file__).resolve().parent.parent
-TEST_URL = database_url()
 pytestmark = pytest.mark.skipif(os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1", reason="explicitly disabled")
 
 
-def _plain(url: str) -> str:
-    return url.replace("postgresql+asyncpg://", "postgresql://")
-
-
-def _with_database(url: str, name: str) -> str:
-    base, _, _ = url.rpartition("/")
-    return f"{base}/{name}"
-
-
-async def _can_create_databases() -> bool:
-    conn = await asyncpg.connect(_plain(TEST_URL))
-    try:
-        return bool(await conn.fetchval("SELECT rolcreatedb OR rolsuper FROM pg_roles WHERE rolname = current_user"))
-    finally:
-        await conn.close()
-
-
-@pytest.fixture(scope="session")
-def createdb_allowed():
-    if asyncio.run(_can_create_databases()):
-        return
-    if os.environ.get("CI"):
-        pytest.fail("the historical upgrade matrix needs CREATEDB on the test server")
-    pytest.skip("needs CREATEDB: run under `python -m tests.support.disposable_pg run -- ...`")
-
-
-class CaseDatabase:
-    """A database of its own for one case, dropped afterwards."""
-
-    def __init__(self) -> None:
-        self.name = f"hist_{uuid.uuid4().hex[:12]}"
-        self.url = _with_database(TEST_URL, self.name)
-
-    async def create(self) -> None:
-        conn = await asyncpg.connect(_plain(TEST_URL))
-        try:
-            await conn.execute(f'CREATE DATABASE "{self.name}"')
-        finally:
-            await conn.close()
-
-    async def drop(self) -> None:
-        conn = await asyncpg.connect(_plain(TEST_URL))
-        try:
-            await conn.execute(f'DROP DATABASE IF EXISTS "{self.name}" WITH (FORCE)')
-        finally:
-            await conn.close()
-
-    async def connect(self) -> asyncpg.Connection:
-        return await asyncpg.connect(_plain(self.url))
-
-
 @pytest.fixture
-def case_db(createdb_allowed):
-    db = CaseDatabase()
-    asyncio.run(db.create())
-    yield db
-    asyncio.run(db.drop())
+def case_db():
+    yield from case_database()
 
 
-def upgrade_with_candidate(url: str) -> subprocess.CompletedProcess:
-    """The candidate's production migration path: its own alembic.ini and env.py, configured by env."""
-    env = {
-        **{k: v for k, v in os.environ.items() if not k.startswith(("BIOAF_", "COV_CORE_", "COVERAGE_"))},
-        "BIOAF_DATABASE_URL": url,
-        "BIOAF_ENCRYPTION_KEYS": runner.TEST_ENCRYPTION_KEY,
-        "BIOAF_JWT_SECRET_KEY": runner.TEST_JWT_SECRET,
-    }
-    return subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic/alembic.ini", "upgrade", "head"],
-        cwd=BACKEND,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-
-
-def _local_head() -> str:
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    cfg = Config(str(BACKEND / "alembic" / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND / "alembic"))
-    return ScriptDirectory.from_config(cfg).get_current_head()
+def upgrade_with_candidate(case: CaseDatabase) -> subprocess.CompletedProcess:
+    """The candidate's production path: an updater's own `alembic upgrade head`, through the lifecycle."""
+    return case.run()
 
 
 async def _catalog(url: str) -> dict:
@@ -147,7 +66,7 @@ async def _catalog(url: str) -> dict:
 
 
 async def _columns(url: str) -> set:
-    conn = await asyncpg.connect(_plain(url))
+    conn = await asyncpg.connect(plain(url))
     try:
         rows = await conn.fetch(
             "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public'"
@@ -166,7 +85,7 @@ def fresh_install_catalog() -> dict:
         db = CaseDatabase()
         asyncio.run(db.create())
         try:
-            done = upgrade_with_candidate(db.url)
+            done = upgrade_with_candidate(db)
             assert done.returncode == 0, done.stderr[-3000:]
             _FRESH["catalog"] = asyncio.run(_catalog(db.url))
         finally:
@@ -270,13 +189,13 @@ def test_a_populated_release_upgrades_to_the_candidate(release, case_db, monkeyp
     ledger = asyncio.run(_prepare())
     assert all(m.startswith("app") for m in manifest.app_modules)
 
-    first = upgrade_with_candidate(case_db.url)
+    first = upgrade_with_candidate(case_db)
     assert first.returncode == 0, first.stderr[-4000:]
 
     async def _check():
         conn = await case_db.connect()
         try:
-            assert await conn.fetchval("SELECT version_num FROM alembic_version") == _local_head()
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == code_head()
             assert await historical_data.assert_preserved(conn, ledger, _decrypt) == []
             assert await _duplicate_seeds(conn) == []
             return await _snapshot(conn)
@@ -292,7 +211,7 @@ def test_a_populated_release_upgrades_to_the_candidate(release, case_db, monkeyp
             f"only fresh {sorted(fresh[kind] - upgraded[kind])[:10]}"
         )
 
-    again = upgrade_with_candidate(case_db.url)
+    again = upgrade_with_candidate(case_db)
     assert again.returncode == 0, again.stderr[-4000:]
 
     async def _unchanged():
@@ -383,7 +302,7 @@ def test_duplicate_source_labels_upgrade_with_unique_external_ids_and_a_visible_
             await conn.close()
 
     ids = asyncio.run(_seed())
-    done = upgrade_with_candidate(case_db.url)
+    done = upgrade_with_candidate(case_db)
     assert done.returncode == 0, done.stderr[-4000:]
 
     async def _check():
@@ -465,7 +384,7 @@ def test_an_interrupted_080_transition_rolls_back_and_a_retry_assigns_the_same_i
             await conn.close()
 
     ids, before = asyncio.run(_seed_and_block())
-    failed = upgrade_with_candidate(case_db.url)
+    failed = upgrade_with_candidate(case_db)
     assert failed.returncode != 0 and "llm_provider_config" in failed.stderr
 
     async def _after_failure():
@@ -487,7 +406,7 @@ def test_an_interrupted_080_transition_rolls_back_and_a_retry_assigns_the_same_i
             await conn.close()
 
     asyncio.run(_unblock())
-    retried = upgrade_with_candidate(case_db.url)
+    retried = upgrade_with_candidate(case_db)
     assert retried.returncode == 0, retried.stderr[-4000:]
 
     async def _assigned():

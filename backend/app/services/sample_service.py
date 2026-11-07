@@ -9,6 +9,7 @@ from app.models.experiment_template import ExperimentTemplate
 from app.models.sample import Sample
 from app.models.sample_batch import SampleBatch
 from app.models.sample_custom_field import SampleCustomField
+from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.models.sequencing_batch import SequencingBatch
 from app.schemas.sample import SampleCreate, SampleUpdate
 from app.services.audit_service import log_action
@@ -65,6 +66,23 @@ class SampleService:
         session.add(batch)
         await session.flush()
         return batch.id
+
+    @staticmethod
+    async def ambiguous_label_candidates(session: AsyncSession, experiment_id: int, label: str) -> list[str]:
+        """The external IDs migration 080 gave samples that shared ``label`` in this experiment.
+
+        Non-empty means ``label`` no longer names one sample: callers report the candidates rather
+        than choosing one or creating another sample under it.
+        """
+        result = await session.execute(
+            select(SampleExternalIdTransition.external_id)
+            .where(
+                SampleExternalIdTransition.experiment_id == experiment_id,
+                SampleExternalIdTransition.source_label == label,
+            )
+            .order_by(SampleExternalIdTransition.external_id)
+        )
+        return list(result.scalars())
 
     @staticmethod
     async def _next_batch_position(session: AsyncSession, sequencing_batch_id: int) -> int:

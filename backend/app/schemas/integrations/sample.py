@@ -75,6 +75,9 @@ class SampleOut(BaseModel):
     qc_status: str | None
     status: str
     created_at: datetime
+    # The source label migration 080 replaced with this external_id because the experiment held it
+    # more than once; null for every other sample. Looking the label up returns 409 with candidates.
+    relabeled_from: str | None = None
     custom_fields: list[CustomFieldOut] = []
 
 

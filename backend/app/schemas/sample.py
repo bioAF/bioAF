@@ -154,6 +154,9 @@ class SampleStatusUpdate(BaseModel):
 class SampleResponse(BaseModel):
     id: int
     external_id: str | None
+    # The source label migration 080 replaced with external_id (the experiment held it more than
+    # once); null for every other sample.
+    relabeled_from: str | None = None
     organism: str | None
     tissue_type: str | None
     donor_source: str | None

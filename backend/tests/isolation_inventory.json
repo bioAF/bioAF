@@ -1322,7 +1322,6 @@
   "test_historical_upgrades.py": {
    "category": "schema",
    "evidence": [
-    "alembic",
     "ddl"
    ],
    "route": "dedicated_schema"
@@ -3093,6 +3092,16 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_relabeled_samples.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_reproduction_plan_service.py": {
    "category": "single_connection",
    "evidence": [
@@ -3366,6 +3375,13 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_schema_upgrade.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
   },
   "test_sdr_api.py": {
    "category": "real_commit",

@@ -6,9 +6,22 @@ LABEL org.opencontainers.image.source=https://github.com/bioAF/bioAF
 # Terraform >= 1.10: the AWS S3 state backend uses native lockfile locking
 # (`use_lockfile`), which was added in 1.10. 1.x is backward-compatible, so the
 # GCS backend / google provider used on GCP are unaffected.
+#
+# PostgreSQL client 16 from the PostgreSQL project's apt repository, matching the
+# bundled postgres:16 server. Debian's floating `postgresql-client` follows the
+# distribution's major (15 on bookworm, 17 on trixie), and an older pg_dump refuses
+# a newer server. The upgrade lifecycle's recovery backup uses
+# /usr/lib/postgresql/16/bin explicitly (BIOAF_UPGRADE_PG_BIN_DIR) and records the
+# resolved version in each backup manifest; `pg_dump` on PATH resolves to it too.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip postgresql-client \
+    curl unzip ca-certificates \
     libcairo2 libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev && \
+    install -d /usr/share/postgresql-common/pgdg && \
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 && \
+    /usr/lib/postgresql/16/bin/pg_dump --version && \
     curl -fsSL https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip -o terraform.zip && \
     unzip terraform.zip -d /usr/local/bin/ && \
     rm terraform.zip && \
