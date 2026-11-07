@@ -42,11 +42,18 @@ class Side:
     stops_on_failure: bool = False  # the backend runs pytest -x; Jest runs every suite
     # path -> (executable lines, covered lines)
     files: dict[str, tuple[set[int], set[int]]] = field(default_factory=dict)
+    # path -> (covered branches, branches); empty when the run did not measure branches
+    branches: dict[str, tuple[int, int]] = field(default_factory=dict)
     available: bool = True
 
     def total(self) -> tuple[int, int]:
         covered = sum(len(c) for _, c in self.files.values())
         return covered, sum(len(e) for e, _ in self.files.values())
+
+    def branch_total(self) -> tuple[int, int] | None:
+        if not self.branches:
+            return None
+        return sum(c for c, _ in self.branches.values()), sum(t for _, t in self.branches.values())
 
     def area(self, path: str) -> str:
         rest = path[len(self.area_root) :] if path.startswith(self.area_root) else path
@@ -57,6 +64,13 @@ class Side:
         for path, (executable, covered) in self.files.items():
             c, t = areas.get(self.area(path), (0, 0))
             areas[self.area(path)] = (c + len(covered), t + len(executable))
+        return dict(sorted(areas.items()))
+
+    def branches_by_area(self) -> dict[str, tuple[int, int]]:
+        areas: dict[str, tuple[int, int]] = {}
+        for path, (covered, total) in self.branches.items():
+            c, t = areas.get(self.area(path), (0, 0))
+            areas[self.area(path)] = (c + covered, t + total)
         return dict(sorted(areas.items()))
 
     def changed(self, added: dict[str, set[int]]) -> tuple[int, int, dict[str, list[int]]]:
@@ -89,6 +103,9 @@ def load_backend(path: Path) -> Side:
         executed = set(data.get("executed_lines", [])) - excluded
         executable = (executed | set(data.get("missing_lines", []))) - excluded
         side.files[name] = (executable, executed)
+        summary = data.get("summary", {})
+        if "num_branches" in summary:  # present only when the run measured branches
+            side.branches[name] = (summary["covered_branches"], summary["num_branches"])
     return side
 
 
@@ -109,6 +126,9 @@ def load_frontend(path: Path) -> Side:
             if data.get("s", {}).get(sid, 0) > 0:
                 covered.add(line)
         side.files[relative] = (executable, covered)
+        if "b" in data:  # one count per path of each branch point
+            paths = [count for counts in data["b"].values() for count in counts]
+            side.branches[relative] = (sum(1 for count in paths if count > 0), len(paths))
     return side
 
 
@@ -158,6 +178,12 @@ def _row(label: str, covered: int, total: int) -> str:
     return f"| {label} | {_pct(covered, total)} | {covered} / {total} |"
 
 
+def _row_with_branches(label: str, lines: tuple[int, int], branches: tuple[int, int] | None) -> str:
+    if branches is None:
+        return f"{_row(label, *lines)} not measured | |"
+    return f"{_row(label, *lines)} {_pct(*branches)} | {branches[0]} / {branches[1]} |"
+
+
 def _status_note(side: Side, status: str) -> str | None:
     if not side.available:
         return f"{side.name}: no coverage data (the job did not produce it)."
@@ -178,8 +204,9 @@ def render(
     sides = (backend, frontend)
     out = [MARKER, "## Coverage", "", f"Line coverage for `{commit[:7]}`.", ""]
     out += [
-        "Backend: executable statement lines (coverage.py). Frontend: line coverage (Jest/Istanbul).",
-        "Area totals measure execution, not assertion quality or branch coverage.",
+        "Backend: executable statement lines and branch arcs (coverage.py). Frontend: lines and branch paths"
+        " (Jest, V8). Line and branch results are separate measures; neither is folded into the other.",
+        "Area totals measure execution, not assertion quality.",
         "",
     ]
     notes = [
@@ -193,9 +220,12 @@ def render(
     if notes:
         out += [f"> **Partial:** {n}" for n in notes] + [""]
 
-    out += ["| Part | Lines | Covered / total |", "| --- | --- | --- |"]
+    out += ["| Part | Lines | Covered / total | Branches | Covered / total |", "| --- | --- | --- | --- | --- |"]
     for side in sides:
-        out.append(_row(side.name, *side.total()) if side.available else f"| {side.name} | not available | |")
+        if side.available:
+            out.append(_row_with_branches(side.name, side.total(), side.branch_total()))
+        else:
+            out.append(f"| {side.name} | not available | | | |")
 
     added = added_lines(diff)
     changed = [(side, side.changed(added)) for side in sides if side.available]
@@ -232,8 +262,12 @@ def render(
             f"<details><summary>{side.name} by area (<code>{side.area_root}</code>)</summary>",
             "",
         ]
-        out += ["| Area | Lines | Covered / total |", "| --- | --- | --- |"]
-        out += [_row(area, c, t) for area, (c, t) in side.by_area().items()]
+        out += ["| Area | Lines | Covered / total | Branches | Covered / total |", "| --- | --- | --- | --- | --- |"]
+        branch_areas = side.branches_by_area()
+        out += [
+            _row_with_branches(area, lines, branch_areas.get(area, (0, 0)) if side.branches else None)
+            for area, lines in side.by_area().items()
+        ]
         out += ["", "</details>"]
     body = "\n".join(out) + "\n"
     if len(body) > MAX_BODY:  # the tables always fit; only the line listings can grow without bound

@@ -259,3 +259,83 @@ def test_backend_default_coverage_measures_branches(tmp_path):
     # The if was only ever true: its false arc (line 2 to line 4) is the one missed branch.
     assert measured["summary"]["num_branches"] == 2
     assert measured["missing_branches"] == [[2, 4]]
+
+
+# --- Branch results, reported beside line results and never folded into them ---
+
+
+def _backend_with_branches(tmp_path: Path) -> Path:
+    data = {
+        "files": {
+            "app/services/a.py": {
+                "executed_lines": [1, 2],
+                "missing_lines": [3],
+                "summary": {"num_branches": 4, "covered_branches": 3},
+            },
+            "app/api/x.py": {
+                "executed_lines": [1],
+                "missing_lines": [],
+                "summary": {"num_branches": 2, "covered_branches": 0},
+            },
+        }
+    }
+    path = tmp_path / "branch-coverage.json"
+    path.write_text(json.dumps(data))
+    return path
+
+
+def _frontend_with_branches(tmp_path: Path) -> Path:
+    root = "/home/runner/work/bioAF/bioAF/frontend"
+    data = {
+        f"{root}/src/lib/util.ts": {
+            "statementMap": {"0": _statement(1)},
+            "s": {"0": 1},
+            # An if/else (one path taken) and a three-way switch (two paths taken): 3 of 5.
+            "branchMap": {"0": {}, "1": {}},
+            "b": {"0": [4, 0], "1": [1, 2, 0]},
+        },
+    }
+    path = tmp_path / "frontend-branches.json"
+    path.write_text(json.dumps(data))
+    return path
+
+
+def test_backend_branches_are_counted_from_each_files_summary(report, tmp_path):
+    side = report.load_backend(_backend_with_branches(tmp_path))
+    assert side.branch_total() == (3, 6)
+    assert side.total() == (3, 4)  # lines are unchanged by branch data
+    assert side.branches_by_area() == {"api": (0, 2), "services": (3, 4)}
+
+
+def test_backend_data_without_branches_reports_branches_as_not_measured(report, tmp_path):
+    side = report.load_backend(_backend(tmp_path))
+    assert side.branch_total() is None
+    body = report.render(
+        backend=side,
+        frontend=report.load_frontend(_frontend(tmp_path)),
+        diff="",
+        commit="abcdef1",
+        backend_status="0",
+        frontend_status="0",
+    )
+    assert "| Backend | 64.3% | 9 / 14 | not measured | |" in body
+
+
+def test_frontend_branches_count_every_path_of_every_branch(report, tmp_path):
+    side = report.load_frontend(_frontend_with_branches(tmp_path))
+    assert side.branch_total() == (3, 5)
+
+
+def test_the_comment_shows_line_and_branch_results_in_separate_columns(report, tmp_path):
+    body = report.render(
+        backend=report.load_backend(_backend_with_branches(tmp_path)),
+        frontend=report.load_frontend(_frontend_with_branches(tmp_path)),
+        diff="",
+        commit="abcdef1",
+        backend_status="0",
+        frontend_status="0",
+    )
+    assert "| Part | Lines | Covered / total | Branches | Covered / total |" in body
+    assert "| Backend | 75.0% | 3 / 4 | 50.0% | 3 / 6 |" in body
+    assert "| Frontend | 100.0% | 1 / 1 | 60.0% | 3 / 5 |" in body
+    assert "| services | 66.7% | 2 / 3 | 75.0% | 3 / 4 |" in body
