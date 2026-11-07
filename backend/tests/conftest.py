@@ -398,3 +398,22 @@ def _no_accession_manifest_network(monkeypatch):
         raise RuntimeError(f"tests do not fetch {url}")
 
     monkeypatch.setattr(accession_manifest_service, "_http_fetch_text", _offline)
+
+
+@pytest.fixture(autouse=True)
+def url_network(monkeypatch):
+    """No test resolves or fetches a real URL through the URL-import guard.
+
+    The guard's resolver and the downloader's HTTP client are replaced by a
+    controlled network (tests/support/url_network.py) that refuses anything a
+    test did not configure. A rejection test therefore cannot make an outbound
+    request even if the guard regresses, and an acceptance test is independent of
+    the developer's network.
+    """
+    from app.services import lab_document_upload_service
+    from tests.support.url_network import UrlNetwork
+
+    network = UrlNetwork()
+    monkeypatch.setattr(lab_document_upload_service, "_resolve_host", network.resolve)
+    monkeypatch.setattr(lab_document_upload_service, "_open_http_client", network.open_client)
+    return network
