@@ -1,8 +1,20 @@
 import pytest
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime, timezone
 
 from httpx import AsyncClient
+
+from tests.support.billing_clock import HOST_TIMEZONES
+
+# Billing dates are UTC usage dates from one captured reference instant. These
+# references sit where the host's local date and month differ from UTC's:
+# 20:00 UTC on October 31 is November 1 in Tokyo; 02:00 UTC on November 1 is
+# still October 31 in Honolulu.
+REFERENCES = [
+    datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc),
+    datetime(2026, 11, 1, 2, 0, tzinfo=timezone.utc),
+]
+REFERENCE = REFERENCES[1]
 
 
 @pytest.mark.asyncio
@@ -98,11 +110,16 @@ async def test_trigger_billing_sync(client: AsyncClient, admin_token: str):
 
 
 @pytest.mark.asyncio
-async def test_cost_summary_with_records(client: AsyncClient, admin_token: str, admin_user, session):
+@pytest.mark.parametrize("host_tz", HOST_TIMEZONES)
+@pytest.mark.parametrize("reference", REFERENCES)
+async def test_cost_summary_with_records(
+    client: AsyncClient, admin_token: str, admin_user, session, billing_clock, reference, host_tz
+):
     """Insert cost records for today and verify summary includes them."""
     from app.models.cost_record import CostRecord
 
-    today = date.today()
+    billing_clock(reference, host_tz)
+    today = reference.date()
 
     for i, component in enumerate(["compute", "storage", "network"]):
         record = CostRecord(
@@ -150,8 +167,9 @@ async def test_cost_history_with_records(client: AsyncClient, admin_token: str, 
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_populates_cost_records(admin_user, session):
+async def test_sync_billing_data_populates_cost_records(admin_user, session, billing_clock):
     """sync_billing_data should create cost_records for node, storage, and compute."""
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from app.models.cost_record import CostRecord
     from app.services.cost_service import CostService
 
@@ -159,7 +177,7 @@ async def test_sync_billing_data_populates_cost_records(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = REFERENCE.date()
     from sqlalchemy import select
 
     result = await session.execute(
@@ -184,8 +202,9 @@ async def test_sync_billing_data_populates_cost_records(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_is_idempotent(admin_user, session):
+async def test_sync_billing_data_is_idempotent(admin_user, session, billing_clock):
     """Running sync twice should not duplicate records for the same day."""
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from app.models.cost_record import CostRecord
     from app.services.cost_service import CostService
 
@@ -195,7 +214,7 @@ async def test_sync_billing_data_is_idempotent(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = REFERENCE.date()
     from sqlalchemy import select
 
     result = await session.execute(
@@ -213,8 +232,9 @@ async def test_sync_billing_data_is_idempotent(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_only_writes_today(admin_user, session):
+async def test_sync_billing_data_only_writes_today(admin_user, session, billing_clock):
     """sync_billing_data should only create records for today, not backfill."""
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from app.models.cost_record import CostRecord
     from app.services.cost_service import CostService
 
@@ -222,7 +242,7 @@ async def test_sync_billing_data_only_writes_today(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = REFERENCE.date()
     from sqlalchemy import select
 
     result = await session.execute(
@@ -237,8 +257,13 @@ async def test_sync_billing_data_only_writes_today(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_cost_summary_includes_synced_data(client: AsyncClient, admin_token: str):
+@pytest.mark.parametrize("host_tz", HOST_TIMEZONES)
+@pytest.mark.parametrize("reference", REFERENCES)
+async def test_cost_summary_includes_synced_data(
+    client: AsyncClient, admin_token: str, billing_clock, reference, host_tz
+):
     """Summary endpoint should return non-zero spend from synced data."""
+    billing_clock(reference, host_tz)
     # Trigger sync first
     await client.post(
         "/api/costs/sync",
@@ -321,8 +346,9 @@ async def test_purge_cost_records_forbidden_for_viewer(client: AsyncClient, view
 
 
 @pytest.mark.asyncio
-async def test_local_cost_rates_from_settings(admin_user, session):
+async def test_local_cost_rates_from_settings(admin_user, session, billing_clock):
     """Sync should use rates from settings, not hardcoded values."""
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from app.models.cost_record import CostRecord
     from app.services.cost_service import CostService
 
@@ -330,7 +356,7 @@ async def test_local_cost_rates_from_settings(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = REFERENCE.date()
     from sqlalchemy import select
 
     result = await session.execute(
@@ -346,7 +372,9 @@ async def test_local_cost_rates_from_settings(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_summary_lazy_sync_survives_the_request(client: AsyncClient, admin_token: str, admin_user, session):
+async def test_summary_lazy_sync_survives_the_request(
+    client: AsyncClient, admin_token: str, admin_user, session, billing_clock
+):
     """The lazy sync inside /summary must commit, not just flush.
 
     Proven on the demo 2026-08-09: /summary reported $76.90 of month-to-date spend
@@ -354,11 +382,12 @@ async def test_summary_lazy_sync_survives_the_request(client: AsyncClient, admin
     cost_records held 0 rows. The sync ran on every /summary request and every row
     it wrote was rolled back when the request's session closed.
     """
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from sqlalchemy import select
     from app.models.cost_record import CostRecord
 
     org_id = admin_user.organization_id
-    today = date.today()
+    today = REFERENCE.date()
 
     response = await client.get(
         "/api/costs/summary",
@@ -378,14 +407,19 @@ async def test_summary_lazy_sync_survives_the_request(client: AsyncClient, admin
 
 
 @pytest.mark.asyncio
-async def test_history_reports_what_summary_reported(client: AsyncClient, admin_token: str, admin_user, session):
+@pytest.mark.parametrize("host_tz", HOST_TIMEZONES)
+@pytest.mark.parametrize("reference", REFERENCES)
+async def test_history_reports_what_summary_reported(
+    client: AsyncClient, admin_token: str, admin_user, session, billing_clock, reference, host_tz
+):
     """The two cost endpoints must not disagree about whether spend exists.
 
     This is the user-visible defect: the Cost Center page (/summary) shows spend
     while the dashboard's "Cost / spend trend" widget (/history) says there is none.
     """
     headers = {"Authorization": f"Bearer {admin_token}"}
-    today = date.today()
+    billing_clock(reference, host_tz)
+    today = reference.date()
 
     summary = await client.get("/api/costs/summary", headers=headers)
     assert summary.status_code == 200
@@ -400,14 +434,15 @@ async def test_history_reports_what_summary_reported(client: AsyncClient, admin_
 
 
 @pytest.mark.asyncio
-async def test_daily_billing_sync_commits(admin_user, session):
+async def test_daily_billing_sync_commits(admin_user, session, billing_clock):
     """The daily sync loop's one pass must persist what it syncs."""
+    billing_clock(REFERENCE, "Pacific/Honolulu")
     from sqlalchemy import select
     from app.models.cost_record import CostRecord
     from app.main import _cost_billing_sync_once
 
     org_id = admin_user.organization_id
-    today = date.today()
+    today = REFERENCE.date()
 
     await _cost_billing_sync_once()
 

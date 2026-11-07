@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from google.cloud import bigquery
 
-from app.adapters.billing.base import BillingProvider
+from app.adapters.billing.base import BillingProvider, UnsupportedBillingExport
 
 # Billing-export table name prefixes (standard usage cost + detailed/resource cost).
 _EXPORT_TABLE_PREFIXES = ("gcp_billing_export_v1_", "gcp_billing_export_resource_v1_")
+
+
+def _partition_start(usage_start: date, granularity: str) -> datetime:
+    """The start of the UTC ingestion partition containing ``usage_start``.
+
+    _PARTITIONTIME is the start of a row's partition, so a lower bound inside a
+    MONTH or YEAR partition would exclude that partition entirely.
+    """
+    if granularity in ("HOUR", "DAY"):
+        return datetime(usage_start.year, usage_start.month, usage_start.day, tzinfo=timezone.utc)
+    if granularity == "MONTH":
+        return datetime(usage_start.year, usage_start.month, 1, tzinfo=timezone.utc)
+    if granularity == "YEAR":
+        return datetime(usage_start.year, 1, 1, tzinfo=timezone.utc)
+    raise UnsupportedBillingExport(f"unsupported partition granularity {granularity!r}")
 
 
 class GcpBillingProvider(BillingProvider):
@@ -29,9 +44,21 @@ class GcpBillingProvider(BillingProvider):
 
         return await asyncio.to_thread(_verify)
 
-    async def query_mtd_costs(self, project_id: str, dataset_id: str, table_id: str) -> list[dict]:
-        now = datetime.now(timezone.utc)
-        invoice_month = now.strftime("%Y%m")
+    async def query_usage_costs(
+        self,
+        project_id: str,
+        dataset_id: str,
+        table_id: str,
+        usage_start: date,
+        usage_end: date,
+    ) -> list[dict]:
+        # The export is partitioned by ingestion time. Rows for a usage day are
+        # ingested on or after that day, so partitions before the one containing
+        # the window start are pruned; there is no upper partition bound because
+        # late exports and corrections for in-window usage land in later partitions.
+        start = datetime(usage_start.year, usage_start.month, usage_start.day, tzinfo=timezone.utc)
+        end = datetime(usage_end.year, usage_end.month, usage_end.day, tzinfo=timezone.utc)
+        table_ref = f"{project_id}.{dataset_id}.{table_id}"
 
         query = f"""
             SELECT
@@ -40,21 +67,32 @@ class GcpBillingProvider(BillingProvider):
                     (SELECT SUM(c.amount) FROM UNNEST(credits) c), 0
                 )) AS net_cost,
                 DATE(usage_start_time) AS usage_date
-            FROM `{project_id}.{dataset_id}.{table_id}`
-            WHERE invoice.month = @invoice_month
-              AND DATE(usage_start_time) < CURRENT_DATE()
+            FROM `{table_ref}`
+            WHERE _PARTITIONTIME >= @partition_start
+              AND usage_start_time >= @usage_start
+              AND usage_start_time < @usage_end
             GROUP BY service_name, usage_date
             ORDER BY usage_date, service_name
         """  # noqa: S608
 
         def _query() -> list[dict]:
             client = bigquery.Client(project=project_id, credentials=self.credentials)
+            partitioning = client.get_table(table_ref).time_partitioning
+            if partitioning is None or partitioning.field is not None:
+                raise UnsupportedBillingExport(
+                    f"{table_ref} is not partitioned by ingestion time; refusing an unbounded scan"
+                )
+            partition_start = _partition_start(usage_start, partitioning.type_)
             job_config = bigquery.QueryJobConfig(
                 query_parameters=[
-                    bigquery.ScalarQueryParameter("invoice_month", "STRING", invoice_month),
+                    bigquery.ScalarQueryParameter("partition_start", "TIMESTAMP", partition_start),
+                    bigquery.ScalarQueryParameter("usage_start", "TIMESTAMP", start),
+                    bigquery.ScalarQueryParameter("usage_end", "TIMESTAMP", end),
                 ]
             )
             job = client.query(query, job_config=job_config)
+            # Materialized in full: an error partway through raises instead of
+            # returning a truncated result.
             return [
                 {
                     "service_name": row.service_name,

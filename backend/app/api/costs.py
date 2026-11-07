@@ -78,9 +78,10 @@ async def trigger_billing_sync(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = current_user["org_id"]
-    await CostService.sync_billing_data(session, org_id)
+    report = await CostService.sync_billing_data(session, org_id)
     await session.commit()
-    return {"status": "sync_initiated"}
+    # billing_import is None when no billing export is configured (estimates only).
+    return {"status": "sync_initiated", "billing_import": report.as_dict() if report else None}
 
 
 @router.delete("/records")

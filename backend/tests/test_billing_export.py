@@ -1,6 +1,6 @@
 """Tests for BigQuery billing export setup and cost sync (ADR-028)."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
@@ -260,7 +260,7 @@ async def test_map_service_to_component():
 
 
 @pytest.mark.asyncio
-async def test_query_mtd_costs_returns_mapped_data():
+async def test_query_usage_costs_returns_mapped_data():
     """Verify BQ results are correctly mapped to component cost dicts."""
     from app.services.billing_export_service import BillingExportService
 
@@ -274,10 +274,12 @@ async def test_query_mtd_costs_returns_mapped_data():
 
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
+    mock_bq_client.get_table.return_value.time_partitioning.field = None
+    mock_bq_client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client):
-        results = await BillingExportService.query_mtd_costs(
-            "test-project", "billing_export", "gcp_billing_export_v1_ABC123"
+        results = await BillingExportService.query_usage_costs(
+            "test-project", "billing_export", "gcp_billing_export_v1_ABC123", date(2026, 3, 1), date(2026, 3, 16)
         )
 
     assert len(results) == 3
@@ -322,8 +324,8 @@ async def test_verify_dataset_passes_credentials_to_bq_client():
 
 
 @pytest.mark.asyncio
-async def test_query_mtd_costs_passes_credentials_to_bq_client():
-    """query_mtd_costs must pass explicit credentials to the BQ client."""
+async def test_query_usage_costs_passes_credentials_to_bq_client():
+    """query_usage_costs must pass explicit credentials to the BQ client."""
     from app.services.billing_export_service import BillingExportService
 
     mock_creds = MagicMock()
@@ -331,10 +333,43 @@ async def test_query_mtd_costs_passes_credentials_to_bq_client():
     mock_query_job.result.return_value = []
     mock_bq_client = MagicMock()
     mock_bq_client.query.return_value = mock_query_job
+    mock_bq_client.get_table.return_value.time_partitioning.field = None
+    mock_bq_client.get_table.return_value.time_partitioning.type_ = "DAY"
 
     with patch("app.adapters.billing.gcp.bigquery.Client", return_value=mock_bq_client) as mock_ctor:
-        await BillingExportService.query_mtd_costs("proj", "ds", "table", credentials=mock_creds)
+        await BillingExportService.query_usage_costs(
+            "proj", "ds", "table", date(2026, 3, 1), date(2026, 3, 16), credentials=mock_creds
+        )
         mock_ctor.assert_called_once_with(project="proj", credentials=mock_creds)
+
+
+@pytest.mark.asyncio
+async def test_query_usage_costs_forwards_the_usage_window():
+    """The service passes the caller's UTC usage window to the provider unchanged."""
+    from app.services.billing_export_service import BillingExportService
+    from tests.support.billing_export_table import BillingExportTable, ExportRow
+
+    utc = timezone.utc
+    table = BillingExportTable(
+        [
+            ExportRow(
+                "Kubernetes Engine",
+                8.0,
+                datetime(2026, 10, 2, 5, tzinfo=utc),
+                "202610",
+                datetime(2026, 10, 3, tzinfo=utc),
+            )
+        ]
+    )
+    with patch("app.adapters.billing.gcp.bigquery.Client", side_effect=table.client):
+        rows = await BillingExportService.query_usage_costs("proj", "ds", "tbl", date(2026, 10, 1), date(2026, 11, 6))
+
+    assert rows == [
+        {"service_name": "Kubernetes Engine", "component": "node", "net_cost": 8.0, "usage_date": date(2026, 10, 2)}
+    ]
+    [(_, params)] = table.queries
+    assert params["usage_start"] == datetime(2026, 10, 1, tzinfo=utc)
+    assert params["usage_end"] == datetime(2026, 11, 6, tzinfo=utc)
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +378,10 @@ async def test_query_mtd_costs_passes_credentials_to_bq_client():
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
+async def test_sync_billing_data_uses_bq_when_configured(admin_user, session, billing_clock):
     """When billing export is configured, sync should query BQ for historical data."""
+    reference = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)
+    billing_clock(reference, "Pacific/Honolulu")
     from app.services.cost_service import CostService
     from app.models.cost_record import CostRecord
     from sqlalchemy import select
@@ -362,7 +399,7 @@ async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
         },
     )
 
-    today = date.today()
+    today = reference.date()
     yesterday = date(today.year, today.month, max(today.day - 1, 1))
 
     mock_bq_results = [
@@ -381,7 +418,7 @@ async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
     ]
 
     with patch(
-        "app.services.billing_export_service.BillingExportService.query_mtd_costs",
+        "app.services.billing_export_service.BillingExportService.query_usage_costs",
         new_callable=AsyncMock,
         return_value=mock_bq_results,
     ):
@@ -402,8 +439,10 @@ async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_falls_back_to_adapters(admin_user, session):
+async def test_sync_billing_data_falls_back_to_adapters(admin_user, session, billing_clock):
     """When billing export is not configured, sync should use adapter path."""
+    reference = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)
+    billing_clock(reference, "Pacific/Honolulu")
     from app.services.cost_service import CostService
     from app.models.cost_record import CostRecord
     from sqlalchemy import select
@@ -415,7 +454,7 @@ async def test_sync_billing_data_falls_back_to_adapters(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = reference.date()
     result = await session.execute(
         select(CostRecord).where(
             CostRecord.organization_id == org_id,

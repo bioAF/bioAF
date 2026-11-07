@@ -1,6 +1,6 @@
 """BigQuery billing export service (ADR-028).
 
-Provides verification of billing export setup and querying of MTD cost data.
+Provides verification of billing export setup and querying of usage-window cost data.
 The backend's billing store is reached through the BAL ``BillingProvider``
 (Phase 9D); this service owns the bioAF component taxonomy mapping and the
 verify/query orchestration, holding no cloud SDK.
@@ -9,6 +9,7 @@ verify/query orchestration, holding no cloud SDK.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from app.adapters.billing import create_billing_provider
@@ -48,20 +49,23 @@ class BillingExportService:
         return await provider.verify_dataset(project_id, dataset_id)
 
     @staticmethod
-    async def query_mtd_costs(
+    async def query_usage_costs(
         project_id: str,
         dataset_id: str,
         table_id: str,
+        usage_start: date,
+        usage_end: date,
         credentials: Credentials | None = None,
     ) -> list[dict]:
-        """Query month-to-date costs from the billing export.
+        """Query costs for UTC usage days in ``[usage_start, usage_end)``.
 
         Returns a list of dicts with keys: service_name, component, net_cost, usage_date.
-        Excludes today's data (it may be incomplete due to export lag). The
-        provider returns raw per-service rows; this maps each to a bioAF component.
+        Each row is a service's complete cost for one usage day across invoice
+        months. The provider returns raw per-service rows; this maps each to a
+        bioAF component.
         """
         provider = create_billing_provider(credentials=credentials, backend=backend_for("billing"))
-        rows = await provider.query_mtd_costs(project_id, dataset_id, table_id)
+        rows = await provider.query_usage_costs(project_id, dataset_id, table_id, usage_start, usage_end)
         return [
             {
                 "service_name": row["service_name"],
