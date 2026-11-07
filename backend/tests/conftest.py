@@ -417,3 +417,13 @@ def url_network(monkeypatch):
     monkeypatch.setattr(lab_document_upload_service, "_resolve_host", network.resolve)
     monkeypatch.setattr(lab_document_upload_service, "_open_http_client", network.open_client)
     return network
+
+
+@pytest.fixture
+def billing_clock():
+    """Fix the billing reference instant and host timezone (tests/support/billing_clock.py)."""
+    from tests.support.billing_clock import BillingClock
+
+    clock = BillingClock()
+    yield clock
+    clock.restore()

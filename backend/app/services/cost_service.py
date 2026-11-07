@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.models.budget_config import BudgetConfig
 from app.models.cost_record import CostRecord
+from app.services.billing_period import BillingPeriod, billing_period
 from app.services.event_bus import event_bus
 from app.services.event_types import BUDGET_THRESHOLD_50, BUDGET_THRESHOLD_80, BUDGET_THRESHOLD_100
 
@@ -21,12 +22,29 @@ logger = logging.getLogger("bioaf.cost_service")
 _COST_SYNC_LOCK_NAMESPACE = 4242
 
 
+def _in_usage_month(org_id: int, period: BillingPeriod) -> tuple:
+    """Rows for ``org_id`` whose usage date is in the period's UTC month."""
+    return (
+        CostRecord.organization_id == org_id,
+        CostRecord.record_date >= period.month_start,
+        CostRecord.record_date < period.next_month_start,
+    )
+
+
+async def _usage_month_spend(session: AsyncSession, org_id: int, period: BillingPeriod) -> Decimal:
+    result = await session.execute(
+        select(func.coalesce(func.sum(CostRecord.cost_amount), 0)).where(*_in_usage_month(org_id, period))
+    )
+    return result.scalar() or Decimal("0")
+
+
 class CostService:
     @staticmethod
-    async def get_cost_summary(session: AsyncSession, org_id: int) -> dict:
-        """Get current month cost summary with trends and breakdown."""
+    async def get_cost_summary(session: AsyncSession, org_id: int, period: BillingPeriod | None = None) -> dict:
+        """Get the current UTC usage month's cost summary with trends and breakdown."""
+        period = period or billing_period()
         # Lazy sync: if no records exist for today, sync from adapters first
-        today = date.today()
+        today = period.today
         today_check = await session.execute(
             select(func.count())
             .select_from(CostRecord)
@@ -46,20 +64,11 @@ class CostService:
             from app.database import async_session_factory
 
             async with async_session_factory() as sync_session:
-                await CostService.sync_billing_data(sync_session, org_id)
+                await CostService.sync_billing_data(sync_session, org_id, period)
                 await sync_session.commit()
 
-        now = datetime.now(timezone.utc)
-        month_start = date(now.year, now.month, 1)
-
         # Current month total
-        total_result = await session.execute(
-            select(func.coalesce(func.sum(CostRecord.cost_amount), 0)).where(
-                CostRecord.organization_id == org_id,
-                CostRecord.record_date >= month_start,
-            )
-        )
-        current_month_spend = total_result.scalar() or Decimal("0")
+        current_month_spend = await _usage_month_spend(session, org_id, period)
 
         # Daily trend
         daily_result = await session.execute(
@@ -67,10 +76,7 @@ class CostService:
                 CostRecord.record_date,
                 func.sum(CostRecord.cost_amount).label("amount"),
             )
-            .where(
-                CostRecord.organization_id == org_id,
-                CostRecord.record_date >= month_start,
-            )
+            .where(*_in_usage_month(org_id, period))
             .group_by(CostRecord.record_date)
             .order_by(CostRecord.record_date)
         )
@@ -82,10 +88,7 @@ class CostService:
                 CostRecord.component,
                 func.sum(CostRecord.cost_amount).label("amount"),
             )
-            .where(
-                CostRecord.organization_id == org_id,
-                CostRecord.record_date >= month_start,
-            )
+            .where(*_in_usage_month(org_id, period))
             .group_by(CostRecord.component)
             .order_by(func.sum(CostRecord.cost_amount).desc())
         )
@@ -105,12 +108,8 @@ class CostService:
         budget_remaining = (monthly_budget - current_month_spend) if monthly_budget else None
 
         # Projection (linear extrapolation)
-        days_elapsed = (now.date() - month_start).days + 1
-        if now.month == 12:
-            days_in_month = 31
-        else:
-            next_month = date(now.year, now.month + 1, 1)
-            days_in_month = (next_month - month_start).days
+        days_elapsed = period.days_elapsed
+        days_in_month = period.days_in_month
         projected = (current_month_spend / days_elapsed * days_in_month) if days_elapsed > 0 else Decimal("0")
 
         currency = budget.currency if budget else "USD"
@@ -151,7 +150,7 @@ class CostService:
         return records, total
 
     @staticmethod
-    async def sync_billing_data(session: AsyncSession, org_id: int) -> None:
+    async def sync_billing_data(session: AsyncSession, org_id: int, period: BillingPeriod | None = None) -> None:
         """Sync cost data into cost_records.
 
         When BigQuery billing export is configured, queries BQ for historical
@@ -166,8 +165,7 @@ class CostService:
         """
         await session.execute(select(func.pg_advisory_xact_lock(_COST_SYNC_LOCK_NAMESPACE, org_id)))
         logger.info("Syncing billing data for org %d", org_id)
-        today = date.today()
-        month_start = date(today.year, today.month, 1)
+        period = period or billing_period()
 
         # Check if BQ billing export is configured
         from app.platform.platform_config_service import PlatformConfigService
@@ -188,17 +186,16 @@ class CostService:
         bq_configured = bq_config.get("billing_export_configured", "false") == "true"
 
         if bq_configured:
-            await CostService._sync_from_bigquery(session, org_id, bq_config, today, month_start)
+            await CostService._sync_from_bigquery(session, org_id, bq_config, period)
         else:
-            await CostService._sync_from_adapters(session, org_id, today, month_start)
+            await CostService._sync_from_adapters(session, org_id, period)
 
     @staticmethod
     async def _sync_from_bigquery(
         session: AsyncSession,
         org_id: int,
         bq_config: dict,
-        today: date,
-        month_start: date,
+        period: BillingPeriod,
     ) -> None:
         """Sync historical MTD from BQ, today from adapters (intraday bridge)."""
         from app.services.billing_export_service import BillingExportService
@@ -250,16 +247,16 @@ class CostService:
                 logger.exception("Failed to query BQ billing export, falling back to adapters")
 
         # Today's costs from adapters (intraday bridge)
-        await CostService._sync_from_adapters(session, org_id, today, month_start)
+        await CostService._sync_from_adapters(session, org_id, period)
 
     @staticmethod
     async def _sync_from_adapters(
         session: AsyncSession,
         org_id: int,
-        today: date,
-        month_start: date,
+        period: BillingPeriod,
     ) -> None:
         """Sync today's cost data from infrastructure adapters."""
+        today = period.today
         compute_adapter = get_compute_adapter()
         cluster_metrics = await compute_adapter.get_cluster_metrics()
         node_cost_daily = Decimal("0")
@@ -275,12 +272,7 @@ class CostService:
         storage_adapter = get_storage_adapter()
         storage_metrics = await storage_adapter.get_storage_metrics()
         storage_cost_monthly = Decimal(str(storage_metrics.total_cost_monthly_usd))
-        if today.month == 12:
-            days_in_month = 31
-        else:
-            next_month = date(today.year, today.month + 1, 1)
-            days_in_month = (next_month - month_start).days
-        storage_cost_daily = storage_cost_monthly / days_in_month if days_in_month > 0 else Decimal("0")
+        storage_cost_daily = storage_cost_monthly / period.days_in_month
 
         components = {
             "node": node_cost_daily,
@@ -343,22 +335,13 @@ class CostService:
         return config
 
     @staticmethod
-    async def check_budget_thresholds(session: AsyncSession, org_id: int) -> None:
-        """Compare current spend to budget, emit events for crossed thresholds."""
+    async def check_budget_thresholds(session: AsyncSession, org_id: int, period: BillingPeriod | None = None) -> None:
+        """Compare the UTC usage month's spend to budget, emit events for crossed thresholds."""
         config = await CostService.get_budget_config(session, org_id)
         if not config or not config.monthly_budget:
             return
 
-        now = datetime.now(timezone.utc)
-        month_start = date(now.year, now.month, 1)
-
-        total_result = await session.execute(
-            select(func.coalesce(func.sum(CostRecord.cost_amount), 0)).where(
-                CostRecord.organization_id == org_id,
-                CostRecord.record_date >= month_start,
-            )
-        )
-        current_spend = total_result.scalar() or Decimal("0")
+        current_spend = await _usage_month_spend(session, org_id, period or billing_period())
         usage_pct = float(current_spend) / float(config.monthly_budget) * 100
 
         if usage_pct >= 100 and config.threshold_100_enabled:

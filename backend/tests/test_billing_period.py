@@ -89,4 +89,3 @@ def test_default_reference_is_the_current_utc_instant(monkeypatch):
     p = billing_period()
     assert p.today == date(2026, 10, 31)
     assert p.reference == _utc(2026, 10, 31, 23, 0)
-

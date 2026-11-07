@@ -1,6 +1,6 @@
 """Tests for BigQuery billing export setup and cost sync (ADR-028)."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
@@ -343,8 +343,10 @@ async def test_query_mtd_costs_passes_credentials_to_bq_client():
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
+async def test_sync_billing_data_uses_bq_when_configured(admin_user, session, billing_clock):
     """When billing export is configured, sync should query BQ for historical data."""
+    reference = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)
+    billing_clock(reference, "Pacific/Honolulu")
     from app.services.cost_service import CostService
     from app.models.cost_record import CostRecord
     from sqlalchemy import select
@@ -362,7 +364,7 @@ async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
         },
     )
 
-    today = date.today()
+    today = reference.date()
     yesterday = date(today.year, today.month, max(today.day - 1, 1))
 
     mock_bq_results = [
@@ -402,8 +404,10 @@ async def test_sync_billing_data_uses_bq_when_configured(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_sync_billing_data_falls_back_to_adapters(admin_user, session):
+async def test_sync_billing_data_falls_back_to_adapters(admin_user, session, billing_clock):
     """When billing export is not configured, sync should use adapter path."""
+    reference = datetime(2026, 11, 6, 2, 0, tzinfo=timezone.utc)
+    billing_clock(reference, "Pacific/Honolulu")
     from app.services.cost_service import CostService
     from app.models.cost_record import CostRecord
     from sqlalchemy import select
@@ -415,7 +419,7 @@ async def test_sync_billing_data_falls_back_to_adapters(admin_user, session):
     await CostService.sync_billing_data(session, org_id)
     await session.flush()
 
-    today = date.today()
+    today = reference.date()
     result = await session.execute(
         select(CostRecord).where(
             CostRecord.organization_id == org_id,
