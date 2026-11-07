@@ -7,7 +7,12 @@ not cost the caller the rows that are complete.
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import text
+
 from app.api.notebook_sessions import _session_response
+from app.models.file import File
+from app.models.notebook_session import ComputeSession
 
 
 def _compute_session(accessed_files):
@@ -52,3 +57,45 @@ def test_recreate_keeps_the_complete_inputs_when_a_legacy_link_has_no_file():
 def test_a_link_with_no_recorded_direction_is_not_offered_as_an_input():
     response = _session_response(_compute_session([_link(7, "input"), _link(8, None)]))
     assert response.input_file_ids == [7]
+
+
+@pytest.mark.asyncio
+async def test_provenance_does_not_call_a_link_with_no_recorded_direction_an_output(
+    client, session, admin_user, admin_token
+):
+    """Owner decision (2026-11-07): a link whose direction was never recorded is in neither list."""
+    compute = ComputeSession(
+        user_id=admin_user.id,
+        organization_id=admin_user.organization_id,
+        session_type="jupyter",
+        resource_profile="small",
+        cpu_cores=2,
+        memory_gb=8,
+        status="stopped",
+    )
+    files = [
+        File(
+            organization_id=admin_user.organization_id,
+            filename=name,
+            storage_uri=f"gs://b/{name}",
+            file_type=name.rsplit(".", 1)[1],
+            source_type="upload",
+        )
+        for name in ("in.h5ad", "out.png", "unknown.csv")
+    ]
+    session.add_all([compute, *files])
+    await session.flush()
+    for f, direction in zip(files, ("input", "output", None)):
+        await session.execute(
+            text("INSERT INTO notebook_session_files (session_id, file_id, access_type) VALUES (:s, :f, :a)"),
+            {"s": compute.id, "f": f.id, "a": direction},
+        )
+    await session.commit()
+
+    resp = await client.get(
+        f"/api/v1/notebooks/sessions/{compute.id}/provenance", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [f["filename"] for f in body["input_files"]] == ["in.h5ad"]
+    assert [f["filename"] for f in body["output_files"]] == ["out.png"]

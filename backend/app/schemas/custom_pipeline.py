@@ -104,7 +104,7 @@ class CustomPipelineVersionResponse(BaseModel):
     version_trigger: str
     status: str
     created_by_user_id: int
-    created_at: datetime
+    created_at: datetime | None = None
     variables: list[CustomPipelineVariableResponse] = []
     qc_template: str | None = None
     qc_config_json: dict | None = None
@@ -118,8 +118,8 @@ class CustomPipelineResponse(BaseModel):
     description: str | None = None
     pipeline_key: str
     created_by_user_id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -130,8 +130,8 @@ class CustomPipelineDetailResponse(BaseModel):
     description: str | None = None
     pipeline_key: str
     created_by_user_id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     versions: list[CustomPipelineVersionResponse] = []
 
     model_config = {"from_attributes": True}

@@ -38,7 +38,7 @@ class ManifestEntryResponse(BaseModel):
     last_check_at: datetime | None = None
     retry_count: int = 0
     error_message: str | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -57,8 +57,8 @@ class SequencingBatchResponse(BaseModel):
     expected_file_count: int | None = None
     ingested_file_count: int = 0
     notes: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

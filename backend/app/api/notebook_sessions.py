@@ -394,6 +394,10 @@ async def get_session_provenance(
         }
         if nsf.access_type == "input":
             input_files.append(file_info)
+        elif nsf.access_type is None:
+            # Released schemas allow a link with no recorded direction; claiming it as an
+            # output would be wrong lineage, so it is in neither list (as in the lineage gatherers).
+            logger.info("Session %s file %s link has no recorded direction; omitted from provenance", session_id, f.id)
         else:
             output_files.append(file_info)
 
