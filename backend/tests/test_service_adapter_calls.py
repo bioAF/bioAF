@@ -16,7 +16,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from app.adapters.compute.kubernetes import _job_progress_from_dict, _job_status_from_dict
-from app.adapters.models import StoredObject, TerminationResult
+from app.adapters.models import ServiceState, SessionInfo, StoredObject, TerminationResult
 from app.models.experiment import Experiment
 from app.models.notebook_session import NotebookSession
 from app.models.pipeline_run import PipelineRun
@@ -467,6 +467,43 @@ async def test_a_refused_launch_leaves_a_failed_session_with_a_reason(session, c
     assert ns.status == "failed"
     assert ns.failure_reason
     assert ns.failure_message
+
+
+@dataclass
+class LaunchingNotebooks:
+    status: ServiceState
+
+    async def launch_session(self, spec):
+        return SessionInfo(session_id="nb-1", status=self.status, provider_details={"pod_name": "nb-1"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("adapter_status", "session_status"),
+    [
+        (ServiceState.ERROR, "failed"),
+        (ServiceState.RUNNING, "running"),
+        (ServiceState.STARTING, "starting"),
+        (ServiceState.UNKNOWN, "starting"),
+    ],
+)
+async def test_a_launched_session_takes_its_status_from_the_adapter(
+    session, comp_bio_user, adapter_status, session_status
+):
+    with patch(
+        "app.services.notebook_service.get_notebook_adapter",
+        return_value=LaunchingNotebooks(adapter_status),
+    ):
+        ns = await NotebookService.launch_session(
+            session,
+            user_id=comp_bio_user.id,
+            org_id=comp_bio_user.organization_id,
+            session_type="jupyter",
+            resource_profile="small",
+        )
+
+    assert ns.status == session_status
+    assert ns.compute_job_ref == "nb-1"
 
 
 @pytest.mark.asyncio
