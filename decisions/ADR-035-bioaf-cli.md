@@ -4,6 +4,11 @@
 **Date:** 2026-03-22
 **Deciders:** Brent (repository owner)
 
+> **Note (2026-11):** the in-session CLI described here is not the same thing as the
+> deployment package that lived under `cli/` (also named `bioaf-cli`, with `deploy` and
+> `destroy` commands). That deployment package and the `helm/bioaf/` chart were retired
+> from the source tree in v2026.11; this ADR's provenance/heartbeat tool is unaffected.
+
 ---
 
 ## Context

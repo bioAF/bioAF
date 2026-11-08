@@ -29,7 +29,7 @@ Encrypt sensitive columns at the application layer using Fernet via a SQLAlchemy
   - `slack_installations.bot_token`
   - `slack_webhooks.webhook_url`
 - **platform_config special case:** the table is key/value, so blanket encryption would over-encrypt non-secrets. `PlatformConfigService` is the single read/write point and consults `SENSITIVE_PLATFORM_CONFIG_KEYS` (currently `{"gcp_service_account_key"}`) to decide which rows to encrypt.
-- **Key source:** `BIOAF_ENCRYPTION_KEYS` env var, comma-separated. First key is the primary writer; all keys are accepted readers. `install.sh` generates a Fernet key into `docker/.env` on first run and on `--force`. Helm reads the value from a Kubernetes Secret named in `values.yaml`.
+- **Key source:** `BIOAF_ENCRYPTION_KEYS` env var, comma-separated. First key is the primary writer; all keys are accepted readers. `install.sh` generates a Fernet key into `docker/.env` on first run and on `--force`. Helm reads the value from a Kubernetes Secret named in `values.yaml`. (Note, 2026-11: the application Helm chart was removed from the source tree in v2026.11; the Compose `docker/.env` path is the current key source. Historical releases still contain the chart.)
 - **Migration 076** backfills ciphertext for every sensitive column on existing rows. Idempotent (skips rows where the value already starts with `gAAAA`) and aborts cleanly if `BIOAF_ENCRYPTION_KEYS` is unset.
 - **Startup check:** `app/config.validate_encryption_keys()` runs in the lifespan handler beside `validate_jwt_secret()`. Missing or malformed keys fail the container immediately.
 

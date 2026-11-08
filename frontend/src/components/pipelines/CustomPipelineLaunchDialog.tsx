@@ -25,6 +25,7 @@ import type {
   FileListResponse,
   FileResponse,
 } from "@/lib/types";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 interface EnvVersionOption {
   env_id: number;
@@ -424,7 +425,7 @@ export function CustomPipelineLaunchDialog({
                       v{selectedVersion.version_number}
                     </span>
                     <span className="text-gray-500 ml-2">
-                      {new Date(selectedVersion.created_at).toLocaleDateString()}
+                      {formatRecordedTime(selectedVersion.created_at, "date")}
                     </span>
                   </>
                 ) : (
@@ -713,7 +714,7 @@ function VersionPickerModal({
                     {statusLabel("pipelineVersionChange", changeKind)}
                   </span>
                   <span className="text-xs text-gray-500">
-                    {new Date(version.created_at).toLocaleString()}
+                    {formatRecordedTime(version.created_at)}
                   </span>
                 </div>
               </button>

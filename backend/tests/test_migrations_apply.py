@@ -57,8 +57,10 @@ STRUCTURAL_DIFFS = {"add_table", "remove_table", "add_column", "remove_column"}
 #                      app/models/__init__.py, so it is dead either way.
 #   *.github_repo_name  columns on experiments/projects; the live one lives on
 #                      gitops_repos.
-#   samples.sample_id_external / samples.batch_id
-#                      left over from the batch split above.
+#   samples.batch_id   left over from the batch split above.
+#
+# samples.sample_id_external is no longer drift: plan 9 declared it on the model as the retained
+# source label that migration 080's identifier transition depends on.
 #
 # Recorded rather than fixed: dropping a table or column from a production
 # database destroys data and is the owner's call, not a side effect of adding a
@@ -68,7 +70,6 @@ KNOWN_DRIFT = {
     ("remove_table", "batches"),
     ("remove_column", "experiments", "github_repo_name"),
     ("remove_column", "projects", "github_repo_name"),
-    ("remove_column", "samples", "sample_id_external"),
     ("remove_column", "samples", "batch_id"),
 }
 
@@ -267,25 +268,33 @@ async def test_running_migrations_leaves_test_logging_alone(root_capture_handler
 # exists today; anything not listed fails, and a listed entry that disappears fails too.
 
 # Uniqueness only the migration chain enforces: every create_all-backed test runs without these.
-UNIQUE_ONLY_IN_MIGRATIONS = {
-    ("experiments", "btree (organization_id, external_id) WHERE (external_id IS NOT NULL)"),
-    ("lab_glossary_terms", "btree (organization_id, lower((term)::text))"),
-    ("notification_preferences", "btree (user_id, event_type, channel)"),
-    ("notification_rules", "btree (organization_id, event_type, channel)"),
-    ("pipeline_catalog", "btree (organization_id, pipeline_key)"),
-    ("projects", "btree (organization_id, external_id) WHERE (external_id IS NOT NULL)"),
-    # Migration 080.
-    ("samples", "btree (experiment_id, external_id) WHERE (external_id IS NOT NULL)"),
-    (
-        "samples",
-        "btree (sequencing_batch_id, sequencing_batch_position) "
-        "WHERE ((sequencing_batch_id IS NOT NULL) AND (sequencing_batch_position IS NOT NULL))",
-    ),
-    ("session_credentials", "btree (organization_id, username)"),
+# Empty since plan 9 declared the nine migration-built rules on their models (DECLARED_UNIQUE).
+UNIQUE_ONLY_IN_MIGRATIONS: set[tuple[str, str]] = set()
+
+# Unique rules the migrations built and the models now declare, by (table, name). Each must be the
+# same kind of object (constraint or index) with the same definition in both schemas, because
+# autogenerate compares them by name and would otherwise propose a drop and a re-create.
+DECLARED_UNIQUE = {
+    ("experiments", "uq_experiments_org_external_id"),  # 078
+    ("lab_glossary_terms", "uq_lab_glossary_terms_org_lower_term"),  # 096
+    ("notification_preferences", "uq_notification_prefs_user_event_channel"),  # 004
+    ("notification_rules", "uq_notification_rules_org_event_channel"),  # 004
+    ("pipeline_catalog", "uq_pipeline_catalog_org_key"),  # 001
+    ("projects", "uq_projects_org_external_id"),  # 078
+    ("samples", "uq_samples_experiment_external_id"),  # 080
+    ("samples", "uq_sample_seq_batch_position"),  # 062
+    ("session_credentials", "ix_session_credentials_org_username"),  # 035
 }
 
 # NOT NULL only the models declare: production accepts NULL here, create_all-backed tests do not.
-NOT_NULL_ONLY_IN_MODELS = {
+# Empty since plan 9 aligned the models with the released schema (LEGACY_NULLABLE).
+NOT_NULL_ONLY_IN_MODELS: set[tuple[str, str]] = set()
+
+# Columns every released schema allows to be NULL that the models used to declare NOT NULL. A NULL
+# here can only come from SQL outside the application (every writer leaves them to their defaults),
+# and nothing records what the missing value was, so the models accept NULL instead of the database
+# being tightened. Each keeps its default, so new rows still get a value.
+LEGACY_NULLABLE = {
     ("custom_pipeline_versions", "created_at"),
     ("custom_pipelines", "created_at"),
     ("custom_pipelines", "updated_at"),
@@ -432,3 +441,58 @@ async def test_migration_080_refuses_a_repeated_external_id_within_one_experimen
         )
     ).scalars()
     assert list(names) == ["S-1", "S-2", None, None]
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_models_declare_the_migration_built_unique_rules_under_their_migration_names(
+    migrated_schema, create_all_schema
+):
+    from tests.support import schema_catalog
+
+    conn, schema = migrated_schema
+    migrated = await schema_catalog.named_unique(conn, schema)
+    created = await schema_catalog.named_unique(conn, create_all_schema)
+
+    for key in sorted(DECLARED_UNIQUE):
+        assert key in migrated, f"the migration chain no longer builds {key}"
+        assert created.get(key) == migrated[key], f"{key}: models {created.get(key)} vs migrations {migrated[key]}"
+
+
+INDEX_OPS = {"add_index", "remove_index", "add_constraint", "remove_constraint"}
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_autogenerate_proposes_no_change_to_the_declared_unique_rules(migrated_schema):
+    """Declaring an existing rule must not make autogenerate add a duplicate or drop the original."""
+    conn, _ = migrated_schema
+
+    def _diff(sync_conn):
+        ctx = MigrationContext.configure(sync_conn, opts={"target_metadata": Base.metadata})
+        return compare_metadata(ctx, Base.metadata)
+
+    diffs = await conn.run_sync(_diff)
+    names = {name for _, name in DECLARED_UNIQUE}
+    touching = [
+        (d[0], getattr(d[1], "name", None))
+        for d in diffs
+        if isinstance(d, tuple) and d and d[0] in INDEX_OPS and getattr(d[1], "name", None) in names
+    ]
+    assert touching == []
+
+
+def test_legacy_nullable_columns_accept_null_and_keep_their_defaults():
+    tables = Base.metadata.tables
+    for table, column in sorted(LEGACY_NULLABLE):
+        col = tables[table].c[column]
+        assert col.nullable, f"{table}.{column} must accept the NULLs released schemas allow"
+        if column in {"session_id", "file_id", "value"}:
+            continue  # identities and settings have no default to keep
+        assert col.server_default is not None or col.default is not None, f"{table}.{column} lost its default"

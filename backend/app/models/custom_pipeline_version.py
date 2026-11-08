@@ -29,7 +29,9 @@ class CustomPipelineVersion(Base):
     qc_template: Mapped[str | None] = mapped_column(String(50), nullable=True)
     qc_config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     custom_pipeline = relationship("CustomPipeline", back_populates="versions")
     environment_version = relationship("EnvironmentVersion", lazy="selectin")

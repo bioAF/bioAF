@@ -1022,12 +1022,14 @@
    "route": "none"
   },
   "test_fetchngs_ingest.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "async_sessionmaker",
+    "uses db_engine directly"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_file_asset_identity.py": {
    "category": "single_connection",
@@ -1144,6 +1146,11 @@
     "uses db_engine directly"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_frozen_migrations.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_full_search.py": {
    "category": "single_connection",
@@ -1316,6 +1323,13 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_historical_upgrades.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
   },
   "test_iam_provider.py": {
    "category": "no_database",
@@ -1763,6 +1777,26 @@
     "async_sessionmaker",
     "uses db_engine directly",
     "seed: pipeline launch outcomes"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_legacy_null_timestamps_api.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_legacy_nullable_readers.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
   },
@@ -3063,6 +3097,16 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_relabeled_samples.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_reproduction_plan_service.py": {
    "category": "single_connection",
    "evidence": [
@@ -3337,6 +3381,13 @@
    "evidence": [],
    "route": "none"
   },
+  "test_schema_upgrade.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
+  },
   "test_sdr_api.py": {
    "category": "real_commit",
    "evidence": [
@@ -3571,6 +3622,17 @@
    "evidence": [],
    "route": "none"
   },
+  "test_startup_gate.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_storage.py": {
    "category": "real_commit",
    "evidence": [
@@ -3765,6 +3827,14 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_upgrade_completion.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
   },
   "test_upgrades.py": {
    "category": "real_commit",

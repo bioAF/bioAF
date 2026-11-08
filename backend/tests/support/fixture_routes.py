@@ -47,7 +47,7 @@ def _trial(filename: str) -> str | None:
     return None
 
 
-# real_commit files that passed on migrated_reset (trial A, 2026-11-05).
+# real_commit files that passed on migrated_reset (trial A, 2026-11-05; plan 9 re-trial, 2026-11-07).
 MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
     {
         "test_access_logs.py",
@@ -67,12 +67,15 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_auto_ingest_neutralized.py",
         "test_auto_run_launch_outcome.py",
         "test_aws_config_api.py",
+        "test_backfill_costs_cli.py",
         "test_backups.py",
         "test_batch_code_resolve.py",
+        "test_batch_position.py",
         "test_batches.py",
         "test_bcrypt_test_rounds.py",
         "test_beta_features.py",
         "test_billing_export.py",
+        "test_billing_import.py",
         "test_bootstrap.py",
         "test_bootstrap_roles_assistant.py",
         "test_bootstrap_roles_llm.py",
@@ -108,6 +111,7 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_experiment_auto_runs.py",
         "test_experiment_field_defaults.py",
         "test_experiments.py",
+        "test_fetchngs_ingest.py",
         "test_file_delete_frees_storage.py",
         "test_file_download.py",
         "test_file_soft_delete.py",
@@ -140,11 +144,15 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_lab_glossary_scan_service.py",
         "test_launch_outcome.py",
         "test_launch_partial_submission.py",
+        "test_legacy_null_timestamps_api.py",
+        "test_legacy_nullable_readers.py",
         "test_literature_agent_review.py",
         "test_literature_api.py",
         "test_literature_attach_pdf.py",
+        "test_literature_authorless_duplicates.py",
         "test_literature_automation.py",
         "test_literature_full_text_provenance.py",
+        "test_literature_lit_review_outcomes.py",
         "test_literature_lit_review_run.py",
         "test_literature_open_access_parse.py",
         "test_literature_openalex_api.py",
@@ -199,6 +207,7 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_reference_import_routes.py",
         "test_reference_upload_complete_route.py",
         "test_reference_upload_init_route.py",
+        "test_relabeled_samples.py",
         "test_request_health.py",
         "test_role_service.py",
         "test_roles_api.py",
@@ -222,6 +231,7 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_ssh_connect.py",
         "test_stack_api.py",
         "test_stack_deploy_background.py",
+        "test_startup_gate.py",
         "test_storage.py",
         "test_storage_api.py",
         "test_storage_uri_read_paths.py",
@@ -268,7 +278,6 @@ ROLLBACK_PILOT: frozenset[str] = frozenset(
         "test_data_search_service.py",
         "test_emitted_name_matching.py",
         "test_environment_build_aws.py",
-        "test_fetchngs_ingest.py",
         "test_file_asset_identity.py",
         "test_file_global_scope.py",
         "test_file_inheritance.py",
@@ -346,6 +355,7 @@ ROLLBACK_PILOT: frozenset[str] = frozenset(
         "test_system_test_pipeline.py",
         "test_terraform_executor.py",
         "test_terraform_operations.py",
+        "test_upgrade_completion.py",
         "test_upload_credentials_sa_hardening.py",
         "test_validation_c1_gate.py",
         "test_validation_design_edit.py",
@@ -364,25 +374,38 @@ ROLLBACK_PILOT: frozenset[str] = frozenset(
 )
 
 
-# Files that failed on a migrated route and stay on the existing one. Every failure traced to
-# migration seed rows or a migration-only uniqueness rule (status.md, "Kept off the pilots").
+# Files that fail on a migrated route and stay on the existing one, each for a reason a migration-built
+# schema cannot satisfy without rewriting the test (plan 9 re-trialled every one, 2026-11-07; the
+# uniqueness and nullability drift that kept some off is gone, and test_batch_position.py moved once
+# the sample batch-move defect it hit was fixed). Retained, with reasons:
 KEPT_EXISTING: frozenset[str] = frozenset(
     {
-        "test_batch_position.py",
+        # Assume no migration seeds: insert platform_config keys or vocabulary values that migrations
+        # already seed, count seeded tables from zero, or expect unseeded vocabularies to accept any
+        # reference genome (seeds switch validation on).
         "test_csv_upload.py",
         "test_deployment_characterization.py",
-        "test_encryption_migration.py",
-        "test_gcp_config_migration.py",
-        "test_migration_025.py",
         "test_pipeline_reproduction.py",
         "test_pipeline_runs.py",
         "test_provenance_fields.py",
         "test_reference_genome_autopopulate.py",
-        "test_sample_batch_rename.py",
         "test_upload_ingest_bucket.py",
         "test_vocabularies.py",
+        # Migration tests that build their own prior state and check one migration's effect on it.
+        "test_encryption_migration.py",
+        "test_gcp_config_migration.py",
+        "test_migration_025.py",
+        # Asserts the model schema on purpose (no legacy batches table or samples.batch_id), which
+        # production still has (test_migrations_apply.KNOWN_DRIFT).
+        "test_sample_batch_rename.py",
     }
 )
+
+# Database files classified real_commit/single_connection that stay on the existing route for the same
+# seed reason, found by the plan 9 re-trial: both read storage bucket settings that migrations seed as
+# the string 'null' (test_service_adapter_calls.py) or expect the billing import to write into an
+# unseeded configuration (test_cost_billing_dates.py).
+SEED_ASSUMING: frozenset[str] = frozenset({"test_cost_billing_dates.py", "test_service_adapter_calls.py"})
 
 
 def route_for(filename: str) -> str:

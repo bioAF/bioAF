@@ -9,6 +9,7 @@ from app.models.experiment_template import ExperimentTemplate
 from app.models.sample import Sample
 from app.models.sample_batch import SampleBatch
 from app.models.sample_custom_field import SampleCustomField
+from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.models.sequencing_batch import SequencingBatch
 from app.schemas.sample import SampleCreate, SampleUpdate
 from app.services.audit_service import log_action
@@ -24,6 +25,13 @@ SAMPLE_STATUS_TRANSITIONS = {
     "pipeline_complete": ["analysis_complete"],
     "analysis_complete": [],
 }
+
+
+def http_error_text(detail: object) -> str:
+    """An HTTPException detail as one readable line: a structured detail's nested text, else as is."""
+    if isinstance(detail, dict) and isinstance(detail.get("detail"), str):
+        return detail["detail"]
+    return str(detail)
 
 
 class SampleService:
@@ -65,6 +73,62 @@ class SampleService:
         session.add(batch)
         await session.flush()
         return batch.id
+
+    @staticmethod
+    async def ambiguous_label_candidates(
+        session: AsyncSession, organization_id: int, experiment_id: int, label: str
+    ) -> list[str]:
+        """The current external IDs of the samples that shared ``label`` before migration 080.
+
+        Non-empty means ``label`` no longer names one sample: callers report the candidates rather
+        than choosing one or creating another sample under it. Only answers for an experiment in
+        ``organization_id``.
+        """
+        # Each sample's ID today, not the one 080 recorded: a sample can be renamed and its old ID
+        # reused, and the mapping row stays as history.
+        result = await session.execute(
+            select(Sample.external_id)
+            .join(SampleExternalIdTransition, SampleExternalIdTransition.sample_id == Sample.id)
+            .join(Experiment, Experiment.id == SampleExternalIdTransition.experiment_id)
+            .where(
+                Experiment.organization_id == organization_id,
+                SampleExternalIdTransition.experiment_id == experiment_id,
+                SampleExternalIdTransition.source_label == label,
+                Sample.external_id.is_not(None),
+            )
+            .order_by(Sample.external_id)
+        )
+        return list(result.scalars())
+
+    @staticmethod
+    async def refuse_ambiguous_label(session: AsyncSession, experiment_id: int, label: str | None) -> None:
+        """409 naming the candidates when a sample would take a label migration 080 had to split.
+
+        Every path that gives a sample its external ID calls this, so no sample can carry such a
+        label again and a lookup by it can only ever report the candidates.
+        """
+        if not label:
+            return
+        organization_id = (
+            await session.execute(select(Experiment.organization_id).where(Experiment.id == experiment_id))
+        ).scalar_one_or_none()
+        if organization_id is None:
+            return
+        candidates = await SampleService.ambiguous_label_candidates(session, organization_id, experiment_id, label)
+        if candidates:
+            raise HTTPException(
+                409,
+                {
+                    # Readable text in the nested "detail", where the app's error handling looks for it.
+                    "detail": (
+                        f"Sample ID \u201c{label}\u201d previously identified multiple samples and cannot be "
+                        f"reused. Choose a different ID. The original samples now use: {', '.join(candidates)}."
+                    ),
+                    "error": "ambiguous_external_id",
+                    "label": label,
+                    "candidates": candidates,
+                },
+            )
 
     @staticmethod
     async def _next_batch_position(session: AsyncSession, sequencing_batch_id: int) -> int:
@@ -140,6 +204,7 @@ class SampleService:
         errors = await SampleService._validate_template_fields(session, experiment_id, data)
         if errors:
             raise HTTPException(400, detail="; ".join(errors))
+        await SampleService.refuse_ambiguous_label(session, experiment_id, data.external_id)
 
         # Validate controlled vocabulary fields
         await VocabularyValidator.validate_sample_fields(
@@ -248,6 +313,9 @@ class SampleService:
                     "library_layout": data.library_layout,
                 },
             )
+
+        for data in samples_data:
+            await SampleService.refuse_ambiguous_label(session, experiment_id, data.external_id)
 
         # Pre-fetch org_id for sequencing batch resolution
         exp_result = await session.execute(select(Experiment).where(Experiment.id == experiment_id))
@@ -362,6 +430,9 @@ class SampleService:
             },
         )
 
+        if data.external_id is not None and data.external_id != sample.external_id:
+            await SampleService.refuse_ambiguous_label(session, sample.experiment_id, data.external_id)
+
         # Resolve batch codes
         previous = {}
         updates = {}
@@ -382,11 +453,16 @@ class SampleService:
                 session, exp.organization_id, data.sequencing_batch_code
             )
             batch_changed = new_batch_id != sample.sequencing_batch_id
-            sample.sequencing_batch_id = new_batch_id
+            # Choose the position before moving the sample: the query autoflushes, and flushing the
+            # new batch with the old position collides with uq_sample_seq_batch_position.
             if data.sequencing_batch_position is not None:
-                sample.sequencing_batch_position = data.sequencing_batch_position
+                new_position = data.sequencing_batch_position
             elif batch_changed:
-                sample.sequencing_batch_position = await SampleService._next_batch_position(session, new_batch_id)
+                new_position = await SampleService._next_batch_position(session, new_batch_id)
+            else:
+                new_position = sample.sequencing_batch_position
+            sample.sequencing_batch_id = new_batch_id
+            sample.sequencing_batch_position = new_position
             updates["sequencing_batch_code"] = data.sequencing_batch_code
             updates["sequencing_batch_position"] = str(sample.sequencing_batch_position)
         elif data.sequencing_batch_position is not None:

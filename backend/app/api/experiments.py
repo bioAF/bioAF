@@ -24,7 +24,7 @@ from app.schemas.experiment import (
 from app.schemas.sample import SampleBulkCreate, SampleCreate, SampleResponse
 from app.schemas.sample_batch import SampleBatchCreate, SampleBatchResponse
 from app.services.experiment_service import ExperimentService
-from app.services.sample_service import SampleService
+from app.services.sample_service import SampleService, http_error_text
 from app.services.sample_batch_service import SampleBatchService
 from app.services.csv_service import generate_sample_template, parse_sample_csv, preview_sample_csv
 
@@ -266,6 +266,7 @@ async def list_experiment_samples(
         SampleResponse(
             id=s.id,
             external_id=s.external_id,
+            relabeled_from=s.relabeled_from,
             organism=s.organism,
             tissue_type=s.tissue_type,
             donor_source=s.donor_source,
@@ -314,6 +315,7 @@ async def create_sample(
     return SampleResponse(
         id=sample.id,
         external_id=sample.external_id,
+        relabeled_from=sample.relabeled_from,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,
@@ -437,7 +439,7 @@ async def confirm_samples_csv(
                         )
                     )
         except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {e.detail}")
+            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
 
     if created:
         await session.commit()
@@ -484,7 +486,7 @@ async def upload_samples_csv(
                         )
                     )
         except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {e.detail}")
+            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
 
     if created:
         await session.commit()

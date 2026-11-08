@@ -41,6 +41,8 @@ frontend/coverage/
 # Update system
 update-status/
 update-requests/
+# Recovery dumps the update writes on the host (each holds the whole database)
+/backups/
 
 # Terraform
 *.tfvars

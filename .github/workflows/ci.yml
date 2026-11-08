@@ -99,7 +99,11 @@ jobs:
     env:
       BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test
     steps:
+      # Full history and tags: the historical upgrade matrix (plan 9) builds every released schema
+      # from the release's own migrations, read from local Git objects.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:

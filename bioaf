@@ -378,14 +378,17 @@ for v in cfg.get('volumes', {}).values():
     # Pin whichever tag we ended up with so future start/restart commands
     # always use this exact version, independent of the worktree.
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
+    ensure_backups_dir
     step "Start services (docker compose up -d)" -- $DC up -d
 
     # Wait for DB
     step "Wait for database to accept connections" -- wait_for_db
 
     # Run migrations
-    step "Run database migrations (alembic upgrade head)" -- \
-        $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
+    # The backend's entrypoint already ran the shared upgrade lifecycle; this confirms it (a no-op
+    # when done) and fails setup if it did not complete.
+    step "Run database migrations" -- \
+        $DC exec -T backend python -m app.schema_upgrade run
 
     # Apply prefill values to platform_config if --prefill was supplied.
     # The file is YAML with flat key/value pairs, e.g.:
@@ -501,6 +504,7 @@ cmd_start() {
     # not silently switch versions. Bootstrap the pin from the running
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
+    ensure_backups_dir
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -580,10 +584,65 @@ cmd_logs() {
 }
 
 cmd_migrate() {
+    # The backend's shared upgrade lifecycle (backend/app/schema_upgrade.py): lock, verified recovery
+    # backup in backups/, migrate, validate, record. Safe to repeat; a no-op once done. A backend
+    # serving maintenance responses restarts into normal service once this succeeds.
     bold "=== Running Database Migrations ==="
     wait_for_db
-    $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
+    if ! $DC exec -T backend python -m app.schema_upgrade run; then
+        red "Database upgrade failed. Details: update-status/schema-upgrade.json"
+        echo "  Fix the cause shown there, then run ./bioaf migrate again."
+        return 1
+    fi
     green "Migrations complete."
+}
+
+ensure_backups_dir() {
+    # backups/ holds full-database dumps: private to the operator who runs ./bioaf (0700), with
+    # earlier bioAF backups tightened to 0600. Creating it here, before any container starts, keeps
+    # Docker from creating the bind-mount source as root; the backend then gives its dumps to the
+    # directory's owner, so the operator can restore them without root.
+    local dir="${1:-$SCRIPT_DIR/backups}"
+    mkdir -p "$dir" && chmod 700 "$dir" || return 1
+    find "$dir" -maxdepth 1 -type f -name 'bioaf_*' -exec chmod 600 {} + 2>/dev/null || true
+}
+
+backup_database() {
+    # Write a gzipped plain-SQL dump to "$1" with the database container's own pg_dump (the bundled
+    # server's version) and keep it only if pg_dump succeeded and the archive is non-empty and intact.
+    # The dump is created 0600 (umask 077), never readable by other accounts even while partial.
+    local target="$1"
+    local partial="${target}.partial"
+    ensure_backups_dir "$(dirname "$target")" || return 1
+    if ! { (umask 077; $DC exec -T db pg_dump -U bioaf bioaf | gzip > "$partial"); }; then
+        rm -f "$partial"
+        return 1
+    fi
+    if ! gzip -t "$partial" 2>/dev/null || [ "$(gzip -dc "$partial" | head -c 1 | wc -c)" -eq 0 ]; then
+        rm -f "$partial"
+        return 1
+    fi
+    mv "$partial" "$target"
+}
+
+db_upgrade_settled() {
+    # True when the running backend image says its own database upgrade completed.
+    local out
+    out=$($DC exec -T backend python -m app.schema_upgrade status 2>/dev/null) || return 1
+    printf '%s' "$out" | grep -q '"settled": true'
+}
+
+wait_for_backend_ready() {
+    # Poll the backend's readiness probe from inside its container (503 while in maintenance).
+    local timeout="${BIOAF_READY_TIMEOUT_SECONDS:-300}" waited=0
+    while [ "$waited" -lt "$timeout" ]; do
+        if $DC exec -T backend python -c "import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=5); sys.exit(0)" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    return 1
 }
 
 cmd_migrate_down() {
@@ -605,9 +664,10 @@ cmd_backup() {
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_file="$SCRIPT_DIR/backups/bioaf_${timestamp}.sql.gz"
-    mkdir -p "$SCRIPT_DIR/backups"
-
-    $DC exec -T db pg_dump -U bioaf bioaf | gzip > "$backup_file"
+    if ! backup_database "$backup_file"; then
+        red "ERROR: Database backup failed; no backup was written."
+        return 1
+    fi
     green "Backup saved to: $backup_file"
 }
 
@@ -864,6 +924,25 @@ get_latest_github_version() {
     echo "${tag#v}"
 }
 
+write_update_status() {
+    # write_update_status <status> <step> [error]; uses _update_from/_update_to.
+    local status="$1" step="$2" error="${3:-}" stamp_key="started_at"
+    mkdir -p "$SCRIPT_DIR/update-status"
+    [ "$status" = "in_progress" ] || stamp_key="completed_at"
+    local error_json=""
+    [ -n "$error" ] && error_json=", \"error\": \"$(printf '%s' "$error" | sed 's/["\\]/\\&/g')\""
+    printf '{"status": "%s", "from_version": "%s", "to_version": "%s", "step": "%s"%s, "%s": "%s"}\n' \
+        "$status" "$_update_from" "$_update_to" "$step" "$error_json" "$stamp_key" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SCRIPT_DIR/update-status/current.json"
+}
+
+update_failed() {
+    # update_failed <step> <message>: record the failure where the UI and agent read it, then stop.
+    write_update_status failed "$1" "$2"
+    red "ERROR: $2"
+    exit 1
+}
+
 cmd_update() {
     local target_version="${1:-}"
     local current_version
@@ -888,16 +967,24 @@ cmd_update() {
         exit 1
     fi
 
-    # Check if already on the target version
+    # Running the target image is not the same as being updated: its database upgrade may have
+    # failed. Only a settled database upgrade makes this a no-op; otherwise retry just that part.
+    local retry_only=false
     if [ "$current_version" = "$target_version" ]; then
-        green "Already running version $current_version. Nothing to update."
-        exit 0
+        if db_upgrade_settled; then
+            green "Already running version $current_version. Nothing to update."
+            exit 0
+        fi
+        retry_only=true
     fi
 
     bold "=== bioAF Update ==="
     echo ""
     echo "  Current version:  $current_version"
     echo "  Target version:   $target_version"
+    if [ "$retry_only" = true ]; then
+        yellow "  Version $target_version is installed but its database upgrade did not complete; retrying it."
+    fi
     echo ""
 
     # Confirmation prompt (skipped when called with --yes flag for automation)
@@ -914,141 +1001,113 @@ cmd_update() {
         fi
     fi
 
-    local status_dir="$SCRIPT_DIR/update-status"
-    mkdir -p "$status_dir"
+    _update_from="$current_version"
+    _update_to="$target_version"
 
-    # Pre-flight: verify all release images exist before doing anything destructive.
-    # Without this, an in-progress release-publish workflow lets us git-checkout
-    # the new tag and then fail at `docker compose pull`, leaving the worktree
-    # in an inconsistent state.
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "verify_images", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-    echo ""
-    bold "Verifying release images are published..."
-    local verify_status=0
-    verify_release_images "$target_version" || verify_status=$?
-    if [ $verify_status -ne 0 ]; then
-        local err_msg
-        if [ $verify_status -eq 1 ]; then
-            err_msg="Release images for v${target_version} are not yet published. The release publish workflow may still be in progress -- please try again in a few minutes."
-        else
-            err_msg="Could not verify release image availability (network or registry error)."
+    if [ "$retry_only" = false ]; then
+        # Pre-flight: verify all release images exist before doing anything destructive.
+        # Without this, an in-progress release-publish workflow lets us git-checkout
+        # the new tag and then fail at `docker compose pull`, leaving the worktree
+        # in an inconsistent state.
+        write_update_status in_progress verify_images
+        echo ""
+        bold "Verifying release images are published..."
+        local verify_status=0
+        verify_release_images "$target_version" || verify_status=$?
+        if [ $verify_status -ne 0 ]; then
+            if [ $verify_status -eq 1 ]; then
+                update_failed verify_images "Release images for v${target_version} are not yet published. The release publish workflow may still be in progress -- please try again in a few minutes."
+            fi
+            update_failed verify_images "Could not verify release image availability (network or registry error)."
         fi
-        cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "verify_images", "error": "$err_msg", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-        exit 1
+        green "All release images are available."
     fi
-    green "All release images are available."
 
-    # Back up the database before updating
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "backup", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-
-    # Back up the database before updating
+    # Back up the database before updating. A failed backup stops the update: nothing has been
+    # changed yet, and an update without recovery material is not safe to continue (the backend
+    # also makes its own verified backup before migrating).
+    write_update_status in_progress backup
     echo ""
     bold "Backing up database..."
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_file="$SCRIPT_DIR/backups/bioaf_pre_update_${current_version}_to_${target_version}_${timestamp}.sql.gz"
-    mkdir -p "$SCRIPT_DIR/backups"
-    if $DC exec -T db pg_dump -U bioaf bioaf 2>/dev/null | gzip > "$backup_file"; then
-        green "Backup saved: $backup_file"
-    else
-        red "WARNING: Database backup failed. Continuing without backup."
-        rm -f "$backup_file"
+    if ! backup_database "$backup_file"; then
+        update_failed backup "Database backup failed, so the update was stopped before changing anything. Check free disk space and that the database is running, then retry."
     fi
+    green "Backup saved: $backup_file"
 
-    # Fetch and checkout the target version
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "checkout", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-
-    echo ""
-    bold "Fetching version $target_version..."
-    git -C "$SCRIPT_DIR" fetch --tags --force
-    if ! git -C "$SCRIPT_DIR" rev-parse "v${target_version}" >/dev/null 2>&1; then
-        red "ERROR: Tag v${target_version} not found in the repository."
-        cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "checkout", "error": "Tag not found"}
-STATUSEOF
-        exit 1
-    fi
-    git -C "$SCRIPT_DIR" checkout "v${target_version}"
-
-    # Upgrade-path: installs that predate v0.13.0 have no BIOAF_ENCRYPTION_KEYS
-    # in docker/.env. The backend's startup validator would refuse to come up
-    # without it. Append the variable to the existing .env (leaving every
-    # other line untouched) before the container restart so the backend sees
-    # it on first boot of the new image. No-op on installs that already have
-    # the value.
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "ensure_encryption_key", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-    bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || {
-        red "ERROR: could not ensure BIOAF_ENCRYPTION_KEYS in $ENV_FILE."
-        cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "failed", "from_version": "$current_version", "to_version": "$target_version", "step": "ensure_encryption_key", "error": "encryption key bootstrap failed"}
-STATUSEOF
-        exit 1
-    }
-
-    # Pull pre-built images while old containers are still running,
-    # so the only downtime is the restart + migrate window.
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "pull", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-
-    echo ""
-    # Pin the new tag in docker/.env so this version sticks for any future
-    # start/restart, not just this $DC up call.
-    pin_image_tag "v${target_version}"
-    bold "Pulling pre-built images..."
-    $DC_PULL backend frontend
-
-    # Warning window before restart: give the UI time to show a countdown
-    # so users know the app is about to go offline briefly. Skipped when
-    # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
-    local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
-    if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
-        cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "warn", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
+    if [ "$retry_only" = false ]; then
+        # Fetch and checkout the target version
+        write_update_status in_progress checkout
         echo ""
-        yellow "Restarting in ${warn_seconds}s (notifying active users)..."
-        sleep "$warn_seconds"
+        bold "Fetching version $target_version..."
+        git -C "$SCRIPT_DIR" fetch --tags --force
+        if ! git -C "$SCRIPT_DIR" rev-parse "v${target_version}" >/dev/null 2>&1; then
+            update_failed checkout "Tag v${target_version} not found in the repository."
+        fi
+        git -C "$SCRIPT_DIR" checkout "v${target_version}"
+
+        # Upgrade-path: installs that predate v0.13.0 have no BIOAF_ENCRYPTION_KEYS
+        # in docker/.env. The backend's startup validator would refuse to come up
+        # without it. Append the variable to the existing .env (leaving every
+        # other line untouched) before the container restart so the backend sees
+        # it on first boot of the new image. No-op on installs that already have
+        # the value.
+        write_update_status in_progress ensure_encryption_key
+        bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+            update_failed ensure_encryption_key "encryption key bootstrap failed"
+
+        # Pull pre-built images while old containers are still running,
+        # so the only downtime is the restart + migrate window.
+        write_update_status in_progress pull
+        echo ""
+        # Pin the new tag in docker/.env so this version sticks for any future
+        # start/restart, not just this $DC up call.
+        pin_image_tag "v${target_version}"
+        bold "Pulling pre-built images..."
+        $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
+
+        # Warning window before restart: give the UI time to show a countdown
+        # so users know the app is about to go offline briefly. Skipped when
+        # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
+        local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
+        if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
+            write_update_status in_progress warn
+            echo ""
+            yellow "Restarting in ${warn_seconds}s (notifying active users)..."
+            sleep "$warn_seconds"
+        fi
+
+        # Restart services with new images. The new backend runs the database upgrade before
+        # serving (backend/entrypoint.sh) and answers 503 until it has completed.
+        write_update_status in_progress restart
+        $DC up -d || update_failed restart "Could not start the v${target_version} containers."
+        wait_for_db
+
+        # Cloud Logging (GCE only, idempotent) -- run after restart so it
+        # does not block the update while containers are down.
+        ensure_cloud_logging
     fi
 
-    # Restart services with new images
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "restart", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-
-    $DC up -d
-    wait_for_db
-
-    # Cloud Logging (GCE only, idempotent) -- run after restart so it
-    # does not block the update while containers are down.
-    ensure_cloud_logging
-
-    # Run migrations
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "in_progress", "from_version": "$current_version", "to_version": "$target_version", "step": "migrate", "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
-
+    # The shared lifecycle again: waits for the entrypoint's run, then finds nothing to do; after a
+    # failure it is the retry.
+    write_update_status in_progress migrate
     echo ""
-    bold "Running migrations..."
-    $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
+    bold "Running database upgrade..."
+    if ! $DC exec -T backend python -m app.schema_upgrade run; then
+        update_failed migrate "The database upgrade did not complete. Details: update-status/schema-upgrade.json. Fix the cause, then run ./bioaf update $target_version again."
+    fi
 
-    # Write success status -- read from the running container, which is now the
-    # source of truth (the worktree was already checked out before restart).
+    write_update_status in_progress ready
+    if ! wait_for_backend_ready; then
+        update_failed ready "The backend did not report ready after the database upgrade. Check ./bioaf logs backend."
+    fi
+
     local new_version
     new_version=$(get_running_version)
-    cat > "$status_dir/current.json" <<STATUSEOF
-{"status": "completed", "from_version": "$current_version", "to_version": "$new_version", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-STATUSEOF
+    _update_to="$new_version"
+    write_update_status completed done
 
     echo ""
     green "=================================================="
@@ -1151,11 +1210,12 @@ cmd_reset_db() {
     $DC exec -T db createdb -U bioaf bioaf
 
     echo "Starting backend..."
+    ensure_backups_dir
     $DC up -d backend
     wait_for_db
 
     echo "Running migrations..."
-    $DC exec -T backend alembic -c alembic/alembic.ini upgrade head
+    $DC exec -T backend python -m app.schema_upgrade run
 
     green "Database reset complete. Run './bioaf setup' to generate a new setup code."
 }
@@ -1191,7 +1251,7 @@ cmd_help() {
     echo "  build [service]     Build container images locally (development only)"
     echo ""
     bold "Database:"
-    echo "  migrate             Run alembic database migrations"
+    echo "  migrate             Upgrade the database (backup, migrate, validate); retry after a failure"
     echo "  migrate-down <rev>  Downgrade database to a specific revision"
     echo "  seed <script.py>    Run a seed/data script in the backend container"
     echo "  backup              Create a database backup"

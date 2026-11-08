@@ -120,12 +120,11 @@ jobs:
         env:
           VERSION: ${{ steps.compute.outputs.version }}
         run: |
-          # Python projects: replace the top-level version = "..." line under [project].
+          # Python project: replace the top-level version = "..." line under [project].
           # The regex pins to a line starting with "version = " to avoid hitting
           # dependency specifiers.
           sed -i.bak -E 's/^(version = ")[^"]*(")/\1'"$VERSION"'\2/' backend/pyproject.toml
-          sed -i.bak -E 's/^(version = ")[^"]*(")/\1'"$VERSION"'\2/' cli/pyproject.toml
-          rm -f backend/pyproject.toml.bak cli/pyproject.toml.bak
+          rm -f backend/pyproject.toml.bak
 
           # frontend: update package.json safely as JSON.
           node -e "
@@ -139,7 +138,7 @@ jobs:
           "
 
           echo "Updated versions:"
-          grep '^version' backend/pyproject.toml cli/pyproject.toml
+          grep '^version' backend/pyproject.toml
           grep '"version"' frontend/package.json
 
       - name: Commit, tag, and push
@@ -147,7 +146,7 @@ jobs:
         env:
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
-          git add backend/pyproject.toml cli/pyproject.toml frontend/package.json RELEASE_NOTES.md changes/unreleased
+          git add backend/pyproject.toml frontend/package.json RELEASE_NOTES.md changes/unreleased
           # -S signs the commit; -s makes a signed annotated tag (-m avoids the
           # editor in CI). Both also follow from commit.gpgsign/tag.gpgsign set
           # by the import step, but the explicit flags keep the intent clear.

@@ -324,3 +324,150 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
     [ -z "$result" ]
     rm -rf "$tmp"
 }
+
+# ---------------------------------------------------------------------------
+# Database upgrade (plan 9): backups that stop on failure, settled-state checks
+# ---------------------------------------------------------------------------
+
+# A stand-in for `docker compose ...`: the test sets FAKE_DUMP / FAKE_DUMP_STATUS / FAKE_SCHEMA_STATUS /
+# FAKE_READY and the stub answers the commands the script runs.
+make_fake_dc() {
+    local dir="$1"
+    cat > "$dir/fake-dc" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+    *"pg_dump"*) printf '%s' "${FAKE_DUMP-}"; exit "${FAKE_DUMP_STATUS:-0}" ;;
+    *"app.schema_upgrade status"*) printf '%s' "${FAKE_SCHEMA_STATUS:-{\}}"; exit 0 ;;
+    *"app.schema_upgrade run"*) echo "schema_upgrade run" >> "${FAKE_LOG:-/dev/null}"; exit "${FAKE_RUN_STATUS:-0}" ;;
+    *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+esac
+exit 0
+STUB
+    chmod +x "$dir/fake-dc"
+}
+
+@test "backup_database keeps a verified gzipped dump" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_DUMP="-- dump" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/out.sql.gz'"
+    [ "$status" -eq 0 ]
+    gzip -t "$tmp/out.sql.gz"
+    [ "$(gunzip -c "$tmp/out.sql.gz")" = "-- dump" ]
+}
+
+@test "backup_database writes a dump only its owner can read, in a private directory" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_DUMP="-- dump" bash -c "umask 022; source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/backups/out.sql.gz'"
+    [ "$status" -eq 0 ]
+    [ "$(stat -f %Lp "$tmp/backups/out.sql.gz" 2>/dev/null || stat -c %a "$tmp/backups/out.sql.gz")" = "600" ]
+    [ "$(stat -f %Lp "$tmp/backups" 2>/dev/null || stat -c %a "$tmp/backups")" = "700" ]
+}
+
+@test "ensure_backups_dir makes backups/ private and tightens earlier bioAF backups only" {
+    tmp="$(mktemp -d)"; mkdir -p "$tmp/backups"; chmod 755 "$tmp/backups"
+    touch "$tmp/backups/bioaf_pre_update_1_to_2.sql.gz" "$tmp/backups/bioaf_pre_upgrade_131_to_132_x.dump" "$tmp/backups/notes.txt"
+    chmod 644 "$tmp/backups/"*
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; ensure_backups_dir"
+    [ "$status" -eq 0 ]
+    mode() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+    [ "$(mode "$tmp/backups")" = "700" ]
+    [ "$(mode "$tmp/backups/bioaf_pre_update_1_to_2.sql.gz")" = "600" ]
+    [ "$(mode "$tmp/backups/bioaf_pre_upgrade_131_to_132_x.dump")" = "600" ]
+    [ "$(mode "$tmp/backups/notes.txt")" = "644" ]
+}
+
+@test "backup_database fails and removes the file when pg_dump fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_DUMP="partial" FAKE_DUMP_STATUS=1 bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/out.sql.gz'"
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/out.sql.gz" ]
+}
+
+@test "backup_database fails on an empty dump even when pg_dump exits 0" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_DUMP="" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/out.sql.gz'"
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/out.sql.gz" ]
+}
+
+@test "db_upgrade_settled trusts only the running image's own verdict" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_SCHEMA_STATUS='{"settled": true, "code_head": "132", "record": {"status": "completed"}}' \
+        bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; db_upgrade_settled"
+    [ "$status" -eq 0 ]
+    run env FAKE_SCHEMA_STATUS='{"settled": false, "code_head": "132", "record": {"status": "completed"}}' \
+        bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; db_upgrade_settled"
+    [ "$status" -ne 0 ]
+    run env FAKE_SCHEMA_STATUS='{}' bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; db_upgrade_settled"
+    [ "$status" -ne 0 ]
+}
+
+@test "update retries the database upgrade when the target image is already running" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": false}' \
+        BIOAF_AUTO_CONFIRM=1 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        get_running_version() { echo 9.9.9; }
+        wait_for_db() { :; }
+        backup_database() { echo backup >> '$tmp/log'; }
+        cmd_update 9.9.9 --yes"
+    [ "$status" -eq 0 ]
+    grep -q backup "$tmp/log"
+    grep -q "schema_upgrade run" "$tmp/log"
+    grep -q '"status": "completed"' "$tmp/update-status/current.json"
+}
+
+@test "update stops when the pre-update backup fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": false}' BIOAF_AUTO_CONFIRM=1 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        get_running_version() { echo 9.9.9; }
+        wait_for_db() { :; }
+        backup_database() { return 1; }
+        cmd_update 9.9.9 --yes"
+    [ "$status" -ne 0 ]
+    ! grep -q "schema_upgrade run" "$tmp/log" 2>/dev/null
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+    grep -q '"step": "backup"' "$tmp/update-status/current.json"
+}
+
+@test "update records failure when the database upgrade fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_RUN_STATUS=1 FAKE_SCHEMA_STATUS='{"settled": false}' BIOAF_AUTO_CONFIRM=1 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        get_running_version() { echo 9.9.9; }
+        wait_for_db() { :; }
+        backup_database() { :; }
+        cmd_update 9.9.9 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+    grep -q '"step": "migrate"' "$tmp/update-status/current.json"
+}
+
+@test "update is a no-op only when the running version's database upgrade is settled" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": true}' bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        get_running_version() { echo 9.9.9; }
+        cmd_update 9.9.9 --yes"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Nothing to update"* ]]
+    [ ! -e "$tmp/log" ]
+}
+
+@test "migrate runs the shared database upgrade lifecycle" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; wait_for_db() { :; }; cmd_migrate"
+    [ "$status" -eq 0 ]
+    grep -q "schema_upgrade run" "$tmp/log"
+}
+
+@test "recovery dumps in backups/ are never offered to git" {
+    # A dump holds the whole database; the checkout on the host must not list it as a file to commit.
+    run git -C "$BATS_TEST_DIRNAME/../.." check-ignore -q backups/bioaf_pre_upgrade_131_to_132_x.dump
+    [ "$status" -eq 0 ]
+}

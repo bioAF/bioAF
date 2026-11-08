@@ -10,6 +10,7 @@ from app.models.file import File
 from app.models.ingest_event import IngestEvent
 from app.models.project import Project
 from app.models.sample import Sample
+from app.services.sample_service import SampleService
 from app.schemas.ingest import (
     BulkReassignRequest,
     BulkReassignResponse,
@@ -240,6 +241,8 @@ async def claim_sample(
     if not sample.is_unclaimed:
         raise HTTPException(400, "Sample is not unclaimed")
 
+    if body.name and body.name != sample.external_id:
+        await SampleService.refuse_ambiguous_label(session, sample.experiment_id, body.name)
     sample.is_unclaimed = False
     if body.name:
         sample.external_id = body.name

@@ -348,6 +348,8 @@ def _build_sample_manifest(samples: list[Sample]) -> str:
 
     fields = [
         "external_id",
+        # The label migration 080 replaced, for samples it relabelled; empty otherwise.
+        "relabeled_from",
         "organism",
         "tissue_type",
         "donor_source",

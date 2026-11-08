@@ -42,7 +42,7 @@ class SampleBatchResponse(BaseModel):
     quality_score_encoding: str | None = None
     notes: str | None
     sample_count: int = 0
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}

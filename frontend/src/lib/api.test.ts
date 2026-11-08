@@ -1,7 +1,10 @@
 import { extractErrorMessage, api, ApiError } from "./api";
 import { getToken, setToken } from "./auth";
 import { permissionsCache } from "@/hooks/permissionsCache";
-import { capabilitiesCache, MINIMAL_CAPABILITIES } from "@/hooks/capabilitiesCache";
+import {
+  capabilitiesCache,
+  MINIMAL_CAPABILITIES,
+} from "@/hooks/capabilitiesCache";
 
 describe("extractErrorMessage", () => {
   test("returns a plain string detail unchanged", () => {
@@ -26,16 +29,29 @@ describe("extractErrorMessage", () => {
     expect(extractErrorMessage(body)).toMatch(/already in progress/i);
   });
 
+  test("reads the explanation a refused split sample ID carries, beside its candidates", () => {
+    const body = {
+      detail: {
+        detail:
+          "Sample ID \u201cDUP\u201d previously identified multiple samples and cannot be reused. Choose a different ID. The original samples now use: DUP~6, DUP~7.",
+        error: "ambiguous_external_id",
+        label: "DUP",
+        candidates: ["DUP~6", "DUP~7"],
+      },
+    };
+    expect(extractErrorMessage(body)).toBe(body.detail.detail);
+  });
+
   test("falls back to a nested string detail when the code is unknown", () => {
-    expect(extractErrorMessage({ detail: { detail: "some other thing" } })).toBe(
-      "some other thing",
-    );
+    expect(
+      extractErrorMessage({ detail: { detail: "some other thing" } }),
+    ).toBe("some other thing");
   });
 
   test("joins validation arrays", () => {
-    expect(
-      extractErrorMessage({ detail: [{ msg: "a" }, { msg: "b" }] }),
-    ).toBe("a; b");
+    expect(extractErrorMessage({ detail: [{ msg: "a" }, { msg: "b" }] })).toBe(
+      "a; b",
+    );
   });
 
   test("falls back to a generic message for an opaque object", () => {
@@ -56,7 +72,9 @@ describe("ApiError carries the structured domain-error envelope", () => {
       json: async () => ({
         detail: "Some selected samples have no linked input files",
         code: "samples_missing_files",
-        details: { samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }] },
+        details: {
+          samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }],
+        },
       }),
     }) as unknown as typeof fetch;
 
@@ -67,7 +85,9 @@ describe("ApiError carries the structured domain-error envelope", () => {
       const e = err as ApiError;
       expect(e).toBeInstanceOf(ApiError);
       expect(e.code).toBe("samples_missing_files");
-      expect(e.details?.samples_without_files).toEqual([{ id: 9, external_id: "SAMPLE-102" }]);
+      expect(e.details?.samples_without_files).toEqual([
+        { id: 9, external_id: "SAMPLE-102" },
+      ]);
     }
   });
 });

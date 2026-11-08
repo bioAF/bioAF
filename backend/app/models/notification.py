@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +29,9 @@ class Notification(Base):
 
 class NotificationRule(Base):
     __tablename__ = "notification_rules"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "event_type", "channel", name="uq_notification_rules_org_event_channel"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
@@ -44,6 +47,9 @@ class NotificationRule(Base):
 
 class NotificationPreference(Base):
     __tablename__ = "notification_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_type", "channel", name="uq_notification_prefs_user_event_channel"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
@@ -81,7 +87,9 @@ class SlackInstallation(Base):
     authed_user_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     installed_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     organization = relationship("Organization")
     installer = relationship("User")
@@ -96,7 +104,9 @@ class SlackChannelMapping(Base):
     channel_name: Mapped[str] = mapped_column(String(255), nullable=False)
     event_types_json: Mapped[list] = mapped_column(JSONB, server_default="[]", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     organization = relationship("Organization")
 

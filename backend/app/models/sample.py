@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -51,6 +53,23 @@ SAMPLE_ASSAYS = ["bulk_rna", "scrna", "other"]
 
 class Sample(Base):
     __tablename__ = "samples"
+    # Built by migrations 062 and 080; declared here so create_all and autogenerate see them.
+    __table_args__ = (
+        Index(
+            "uq_sample_seq_batch_position",
+            "sequencing_batch_id",
+            "sequencing_batch_position",
+            unique=True,
+            postgresql_where=text("sequencing_batch_id IS NOT NULL AND sequencing_batch_position IS NOT NULL"),
+        ),
+        Index(
+            "uq_samples_experiment_external_id",
+            "experiment_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     uuid: Mapped[uuid_pkg.UUID] = mapped_column(
@@ -61,6 +80,10 @@ class Sample(Base):
     sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
     sequencing_batch_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The source label a sample had before migration 080 introduced external_id. Retained, not dead:
+    # where an experiment held one label more than once, 080 gave those samples new external IDs and
+    # this is how they are still found (SampleExternalIdTransition). Never drop or rewrite it.
+    sample_id_external: Mapped[str | None] = mapped_column(String(255), nullable=True)
     organism: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tissue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     donor_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -99,3 +122,17 @@ class Sample(Base):
     parent_sample = relationship("Sample", remote_side="Sample.id", foreign_keys=[parent_sample_id])
     derived_samples = relationship("Sample", foreign_keys=[parent_sample_id], overlaps="parent_sample")
     custom_fields = relationship("SampleCustomField", back_populates="sample", cascade="all, delete-orphan")
+    # Set only for samples migration 080 relabelled (written by the migration, never by the app).
+    external_id_transition = relationship("SampleExternalIdTransition", uselist=False, lazy="selectin", viewonly=True)
+
+    @property
+    def relabeled_from(self) -> str | None:
+        """The source label 080 replaced with a new external ID, or None.
+
+        Loaded with every sample read from the database (selectin). A sample this process created
+        has no transition and may not have the relationship loaded; that is None too, not a query.
+        """
+        if "external_id_transition" in sa_inspect(self).unloaded:
+            return None
+        transition = self.external_id_transition
+        return transition.source_label if transition is not None else None

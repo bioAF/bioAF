@@ -69,13 +69,19 @@ def _project_summary(project) -> ProjectSummary | None:
 
 def _session_response(ns) -> SessionResponse:
     # accessed_files is the NotebookSessionFile join. Filter for input rows so
-    # the frontend's Recreate flow can re-select the same files.
+    # the frontend's Recreate flow can re-select the same files. Released schemas
+    # allow a link with no file; it names nothing to re-select, so it is skipped
+    # rather than costing the session its other inputs.
     input_file_ids = None
     accessed = getattr(ns, "accessed_files", None)
     if accessed is not None:
         try:
             input_file_ids = sorted(
-                {nsf.file_id for nsf in accessed if getattr(nsf, "access_type", "input") == "input"}
+                {
+                    nsf.file_id
+                    for nsf in accessed
+                    if nsf.file_id is not None and getattr(nsf, "access_type", "input") == "input"
+                }
             )
         except Exception:
             input_file_ids = None
@@ -388,6 +394,10 @@ async def get_session_provenance(
         }
         if nsf.access_type == "input":
             input_files.append(file_info)
+        elif nsf.access_type is None:
+            # Released schemas allow a link with no recorded direction; claiming it as an
+            # output would be wrong lineage, so it is in neither list (as in the lineage gatherers).
+            logger.info("Session %s file %s link has no recorded direction; omitted from provenance", session_id, f.id)
         else:
             output_files.append(file_info)
 

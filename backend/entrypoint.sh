@@ -23,10 +23,11 @@ set -e
 #
 # Skipped (no-op) when:
 #   - BIOAF_ENCRYPTION_KEYS is already set (fresh installs, normal upgrades,
-#     Kubernetes deployments where the Secret provides the value).
-#   - /host/.env is not present (Kubernetes path; the Secret handles it).
+#     or a container started with the value supplied externally).
 #
 # Fails loudly when:
+#   - The variable is empty AND /host/.env is not mounted (a container started
+#     outside the Compose stack must be given the value by its caller).
 #   - The variable is empty AND /host/.env is present but not writable
 #     (the upgrade would be silently incomplete otherwise; better to fail).
 # ---------------------------------------------------------------------------
@@ -37,11 +38,11 @@ bootstrap_encryption_key() {
     fi
 
     if [ ! -e /host/.env ]; then
-        # No host env file mounted: this is the Kubernetes (Helm) path where
-        # the Secret should already have supplied BIOAF_ENCRYPTION_KEYS. If
-        # we get here, the operator misconfigured the chart. Fail clearly.
+        # No host env file mounted: the container was started outside the
+        # Compose stack, so BIOAF_ENCRYPTION_KEYS must be supplied by whoever
+        # started it. Generating a key here would not persist. Fail clearly.
         echo "FATAL: BIOAF_ENCRYPTION_KEYS is unset and no host .env is mounted." >&2
-        echo "  On Kubernetes, ensure the chart's encryption Secret exists." >&2
+        echo "  Outside docker/docker-compose.yml, supply BIOAF_ENCRYPTION_KEYS yourself." >&2
         echo "  See decisions/ADR-047-data-at-rest-encryption.md." >&2
         return 1
     fi
@@ -98,17 +99,41 @@ bootstrap_encryption_key() {
     export BIOAF_ENCRYPTION_KEYS="$new_key"
 }
 
-bootstrap_encryption_key
+# ---------------------------------------------------------------------------
+# Upgrade the database before the application serves (plan 9).
+#
+# Runs on every start of the application server, so the first start of a new
+# image upgrades the database whichever updater started it: this file and
+# docker-compose.yml are read fresh on every update, the host's ./bioaf may not
+# be. backend/app/schema_upgrade.py does the work (lock, verified recovery
+# backup in /app/backups, migrate, validate, record). If it fails, the server
+# still starts, but in maintenance: it answers 503 with the reason and does no
+# normal work until `./bioaf migrate` (or the next update) completes the
+# upgrade. There is no switch to skip this: the application's own gate would
+# refuse normal service anyway. One-off commands (`docker compose run backend
+# <cmd>`) are left alone.
+# ---------------------------------------------------------------------------
 
-# Run migrations if requested (non-fatal -- container starts regardless)
-if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
-    echo "Running database migrations..."
-    if alembic -c alembic/alembic.ini upgrade head; then
-        echo "Migrations completed successfully."
-    else
-        echo "WARNING: Migrations failed. The application will start without migrations."
-        echo "Run 'alembic -c alembic/alembic.ini upgrade head' manually to retry."
+run_database_upgrade() {
+    [ "${1:-}" = "uvicorn" ] || return 0
+
+    # Docker creates a missing bind-mount source as root; give it to the owner
+    # of the host's .env (the operator) so ./bioaf backup can write there too.
+    if [ -d "${BIOAF_UPGRADE_BACKUPS_DIR:-/app/backups}" ] && [ -e /host/.env ]; then
+        chown "$(stat -c %u:%g /host/.env)" "${BIOAF_UPGRADE_BACKUPS_DIR:-/app/backups}" 2>/dev/null || true
     fi
-fi
+
+    echo "Upgrading the database..."
+    if python -m app.schema_upgrade run; then
+        return 0
+    fi
+    echo "WARNING: the database upgrade did not complete; serving maintenance responses only." >&2
+    echo "  Details: /app/update-status/schema-upgrade.json (update-status/ on the host)." >&2
+    echo "  Fix the cause, then run: ./bioaf migrate" >&2
+    return 0
+}
+
+bootstrap_encryption_key
+run_database_upgrade "$@"
 
 exec "$@"

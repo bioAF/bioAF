@@ -17,6 +17,7 @@ from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.sample import Sample
 from app.models.sample_custom_field import SampleCustomField
+from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.schemas.integrations.common import CustomFieldOut
 from app.schemas.integrations.sample import (
     SampleCreate,
@@ -26,6 +27,7 @@ from app.schemas.integrations.sample import (
 )
 from app.services import idempotency_service
 from app.services.audit_service import log_action
+from app.services.sample_service import SampleService
 from app.services.event_bus import event_bus
 from app.services.event_types import (
     INTEGRATION_SAMPLE_CREATED,
@@ -53,6 +55,7 @@ def _sample_out(sample: Sample) -> SampleOut:
         qc_status=sample.qc_status,
         status=sample.status,
         created_at=sample.created_at,
+        relabeled_from=sample.relabeled_from,
         custom_fields=[
             CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value) for cf in (sample.custom_fields or [])
         ],
@@ -146,6 +149,7 @@ async def create_sample(
     ).scalar_one_or_none()
     if existing_dup is not None:
         raise HTTPException(409, "external_id_already_exists")
+    await SampleService.refuse_ambiguous_label(session, body.experiment_id, body.external_id)
 
     sample = Sample(
         experiment_id=body.experiment_id,
@@ -229,7 +233,11 @@ async def list_samples(
     if experiment_id is not None:
         stmt = stmt.where(Sample.experiment_id == experiment_id)
     if external_id:
-        stmt = stmt.where(Sample.external_id == external_id)
+        # A label 080 relabelled still finds every sample that carried it (each shows relabeled_from).
+        relabelled = select(SampleExternalIdTransition.sample_id).where(
+            SampleExternalIdTransition.source_label == external_id
+        )
+        stmt = stmt.where((Sample.external_id == external_id) | Sample.id.in_(relabelled))
     if q:
         like = f"%{q}%"
         stmt = stmt.where((Sample.external_id.ilike(like)) | (Sample.organism.ilike(like)))
@@ -282,6 +290,10 @@ async def get_sample_by_external(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(user["org_id"])
+    # A label migration 080 split names none of its samples, even if one carries it again.
+    candidates = await SampleService.ambiguous_label_candidates(session, org_id, experiment_id, external_id)
+    if candidates:
+        raise HTTPException(409, {"error": "ambiguous_external_id", "label": external_id, "candidates": candidates})
     result = await session.execute(
         select(Sample)
         .join(Experiment, Sample.experiment_id == Experiment.id)

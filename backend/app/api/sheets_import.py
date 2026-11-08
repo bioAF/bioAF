@@ -247,7 +247,7 @@ async def confirm_sheet_samples(
     """
     from app.api.experiments import _experiment_column_aliases
     from app.models.sample_custom_field import SampleCustomField
-    from app.services.sample_service import SampleService
+    from app.services.sample_service import SampleService, http_error_text
 
     user_id = int(current_user["sub"])
     csv_bytes, _ = await _read_sheet_as_csv(SheetPreviewRequest(sheet_url=body.sheet_url), session)
@@ -279,7 +279,7 @@ async def confirm_sheet_samples(
                         )
                     )
         except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {e.detail}")
+            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
 
     if created:
         await session.commit()

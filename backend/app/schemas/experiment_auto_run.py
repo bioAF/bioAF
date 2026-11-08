@@ -29,8 +29,8 @@ class AutoRunConfigResponse(BaseModel):
     delay_minutes: int
     enabled: bool
     configured_by_user_id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -45,6 +45,6 @@ class PendingAutoRunResponse(BaseModel):
     status: str
     pipeline_run_id: int | None = None
     cancelled_reason: str | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
