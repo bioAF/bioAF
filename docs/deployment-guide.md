@@ -191,7 +191,10 @@ command of any older release) goes through the same steps in the backend:
    PostgreSQL 16 dump to `backups/` on the host
    (`bioaf_pre_upgrade_<from>_to_<to>_<time>.dump`, with a `.json` manifest
    naming the database revision, tool versions and checksum). It is kept only
-   if `pg_dump` succeeded and the dump lists data for every table. If the
+   if `pg_dump` succeeded and the dump lists data for every table. Each dump
+   holds the whole database, so `backups/` is private (0700) and every bioAF
+   backup in it is 0600, owned by the account that owns `backups/` (the
+   operator who runs `./bioaf`), so that account can restore without root. If the
    backup cannot be made (no space, directory not writable, dump unreadable),
    **nothing is changed** and the update stops with the reason. Free space
    needed: about 1.5 times the database size plus 512 MiB.

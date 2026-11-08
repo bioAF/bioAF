@@ -355,6 +355,27 @@ STUB
     [ "$(gunzip -c "$tmp/out.sql.gz")" = "-- dump" ]
 }
 
+@test "backup_database writes a dump only its owner can read, in a private directory" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_DUMP="-- dump" bash -c "umask 022; source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/backups/out.sql.gz'"
+    [ "$status" -eq 0 ]
+    [ "$(stat -f %Lp "$tmp/backups/out.sql.gz" 2>/dev/null || stat -c %a "$tmp/backups/out.sql.gz")" = "600" ]
+    [ "$(stat -f %Lp "$tmp/backups" 2>/dev/null || stat -c %a "$tmp/backups")" = "700" ]
+}
+
+@test "ensure_backups_dir makes backups/ private and tightens earlier bioAF backups only" {
+    tmp="$(mktemp -d)"; mkdir -p "$tmp/backups"; chmod 755 "$tmp/backups"
+    touch "$tmp/backups/bioaf_pre_update_1_to_2.sql.gz" "$tmp/backups/bioaf_pre_upgrade_131_to_132_x.dump" "$tmp/backups/notes.txt"
+    chmod 644 "$tmp/backups/"*
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; ensure_backups_dir"
+    [ "$status" -eq 0 ]
+    mode() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+    [ "$(mode "$tmp/backups")" = "700" ]
+    [ "$(mode "$tmp/backups/bioaf_pre_update_1_to_2.sql.gz")" = "600" ]
+    [ "$(mode "$tmp/backups/bioaf_pre_upgrade_131_to_132_x.dump")" = "600" ]
+    [ "$(mode "$tmp/backups/notes.txt")" = "644" ]
+}
+
 @test "backup_database fails and removes the file when pg_dump fails" {
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"
     run env FAKE_DUMP="partial" FAKE_DUMP_STATUS=1 bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/out.sql.gz'"

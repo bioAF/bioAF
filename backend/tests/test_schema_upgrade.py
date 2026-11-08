@@ -124,6 +124,32 @@ def test_an_upgrade_backs_up_verifies_migrates_and_records(released):
     assert asyncio.run(_state(case))["revision"] == code_head()
 
 
+def test_recovery_material_is_private_to_the_backups_owner(released):
+    """A dump holds the whole database: 0600 files in a 0700 directory, owned like the directory."""
+    import os
+    import stat
+
+    case, _ = released
+    case.backups.mkdir(parents=True, exist_ok=True)
+    earlier = case.backups / "bioaf_pre_update_2026.9.1_to_2026.10.1_x.sql.gz"
+    earlier.write_bytes(b"")
+    earlier.chmod(0o644)
+    case.backups.chmod(0o755)
+
+    done = case.run(*ENTRYPOINT_RUN)
+    assert done.returncode == 0, done.stderr[-3000:]
+
+    def mode(path):
+        return stat.S_IMODE(path.stat().st_mode)
+
+    [dump] = _dumps(case)
+    assert mode(case.backups) == 0o700
+    for path in (dump, dump.with_suffix(".json"), earlier):
+        assert mode(path) == 0o600, path.name
+        assert (path.stat().st_uid, path.stat().st_gid) == (case.backups.stat().st_uid, case.backups.stat().st_gid)
+    assert os.access(dump, os.R_OK)
+
+
 def test_the_recovery_dump_restores_the_pre_upgrade_database(released, tmp_path):
     case, _ = released
     before = asyncio.run(_state(case))

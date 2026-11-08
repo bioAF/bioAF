@@ -173,11 +173,34 @@ def _is_mounted(path: Path) -> bool:
     return os.path.ismount(resolved)
 
 
+def secure_backups_dir(backups: Path) -> tuple[int, int]:
+    """Make ``backups`` private (0700) and earlier bioAF backups 0600; return the owner they belong to.
+
+    Recovery files are owned like the directory, which ./bioaf creates as the host operator before any
+    container starts: the backend runs as root, and root-only dumps would need root to restore.
+    """
+    backups.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backups.chmod(0o700)
+    info = backups.stat()
+    owner = (info.st_uid, info.st_gid)
+    for path in backups.glob("bioaf_*"):
+        if path.is_file():
+            path.chmod(0o600)
+            _give_to(path, owner)
+    return owner
+
+
+def _give_to(path: Path, owner: tuple[int, int]) -> None:
+    info = path.stat()
+    if os.geteuid() == 0 and (info.st_uid, info.st_gid) != owner:
+        os.chown(path, *owner)
+
+
 def make_backup(conn: Connection, url: str, from_revision: str | None, to_revision: str) -> dict[str, Any]:
     """Write and verify the recovery dump; return its manifest. Raises BackupFailed, changing nothing."""
     backups = Path(settings.upgrade_backups_dir)
     try:
-        backups.mkdir(parents=True, exist_ok=True)
+        owner = secure_backups_dir(backups)
         probe = backups / ".write-probe"
         probe.write_text("")
         probe.unlink()
@@ -218,6 +241,7 @@ def make_backup(conn: Connection, url: str, from_revision: str | None, to_revisi
             capture_output=True,
             text=True,
             timeout=settings.upgrade_backup_timeout_seconds,
+            umask=0o077,  # the dump is 0600 from creation, partial included
         )
         if done.returncode != 0:
             raise BackupFailed(f"pg_dump exited {done.returncode}: {done.stderr.strip()[:500]}")
@@ -233,6 +257,7 @@ def make_backup(conn: Connection, url: str, from_revision: str | None, to_revisi
 
     digest = file_sha256(partial)
     os.replace(partial, final)
+    _give_to(final, owner)
     manifest = {
         "path": str(final),
         "format": "postgresql custom (pg_restore)",
@@ -253,7 +278,10 @@ def make_backup(conn: Connection, url: str, from_revision: str | None, to_revisi
         ],
         "created_at": _now(),
     }
-    final.with_suffix(".json").write_text(json.dumps(manifest, indent=1))
+    manifest_path = final.with_suffix(".json")
+    with os.fdopen(os.open(manifest_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write(json.dumps(manifest, indent=1))
+    _give_to(manifest_path, owner)
     return manifest
 
 
@@ -312,6 +340,12 @@ def run(conn: Connection, url: str, destination: str | None, migrate: Callable[[
         if destination is None:
             migrate(conn)
             return
+        backups = Path(settings.upgrade_backups_dir)
+        if backups.is_dir():
+            try:
+                secure_backups_dir(backups)  # recovery material from earlier versions, too
+            except OSError as exc:
+                logger.warning("Could not make %s private: %s", backups, exc)
         current = _current(conn)
         conn.rollback()
         record: dict[str, Any] = {

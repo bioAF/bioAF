@@ -378,6 +378,7 @@ for v in cfg.get('volumes', {}).values():
     # Pin whichever tag we ended up with so future start/restart commands
     # always use this exact version, independent of the worktree.
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
+    ensure_backups_dir
     step "Start services (docker compose up -d)" -- $DC up -d
 
     # Wait for DB
@@ -503,6 +504,7 @@ cmd_start() {
     # not silently switch versions. Bootstrap the pin from the running
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
+    ensure_backups_dir
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -595,13 +597,24 @@ cmd_migrate() {
     green "Migrations complete."
 }
 
+ensure_backups_dir() {
+    # backups/ holds full-database dumps: private to the operator who runs ./bioaf (0700), with
+    # earlier bioAF backups tightened to 0600. Creating it here, before any container starts, keeps
+    # Docker from creating the bind-mount source as root; the backend then gives its dumps to the
+    # directory's owner, so the operator can restore them without root.
+    local dir="${1:-$SCRIPT_DIR/backups}"
+    mkdir -p "$dir" && chmod 700 "$dir" || return 1
+    find "$dir" -maxdepth 1 -type f -name 'bioaf_*' -exec chmod 600 {} + 2>/dev/null || true
+}
+
 backup_database() {
     # Write a gzipped plain-SQL dump to "$1" with the database container's own pg_dump (the bundled
     # server's version) and keep it only if pg_dump succeeded and the archive is non-empty and intact.
+    # The dump is created 0600 (umask 077), never readable by other accounts even while partial.
     local target="$1"
     local partial="${target}.partial"
-    mkdir -p "$(dirname "$target")"
-    if ! { $DC exec -T db pg_dump -U bioaf bioaf | gzip > "$partial"; }; then
+    ensure_backups_dir "$(dirname "$target")" || return 1
+    if ! { (umask 077; $DC exec -T db pg_dump -U bioaf bioaf | gzip > "$partial"); }; then
         rm -f "$partial"
         return 1
     fi
@@ -1197,6 +1210,7 @@ cmd_reset_db() {
     $DC exec -T db createdb -U bioaf bioaf
 
     echo "Starting backend..."
+    ensure_backups_dir
     $DC up -d backend
     wait_for_db
 
