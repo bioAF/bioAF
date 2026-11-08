@@ -172,10 +172,11 @@ docker compose -f docker/docker-compose.dev.yml up
 ### Manual Setup
 
 ```bash
-# Backend
+# Backend (needs uv: https://docs.astral.sh/uv/; dependencies are declared in
+# backend/pyproject.toml and pinned in backend/uv.lock)
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+uv sync --locked          # runtime + development groups into backend/.venv
+source .venv/bin/activate
 uvicorn app.main:app --reload
 
 # Frontend

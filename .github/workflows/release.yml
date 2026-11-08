@@ -41,6 +41,11 @@ jobs:
           git_commit_gpgsign: true
           git_tag_gpgsign: true
 
+      # The uv version the backend image copies (docker/Dockerfile.backend).
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.13.5"
+
       - name: Check for changelog entries
         id: check_entries
         run: |
@@ -141,12 +146,23 @@ jobs:
           grep '^version' backend/pyproject.toml
           grep '"version"' frontend/package.json
 
+      # The lock records the project version, so the bump leaves it stale and `uv sync --locked` (the image build
+      # from this tag, CI) would refuse it. Without --upgrade, uv keeps every third-party selection; the check proves
+      # the committed pair agrees. Routine dependency updates arrive as reviewed pull requests, never here.
+      - name: Refresh the lock for the new version
+        if: steps.check_entries.outputs.has_entries == 'true'
+        working-directory: backend
+        run: |
+          uv lock
+          uv lock --check
+          git diff --stat -- uv.lock
+
       - name: Commit, tag, and push
         if: steps.check_entries.outputs.has_entries == 'true'
         env:
           TAG: ${{ steps.compute.outputs.tag }}
         run: |
-          git add backend/pyproject.toml frontend/package.json RELEASE_NOTES.md changes/unreleased
+          git add backend/pyproject.toml backend/uv.lock frontend/package.json RELEASE_NOTES.md changes/unreleased
           # -S signs the commit; -s makes a signed annotated tag (-m avoids the
           # editor in CI). Both also follow from commit.gpgsign/tag.gpgsign set
           # by the import step, but the explicit flags keep the intent clear.

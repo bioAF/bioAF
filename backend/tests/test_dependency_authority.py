@@ -57,6 +57,11 @@ def _lock_project() -> dict:
 # ── one authority ──
 
 
+def test_the_hand_maintained_requirements_lists_are_retired():
+    assert not (BACKEND / "requirements.txt").exists()
+    assert not (BACKEND / "requirements-dev.txt").exists()
+
+
 def test_the_backend_is_an_application_not_a_package():
     # uv installs the dependencies only; the source runs from /app as copied, it is never built into a wheel.
     assert _pyproject()["tool"]["uv"]["package"] is False

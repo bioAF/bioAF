@@ -95,16 +95,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
+      # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
+      - uses: astral-sh/setup-uv@v10
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-3.12-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
-          restore-keys: pip-${{ runner.os }}-3.12-
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # backend/uv.lock must match pyproject.toml; neither step rewrites it (plan 11).
+      - name: Check the lock matches the project metadata
+        run: uv lock --check
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt
+          uv sync --locked --python 3.12 --no-python-downloads
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Ruff lint
         run: ruff check .
@@ -148,17 +153,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
+      # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
+      - uses: astral-sh/setup-uv@v10
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-3.12-${{ hashFiles('backend/requirements.txt', 'backend/requirements-dev.txt') }}
-          restore-keys: pip-${{ runner.os }}-3.12-
+          version: "0.13.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
 
       - name: Install dependencies
         run: |
           echo "install_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
-          pip install -r requirements.txt -r requirements-dev.txt
+          uv sync --locked --python 3.12 --no-python-downloads
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           echo "install_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
 
       # Runtime evidence (plan 4): per-phase timing, JUnit outcomes, pytest output and the
@@ -173,8 +179,11 @@ jobs:
             echo "memory_bytes=$(free -b | awk '/^Mem:/ {print $2}')"
             echo "pytest_command=pytest -n auto --tb=short --cov=app --cov-report=term-missing --cov-report=json -q"
             echo "unit_command=python -m tests.support.unit_selection -q -n 0 --cov=app --cov-report=json"
+            echo "platform=$(python -c 'import sysconfig; print(sysconfig.get_platform())')"
+            echo "uv=$(uv --version)"
+            echo "lock_sha256=$(sha256sum uv.lock | cut -d' ' -f1)"
           } > test-artifacts/environment.txt
-          pip freeze > test-artifacts/pip-freeze.txt
+          uv pip freeze > test-artifacts/pip-freeze.txt
 
       - name: Run tests
         run: |
