@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Backend Python dependencies: pyproject.toml declares them, uv.lock pins them (backend/DEPENDENCIES.md).
+  # Each pull request changes the lock (and a floor, when one must move) and runs the full CI gate.
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # Deliberate pins and caps, moved only by a reviewed pyproject change; the reasons are next to each one.
+      - dependency-name: ruff
+      - dependency-name: mypy
+      - dependency-name: kubernetes
+        update-types: ["version-update:semver-major"]
+      - dependency-name: boto3
+        update-types: ["version-update:semver-major"]

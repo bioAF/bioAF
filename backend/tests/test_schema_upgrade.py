@@ -387,6 +387,17 @@ async def test_a_database_at_head_that_fails_validation_closes_the_gate(released
         await engine.dispose()
 
 
+def test_a_read_only_alembic_command_reports_without_upgrading(released):
+    """`alembic current` (run by hand inside the container) names no destination; it must not fail or migrate."""
+    case, release = released
+    before = asyncio.run(_state(case))
+    done = case.run("-m", "alembic", "-c", "alembic/alembic.ini", "current")
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert release["head"] in done.stdout
+    assert asyncio.run(_state(case)) == before
+    assert _record(case) == {} and _dumps(case) == []
+
+
 def test_a_fresh_install_has_nothing_to_back_up(case_db):
     done = case_db.run(*ENTRYPOINT_RUN)
     assert done.returncode == 0, done.stderr[-3000:]

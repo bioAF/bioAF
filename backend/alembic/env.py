@@ -93,7 +93,11 @@ def do_run_migrations(connection: Connection) -> None:
 
 def _destination() -> str | None:
     """The revision this command moves to; None for read-only commands (current, history, ...)."""
-    argument = context.get_revision_argument()
+    try:
+        argument = context.get_revision_argument()
+    except KeyError:
+        # Alembic sets destination_rev only for upgrade/downgrade/stamp; `current` and `history` raise here.
+        return None
     if argument is None:
         return None
     if argument == "base":

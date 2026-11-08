@@ -35,10 +35,20 @@ ENV PYTHONPATH=/app
 # container's writable layer, which is discarded when the container is replaced.
 ENV BIOAF_UPGRADE_REQUIRE_MOUNTED_BACKUPS=true
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Backend dependencies come from backend/uv.lock alone (plan 11). --locked fails on a lock that no longer matches
+# pyproject.toml instead of rewriting it; --no-dev leaves out the development group. The environment lands in
+# /app/.venv and goes first on PATH, so bare python, python3, alembic and uvicorn resolve to it for the entrypoint,
+# `docker compose exec`/`run` (the released ./bioaf) and Compose command overrides, with no activation or uv wrapper.
+# The uv version is the one CI and the release workflow use (backend/tests/test_dependency_installers.py).
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /usr/local/bin/uv
+ENV UV_PYTHON_DOWNLOADS=never \
+    UV_NO_CACHE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
+ENV PATH="/app/.venv/bin:$PATH"
 
-COPY pyproject.toml .
 COPY app/ app/
 COPY alembic/ alembic/
 COPY terraform/ terraform/
