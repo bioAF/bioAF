@@ -27,6 +27,13 @@ SAMPLE_STATUS_TRANSITIONS = {
 }
 
 
+def http_error_text(detail: object) -> str:
+    """An HTTPException detail as one readable line: a structured detail's nested text, else as is."""
+    if isinstance(detail, dict) and isinstance(detail.get("detail"), str):
+        return detail["detail"]
+    return str(detail)
+
+
 class SampleService:
     @staticmethod
     async def _get_field_defaults(session: AsyncSession, experiment_id: int) -> dict[str, str]:
@@ -109,7 +116,19 @@ class SampleService:
             return
         candidates = await SampleService.ambiguous_label_candidates(session, organization_id, experiment_id, label)
         if candidates:
-            raise HTTPException(409, {"error": "ambiguous_external_id", "label": label, "candidates": candidates})
+            raise HTTPException(
+                409,
+                {
+                    # Readable text in the nested "detail", where the app's error handling looks for it.
+                    "detail": (
+                        f"Sample ID \u201c{label}\u201d previously identified multiple samples and cannot be "
+                        f"reused. Choose a different ID. The original samples now use: {', '.join(candidates)}."
+                    ),
+                    "error": "ambiguous_external_id",
+                    "label": label,
+                    "candidates": candidates,
+                },
+            )
 
     @staticmethod
     async def _next_batch_position(session: AsyncSession, sequencing_batch_id: int) -> int:

@@ -18,6 +18,19 @@ from app.models.sample import Sample
 from app.models.sample_external_id_transition import SampleExternalIdTransition
 
 
+def _refused(ids: list[str]) -> dict:
+    """The 409 body for giving a sample a split label: readable text plus the structured fields."""
+    return {
+        "detail": (
+            "Sample ID \u201cDUP\u201d previously identified multiple samples and cannot be reused. "
+            f"Choose a different ID. The original samples now use: {', '.join(ids)}."
+        ),
+        "error": "ambiguous_external_id",
+        "label": "DUP",
+        "candidates": ids,
+    }
+
+
 async def _relabelled_experiment(session, org_id: int, owner_id: int) -> dict:
     exp = Experiment(organization_id=org_id, name="Legacy duplicates", owner_user_id=owner_id, status="registered")
     session.add(exp)
@@ -106,7 +119,7 @@ async def test_creating_a_sample_under_an_ambiguous_old_label_is_refused(
         json={"experiment_id": data["experiment"], "external_id": "DUP", "organism": "Mouse"},
     )
     assert r.status_code == 409
-    assert r.json()["detail"] == {"error": "ambiguous_external_id", "label": "DUP", "candidates": data["ids"]}
+    assert r.json()["detail"] == _refused(data["ids"])
     count = len((await session.execute(select(Sample.id).where(Sample.experiment_id == data["experiment"]))).all())
     assert count == 3
 
@@ -210,7 +223,7 @@ async def _sample_count(session, experiment_id: int) -> int:
 async def test_the_app_create_and_bulk_create_refuse_an_ambiguous_old_label(client, session, admin_user, admin_token):
     data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
     headers = {"Authorization": f"Bearer {admin_token}"}
-    expected = {"error": "ambiguous_external_id", "label": "DUP", "candidates": data["ids"]}
+    expected = _refused(data["ids"])
 
     one = await client.post(
         f"/api/experiments/{data['experiment']}/samples", headers=headers, json={"external_id": "DUP"}
@@ -306,3 +319,44 @@ async def test_candidates_follow_each_sample_to_its_current_id_after_a_rename_an
         )
     ).scalar_one()
     assert recorded == assigned  # the historical mapping is untouched
+
+
+def _upload(rows: str):
+    return {"file": ("samples.csv", io.BytesIO(rows.encode()), "text/csv")}
+
+
+@pytest.mark.asyncio
+async def test_every_sample_import_explains_a_refused_split_label_and_keeps_the_rest(
+    client, session, admin_user, admin_token
+):
+    """CSV upload, mapped CSV confirm and Google Sheet confirm: readable reason, row number, partial import."""
+    from unittest.mock import AsyncMock, patch
+
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    exp = data["experiment"]
+    expected = f"Sample 1: {_refused(data['ids'])['detail']}"
+
+    upload = await client.post(
+        f"/api/experiments/{exp}/samples/upload", headers=headers, files=_upload("external_id\nDUP\nNEW-A\n")
+    )
+    assert upload.status_code == 200, upload.text
+    assert (upload.json()["created_count"], upload.json()["errors"]) == (1, [expected])
+
+    confirm = await client.post(
+        f"/api/experiments/{exp}/samples/upload/confirm", headers=headers, files=_upload("external_id\nDUP\nNEW-B\n")
+    )
+    assert confirm.status_code == 200, confirm.text
+    assert (confirm.json()["created_count"], confirm.json()["errors"]) == (1, [expected])
+
+    with patch(
+        "app.api.sheets_import._read_sheet_as_csv", AsyncMock(return_value=(b"external_id\nDUP\nNEW-C\n", None))
+    ):
+        sheet = await client.post(
+            f"/api/v1/sheets/{exp}/samples/confirm",
+            headers=headers,
+            json={"sheet_url": "https://docs.google.com/spreadsheets/d/abc/edit"},
+        )
+    assert sheet.status_code == 200, sheet.text
+    assert (sheet.json()["created_count"], sheet.json()["errors"]) == (1, [expected])
+    assert await _sample_count(session, exp) == 6
