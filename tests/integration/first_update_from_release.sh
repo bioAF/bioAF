@@ -27,7 +27,6 @@ CANDIDATE_VERSION="9999.0.0"
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 CANDIDATE_COMMIT="$(git -C "$REPO" rev-parse HEAD)"
 WORK="$(mktemp -d)"
-export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
 say() { printf '\n=== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -41,7 +40,7 @@ install_release() {
     git clone -q "$REPO" "$dir"
     git -C "$dir" checkout -q "$OLD_TAG"
     # The candidate, tagged as a release the old updater can fetch and check out (local clone only).
-    git -C "$dir" tag "v$CANDIDATE_VERSION" "$CANDIDATE_COMMIT"
+    git -C "$dir" tag -f "v$CANDIDATE_VERSION" "$CANDIDATE_COMMIT" >/dev/null
     git -C "$REPO" tag -f "v$CANDIDATE_VERSION" "$CANDIDATE_COMMIT" >/dev/null
     cat > "$dir/docker/.env" <<ENV
 COMPOSE_PROJECT_NAME=$project
@@ -51,7 +50,16 @@ SECRET_KEY=plan9-first-update-check-0123456789abcdef0123456789
 BIOAF_ENCRYPTION_KEYS=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
 BIOAF_IMAGE_TAG=$OLD_TAG
 ENV
-    (cd "$dir" && ./bioaf start >/dev/null && ./bioaf migrate >/dev/null)
+    # On an empty database the release's backend fails startup and restarts until migrated, and a
+    # restart kills an in-flight `exec` migration: retry its own migrate until one run completes.
+    (cd "$dir" && ./bioaf start >/dev/null 2>&1 || true)
+    local attempt
+    for attempt in 1 2 3 4 5 6; do
+        (cd "$dir" && ./bioaf migrate >/dev/null 2>&1) && break
+        [ "$attempt" = 6 ] && fail "could not install $OLD_TAG"
+        sleep 5
+    done
+    dc "$dir" restart backend >/dev/null 2>&1
     docker compose -f "$dir/docker/docker-compose.yml" --env-file "$dir/docker/.env" exec -T db psql -U bioaf -q -c "
         INSERT INTO organizations (name) VALUES ('Lab');
         INSERT INTO projects (organization_id, name, status) VALUES (1, 'P', 'active');
@@ -125,7 +133,7 @@ dc "$B" exec -T backend python -m app.schema_upgrade status | grep -q '"step": "
 echo "PASS: scenario 2a (no backup -> nothing changed, backend in maintenance)"
 
 rm -f "$B/backups"; mv "$B/backups.host" "$B/backups"
-dc "$B" up -d backend >/dev/null  # remount the fixed directory
+dc "$B" up -d --force-recreate backend >/dev/null  # remount the fixed directory
 (cd "$B" && BIOAF_AUTO_CONFIRM=1 ./bioaf update "$CANDIDATE_VERSION" --yes) || fail "retry with the image installed failed"
 [ "$(sql "$B" "SELECT version_num FROM alembic_version")" != "$old_head" ] || fail "retry did not upgrade"
 wait_ready_status "$B" 200
