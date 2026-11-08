@@ -107,7 +107,7 @@ async def named_unique(conn: AsyncConnection, schema: str) -> dict[tuple[str, st
         ),
         {"s": schema},
     )
-    return {(t, name): (kind, _strip(schema, d)) for t, name, kind, d in rows.all()}
+    return {(str(t), str(name)): (str(kind), _strip(schema, str(d))) for t, name, kind, d in rows.all()}
 
 
 def differences(migrated: dict[str, Any], created: dict[str, Any]) -> dict[str, dict[str, list]]:

@@ -35,7 +35,13 @@ async def _relabelled_experiment(session, org_id: int, owner_id: int) -> dict:
             )
         )
     await session.commit()
-    return {"experiment": exp.id, "a": a.id, "b": b.id, "plain": plain.id, "ids": sorted([a.external_id, b.external_id])}
+    return {
+        "experiment": exp.id,
+        "a": a.id,
+        "b": b.id,
+        "plain": plain.id,
+        "ids": sorted([a.external_id, b.external_id]),
+    }
 
 
 @pytest.mark.asyncio
@@ -55,7 +61,9 @@ async def test_integration_detail_and_list_show_the_label_a_sample_was_relabelle
 
     # Filtering by the old label finds every sample that carried it.
     listed = await client.get(
-        "/api/v1/integrations/samples", headers=headers, params={"external_id": "DUP", "experiment_id": data["experiment"]}
+        "/api/v1/integrations/samples",
+        headers=headers,
+        params={"external_id": "DUP", "experiment_id": data["experiment"]},
     )
     assert listed.status_code == 200
     assert sorted(s["external_id"] for s in listed.json()["items"]) == data["ids"]
@@ -88,7 +96,9 @@ async def test_lookup_by_an_ambiguous_old_label_names_the_candidates_instead_of_
 
 
 @pytest.mark.asyncio
-async def test_creating_a_sample_under_an_ambiguous_old_label_is_refused(client, session, admin_user, integration_api_key):
+async def test_creating_a_sample_under_an_ambiguous_old_label_is_refused(
+    client, session, admin_user, integration_api_key
+):
     data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
     r = await client.post(
         "/api/v1/integrations/samples",
@@ -106,7 +116,9 @@ async def test_ingest_does_not_auto_create_a_sample_under_an_ambiguous_old_label
     from app.services.ingest_service import resolve_or_create_sample
 
     data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
-    resolved = await resolve_or_create_sample("DUP", data["experiment"], admin_user.organization_id, admin_user.id, session)
+    resolved = await resolve_or_create_sample(
+        "DUP", data["experiment"], admin_user.organization_id, admin_user.id, session
+    )
     assert resolved is None
     exact = await resolve_or_create_sample(
         f"DUP~{data['a']}", data["experiment"], admin_user.organization_id, admin_user.id, session

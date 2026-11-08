@@ -145,9 +145,9 @@ redirected to HTTPS on port 443.
 ## Database Operations
 
 ```bash
-./bioaf migrate             # Run pending Alembic migrations
-./bioaf migrate-down <rev>  # Downgrade to a specific revision
-./bioaf backup              # Dump database to backups/ directory (gzipped)
+./bioaf migrate             # Upgrade the database (verified backup first); retry after a failure
+./bioaf migrate-down <rev>  # Downgrade to a specific revision (also backs up first)
+./bioaf backup              # Dump database to backups/ directory (gzipped, verified)
 ./bioaf seed <script.py>       # Run a seed script inside the backend container
 ./bioaf dbshell             # Open a psql session
 ./bioaf reset-db            # Drop and recreate database (destructive, with confirmation)
@@ -172,11 +172,71 @@ From the CLI:
 ```
 
 This backs up the database, fetches the target version tag from GitHub,
-pulls pre-built images, restarts services, and runs any new migrations.
+pulls pre-built images, restarts services, upgrades the database, and
+waits until the backend reports ready.
 
 From the UI, admins can click the **Install Update** button on the
 **Settings > Information** page when a new version is available. This
 triggers the same update process through a host-side update agent.
+
+### How the database is upgraded
+
+Every way of upgrading the database (the backend starting a new version,
+`./bioaf update`, `./bioaf migrate`, the update agent, and the update
+command of any older release) goes through the same steps in the backend:
+
+1. **One at a time.** A database lock makes a second attempt wait, then find
+   nothing left to do.
+2. **Recovery backup first.** Before anything changes, the backend writes a
+   PostgreSQL 16 dump to `backups/` on the host
+   (`bioaf_pre_upgrade_<from>_to_<to>_<time>.dump`, with a `.json` manifest
+   naming the database revision, tool versions and checksum). It is kept only
+   if `pg_dump` succeeded and the dump lists data for every table. If the
+   backup cannot be made (no space, directory not writable, dump unreadable),
+   **nothing is changed** and the update stops with the reason. Free space
+   needed: about 1.5 times the database size plus 512 MiB.
+3. **Upgrade and check**, then record the result in
+   `update-status/schema-upgrade.json`.
+
+Older data is repaired automatically on the way; no manual SQL is needed.
+One visible case: before release v0.15.0 a sample's ID did not have to be
+unique within an experiment. If yours had repeats, each of those samples now
+has its own ID (`<old ID>~<sample number>`), the old ID is shown beside it as
+"before upgrade", and looking up or creating a sample by the repeated old ID
+answers with the candidates instead of choosing one.
+
+Until the upgrade has completed, the backend answers every request with a
+"finishing an upgrade" message and does no background work. The web app
+shows that message and picks up by itself when the backend is ready.
+
+### If an update fails
+
+1. Read `update-status/schema-upgrade.json` (and `./bioaf logs backend`).
+   It names the step that failed (`backup`, `migrate`, `validate`) and why.
+2. Fix the cause (for example free disk space), then retry with
+   `./bioaf migrate` or `./bioaf update <version>`. Retrying works when the
+   new version's images are already installed; a completed upgrade is never
+   repeated and earlier backups are never overwritten.
+3. To return to the state before the update instead, you need three things
+   from the same moment: the dump in `backups/`, `docker/.env` (its
+   `BIOAF_ENCRYPTION_KEYS` decrypts the stored secrets; the manifest lists
+   fingerprints of the keys that were in use), and the release the dump came
+   from. Check out that release's tag, set `BIOAF_IMAGE_TAG` in `docker/.env`
+   to it, and restore into a fresh database:
+
+   ```bash
+   ./bioaf stop
+   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d db
+   docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
+       sh -c 'dropdb -U bioaf bioaf && createdb -U bioaf bioaf'
+   docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
+       pg_restore -U bioaf -d bioaf --no-owner < backups/bioaf_pre_upgrade_<...>.dump
+   ./bioaf start
+   ```
+
+   A gzipped SQL backup from `./bioaf backup` or an older update restores the
+   same way with `gunzip -c backups/<file>.sql.gz | ... exec -T db psql -U bioaf -d bioaf`.
+   Alembic downgrades are not a substitute: they do not undo data repairs.
 
 ## Reinstalling
 
