@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.api.sample_responses import sample_response
 from app.api.scoped_loaders import require_owned_experiment
 from app.models.experiment import Experiment
 from app.schemas.audit import AuditLogEntry, AuditLogResponse
@@ -262,41 +263,7 @@ async def list_experiment_samples(
     samples = await SampleService.list_samples(
         session, experiment_id, sample_batch_id=sample_batch_id, qc_status=qc_status, status=status
     )
-    return [
-        SampleResponse(
-            id=s.id,
-            external_id=s.external_id,
-            relabeled_from=s.relabeled_from,
-            organism=s.organism,
-            tissue_type=s.tissue_type,
-            donor_source=s.donor_source,
-            treatment_condition=s.treatment_condition,
-            chemistry_version=s.chemistry_version,
-            sample_batch={"id": s.sample_batch.id, "name": s.sample_batch.name} if s.sample_batch else None,
-            sequencing_batch={"id": s.sequencing_batch.id, "code": s.sequencing_batch.code}
-            if s.sequencing_batch
-            else None,
-            sequencing_batch_position=s.sequencing_batch_position,
-            viability_pct=float(s.viability_pct) if s.viability_pct is not None else None,
-            cell_count=s.cell_count,
-            prep_notes=s.prep_notes,
-            molecule_type=s.molecule_type,
-            library_prep_method=s.library_prep_method,
-            library_layout=s.library_layout,
-            assay=s.assay,
-            qc_status=s.qc_status,
-            qc_notes=s.qc_notes,
-            parent_sample_id=s.parent_sample_id,
-            collection_timestamp=s.collection_timestamp,
-            collection_method=s.collection_method,
-            file_count=len(s.files) if s.files else 0,
-            status=s.status,
-            created_at=s.created_at,
-            updated_at=s.updated_at,
-            custom_fields=list(s.custom_fields or []),
-        )
-        for s in samples
-    ]
+    return [sample_response(s, file_count=len(s.files) if s.files else 0) for s in samples]
 
 
 @router.post("/{experiment_id}/samples", response_model=SampleResponse)
@@ -312,37 +279,7 @@ async def create_sample(
     await session.commit()
 
     sample = await SampleService.get_sample(session, sample.id)
-    return SampleResponse(
-        id=sample.id,
-        external_id=sample.external_id,
-        relabeled_from=sample.relabeled_from,
-        organism=sample.organism,
-        tissue_type=sample.tissue_type,
-        donor_source=sample.donor_source,
-        treatment_condition=sample.treatment_condition,
-        chemistry_version=sample.chemistry_version,
-        sample_batch={"id": sample.sample_batch.id, "name": sample.sample_batch.name} if sample.sample_batch else None,
-        sequencing_batch={"id": sample.sequencing_batch.id, "code": sample.sequencing_batch.code}
-        if sample.sequencing_batch
-        else None,
-        sequencing_batch_position=sample.sequencing_batch_position,
-        viability_pct=float(sample.viability_pct) if sample.viability_pct is not None else None,
-        cell_count=sample.cell_count,
-        prep_notes=sample.prep_notes,
-        molecule_type=sample.molecule_type,
-        library_prep_method=sample.library_prep_method,
-        library_layout=sample.library_layout,
-        assay=sample.assay,
-        qc_status=sample.qc_status,
-        qc_notes=sample.qc_notes,
-        parent_sample_id=sample.parent_sample_id,
-        collection_timestamp=sample.collection_timestamp,
-        collection_method=sample.collection_method,
-        status=sample.status,
-        created_at=sample.created_at,
-        updated_at=sample.updated_at,
-        custom_fields=list(sample.custom_fields or []),
-    )
+    return sample_response(sample)
 
 
 @router.post("/{experiment_id}/samples/bulk")
