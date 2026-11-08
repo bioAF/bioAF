@@ -68,21 +68,44 @@ class SampleService:
         return batch.id
 
     @staticmethod
-    async def ambiguous_label_candidates(session: AsyncSession, experiment_id: int, label: str) -> list[str]:
+    async def ambiguous_label_candidates(
+        session: AsyncSession, organization_id: int, experiment_id: int, label: str
+    ) -> list[str]:
         """The external IDs migration 080 gave samples that shared ``label`` in this experiment.
 
         Non-empty means ``label`` no longer names one sample: callers report the candidates rather
-        than choosing one or creating another sample under it.
+        than choosing one or creating another sample under it. Only answers for an experiment in
+        ``organization_id``.
         """
         result = await session.execute(
             select(SampleExternalIdTransition.external_id)
+            .join(Experiment, Experiment.id == SampleExternalIdTransition.experiment_id)
             .where(
+                Experiment.organization_id == organization_id,
                 SampleExternalIdTransition.experiment_id == experiment_id,
                 SampleExternalIdTransition.source_label == label,
             )
             .order_by(SampleExternalIdTransition.external_id)
         )
         return list(result.scalars())
+
+    @staticmethod
+    async def refuse_ambiguous_label(session: AsyncSession, experiment_id: int, label: str | None) -> None:
+        """409 naming the candidates when a sample would take a label migration 080 had to split.
+
+        Every path that gives a sample its external ID calls this, so no sample can carry such a
+        label again and a lookup by it can only ever report the candidates.
+        """
+        if not label:
+            return
+        organization_id = (
+            await session.execute(select(Experiment.organization_id).where(Experiment.id == experiment_id))
+        ).scalar_one_or_none()
+        if organization_id is None:
+            return
+        candidates = await SampleService.ambiguous_label_candidates(session, organization_id, experiment_id, label)
+        if candidates:
+            raise HTTPException(409, {"error": "ambiguous_external_id", "label": label, "candidates": candidates})
 
     @staticmethod
     async def _next_batch_position(session: AsyncSession, sequencing_batch_id: int) -> int:
@@ -158,6 +181,7 @@ class SampleService:
         errors = await SampleService._validate_template_fields(session, experiment_id, data)
         if errors:
             raise HTTPException(400, detail="; ".join(errors))
+        await SampleService.refuse_ambiguous_label(session, experiment_id, data.external_id)
 
         # Validate controlled vocabulary fields
         await VocabularyValidator.validate_sample_fields(
@@ -266,6 +290,9 @@ class SampleService:
                     "library_layout": data.library_layout,
                 },
             )
+
+        for data in samples_data:
+            await SampleService.refuse_ambiguous_label(session, experiment_id, data.external_id)
 
         # Pre-fetch org_id for sequencing batch resolution
         exp_result = await session.execute(select(Experiment).where(Experiment.id == experiment_id))
@@ -379,6 +406,9 @@ class SampleService:
                 "library_layout": data.library_layout,
             },
         )
+
+        if data.external_id is not None and data.external_id != sample.external_id:
+            await SampleService.refuse_ambiguous_label(session, sample.experiment_id, data.external_id)
 
         # Resolve batch codes
         previous = {}

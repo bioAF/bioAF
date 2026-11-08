@@ -62,13 +62,6 @@ def _sample_out(sample: Sample) -> SampleOut:
     )
 
 
-async def _refuse_ambiguous_label(session: AsyncSession, experiment_id: int, label: str) -> None:
-    """409 naming the candidates when ``label`` is a source label migration 080 had to split."""
-    candidates = await SampleService.ambiguous_label_candidates(session, experiment_id, label)
-    if candidates:
-        raise HTTPException(409, {"error": "ambiguous_external_id", "label": label, "candidates": candidates})
-
-
 async def _apply_custom_fields(
     session: AsyncSession,
     sample_id: int,
@@ -156,7 +149,7 @@ async def create_sample(
     ).scalar_one_or_none()
     if existing_dup is not None:
         raise HTTPException(409, "external_id_already_exists")
-    await _refuse_ambiguous_label(session, body.experiment_id, body.external_id)
+    await SampleService.refuse_ambiguous_label(session, body.experiment_id, body.external_id)
 
     sample = Sample(
         experiment_id=body.experiment_id,
@@ -297,6 +290,10 @@ async def get_sample_by_external(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(user["org_id"])
+    # A label migration 080 split names none of its samples, even if one carries it again.
+    candidates = await SampleService.ambiguous_label_candidates(session, org_id, experiment_id, external_id)
+    if candidates:
+        raise HTTPException(409, {"error": "ambiguous_external_id", "label": external_id, "candidates": candidates})
     result = await session.execute(
         select(Sample)
         .join(Experiment, Sample.experiment_id == Experiment.id)
@@ -309,7 +306,6 @@ async def get_sample_by_external(
     )
     row = result.scalar_one_or_none()
     if row is None:
-        await _refuse_ambiguous_label(session, experiment_id, external_id)
         raise HTTPException(404, "sample_not_found")
     return _sample_out(row)
 

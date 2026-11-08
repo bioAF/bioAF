@@ -161,3 +161,116 @@ async def test_the_experiment_export_manifest_carries_the_old_label(session, adm
         (f"DUP~{data['b']}", "DUP"),
         ("PLAIN", ""),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_into_another_organizations_experiment_reveals_nothing(
+    client, session, admin_user, integration_api_key
+):
+    """The ambiguity check must not answer for an experiment outside the caller's organization."""
+    from app.models.organization import Organization
+
+    other = Organization(name="Other lab", setup_complete=True)
+    session.add(other)
+    await session.flush()
+    data = await _relabelled_experiment(session, other.id, admin_user.id)
+
+    r = await client.get(
+        "/api/v1/integrations/samples/by-external/DUP",
+        headers=integration_api_key["headers"],
+        params={"experiment_id": data["experiment"]},
+    )
+    assert r.status_code == 404
+    assert "DUP~" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_lookup_reports_the_ambiguity_even_when_a_sample_carries_the_old_label(
+    client, session, admin_user, integration_api_key
+):
+    """Should a sample carry the split label anyway, the lookup still refuses to pick one."""
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    session.add(Sample(experiment_id=data["experiment"], external_id="DUP", status="registered"))
+    await session.commit()
+
+    r = await client.get(
+        "/api/v1/integrations/samples/by-external/DUP",
+        headers=integration_api_key["headers"],
+        params={"experiment_id": data["experiment"]},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["candidates"] == data["ids"]
+
+
+async def _sample_count(session, experiment_id: int) -> int:
+    return len((await session.execute(select(Sample.id).where(Sample.experiment_id == experiment_id))).all())
+
+
+@pytest.mark.asyncio
+async def test_the_app_create_and_bulk_create_refuse_an_ambiguous_old_label(client, session, admin_user, admin_token):
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    expected = {"error": "ambiguous_external_id", "label": "DUP", "candidates": data["ids"]}
+
+    one = await client.post(
+        f"/api/experiments/{data['experiment']}/samples", headers=headers, json={"external_id": "DUP"}
+    )
+    assert one.status_code == 409, one.text
+    assert one.json()["detail"] == expected
+
+    bulk = await client.post(
+        f"/api/experiments/{data['experiment']}/samples/bulk",
+        headers=headers,
+        json={"samples": [{"external_id": "NEW-1"}, {"external_id": "DUP"}]},
+    )
+    assert bulk.status_code == 409, bulk.text
+    assert bulk.json()["detail"] == expected
+    assert await _sample_count(session, data["experiment"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_sample_to_an_ambiguous_old_label_is_refused(client, session, admin_user, admin_token):
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    r = await client.patch(f"/api/samples/{data['plain']}", headers=headers, json={"external_id": "DUP"})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["candidates"] == data["ids"]
+    # Every other edit to a relabelled sample still works.
+    ok = await client.patch(f"/api/samples/{data['a']}", headers=headers, json={"organism": "Mouse"})
+    assert ok.status_code == 200, ok.text
+    await session.refresh(await session.get(Sample, data["plain"]))
+    assert (await session.get(Sample, data["plain"])).external_id == "PLAIN"
+
+
+@pytest.mark.asyncio
+async def test_claiming_an_unclaimed_sample_under_an_ambiguous_old_label_is_refused(
+    client, session, admin_user, admin_token
+):
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    unclaimed = Sample(experiment_id=data["experiment"], external_id="raw-1", status="registered", is_unclaimed=True)
+    session.add(unclaimed)
+    await session.commit()
+
+    r = await client.post(
+        f"/api/samples/{unclaimed.id}/claim", headers={"Authorization": f"Bearer {admin_token}"}, json={"name": "DUP"}
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["candidates"] == data["ids"]
+
+
+@pytest.mark.asyncio
+async def test_the_candidate_lookup_is_scoped_to_the_organization(session, admin_user):
+    from app.models.organization import Organization
+    from app.services.sample_service import SampleService
+
+    other = Organization(name="Other lab", setup_complete=True)
+    session.add(other)
+    await session.flush()
+    data = await _relabelled_experiment(session, other.id, admin_user.id)
+
+    assert await SampleService.ambiguous_label_candidates(session, other.id, data["experiment"], "DUP") == data["ids"]
+    assert (
+        await SampleService.ambiguous_label_candidates(session, admin_user.organization_id, data["experiment"], "DUP")
+        == []
+    )

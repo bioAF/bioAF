@@ -491,3 +491,31 @@ async def test_ingest_survives_a_duplicate_inserted_by_a_racing_writer(
     )
     # Ingest's own SRR2 insert was rolled back with its savepoint; the racer's row and the caller's work stand.
     assert external_ids == ["AFTER", "CALLER-PENDING", "GSM7777_SRR1"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_skips_a_label_migration_080_split_and_keeps_the_rest(session, admin_user):
+    """A split label names no sample and may not be reused; the other fetched samples still arrive."""
+    from app.models.sample_external_id_transition import SampleExternalIdTransition
+
+    exp = await _experiment(session, admin_user)
+    a = Sample(experiment_id=exp.id, sample_id_external="GSM7777_SRR1", status="registered")
+    b = Sample(experiment_id=exp.id, sample_id_external="GSM7777_SRR1", status="registered")
+    session.add_all([a, b])
+    await session.flush()
+    for s in (a, b):
+        s.external_id = f"GSM7777_SRR1~{s.id}"
+        session.add(
+            SampleExternalIdTransition(
+                sample_id=s.id, experiment_id=exp.id, source_label="GSM7777_SRR1", external_id=s.external_id
+            )
+        )
+    await session.commit()
+    run = await _fetchngs_run(session, admin_user, exp)
+
+    created = await FetchngsIngestService.ingest_for_run(
+        session, run, outdir=run.parameters_json["outdir"], storage_adapter=_FakeStorage(text=_FETCHNGS_SAMPLESHEET)
+    )
+    await session.commit()
+
+    assert [s.external_id for s in created] == ["GSM7777_SRR2"]
