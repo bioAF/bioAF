@@ -173,6 +173,9 @@ class Settings(BaseSettings):
     upgrade_backup_reserve_bytes: int = 512 * 1024 * 1024
     upgrade_backup_timeout_seconds: int = 3600
     upgrade_lock_timeout_seconds: int = 7200
+    # Set in the image (Dockerfile.backend): a dump in the container's writable layer would be lost
+    # when Compose replaces the container, so there the backups directory must be a mount.
+    upgrade_require_mounted_backups: bool = False
 
     # Bcrypt
     bcrypt_rounds: int = 12

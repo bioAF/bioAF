@@ -155,6 +155,18 @@ def verify_archive(path: Path, tables: list[str]) -> None:
         raise BackupFailed(f"the dump has no data for {len(missing)} table(s), e.g. {missing[:5]}")
 
 
+def _is_mounted(path: Path) -> bool:
+    """Whether ``path`` is itself a mount point (a bind mount from the host, in Compose)."""
+    resolved = str(path.resolve())
+    try:
+        with open("/proc/self/mountinfo") as mounts:
+            if any(line.split()[4] == resolved for line in mounts):
+                return True
+    except OSError:
+        pass
+    return os.path.ismount(resolved)
+
+
 def make_backup(conn: Connection, url: str, from_revision: str | None, to_revision: str) -> dict[str, Any]:
     """Write and verify the recovery dump; return its manifest. Raises BackupFailed, changing nothing."""
     backups = Path(settings.upgrade_backups_dir)
@@ -165,6 +177,12 @@ def make_backup(conn: Connection, url: str, from_revision: str | None, to_revisi
         probe.unlink()
     except OSError as exc:
         raise BackupFailed(f"cannot write recovery backups to {backups}: {exc}") from exc
+
+    if settings.upgrade_require_mounted_backups and not _is_mounted(backups):
+        raise BackupFailed(
+            f"{backups} is not a mounted volume, so a backup there would be lost with the container; "
+            "docker-compose.yml mounts ../backups there"
+        )
 
     db_size = int(conn.execute(text("SELECT pg_database_size(current_database())")).scalar_one())
     needed = int(db_size * 1.5) + settings.upgrade_backup_reserve_bytes
@@ -375,7 +393,11 @@ def _public(record: dict[str, Any]) -> dict[str, Any]:
 def main(argv: list[str]) -> int:
     """``python -m app.schema_upgrade run|status``: run the lifecycle to head, or print the record."""
     if argv[:1] == ["status"]:
-        print(json.dumps(read_status(), indent=1))
+        # "settled": this image's own verdict, so a record left by an older image is never mistaken
+        # for this one's upgrade (./bioaf update reads it to decide whether to retry).
+        record, head = read_status(), code_head()
+        settled = record.get("status") == "completed" and record.get("target_revision") == head
+        print(json.dumps({"settled": settled, "code_head": head, "record": record}, indent=1))
         return 0
     if argv[:1] != ["run"]:
         print("usage: python -m app.schema_upgrade run|status", file=sys.stderr)

@@ -344,3 +344,35 @@ async def test_the_gate_reads_the_database_and_the_record(released, monkeypatch)
         }
     finally:
         await engine.dispose()
+
+
+def test_inside_the_image_backups_must_be_on_a_mounted_volume(released):
+    """A dump in the container's writable layer is gone when Compose replaces the container."""
+    case, _ = released
+    before = asyncio.run(_state(case))
+    failed = case.run(*ENTRYPOINT_RUN, BIOAF_UPGRADE_REQUIRE_MOUNTED_BACKUPS="true")
+    assert failed.returncode == 1
+    assert "not a mounted volume" in _record(case)["error"]
+    assert asyncio.run(_state(case)) == before
+
+
+def test_status_reports_whether_this_images_upgrade_settled(released):
+    """`./bioaf update` retries unless the running image says its own upgrade completed."""
+    case, _ = released
+
+    def _status():
+        done = case.run("-m", "app.schema_upgrade", "status")
+        assert done.returncode == 0
+        return json.loads(done.stdout)
+
+    assert _status()["settled"] is False
+    assert case.run(*ENTRYPOINT_RUN, BIOAF_UPGRADE_PG_BIN_DIR="/nonexistent").returncode == 1
+    assert _status()["settled"] is False
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    verdict = _status()
+    assert verdict["settled"] is True and verdict["code_head"] == code_head()
+
+    # A record an older image left (another head) is not this image's upgrade.
+    record = _record(case)
+    (case.status / "schema-upgrade.json").write_text(json.dumps({**record, "target_revision": "131"}))
+    assert _status()["settled"] is False

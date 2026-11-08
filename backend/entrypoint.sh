@@ -99,17 +99,41 @@ bootstrap_encryption_key() {
     export BIOAF_ENCRYPTION_KEYS="$new_key"
 }
 
-bootstrap_encryption_key
+# ---------------------------------------------------------------------------
+# Upgrade the database before the application serves (plan 9).
+#
+# Runs on every start of the application server, so the first start of a new
+# image upgrades the database whichever updater started it: this file and
+# docker-compose.yml are read fresh on every update, the host's ./bioaf may not
+# be. backend/app/schema_upgrade.py does the work (lock, verified recovery
+# backup in /app/backups, migrate, validate, record). If it fails, the server
+# still starts, but in maintenance: it answers 503 with the reason and does no
+# normal work until `./bioaf migrate` (or the next update) completes the
+# upgrade. There is no switch to skip this: the application's own gate would
+# refuse normal service anyway. One-off commands (`docker compose run backend
+# <cmd>`) are left alone.
+# ---------------------------------------------------------------------------
 
-# Run migrations if requested (non-fatal -- container starts regardless)
-if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
-    echo "Running database migrations..."
-    if alembic -c alembic/alembic.ini upgrade head; then
-        echo "Migrations completed successfully."
-    else
-        echo "WARNING: Migrations failed. The application will start without migrations."
-        echo "Run 'alembic -c alembic/alembic.ini upgrade head' manually to retry."
+run_database_upgrade() {
+    [ "${1:-}" = "uvicorn" ] || return 0
+
+    # Docker creates a missing bind-mount source as root; give it to the owner
+    # of the host's .env (the operator) so ./bioaf backup can write there too.
+    if [ -d "${BIOAF_UPGRADE_BACKUPS_DIR:-/app/backups}" ] && [ -e /host/.env ]; then
+        chown "$(stat -c %u:%g /host/.env)" "${BIOAF_UPGRADE_BACKUPS_DIR:-/app/backups}" 2>/dev/null || true
     fi
-fi
+
+    echo "Upgrading the database..."
+    if python -m app.schema_upgrade run; then
+        return 0
+    fi
+    echo "WARNING: the database upgrade did not complete; serving maintenance responses only." >&2
+    echo "  Details: /app/update-status/schema-upgrade.json (update-status/ on the host)." >&2
+    echo "  Fix the cause, then run: ./bioaf migrate" >&2
+    return 0
+}
+
+bootstrap_encryption_key
+run_database_upgrade "$@"
 
 exec "$@"

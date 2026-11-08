@@ -31,6 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 ENV PYTHONPATH=/app
+# Recovery backups must be on the host bind mount (docker-compose.yml), never the
+# container's writable layer, which is discarded when the container is replaced.
+ENV BIOAF_UPGRADE_REQUIRE_MOUNTED_BACKUPS=true
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
