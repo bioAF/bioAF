@@ -111,6 +111,11 @@ jobs:
           uv sync --locked --python 3.12 --no-python-downloads
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      # Replays release.yml's version bump and lock refresh on a copy against the package index: the lock must go
+      # stale, refresh, and change nothing but the project version (scripts/ci/release_lock_rehearsal.py).
+      - name: Rehearse a version-only release lock refresh
+        run: python ../scripts/ci/release_lock_rehearsal.py --repo .. --timeout 180
+
       - name: Ruff lint
         run: ruff check .
 
