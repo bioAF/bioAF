@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.search import QuickSearchHit, QuickSearchResult, SearchHit, SearchResult
@@ -68,8 +69,8 @@ async def unified_search(
     request: Request,
     query: str = "",
     entity_types: str | None = None,
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     session: AsyncSession = Depends(get_session),
 ):
     """Full search for the dedicated results page (`/search`).

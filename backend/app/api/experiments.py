@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.api.sample_imports import run_sample_import
@@ -75,8 +76,8 @@ def _experiment_response(exp) -> ExperimentResponse:
 @router.get("", response_model=ExperimentListResponse)
 async def list_experiments(
     current_user: dict = require_permission("experiments", "view"),
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     project_id: int | None = None,
     status: str | None = None,
     owner_user_id: int | None = None,
@@ -471,8 +472,8 @@ async def list_experiment_sequencing_batches(
 async def list_experiment_files(
     experiment_id: int,
     current_user: dict = require_permission("experiments", "view"),
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -561,8 +562,8 @@ async def list_experiment_files(
 async def get_experiment_audit(
     experiment_id: int,
     current_user: dict = require_permission("experiments", "view"),
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

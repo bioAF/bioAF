@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.api.sample_responses import sample_response
@@ -29,8 +30,8 @@ router = APIRouter(prefix="/api/samples", tags=["samples"])
 @router.get("", response_model=SampleOptionListResponse)
 async def list_organization_samples(
     current_user: dict = require_permission("samples", "view"),
-    page: int = 1,
-    page_size: int = 100,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 100,
     session: AsyncSession = Depends(get_session),
 ):
     rows, total = await SampleService.list_organization_samples(session, int(current_user["org_id"]), page, page_size)
