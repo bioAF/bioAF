@@ -88,7 +88,7 @@ class TestExtractAnndataMetadata:
 class TestSerializeParams:
     def test_numpy_scalar(self):
         result = _serialize_params({"n": np.int64(15)})
-        assert result["n"] == 16  # plan 10 merge-gate demonstration, reverted next commit
+        assert result["n"] == 15
         assert isinstance(result["n"], int)
 
     def test_nested_dict(self):
