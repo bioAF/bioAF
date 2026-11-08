@@ -3,17 +3,12 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.samplesheet_mapping import SamplesheetPrefill
+from app.schemas.user_summary import UserSummary
 
 
 class ExperimentSummary(BaseModel):
     id: int
     name: str
-
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
 
 
 class SampleSummary(BaseModel):
