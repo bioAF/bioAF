@@ -13,7 +13,7 @@
 
 ### Samples
 
-- A sample whose ID was changed by that upgrade shows its old ID ("before upgrade") on the experiment's sample list and details, in `relabeled_from` on the sample APIs, and in the experiment export's sample manifest. Looking up a sample by such an old ID through the integration API, or creating one with it, answers 409 with the candidate IDs instead of picking one or creating another sample.
+- A sample whose ID was changed by that upgrade shows its old ID ("before upgrade") on the experiment's sample list and details, in `relabeled_from` on the sample APIs, and in the experiment export's sample manifest. Looking up a sample by such an old ID through the integration API answers 409 with the candidates (each sample's current ID, following any later rename) instead of picking one. No sample can take such an old ID again: creating, bulk-creating, renaming or claiming a sample with it answers 409 with the candidates, CSV and sheet imports skip that row with its reason, and accession imports and file ingest leave it out.
 - Moving a sample to a different sequencing batch no longer fails with a server error when the new batch already has a sample in position 1.
 
 ### Fixes

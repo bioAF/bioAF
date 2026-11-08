@@ -444,3 +444,9 @@ STUB
     [ "$status" -eq 0 ]
     grep -q "schema_upgrade run" "$tmp/log"
 }
+
+@test "recovery dumps in backups/ are never offered to git" {
+    # A dump holds the whole database; the checkout on the host must not list it as a file to commit.
+    run git -C "$BATS_TEST_DIRNAME/../.." check-ignore -q backups/bioaf_pre_upgrade_131_to_132_x.dump
+    [ "$status" -eq 0 ]
+}
