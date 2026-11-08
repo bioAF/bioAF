@@ -3,6 +3,8 @@
 
 BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 
+load network
+
 # ---------------------------------------------------------------------------
 # Help / dispatch
 # ---------------------------------------------------------------------------
@@ -118,13 +120,42 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 }
 
 # ---------------------------------------------------------------------------
+# ghcr_reachable  (the connectivity guard for the network tests below)
+# ---------------------------------------------------------------------------
+
+# Put a fake curl first on PATH that prints the given HTTP code, as curl's
+# -w '%{http_code}' does, and exits with the given status.
+fake_curl() {
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    printf '#!/bin/sh\nprintf %%s %s\nexit %s\n' "$1" "$2" > "$BATS_TEST_TMPDIR/bin/curl"
+    chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+}
+
+@test "ghcr_reachable is false when curl gets no response (HTTP 000)" {
+    fake_curl 000 28
+    run ghcr_reachable
+    [ "$status" -ne 0 ]
+}
+
+@test "ghcr_reachable is false when curl prints nothing" {
+    fake_curl '' 6
+    run ghcr_reachable
+    [ "$status" -ne 0 ]
+}
+
+@test "ghcr_reachable is true when ghcr.io answers, even with an error status" {
+    fake_curl 401 22
+    run ghcr_reachable
+    [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # verify_image_available  (uses real ghcr.io; skipped if no network)
 # ---------------------------------------------------------------------------
 
 @test "verify_image_available returns 0 for known-published tag" {
-    if ! curl -sf --max-time 5 "https://ghcr.io/v2/" >/dev/null 2>&1 \
-        && ! curl -s --max-time 5 -o /dev/null -w '%{http_code}' "https://ghcr.io/v2/" \
-            | grep -q '^[0-9]'; then
+    if ! ghcr_reachable; then
         skip "ghcr.io unreachable"
     fi
     run bash -c "source '$BIOAF_SCRIPT' && verify_image_available 'bioaf/bioaf-backend' 'v0.11.5'"
@@ -132,7 +163,7 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 }
 
 @test "verify_image_available returns 1 for missing tag" {
-    if ! curl -s --max-time 5 -o /dev/null "https://ghcr.io/v2/" 2>/dev/null; then
+    if ! ghcr_reachable; then
         skip "ghcr.io unreachable"
     fi
     run bash -c "source '$BIOAF_SCRIPT' && verify_image_available 'bioaf/bioaf-backend' 'v9999.99.99'"
@@ -144,7 +175,7 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 # ---------------------------------------------------------------------------
 
 @test "verify_release_images reports friendly retry message when images missing" {
-    if ! curl -s --max-time 5 -o /dev/null "https://ghcr.io/v2/" 2>/dev/null; then
+    if ! ghcr_reachable; then
         skip "ghcr.io unreachable"
     fi
     run bash -c "source '$BIOAF_SCRIPT' && verify_release_images '9999.99.99'"
@@ -359,8 +390,8 @@ STUB
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"
     run env FAKE_DUMP="-- dump" bash -c "umask 022; source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; backup_database '$tmp/backups/out.sql.gz'"
     [ "$status" -eq 0 ]
-    [ "$(stat -f %Lp "$tmp/backups/out.sql.gz" 2>/dev/null || stat -c %a "$tmp/backups/out.sql.gz")" = "600" ]
-    [ "$(stat -f %Lp "$tmp/backups" 2>/dev/null || stat -c %a "$tmp/backups")" = "700" ]
+    [ "$(stat -c %a "$tmp/backups/out.sql.gz" 2>/dev/null || stat -f %Lp "$tmp/backups/out.sql.gz")" = "600" ]
+    [ "$(stat -c %a "$tmp/backups" 2>/dev/null || stat -f %Lp "$tmp/backups")" = "700" ]
 }
 
 @test "ensure_backups_dir makes backups/ private and tightens earlier bioAF backups only" {
@@ -369,7 +400,7 @@ STUB
     chmod 644 "$tmp/backups/"*
     run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; ensure_backups_dir"
     [ "$status" -eq 0 ]
-    mode() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+    mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
     [ "$(mode "$tmp/backups")" = "700" ]
     [ "$(mode "$tmp/backups/bioaf_pre_update_1_to_2.sql.gz")" = "600" ]
     [ "$(mode "$tmp/backups/bioaf_pre_upgrade_131_to_132_x.dump")" = "600" ]

@@ -301,6 +301,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_bats_status.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_bcrypt_service_test_rounds.py": {
    "category": "single_connection",
    "evidence": [
@@ -485,6 +490,11 @@
    "route": "rollback_candidate"
   },
   "test_ci_coverage_workflow.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_ci_workflow.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"
@@ -2932,6 +2942,11 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_r_check_status.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_rate_limit_proxy.py": {
    "category": "no_database",

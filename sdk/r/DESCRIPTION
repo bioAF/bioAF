@@ -8,11 +8,18 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.0
+Depends:
+    R (>= 4.1.0)
 Imports:
+    curl,
     httr2,
-    jsonlite
+    jsonlite,
+    methods,
+    stats
 Suggests:
     Seurat,
     arrow,
-    testthat (>= 3.0.0)
+    mockery,
+    testthat (>= 3.0.0),
+    withr
 Config/testthat/edition: 3

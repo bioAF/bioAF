@@ -84,7 +84,10 @@ def _serialize_params(params: Any) -> dict:
         if isinstance(v, (str, int, float, bool, type(None))):
             result[k] = v
         elif hasattr(v, "item"):  # numpy scalar
-            result[k] = v.item()
+            try:
+                result[k] = v.item()
+            except ValueError:  # multi-element array: no single value
+                result[k] = str(v)
         elif isinstance(v, dict):
             result[k] = _serialize_params(v)
         else:
