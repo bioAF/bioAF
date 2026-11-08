@@ -12,11 +12,19 @@ global.fetch = mockFetch as unknown as typeof fetch;
 import { useBackendReady } from "./useBackendReady";
 import { reportMaintenance, clearMaintenance } from "@/lib/maintenance";
 
-const up = () => ({ ok: true, status: 200, json: async () => ({ status: "ok" }) });
+const up = () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ status: "ok" }),
+});
 const upgrading = () => ({
   ok: false,
   status: 503,
-  json: async () => ({ status: "maintenance", reason: "upgrade_in_progress", upgrade: { step: "migrate" } }),
+  json: async () => ({
+    status: "maintenance",
+    reason: "upgrade_in_progress",
+    upgrade: { step: "migrate" },
+  }),
 });
 
 async function settle() {
@@ -25,6 +33,13 @@ async function settle() {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+/** jsdom cannot navigate, and reports every reload attempt as this console error. */
+function reloaded(): boolean {
+  return (console.error as jest.Mock).mock.calls.some((call) =>
+    String(call[0]).includes("Not implemented: navigation"),
+  );
 }
 
 async function nextPoll() {
@@ -83,4 +98,27 @@ it("in an open tab, shows maintenance and clears it when the backend is back, wi
   const calls = mockFetch.mock.calls.length;
   await nextPoll();
   expect(mockFetch.mock.calls.length).toBe(calls); // polling stopped
+  expect(reloaded()).toBe(false);
+});
+
+it("in an open tab, never reloads, whatever order the readiness answers arrive in", async () => {
+  // Reporting maintenance drops the cached readiness. That must not restart the boot-time probe,
+  // whose recovery path reloads the page: here the backend answers 503 once more, then ready.
+  sessionStorage.setItem("bioaf_backend_ready", "true");
+  const { result } = renderHook(() => useBackendReady());
+  await settle();
+
+  mockFetch
+    .mockResolvedValueOnce(upgrading())
+    .mockResolvedValueOnce(upgrading())
+    .mockResolvedValue(up());
+  await act(async () => {
+    reportMaintenance({ status: "maintenance", reason: "upgrade_in_progress" });
+  });
+  await settle();
+  for (let i = 0; i < 4; i++) await nextPoll();
+
+  expect(result.current.maintenance).toBeNull();
+  expect(result.current.ready).toBe(true);
+  expect(reloaded()).toBe(false);
 });

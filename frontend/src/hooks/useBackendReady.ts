@@ -51,13 +51,19 @@ const GRACE_ATTEMPTS = 3;
  * the backend is ready, then clears it without reloading, so unsaved work stays.
  */
 export function useBackendReady() {
-  const alreadyConfirmed =
-    typeof window !== "undefined" &&
-    sessionStorage.getItem(SESSION_KEY) === "true";
+  // Read once, at mount. Reporting maintenance later drops the cached flag; re-reading it on that
+  // render would restart the boot probe in a working tab, and the probe's recovery reloads the page.
+  const [alreadyConfirmed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      sessionStorage.getItem(SESSION_KEY) === "true",
+  );
 
   const [ready, setReady] = useState(alreadyConfirmed);
   const [unreachable, setUnreachable] = useState(false);
-  const [maintenance, setMaintenance] = useState<MaintenanceInfo | null>(getMaintenance());
+  const [maintenance, setMaintenance] = useState<MaintenanceInfo | null>(
+    getMaintenance(),
+  );
 
   // Lets `retryNow` run the same check the timer runs, without duplicating it.
   const checkRef = useRef<() => void>(() => {});
@@ -109,7 +115,10 @@ export function useBackendReady() {
         }
         if (!cancelled && !res.ok) {
           if (!logged) {
-            logError("checking whether the backend is ready", new Error(`probe returned ${res.status}`));
+            logError(
+              "checking whether the backend is ready",
+              new Error(`probe returned ${res.status}`),
+            );
             logged = true;
           }
         }
@@ -146,7 +155,9 @@ export function useBackendReady() {
 
     async function recheck() {
       try {
-        const res = await fetch(`${API_URL}/api/health/ready`, { cache: "no-store" });
+        const res = await fetch(`${API_URL}/api/health/ready`, {
+          cache: "no-store",
+        });
         if (!cancelled && res.ok) {
           const body = await res.json();
           if (body.status === "ok") {
