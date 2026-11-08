@@ -127,3 +127,12 @@ def test_every_run_step_fails_on_a_failure_anywhere_in_a_pipeline(workflow):
         assert job.get("defaults", {}).get("run", {}).get("shell", "bash") == "bash", name
         for step in job.get("steps", []):
             assert step.get("shell", "bash") == "bash", (name, step.get("name"))
+
+
+def test_the_shell_job_gates_its_bats_output(workflow):
+    # Bats exits 0 when it finds no tests; bats_status.py fails a run that executed none.
+    steps = workflow["jobs"]["shell-tests"]["steps"]
+    gating = [s for s in steps if "scripts/ci/bats_status.py" in s.get("run", "")]
+    assert len(gating) == 1
+    assert "bats-output.tap" in gating[0]["run"]
+    assert not gating[0].get("continue-on-error")

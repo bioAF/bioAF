@@ -485,23 +485,8 @@ jobs:
           status=0
           bats --formatter tap --report-formatter junit --output shell-evidence tests/shell \
             2>&1 | tee shell-evidence/bats-output.tap || status=$?
-          total=$(grep -cE '^(ok|not ok) ' shell-evidence/bats-output.tap || true)
-          failed=$(grep -cE '^not ok ' shell-evidence/bats-output.tap || true)
-          skips=$(grep -E '^ok .* # skip' shell-evidence/bats-output.tap || true)
-          unexpected=$(printf '%s\n' "$skips" | grep -v -e '^$' -e '# skip ghcr.io unreachable$' || true)
-          {
-            echo "### Shell tests (Bats)"
-            echo
-            echo "- total: $total"
-            echo "- failed: $failed"
-            echo "- skipped: $(printf '%s' "$skips" | grep -c . || true)"
-            if [ -n "$skips" ]; then echo; echo '```'; echo "$skips"; echo '```'; fi
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$unexpected" ]; then
-            echo "::error::Unexpected skips (only 'ghcr.io unreachable' is accepted):"
-            echo "$unexpected"
-            status=1
-          fi
+          python3 scripts/ci/bats_status.py shell-evidence/bats-output.tap --summary "$GITHUB_STEP_SUMMARY" \
+            || status=1
           exit $status
 
       - name: Upload shell test evidence

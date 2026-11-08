@@ -301,6 +301,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_bats_status.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_bcrypt_service_test_rounds.py": {
    "category": "single_connection",
    "evidence": [
