@@ -9,27 +9,124 @@ description = "bioAF control plane backend"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
+    # Starlette ships under FastAPI. Floor raised to 1.3.1 to pull the fixes for the
+    # request.form() limit-bypass DoS (GHSA-82w8-qh3p-5jfq) and the Host-header path
+    # poisoning that the auth/rate-limit middleware path checks rely on
+    # (GHSA-86qp-5c8j-p5mr). FastAPI's current pin has no upper bound on Starlette 1.x.
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.27",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
     "alembic>=1.13",
-    "pydantic>=2.6",
-    # Security floors below mirror requirements.txt, which is what CI and the
-    # backend image actually install. Keep the two in step: a looser floor here
-    # lets `uv lock` resolve back onto a vulnerable version.
+    "pydantic[email]>=2.6",
+    # Floor raised to 2.14.2: NestedSecretsSettingsSource followed symlinks out of
+    # secrets_dir, allowing a local file read past the secrets_dir_max_size guard
+    # (GHSA-4xgf-cpjx-pc3j).
     "pydantic-settings>=2.14.2",
+    # Data-at-rest column encryption (Fernet / MultiFernet).
+    # Floor raised to 48.0.1: earlier wheels bundle a vulnerable OpenSSL
+    # (GHSA-537c-gmf6-5ccf).
+    # Floor raised again to 50.0.0: PKCS#7 EnvelopedData decryption leaked a
+    # Bleichenbacher oracle through distinguishable errors and timing
+    # (GHSA-g6cj-pr64-35w5).
+    "cryptography>=50.0.0",
     "bcrypt>=4.1",
     "google-cloud-secret-manager>=2.18",
-    "google-cloud-iam>=2.14",
-    "google-cloud-compute>=1.19",
     "httpx>=0.27",
+    # Floor raised to 0.0.31: earlier versions have a quadratic-time querystring DoS
+    # (GHSA-5rvq-cxj2-64vf) and related parsing issues. FastAPI uses this for form
+    # and multipart (file upload) parsing.
     "python-multipart>=0.0.31",
-    "pyyaml>=6.0",
-    "PyJWT[crypto]>=2.13.0",
-    "pyasn1>=0.6.4",
+    "asyncssh>=2.14",
+    # Phase 5: Data Management + Visualization
+    "google-cloud-storage>=2.14",
+    # AWS SDK for the S3 storage provider (Stage 6a) and later AWS substrate
+    # providers. Bounded to the 1.x major so an unpinned floor cannot jump to a
+    # breaking 2.0 (the kubernetes/starlette drift class). boto3 pins botocore.
+    "boto3>=1.34,<2",
+    # Imported directly (h5ad inspection, QC templates, the S3/ECR adapters, Terraform streaming, Google API error
+    # handling, the reference importer); before plan 11 they arrived only transitively. botocore takes no range:
+    # boto3 pins it exactly.
     "h5py>=3.10",
+    "numpy",
+    "botocore",
+    "anyio",
+    "google-api-core",
+    "httpcore",
+    "pdfplumber>=0.11",
+    "matplotlib>=3.8",
+    "anndata>=0.10",
+    "scanpy>=1.10",
+    "meilisearch>=0.31",
+    # Pinned to the tested major: read_namespaced_pod_log returns bytes on some client
+    # versions (~31-34) and str on others, which drifted prod vs dev (logs rendered as a
+    # bytes repr). 35.x is the tested-good version; the adapter also decodes defensively
+    # (compute/kubernetes.py _pod_log_to_text). Bump deliberately after re-testing logs.
+    "kubernetes>=35.0,<36",
+    # Phase 6: GitOps + Package Management
+    "PyGithub>=2.1.0",
+    "pyyaml>=6.0",
+    # Phase 9: GEO Export
+    "openpyxl>=3.1",
+    # Phase 16: GCP Settings Configuration
+    "google-auth>=2.29",
+    # pyasn1 ships transitively under google-auth (and rsa). Floor pinned here
+    # because neither parent constrains it: the BER/CER/DER decoder hung on
+    # unbounded long-form tag IDs, a DoS reachable from any certificate or token
+    # parsed on the Google auth path (GHSA-m4p7-r5rc-7g4j, GHSA-8ppf-4f7h-5ppj,
+    # GHSA-hm4w-wwcw-mr6r).
+    "pyasn1>=0.6.4",
+    "google-cloud-resource-manager>=1.12",
+    "google-cloud-container>=2.47",
+    "google-cloud-service-usage>=1.8",
+    "google-cloud-iam>=2.14",
+    # Phase 21: Auto-ingest Pub/Sub listener
+    "google-cloud-pubsub>=2.21",
+    # BigQuery billing export
+    "google-cloud-bigquery>=3.20",
+    # Google Sheets import for experiment field setup
+    "google-api-python-client>=2.130",
+    # Cloud Logging fallback for pipeline log persistence
+    "google-cloud-logging>=3.10",
+    # GCE VM management for work nodes (ADR-043)
+    "google-cloud-compute>=1.19",
+    # GitHub App JWT authentication.
+    # Floor raised to 2.13.0 for two PyJWKClient fixes: a missing scheme allowlist
+    # that let file://, ftp:// and data: JWKS URIs drive CVE-2024-21643-class SSRF
+    # and token forgery (GHSA-993g-76c3-p5m4), and unbounded JWKS refetches driven
+    # by an attacker-controlled `kid` (GHSA-fhv5-28vv-h8m8).
+    "PyJWT[crypto]>=2.13.0",
+    # Provenance report generation
+    "weasyprint>=60",
+    "markdown>=3.5",
+    # PDF thumbnail generation for plot archive
     "PyMuPDF>=1.24",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "pytest-xdist>=3.5",
+    # pinned: ruff 0.16 turned on new default rules that flag the existing tree (2397 findings); unpin deliberately
+    # after a repo-wide cleanup
+    "ruff==0.15.17",
+    # pinned alongside ruff so an unpinned linter release cannot break CI again
+    "mypy==2.1.0",
+    "factory-boy>=3.3",
+    "respx>=0.21",
+    # Imported directly by tests: an independent hypergeometric cross-check, requirement parsing, and the coverage
+    # report's own tests.
+    "scipy",
+    "packaging",
+    "coverage",
+]
+
+[tool.uv]
+# An application, not a distributable package: uv installs the locked dependencies into the environment and the
+# source runs from where it is (/app in the backend image). Nothing is built.
+package = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
