@@ -173,7 +173,7 @@ docker compose -f docker/docker-compose.dev.yml up
 
 ```bash
 # Backend (needs uv: https://docs.astral.sh/uv/; dependencies are declared in
-# backend/pyproject.toml and pinned in backend/uv.lock)
+# backend/pyproject.toml and pinned in backend/uv.lock, see backend/DEPENDENCIES.md)
 cd backend
 uv sync --locked          # runtime + development groups into backend/.venv
 source .venv/bin/activate

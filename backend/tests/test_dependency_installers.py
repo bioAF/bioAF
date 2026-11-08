@@ -193,3 +193,31 @@ def test_a_version_only_release_refreshes_the_lock_without_changing_selections(t
     assert _selections(backend / "uv.lock") == _selections(REPO / "backend" / "uv.lock")
     [project] = [p for p in tomllib.loads((backend / "uv.lock").read_text())["package"] if p["name"] == "bioaf-backend"]
     assert project["version"] == "2099.1.0"
+
+
+# ── dependency updates ──
+
+
+def test_dependabot_proposes_weekly_backend_lock_updates():
+    config = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text())
+    assert config["version"] == 2
+    [backend] = [u for u in config["updates"] if u["package-ecosystem"] == "uv"]
+    assert backend["directory"] == "/backend"
+    assert backend["schedule"]["interval"] == "weekly"
+
+
+def test_dependabot_respects_the_deliberate_pins():
+    # ruff, mypy, kubernetes and boto3 move only by a deliberate pyproject change (see the comments there).
+    config = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text())
+    [backend] = [u for u in config["updates"] if u["package-ecosystem"] == "uv"]
+    ignored = {i["dependency-name"]: i.get("update-types") for i in backend.get("ignore", [])}
+    assert set(ignored) >= {"ruff", "mypy", "kubernetes", "boto3"}
+    assert ignored["kubernetes"] == ["version-update:semver-major"]
+    assert ignored["boto3"] == ["version-update:semver-major"]
+
+
+def test_the_refresh_process_is_documented():
+    text = (REPO / "backend" / "DEPENDENCIES.md").read_text()
+    for command in ("uv lock --check", "uv lock --upgrade-package", "uv sync --locked"):
+        assert command in text
+    assert "0.13.5" in text
