@@ -155,6 +155,12 @@ def verify_archive(path: Path, tables: list[str]) -> None:
         raise BackupFailed(f"the dump has no data for {len(missing)} table(s), e.g. {missing[:5]}")
 
 
+def file_sha256(path: Path) -> str:
+    """SHA-256 of a file read in blocks: a dump can be larger than the backend's memory limit."""
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
 def _is_mounted(path: Path) -> bool:
     """Whether ``path`` is itself a mount point (a bind mount from the host, in Compose)."""
     resolved = str(path.resolve())
@@ -225,7 +231,7 @@ def make_backup(conn: Connection, url: str, from_revision: str | None, to_revisi
         partial.unlink(missing_ok=True)
         raise
 
-    digest = hashlib.sha256(partial.read_bytes()).hexdigest()
+    digest = file_sha256(partial)
     os.replace(partial, final)
     manifest = {
         "path": str(final),

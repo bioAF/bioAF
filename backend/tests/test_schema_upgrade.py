@@ -441,3 +441,28 @@ def test_status_reports_whether_this_images_upgrade_settled(released):
     record = _record(case)
     (case.status / "schema-upgrade.json").write_text(json.dumps({**record, "target_revision": "131"}))
     assert _status()["settled"] is False
+
+
+def test_the_dump_checksum_streams_the_file_instead_of_loading_it(tmp_path):
+    """A dump larger than the backend's memory limit must still hash: memory stays bounded."""
+    import tracemalloc
+
+    from app.schema_upgrade import file_sha256
+
+    dump = tmp_path / "large.dump"
+    with dump.open("wb") as f:
+        f.write(b"bioaf")
+        f.truncate(64 * 1024 * 1024)
+    expected = hashlib.sha256()
+    with dump.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            expected.update(block)
+
+    tracemalloc.start()
+    try:
+        digest = file_sha256(dump)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert digest == expected.hexdigest()
+    assert peak < 8 * 1024 * 1024
