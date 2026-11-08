@@ -74,6 +74,16 @@ def test_error_row_labels_follow_the_recorded_conventions():
     ]
 
 
+def test_record_number_is_the_physical_line_each_record_starts_on():
+    """Blank lines and quoted values spanning lines both move later records down the file."""
+    from app.services.csv_service import parse_sample_rows
+
+    content = b'external_id,prep_notes\n\nA,"two\nlines"\n\n\nB,plain\nC,x\n'
+    rows, errors = parse_sample_rows(content)
+    assert errors == []
+    assert [(r.sample.external_id, r.record_number) for r in rows] == [("A", 3), ("B", 7), ("C", 8)]
+
+
 # --- API fixtures and helpers ------------------------------------------------
 
 
@@ -244,7 +254,10 @@ async def test_a_domain_failure_after_the_sample_is_written_rolls_back_the_whole
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
 @pytest.mark.asyncio
-async def test_a_custom_field_conflict_on_flush_rolls_back_its_sample(client, session, headers, experiment, entry):
+async def test_an_unrecognized_unique_violation_fails_the_request_with_no_rows(
+    client, session, headers, experiment, entry
+):
+    """Only the named sample constraints are row conflicts; any other unique violation is not bad input."""
     await session.execute(
         text(
             "CREATE FUNCTION refuse_boom() RETURNS trigger AS $$ BEGIN "
@@ -258,13 +271,24 @@ async def test_a_custom_field_conflict_on_flush_rolls_back_its_sample(client, se
         )
     )
     await session.commit()
-    csv_text = "external_id,tag\nA,alpha\nX,boom\nB,beta\n"
-    response = await _import(client, headers, entry, experiment.id, csv_text)
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["created_count"] == 2
-    assert body["errors"] == ["Sample 2: It conflicts with a record that already exists."]
-    assert await _persisted(session, experiment.id) == {"A": {"tag": "alpha"}, "B": {"tag": "beta"}}
+    with pytest.raises(Exception, match="conflict"):
+        await _import(client, headers, entry, experiment.id, "external_id,tag\nA,alpha\nX,boom\nB,beta\n")
+    assert await _persisted(session, experiment.id) == {}
+
+
+@pytest.mark.parametrize("entry", ENTRY_POINTS)
+@pytest.mark.asyncio
+async def test_an_audit_key_conflict_fails_the_request_with_no_rows(
+    client, session, admin_user, headers, experiment, entry
+):
+    """An audit-log sequence behind its existing rows is an infrastructure fault, not a bad CSV row."""
+    for audit_id in range(1, 6):
+        session.add(AuditLog(id=audit_id, user_id=admin_user.id, entity_type="seed", entity_id=0, action="seed"))
+    await session.commit()
+    with pytest.raises(Exception, match="audit_log_pkey|duplicate key"):
+        await _import(client, headers, entry, experiment.id, "external_id,tag\nVALID-A,a\nVALID-B,b\n")
+    assert await _persisted(session, experiment.id) == {}
+    assert await _count(session, AuditLog, AuditLog.entity_type == "sample") == 0
 
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)

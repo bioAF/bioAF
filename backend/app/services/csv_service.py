@@ -80,7 +80,8 @@ class ParsedSampleRow:
     """One accepted CSV record: the sample, its custom fields, and the line it came from.
 
     Kept together so a rejected record can never shift another record's custom fields.
-    ``record_number`` is the CSV line (the header is line 1).
+    ``record_number`` is the physical line the record starts on (the header is line 1); blank
+    lines and quoted values spanning lines are counted. Error labels do not use it.
     """
 
     record_number: int
@@ -188,22 +189,52 @@ def _convert_value(field_name: str, raw_val: str) -> tuple[Any, str | None]:
     return raw_val, None
 
 
+class _LineCounter:
+    """Feeds a csv reader line by line and remembers which physical lines it consumed."""
+
+    def __init__(self, text: str) -> None:
+        self._lines = enumerate(io.StringIO(text), start=1)
+        self.consumed: list[tuple[int, str]] = []
+
+    def __iter__(self) -> "_LineCounter":
+        return self
+
+    def __next__(self) -> str:
+        number, line = next(self._lines)
+        self.consumed.append((number, line))
+        return line
+
+    def record_start(self) -> int:
+        """The first line of the record just read: csv skips completely empty lines before it."""
+        start = next(n for n, line in self.consumed if line.rstrip("\r\n"))
+        self.consumed.clear()
+        return start
+
+
 def _parse_rows(
     text: str,
     delimiter: str,
     header_map: dict[str, str],
 ) -> tuple[list[tuple[int, dict[str, Any], dict[str, Any]]], list[str]]:
-    """Parse CSV rows using the header map, skipping empty lines.
+    """Parse CSV rows using the header map, skipping records with no values.
 
-    Returns (records, errors). Each record is (csv_line, sample_fields, custom_fields):
-    sample_fields maps field_name -> value (for SampleCreate) and custom_fields maps
-    custom field name -> value for the same line.
+    Returns (records, errors). Each record is (start_line, sample_fields, custom_fields):
+    start_line is the physical line the record begins on (header is line 1), sample_fields
+    maps field_name -> value (for SampleCreate), and custom_fields maps custom field name ->
+    value for the same record.
+
+    Error labels keep their established numbering, which is not the physical line: records
+    counted from 2, where a record of empty values counts and a blank line does not.
     """
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    lines = _LineCounter(text)
+    reader = csv.DictReader(lines, delimiter=delimiter)
+    reader.fieldnames  # consume the header so it is not taken for the first record's start
+    lines.consumed.clear()
     records: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
     errors: list[str] = []
 
     for row_num, row in enumerate(reader, start=2):
+        start_line = lines.record_start()
         if all(not v or not v.strip() for v in row.values()):
             continue
 
@@ -225,7 +256,7 @@ def _parse_rows(
                 continue
             sample_data[field_name] = converted
 
-        records.append((row_num, sample_data, custom_fields))
+        records.append((start_line, sample_data, custom_fields))
 
     return records, errors
 
@@ -315,8 +346,9 @@ def parse_sample_rows(
     custom fields. A value that fails numeric or datetime conversion is reported
     and omitted; the rest of its record is still accepted.
 
-    Error labels: conversion errors name the CSV line; validation errors number
-    the non-empty records from 2, so the two differ after a skipped empty line.
+    Error labels (established, not physical lines): conversion errors number records
+    from 2, counting a record of empty values but not a blank line; validation errors
+    number only the records with values, from 2.
     """
     encoding = _detect_encoding(file_content)
     text = file_content.decode(encoding)

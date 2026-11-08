@@ -2,8 +2,9 @@
 
 Each accepted row is one unit of work inside its own savepoint: the sample, its
 custom fields, any batch it creates, and its audit records are flushed together
-and either all stay or all roll back. An expected row failure (a domain error or
-a unique-index conflict) loses only that row; anything else fails the import.
+and either all stay or all roll back. An expected row failure (a domain error, or a
+conflict on the sample ID or batch-position index) loses only that row; anything
+else fails the import.
 The caller commits the surviving rows together.
 """
 
@@ -55,19 +56,23 @@ async def experiment_column_aliases(session: AsyncSession, experiment_id: int, o
 
 
 def _unique_conflict_text(exc: IntegrityError, row: ParsedSampleRow) -> str | None:
-    """Readable text for a unique-index conflict, or None when the error is not one."""
+    """Readable text when the error is one of the sample constraints a row's own values can break.
+
+    Anything else, including a unique violation on another table or an unnamed one (an audit-log
+    key behind its rows, say), is not bad input: None, and the caller fails the import.
+    """
     orig = exc.orig
     if getattr(orig, "sqlstate", None) != "23505" and getattr(orig, "pgcode", None) != "23505":
         return None
     constraint = getattr(getattr(orig, "__cause__", None), "constraint_name", None)
     if constraint == "uq_samples_experiment_external_id":
-        return f"Sample ID “{row.sample.external_id}” already exists in this experiment."
+        return f"Sample ID \u201c{row.sample.external_id}\u201d already exists in this experiment."
     if constraint == "uq_sample_seq_batch_position":
-        batch = f"sequencing batch “{row.sample.sequencing_batch_code}”"
+        batch = f"sequencing batch \u201c{row.sample.sequencing_batch_code}\u201d"
         if row.sample.sequencing_batch_position is None:
             return f"Its position in {batch} is already taken."
         return f"Position {row.sample.sequencing_batch_position} in {batch} is already taken."
-    return "It conflicts with a record that already exists."
+    return None
 
 
 async def _create_row(session: AsyncSession, experiment_id: int, user_id: int, row: ParsedSampleRow) -> None:
