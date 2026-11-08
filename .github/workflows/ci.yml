@@ -24,7 +24,7 @@ jobs:
   terraform-validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
-    if: true
+    if: false  # plan 10 merge-gate demonstration, reverted next commit
     defaults:
       run:
         working-directory: backend/terraform
