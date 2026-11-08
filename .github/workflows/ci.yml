@@ -458,9 +458,12 @@ jobs:
 
       - name: Install Bats and the test prerequisites
         run: |
-          npm install -g bats@1.13.0
-          python -m pip install "cryptography>=50.0.0"
           mkdir -p shell-evidence
+          git clone --quiet --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core "$RUNNER_TEMP/bats-core"
+          "$RUNNER_TEMP/bats-core/install.sh" "$HOME/.local"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          python -m pip install "cryptography>=50.0.0"
           {
             bats --version
             python --version
