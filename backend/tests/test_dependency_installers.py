@@ -8,7 +8,11 @@ calls and the development Compose command) resolve to it without activation or a
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tomllib
 from functools import cache
 from pathlib import Path
 
@@ -156,3 +160,36 @@ def test_nothing_installs_from_the_retired_requirements_lists():
 
 def test_the_readme_documents_the_locked_development_setup():
     assert "uv sync --locked" in (REPO / "README.md").read_text()
+
+
+# ── release preparation, run for real against a copy ──
+
+
+def _release_step(name: str) -> str:
+    return next(s["run"] for s in _steps("release.yml", "release") if s.get("name") == name)
+
+
+def _selections(lock: Path) -> set[tuple[str, str]]:
+    packages = tomllib.loads(lock.read_text())["package"]
+    return {(p["name"], p["version"]) for p in packages if p["name"] != "bioaf-backend"}
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed (CI installs it with setup-uv)")
+def test_a_version_only_release_refreshes_the_lock_without_changing_selections(tmp_path):
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copy(REPO / "backend" / name, backend / name)
+    bump = next(line for line in _release_step("Update version in source files").splitlines() if "sed -i" in line)
+    env = {**os.environ, "VERSION": "2099.1.0"}
+    subprocess.run(["bash", "-c", bump.strip()], cwd=tmp_path, env=env, check=True)
+
+    stale = subprocess.run(["uv", "lock", "--check"], cwd=backend, capture_output=True, text=True)
+    assert stale.returncode != 0, "a version bump must leave the lock detectably stale"
+
+    refresh = _release_step("Refresh the lock for the new version").replace("git diff --stat -- uv.lock", "")
+    subprocess.run(["bash", "-ec", refresh], cwd=backend, check=True, capture_output=True)
+
+    assert _selections(backend / "uv.lock") == _selections(REPO / "backend" / "uv.lock")
+    [project] = [p for p in tomllib.loads((backend / "uv.lock").read_text())["package"] if p["name"] == "bioaf-backend"]
+    assert project["version"] == "2099.1.0"
