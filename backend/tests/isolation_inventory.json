@@ -489,6 +489,11 @@
    "evidence": [],
    "route": "none"
   },
+  "test_ci_workflow.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_cloud_logging.py": {
    "category": "no_database",
    "evidence": [],
@@ -2932,6 +2937,11 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_r_check_status.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_rate_limit_proxy.py": {
    "category": "no_database",

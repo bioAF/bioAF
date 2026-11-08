@@ -21,24 +21,57 @@ jobs:
     if: true
     defaults:
       run:
-        working-directory: backend/terraform/modules
+        working-directory: backend/terraform
     steps:
       - uses: actions/checkout@v5
 
+      # The version the backend image ships (docker/Dockerfile.backend); backend/tests/test_ci_workflow.py
+      # fails when the two drift apart.
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.7"
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
 
-      - name: Terraform fmt check
-        run: terraform fmt -check -recursive
-
-      - name: Terraform validate (each module)
+      - name: Terraform fmt check (GCP and AWS)
         run: |
-          for m in foundation storage compute billing_export; do
-            echo "== $m =="
-            terraform -chdir="$m" init -backend=false -no-color
-            terraform -chdir="$m" validate -no-color
+          terraform version
+          terraform fmt -check -recursive modules
+          terraform fmt -check -recursive aws/modules
+
+      # Every module of both providers is validated, even after one fails, and each outcome is listed in
+      # the job summary. A tree with no modules fails: a move must not leave nothing validated.
+      - name: Terraform validate (each GCP and AWS module)
+        run: |
+          failed=()
+          {
+            echo "### Terraform $(terraform version | head -n 1)"
+            echo "| Module | Result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for tree in modules aws/modules; do
+            found=0
+            for m in "$tree"/*/; do
+              [ -f "$m/main.tf" ] || continue
+              found=1
+              m="${m%/}"
+              echo "== $m =="
+              if terraform -chdir="$m" init -backend=false -no-color -input=false \
+                && terraform -chdir="$m" validate -no-color; then
+                echo "| $m | valid |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "| $m | FAILED |" >> "$GITHUB_STEP_SUMMARY"
+                failed+=("$m")
+              fi
+            done
+            if [ "$found" = 0 ]; then
+              echo "| $tree | no modules found |" >> "$GITHUB_STEP_SUMMARY"
+              failed+=("$tree (no modules)")
+            fi
           done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Terraform validation failed: ${failed[*]}"
+            exit 1
+          fi
 
   # ──────────────────────────────────────────────
   # FastAPI backend
@@ -250,14 +283,248 @@ jobs:
             frontend/coverage/exit-status
           if-no-files-found: warn
 
+  # ──────────────────────────────────────────────
+  # SDKs and shell scripts
+  # ──────────────────────────────────────────────
+  # The Python SDK is tested as its built wheel, installed into a clean virtualenv and imported from
+  # outside the checkout, so a packaging defect fails here rather than for a user.
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sdk/python/pyproject.toml
+
+      - name: Build the wheel
+        run: |
+          mkdir -p sdk-evidence
+          python -m pip wheel --no-deps -w sdk-evidence sdk/python
+          ls sdk-evidence
+
+      - name: Install the wheel into a clean virtualenv
+        run: |
+          python -m venv "$RUNNER_TEMP/sdk-venv"
+          "$RUNNER_TEMP/sdk-venv/bin/pip" install "$(ls sdk-evidence/bioaf_sdk-*.whl)[dev]"
+          "$RUNNER_TEMP/sdk-venv/bin/pip" freeze > sdk-evidence/pip-freeze.txt
+
+      - name: Import the installed package, not the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          location=$("$RUNNER_TEMP/sdk-venv/bin/python" -c "import bioaf, bioaf.extractors.anndata; print(bioaf.__file__)")
+          echo "bioaf loaded from $location"
+          case "$location" in
+            "$GITHUB_WORKSPACE"/*) echo "::error::bioaf was imported from the checkout"; exit 1 ;;
+          esac
+
+      # From outside the checkout with importlib mode, so nothing puts sdk/python/src on sys.path. The
+      # suite has no optional skips; any skip fails the job.
+      - name: Run the tests against the installed wheel
+        working-directory: ${{ runner.temp }}
+        run: |
+          status=0
+          "$RUNNER_TEMP/sdk-venv/bin/python" -m pytest "$GITHUB_WORKSPACE/sdk/python/tests" \
+            --import-mode=importlib -p no:cacheprovider -rs \
+            --junitxml="$GITHUB_WORKSPACE/sdk-evidence/junit.xml" \
+            2>&1 | tee "$GITHUB_WORKSPACE/sdk-evidence/pytest-output.txt" || status=$?
+          python3 - "$GITHUB_WORKSPACE/sdk-evidence/junit.xml" <<'EOF' >> "$GITHUB_STEP_SUMMARY" || status=1
+          import sys, xml.etree.ElementTree as ET
+          suite = ET.parse(sys.argv[1]).getroot()
+          suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
+          counts = {k: int(suite.get(k, 0)) for k in ("tests", "failures", "errors", "skipped")}
+          print("### Python SDK (installed wheel)\n")
+          print("\n".join(f"- {k}: {v}" for k, v in counts.items()))
+          sys.exit(1 if counts["tests"] == 0 or counts["skipped"] else 0)
+          EOF
+          exit $status
+
+      - name: Upload Python SDK evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-sdk-evidence
+          path: sdk-evidence/
+          if-no-files-found: warn
+
+  # The R SDK is built as a source package, installed into an empty library and tested from there, then
+  # checked with R CMD check. Seurat and the test packages are mandatory: a missing one fails the job
+  # (scripts/ci/r_sdk_tests.R) instead of skipping the Seurat extractor test. arrow is optional and not
+  # installed: the suite does not exercise checkpoint uploads. _R_CHECK_FORCE_SUGGESTS_=false lets
+  # R CMD check run without it.
+  r-sdk:
+    name: R SDK
+    runs-on: ubuntu-latest
+    env:
+      R_EVIDENCE: ${{ github.workspace }}/r-evidence
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Start the clock
+        run: |
+          mkdir -p "$R_EVIDENCE"
+          echo "deps_started=$(date +%s)" >> "$R_EVIDENCE/timings.env"
+
+      # Prebuilt Ubuntu binaries from Posit Public Package Manager; pak installs their system libraries.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.6.2"
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: sdk/r
+          dependencies: '"hard"'
+          extra-packages: |
+            any::Seurat
+            any::testthat
+            any::withr
+            any::mockery
+            any::xml2
+
+      - name: Record dependency install time
+        run: |
+          echo "deps_finished=$(date +%s)" >> "$R_EVIDENCE/timings.env"
+          Rscript -e 'ip <- installed.packages(fields = "Built"); write.csv(ip[, c("Package", "Version", "LibPath", "Built")], row.names = FALSE)' \
+            > "$R_EVIDENCE/installed-packages.csv"
+
+      - name: Build the source package
+        working-directory: ${{ runner.temp }}
+        run: |
+          R CMD build --no-manual "$GITHUB_WORKSPACE/sdk/r"
+          cp bioaf_*.tar.gz "$R_EVIDENCE/"
+
+      - name: Install it into an empty library
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p r-lib
+          R CMD INSTALL --library=r-lib bioaf_*.tar.gz
+
+      - name: Run the tests against the installed package
+        working-directory: ${{ runner.temp }}
+        run: |
+          R_LIBS="$RUNNER_TEMP/r-lib" Rscript "$GITHUB_WORKSPACE/scripts/ci/r_sdk_tests.R" \
+            "$GITHUB_WORKSPACE/sdk/r/tests/testthat" "$R_EVIDENCE/junit.xml" "$R_EVIDENCE/tests-summary.md" \
+            2>&1 | tee "$R_EVIDENCE/tests-output.txt"
+
+      - name: R CMD check
+        if: always()
+        working-directory: ${{ runner.temp }}
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: "false"
+        run: |
+          echo "check_started=$(date +%s)" >> "$R_EVIDENCE/timings.env"
+          R CMD check --no-manual bioaf_*.tar.gz 2>&1 | tee "$R_EVIDENCE/check-output.txt" || true
+          echo "check_finished=$(date +%s)" >> "$R_EVIDENCE/timings.env"
+          cp bioaf.Rcheck/00check.log "$R_EVIDENCE/" || true
+          cp bioaf.Rcheck/tests/testthat.Rout* "$R_EVIDENCE/" 2>/dev/null || true
+          python3 "$GITHUB_WORKSPACE/scripts/ci/r_check_status.py" "$R_EVIDENCE/00check.log" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            cat "$R_EVIDENCE/tests-summary.md" 2>/dev/null || echo "R SDK tests did not report."
+            echo
+            echo '```'
+            cat "$R_EVIDENCE/timings.env"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload R SDK evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r-sdk-evidence
+          path: r-evidence/
+          if-no-files-found: warn
+
+  # The Bats suites for ./bioaf, the installers and the update agent. Ubuntu runners have Docker,
+  # Compose, a running daemon, git and openssl, so the Linux prerequisite test runs here; cryptography
+  # lets the encryption bootstrap test run. The only skip accepted is the network guard's.
+  shell-tests:
+    name: Shell Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Bats and the test prerequisites
+        run: |
+          npm install -g bats@1.13.0
+          python -m pip install "cryptography>=50.0.0"
+          mkdir -p shell-evidence
+          {
+            bats --version
+            python --version
+            python -c "import cryptography; print('cryptography', cryptography.__version__)"
+            docker version --format 'docker {{.Server.Version}}'
+            docker compose version
+            git --version
+            openssl version
+          } | tee shell-evidence/environment.txt
+
+      - name: Run the Bats suites
+        run: |
+          status=0
+          bats --formatter tap --report-formatter junit --output shell-evidence tests/shell \
+            2>&1 | tee shell-evidence/bats-output.tap || status=$?
+          total=$(grep -cE '^(ok|not ok) ' shell-evidence/bats-output.tap || true)
+          failed=$(grep -cE '^not ok ' shell-evidence/bats-output.tap || true)
+          skips=$(grep -E '^ok .* # skip' shell-evidence/bats-output.tap || true)
+          unexpected=$(printf '%s\n' "$skips" | grep -v -e '^$' -e '# skip ghcr.io unreachable$' || true)
+          {
+            echo "### Shell tests (Bats)"
+            echo
+            echo "- total: $total"
+            echo "- failed: $failed"
+            echo "- skipped: $(printf '%s' "$skips" | grep -c . || true)"
+            if [ -n "$skips" ]; then echo; echo '```'; echo "$skips"; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected skips (only 'ghcr.io unreachable' is accepted):"
+            echo "$unexpected"
+            status=1
+          fi
+          exit $status
+
+      - name: Upload shell test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-test-evidence
+          path: shell-evidence/
+          if-no-files-found: warn
+
   # One comment per pull request with backend and frontend line and branch coverage, the gates, the
   # unit selection, the same by area, and for the lines the pull request added; updated in place on
   # every run. Fork pull requests get a read-only token, so for them the report goes to the job
   # summary only. A failed gate fails this job after the comment is posted.
+  #
+  # This is also the merge gate: the main ruleset requires this one check. It needs every other job in
+  # this workflow (held by backend/tests/test_ci_workflow.py) and fails unless each succeeded; the
+  # coverage report is still built and posted when one did not.
   coverage-comment:
     name: Coverage Report
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
+    needs:
+      - terraform-validate
+      - backend-lint
+      - backend-test
+      - frontend-lint
+      - frontend-test
+      - python-sdk
+      - r-sdk
+      - shell-tests
+      - security-scan
+      - docs-lint
     if: always() && github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -325,6 +592,13 @@ jobs:
             echo "::error::Coverage gates failed (report status: $status). See the Gates table in the job summary."
             exit 1
           fi
+
+      # Only success passes: a failed, cancelled or skipped dependency fails the merge gate.
+      - name: Enforce required checks
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/required_checks.py --needs "$NEEDS_JSON" --summary "$GITHUB_STEP_SUMMARY"
 
   # ──────────────────────────────────────────────
   # Security & docs

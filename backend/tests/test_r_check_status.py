@@ -33,7 +33,9 @@ def _log(*blocks: str, status: str) -> str:
 
 
 LICENSE = "* checking DESCRIPTION meta-information ... WARNING\nInvalid license file pointers: LICENSE\n"
-IMPORTS = "* checking dependencies in R code ... WARNING\n'::' or ':::' imports not declared from:\n  'curl' 'methods'\n"
+IMPORTS = (
+    "* checking dependencies in R code ... WARNING\n'::' or ':::' imports not declared from:\n  'curl' 'methods'\n"
+)
 UNDOCUMENTED = (
     "* checking for missing documentation entries ... WARNING\nUndocumented code objects:\n"
     "  'extract_seurat_metadata'\n"
