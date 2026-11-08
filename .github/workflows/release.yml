@@ -42,7 +42,7 @@ jobs:
           git_tag_gpgsign: true
 
       # The uv version the backend image copies (docker/Dockerfile.backend).
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.13.5"
 
