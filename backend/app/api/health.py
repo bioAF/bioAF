@@ -1,11 +1,13 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.middleware.maintenance import maintenance_body
 
 logger = logging.getLogger("bioaf.health")
 
@@ -18,13 +20,21 @@ async def liveness():
 
 
 @router.get("/ready")
-async def readiness(session: AsyncSession = Depends(get_session)):
+async def readiness(request: Request, session: AsyncSession = Depends(get_session)):
+    """200 only when this backend serves normally: the upgrade gate is open and the database answers.
+
+    503 while the gate is closed (upgrade running, failed or not yet validated: see
+    app.schema_upgrade) and when the database does not answer. Liveness stays separate.
+    """
+    gate = getattr(request.app.state, "maintenance", None)
+    if gate:
+        return JSONResponse(status_code=503, content=maintenance_body(gate), headers={"Retry-After": "30"})
     try:
         await session.execute(text("SELECT 1"))
         return {"status": "ok", "database": "connected"}
     except Exception:
         logger.exception("Readiness check failed")
-        return {"status": "error", "database": "unavailable"}
+        return JSONResponse(status_code=503, content={"status": "error", "database": "unavailable"})
 
 
 @router.get("/status")

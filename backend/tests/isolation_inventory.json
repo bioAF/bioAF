@@ -3617,6 +3617,17 @@
    "evidence": [],
    "route": "none"
   },
+  "test_startup_gate.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_storage.py": {
    "category": "real_commit",
    "evidence": [
@@ -3811,6 +3822,14 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_upgrade_completion.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
   },
   "test_upgrades.py": {
    "category": "real_commit",
