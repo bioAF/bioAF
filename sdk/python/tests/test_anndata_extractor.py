@@ -102,3 +102,12 @@ class TestSerializeParams:
     def test_string_fallback(self):
         result = _serialize_params({"arr": np.array([1, 2, 3])})
         assert isinstance(result["arr"], str)
+
+    def test_single_element_array_keeps_its_value(self):
+        result = _serialize_params({"arr": np.array([7])})
+        assert result["arr"] == 7
+
+    def test_multi_element_array_inside_a_nested_dict(self):
+        result = _serialize_params({"outer": {"n": np.int64(3), "arr": np.array([[1, 2], [3, 4]])}})
+        assert result["outer"]["n"] == 3
+        assert isinstance(result["outer"]["arr"], str)

@@ -11,6 +11,22 @@
 
 REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
+# The system tool directories as one directory of links, minus any cloud CLI or
+# Homebrew the host has: the tests start from a machine with none of them, and
+# GitHub's Ubuntu runners ship gcloud in /usr/bin.
+setup_file() {
+    local dir tool name
+    export SYSTEM_BIN="$BATS_FILE_TMPDIR/system-bin"
+    mkdir -p "$SYSTEM_BIN"
+    for dir in /usr/bin /bin /usr/sbin /sbin; do
+        for tool in "$dir"/*; do
+            name="${tool##*/}"
+            case "$name" in gcloud | gsutil | bq | aws | aws_completer | brew) continue ;; esac
+            [ -e "$SYSTEM_BIN/$name" ] || ln -s "$tool" "$SYSTEM_BIN/$name"
+        done
+    done
+}
+
 setup() {
     TEST_DIR="$(mktemp -d)"
     export TEST_DIR
@@ -24,7 +40,7 @@ setup() {
     mkdir -p "$HOME" "$STUBS_DIR" "$TEMPLATES"
     : > "$CALL_LOG"
     : > "$BIOAF_TTY"
-    export PATH="$STUBS_DIR:/usr/bin:/bin:/usr/sbin:/sbin"
+    export PATH="$STUBS_DIR:$SYSTEM_BIN"
     # A login shell named zsh (so profile choice matches a new Mac) that
     # exits instead of running whatever is left on its stdin.
     mkdir -p "$TEST_DIR/shell"
