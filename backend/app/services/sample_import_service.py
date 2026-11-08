@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +19,7 @@ from app.exceptions import DomainError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.sample_custom_field import SampleCustomField
 from app.services.csv_service import ParsedSampleRow, parse_sample_rows
-from app.services.sample_service import SampleService, http_error_text
+from app.services.sample_service import SampleService
 
 CUSTOM_FIELD_NAME_LIMIT = 255
 
@@ -64,10 +63,10 @@ def _unique_conflict_text(exc: IntegrityError, row: ParsedSampleRow) -> str | No
     if constraint == "uq_samples_experiment_external_id":
         return f"Sample ID “{row.sample.external_id}” already exists in this experiment."
     if constraint == "uq_sample_seq_batch_position":
-        return (
-            f"Position {row.sample.sequencing_batch_position} in sequencing batch "
-            f"“{row.sample.sequencing_batch_code}” is already taken."
-        )
+        batch = f"sequencing batch “{row.sample.sequencing_batch_code}”"
+        if row.sample.sequencing_batch_position is None:
+            return f"Its position in {batch} is already taken."
+        return f"Position {row.sample.sequencing_batch_position} in {batch} is already taken."
     return "It conflicts with a record that already exists."
 
 
@@ -106,8 +105,6 @@ async def import_samples(
         try:
             async with session.begin_nested():
                 await _create_row(session, experiment_id, user_id, row)
-        except HTTPException as exc:
-            create_errors.append(f"Sample {number}: {http_error_text(exc.detail)}")
         except DomainError as exc:
             create_errors.append(f"Sample {number}: {exc}")
         except IntegrityError as exc:

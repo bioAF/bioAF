@@ -353,3 +353,46 @@ async def test_sheet_sample_import_still_works_in_the_callers_organization(clien
     assert confirm.status_code == 200
     assert confirm.json()["created_count"] == 1
     assert await _persisted(session, experiment.id) == {"A": {"tag": "alpha"}}
+
+
+@pytest.mark.asyncio
+async def test_a_taken_batch_position_rolls_back_only_its_row(client, session, admin_user, headers, experiment):
+    from app.models.sequencing_batch import SequencingBatch
+
+    batch = SequencingBatch(organization_id=admin_user.organization_id, name="run", code="RUN1", status="pending")
+    session.add(batch)
+    await session.flush()
+    session.add(
+        Sample(
+            experiment_id=experiment.id,
+            external_id="HELD",
+            sequencing_batch_id=batch.id,
+            sequencing_batch_position=1,
+            status="registered",
+        )
+    )
+    await session.commit()
+    csv_text = "external_id,sequencing_batch,sequencing_batch_position\nA,RUN1,1\nB,RUN1,2\n"
+    response = await _import(client, headers, "csv_confirm", experiment.id, csv_text)
+    assert response.status_code == 200, response.text
+    assert response.json()["errors"] == ["Sample 1: Position 1 in sequencing batch “RUN1” is already taken."]
+    assert set(await _persisted(session, experiment.id)) == {"HELD", "B"}
+
+
+def test_a_conflict_on_an_assigned_position_does_not_name_a_missing_number():
+    from sqlalchemy.exc import IntegrityError
+
+    from app.schemas.sample import SampleCreate
+    from app.services.csv_service import ParsedSampleRow
+    from app.services.sample_import_service import _unique_conflict_text
+
+    class Cause(Exception):
+        constraint_name = "uq_sample_seq_batch_position"
+
+    cause = Cause()
+    orig = Exception("dup")
+    orig.sqlstate = "23505"  # type: ignore[attr-defined]
+    orig.__cause__ = cause
+    row = ParsedSampleRow(2, SampleCreate(external_id="A", sequencing_batch_code="RUN1"))
+    text_ = _unique_conflict_text(IntegrityError("insert", {}, orig), row)
+    assert text_ == "Its position in sequencing batch “RUN1” is already taken."

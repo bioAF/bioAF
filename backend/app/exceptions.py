@@ -37,9 +37,18 @@ class DomainError(Exception):
     status_code: int = 400
     code: str = "domain_error"
 
-    def __init__(self, message: str = "", *, details: dict | None = None) -> None:
+    def __init__(self, message: str = "", *, details: dict | None = None, plain_body: bool = False) -> None:
         super().__init__(message)
         self.details: dict = details or {}
+        # A failure that routes answered as a bare ``{"detail": ...}`` before the service raised
+        # semantic errors keeps that body: ``plain_body`` renders ``detail`` below instead of the
+        # ``{detail, code, details}`` envelope. Dropping it is an API change, not a refactor.
+        self.plain_body = plain_body
+
+    @property
+    def detail(self) -> str | dict:
+        """The plain body's ``detail``: the message, or the message with ``details`` beside it."""
+        return {"detail": str(self), **self.details} if self.details else str(self)
 
 
 class ValidationError(DomainError):
@@ -47,6 +56,14 @@ class ValidationError(DomainError):
 
     status_code = 400
     code = "validation_error"
+
+
+class UnprocessableError(ValidationError):
+    """Well-formed input whose values cannot be accepted (an unknown vocabulary term, a
+    comparison of the wrong size). Answers 422 where the route always has."""
+
+    status_code = 422
+    code = "unprocessable"
 
 
 class SamplesMissingFilesError(ValidationError):

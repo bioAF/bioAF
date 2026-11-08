@@ -74,6 +74,7 @@ COLUMN_MAP = {
     "batch_position": "sequencing_batch_position",
 }
 
+
 @dataclass(frozen=True)
 class ParsedSampleRow:
     """One accepted CSV record: the sample, its custom fields, and the line it came from.

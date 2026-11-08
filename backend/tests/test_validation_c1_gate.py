@@ -6,7 +6,7 @@ audited.
 """
 
 import pytest
-from fastapi import HTTPException
+from app.exceptions import DomainError
 
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -38,7 +38,7 @@ async def test_approve_plan_advances_to_acquiring_data_and_stamps_approver(sessi
 async def test_approve_plan_rejected_when_not_in_plan_ready(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()  # still in 'requested'
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
     assert ei.value.status_code == 400
     assert "plan_ready" in ei.value.detail
@@ -54,7 +54,7 @@ async def test_decline_plan_is_terminal_and_records_reason(session, admin_user):
     assert declined.state == "plan_declined"
     assert declined.failure_reason == "wrong accession"
     # Terminal: no further transitions.
-    with pytest.raises(HTTPException):
+    with pytest.raises(DomainError):
         await ValidationStudyService.transition(
             session, study.id, admin_user.organization_id, admin_user.id, "acquiring_data"
         )
@@ -64,7 +64,7 @@ async def test_decline_plan_is_terminal_and_records_reason(session, admin_user):
 async def test_decline_plan_rejected_when_not_in_plan_ready(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.decline_plan(session, study.id, admin_user.organization_id, admin_user.id)
     assert ei.value.status_code == 400
 
@@ -73,7 +73,7 @@ async def test_decline_plan_rejected_when_not_in_plan_ready(session, admin_user)
 async def test_approve_plan_is_org_scoped(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id + 999, admin_user.id)
     assert ei.value.status_code == 404
 
@@ -156,7 +156,7 @@ async def test_retry_is_rejected_for_a_study_that_did_not_error(session, admin_u
     study = await _study_at_plan_ready(session, admin_user)
     await session.commit()
 
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id, admin_user.id)
     assert ei.value.status_code == 400
     assert "error" in ei.value.detail
@@ -166,7 +166,7 @@ async def test_retry_is_rejected_for_a_study_that_did_not_error(session, admin_u
 async def test_retry_is_org_scoped(session, admin_user):
     study = await _errored_study(session, admin_user)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id + 999, admin_user.id)
     assert ei.value.status_code == 404
 
@@ -207,7 +207,7 @@ async def test_approving_a_plan_the_deposit_contradicts_is_refused(session, admi
     conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
     study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
 
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
 
     assert ei.value.status_code == 400
@@ -221,7 +221,7 @@ async def test_a_refused_approval_leaves_the_study_at_the_gate(session, admin_us
     conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
     study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
 
-    with pytest.raises(HTTPException):
+    with pytest.raises(DomainError):
         await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
 
     assert study.state == "plan_ready"

@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
-from fastapi import HTTPException
 from sqlalchemy import ColumnElement, exists, false, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,6 +15,7 @@ from app.models.notebook_session import ComputeSession
 from app.models.project import Project
 from app.schemas.analysis_snapshot import SnapshotCreate
 from app.services.audit_service import log_action
+from app.exceptions import NotFoundError, PermissionDeniedError, UnprocessableError
 
 
 SNAPSHOT_ACCESS_DENIED = "snapshot_access_denied"
@@ -88,7 +88,7 @@ class SnapshotService:
         data: SnapshotCreate,
     ) -> AnalysisSnapshot:
         if not data.experiment_id and not data.project_id:
-            raise HTTPException(422, "At least one of experiment_id or project_id is required")
+            raise UnprocessableError("At least one of experiment_id or project_id is required", plain_body=True)
 
         # Each reference must be this Organization's. Whether the project and the
         # experiment match is deliberately not checked: cross-project work is
@@ -106,7 +106,7 @@ class SnapshotService:
                     select(model.id).where(model.id == record_id, model.organization_id == org_id)
                 )
                 if result.scalar_one_or_none() is None:
-                    raise HTTPException(404, not_found)
+                    raise NotFoundError(not_found, plain_body=True)
 
         snapshot = AnalysisSnapshot(
             organization_id=org_id,
@@ -265,7 +265,7 @@ class SnapshotService:
     @staticmethod
     async def compare_snapshots(session: AsyncSession, ids: list[int], org_id: int, access: SnapshotAccess) -> dict:
         if len(ids) < 2 or len(ids) > 5:
-            raise HTTPException(422, "Must compare between 2 and 5 snapshots")
+            raise UnprocessableError("Must compare between 2 and 5 snapshots", plain_body=True)
 
         result = await session.execute(
             select(AnalysisSnapshot)
@@ -279,10 +279,10 @@ class SnapshotService:
         if len(snapshots) != len(ids):
             found_ids = {s.id for s in snapshots}
             missing = set(ids) - found_ids
-            raise HTTPException(404, f"Snapshots not found: {sorted(missing)}")
+            raise NotFoundError(f"Snapshots not found: {sorted(missing)}", plain_body=True)
 
         if await SnapshotService.reachable_ids(session, ids, org_id, access) != set(ids):
-            raise HTTPException(403, SNAPSHOT_ACCESS_DENIED)
+            raise PermissionDeniedError(SNAPSHOT_ACCESS_DENIED, plain_body=True)
 
         # Sort by created_at for consistent ordering
         snapshots.sort(key=lambda s: s.created_at)
