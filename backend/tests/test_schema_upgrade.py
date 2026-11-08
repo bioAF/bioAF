@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import hashlib
 import json
 import subprocess
 
 import asyncpg
 import pytest
+from cryptography.fernet import Fernet
 
 from tests.support import historical_runner as runner
 from tests.support import releases
@@ -60,6 +62,12 @@ async def _populate(case: CaseDatabase) -> None:
                 "INSERT INTO samples (experiment_id, external_id, status) VALUES ($1, $2, 'registered')", exp, f"S-{i}"
             )
         await conn.execute("UPDATE platform_config SET value = 'lab-project' WHERE key = 'gcp_project_id'")
+        # A secret stored as the application stores it: Fernet ciphertext under the install's key.
+        await conn.execute(
+            "INSERT INTO slack_webhooks (organization_id, name, webhook_url) VALUES ($1, 'hook', $2)",
+            org,
+            Fernet(runner.TEST_ENCRYPTION_KEY.encode()).encrypt(b"https://hooks.example/lab").decode(),
+        )
     finally:
         await conn.close()
 
@@ -139,8 +147,23 @@ def test_the_recovery_dump_restores_the_pre_upgrade_database(released, tmp_path)
         )
         assert restored.returncode == 0, restored.stderr[-2000:]
         assert asyncio.run(_state(target)) == before
+        # With the .env key that was in use (its fingerprint is in the manifest), secrets read back.
+        manifest = json.loads(dump.with_suffix(".json").read_text())
+        assert manifest["encryption_key_fingerprints"] == [
+            hashlib.sha256(runner.TEST_ENCRYPTION_KEY.encode()).hexdigest()[:16]
+        ]
+        assert asyncio.run(_webhook(target)) == "https://hooks.example/lab"
     finally:
         asyncio.run(target.drop())
+
+
+async def _webhook(case: CaseDatabase) -> str:
+    conn = await case.connect()
+    try:
+        stored = await conn.fetchval("SELECT webhook_url FROM slack_webhooks")
+    finally:
+        await conn.close()
+    return Fernet(runner.TEST_ENCRYPTION_KEY.encode()).decrypt(stored.encode()).decode()
 
 
 def test_a_gzipped_plain_sql_backup_from_the_host_updater_restores(released):
@@ -164,6 +187,7 @@ def test_a_gzipped_plain_sql_backup_from_the_host_updater_restores(released):
         )
         assert restored.returncode == 0, restored.stderr[-2000:]
         assert asyncio.run(_state(target)) == before
+        assert asyncio.run(_webhook(target)) == "https://hooks.example/lab"
     finally:
         asyncio.run(target.drop())
 
