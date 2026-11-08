@@ -1147,6 +1147,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_frozen_migrations.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_full_search.py": {
    "category": "single_connection",
    "evidence": [

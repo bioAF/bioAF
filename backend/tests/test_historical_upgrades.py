@@ -20,6 +20,7 @@ That needs CREATEDB: CI's service user has it; locally run under
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 
@@ -423,3 +424,109 @@ def test_an_interrupted_080_transition_rolls_back_and_a_retry_assigns_the_same_i
         ids["long_a"]: LONG[: 255 - len(f"~{ids['long_a']}")] + f"~{ids['long_a']}",
         ids["long_b"]: LONG[: 255 - len(f"~{ids['long_b']}")] + f"~{ids['long_b']}",
     }
+
+
+# --- 076 and 087, frozen into their migrations (tests/test_frozen_migrations.py) -------------------
+
+
+def _crossing(revision: int) -> list[dict]:
+    """The oldest and the newest release tree below ``revision``: both ends of the paths crossing it."""
+    below = sorted((r for r in _distinct_cases() if int(r["head"]) < revision), key=lambda r: int(r["head"]))
+    return [below[0], below[-1]] if len(below) > 1 else below
+
+
+@pytest.mark.parametrize("release", _crossing(87), ids=lambda r: f"{r['tag']}-{r['head']}")
+def test_087_links_old_notifications_to_their_entities_as_published(release, case_db):
+    runner.build(release["commit"], release["head"], case_db.url)
+
+    async def _seed():
+        conn = await case_db.connect()
+        try:
+            org = await conn.fetchval("INSERT INTO organizations (name) VALUES ('Lab') RETURNING id")
+            role = await conn.fetchval(
+                "INSERT INTO roles (organization_id, name, is_system) VALUES ($1, 'admin', true) RETURNING id", org
+            )
+            user = await conn.fetchval(
+                "INSERT INTO users (organization_id, email, password_hash, role_id) "
+                "VALUES ($1, 'u@lab.example', 'x', $2) RETURNING id",
+                org,
+                role,
+            )
+            stamp = await conn.fetchval("SELECT now() - interval '3 days'")
+            await conn.execute(
+                "INSERT INTO activity_feed (organization_id, event_type, entity_type, entity_id, summary, created_at) "
+                "VALUES ($1, 'pipeline.completed', 'pipeline_run', 42, 's', $2)",
+                org,
+                stamp,
+            )
+            ids = {}
+            for key, meta, event in (
+                ("linked", "{}", "pipeline.completed"),
+                ("already", '{"entity_type": "experiment", "entity_id": 7}', "pipeline.completed"),
+                ("unmatched", "{}", "sample.registered"),
+            ):
+                ids[key] = await conn.fetchval(
+                    "INSERT INTO notifications (organization_id, user_id, event_type, title, message, "
+                    "metadata_json, created_at) VALUES ($1, $2, $3, 't', 'm', $4::jsonb, $5) RETURNING id",
+                    org,
+                    user,
+                    event,
+                    meta,
+                    stamp,
+                )
+            return ids
+        finally:
+            await conn.close()
+
+    ids = asyncio.run(_seed())
+    done = upgrade_with_candidate(case_db)
+    assert done.returncode == 0, done.stderr[-4000:]
+
+    async def _links():
+        conn = await case_db.connect()
+        try:
+            rows = await conn.fetch("SELECT id, metadata_json FROM notifications")
+            return {r["id"]: json.loads(r["metadata_json"]) for r in rows}
+        finally:
+            await conn.close()
+
+    links = asyncio.run(_links())
+    assert links[ids["linked"]] == {"entity_type": "pipeline_run", "entity_id": 42}
+    assert links[ids["already"]] == {"entity_type": "experiment", "entity_id": 7}
+    assert links[ids["unmatched"]] == {}
+
+
+@pytest.mark.parametrize("release", _crossing(76), ids=lambda r: f"{r['tag']}-{r['head']}")
+def test_076_encrypts_a_service_account_key_setting_and_leaves_an_empty_one(release, case_db):
+    runner.build(release["commit"], release["head"], case_db.url)
+    secret = '{"type": "service_account", "private_key": "-----BEGIN-----"}'
+
+    async def _seed():
+        conn = await case_db.connect()
+        try:
+            await conn.execute(
+                "INSERT INTO platform_config (key, value) VALUES ('gcp_service_account_key', $1)", secret
+            )
+            await conn.execute("UPDATE platform_config SET value = '' WHERE key = 'gcp_project_id'")
+        finally:
+            await conn.close()
+
+    asyncio.run(_seed())
+    done = upgrade_with_candidate(case_db)
+    assert done.returncode == 0, done.stderr[-4000:]
+
+    async def _values():
+        conn = await case_db.connect()
+        try:
+            return dict(
+                await conn.fetch(
+                    "SELECT key, value FROM platform_config WHERE key IN ('gcp_service_account_key', 'gcp_project_id')"
+                )
+            )
+        finally:
+            await conn.close()
+
+    values = asyncio.run(_values())
+    assert values["gcp_service_account_key"].startswith("gAAAA")
+    assert _decrypt(values["gcp_service_account_key"]) == secret
+    assert values["gcp_project_id"] == ""
