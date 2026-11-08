@@ -36,6 +36,8 @@ LICENSE = "* checking DESCRIPTION meta-information ... WARNING\nInvalid license 
 IMPORTS = (
     "* checking dependencies in R code ... WARNING\n'::' or ':::' imports not declared from:\n  'curl' 'methods'\n"
 )
+# R uses the singular form when exactly one package is undeclared.
+IMPORT = "* checking dependencies in R code ... WARNING\n'::' or ':::' import not declared from: 'methods'\n"
 UNDOCUMENTED = (
     "* checking for missing documentation entries ... WARNING\nUndocumented code objects:\n"
     "  'extract_seurat_metadata'\n"
@@ -75,7 +77,9 @@ def test_an_error_fails(gate, tmp_path):
     assert "checking tests" in summary
 
 
-@pytest.mark.parametrize("block", [LICENSE, IMPORTS, UNDOCUMENTED], ids=["license", "imports", "documentation"])
+@pytest.mark.parametrize(
+    "block", [LICENSE, IMPORTS, IMPORT, UNDOCUMENTED], ids=["license", "imports", "one-import", "documentation"]
+)
 def test_a_repaired_defect_coming_back_fails(gate, tmp_path, block):
     status, _ = _run(gate, tmp_path, _log(block, status="1 WARNING"))
     assert status == 1

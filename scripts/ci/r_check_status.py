@@ -18,7 +18,7 @@ from pathlib import Path
 # The defects plan 10 repaired, by the text R CMD check reports for each. Their return fails the check.
 REPAIRED = {
     "LICENSE file pointer": re.compile(r"Invalid license file pointers"),
-    "undeclared :: imports": re.compile(r"imports not declared from"),
+    "undeclared :: imports": re.compile(r"imports? not declared from"),
     "undocumented exports": re.compile(r"Undocumented code objects"),
 }
 
