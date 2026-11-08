@@ -336,6 +336,8 @@ export interface SampleCustomFieldResponse {
 export interface Sample {
   id: number;
   external_id: string | null;
+  /** The source label migration 080 replaced with external_id (the experiment held it twice); else null. */
+  relabeled_from?: string | null;
   organism: string | null;
   tissue_type: string | null;
   donor_source: string | null;

@@ -2,10 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logError } from "@/lib/errorReporting";
+import {
+  BACKEND_READY_KEY,
+  clearMaintenance,
+  getMaintenance,
+  isMaintenanceBody,
+  reportMaintenance,
+  subscribeMaintenance,
+  type MaintenanceInfo,
+} from "@/lib/maintenance";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const POLL_INTERVAL_MS = 2000;
-const SESSION_KEY = "bioaf_backend_ready";
+const SESSION_KEY = BACKEND_READY_KEY;
 
 /**
  * How many consecutive failures before we tell the user anything is wrong.
@@ -34,6 +43,12 @@ const GRACE_ATTEMPTS = 3;
  *
  * It keeps polling after that: the backend usually does come back, and giving up
  * would be the opposite defect. `unreachable` only changes what the user is told.
+ *
+ * `maintenance` is a third state (plan 9): the backend answered, with 503 and
+ * `{"status": "maintenance"}`, because it is finishing a database upgrade or one
+ * failed. That is not "unreachable", at boot or later. In a tab that was already
+ * working, the API client reports it (lib/maintenance) and this hook polls until
+ * the backend is ready, then clears it without reloading, so unsaved work stays.
  */
 export function useBackendReady() {
   const alreadyConfirmed =
@@ -42,6 +57,7 @@ export function useBackendReady() {
 
   const [ready, setReady] = useState(alreadyConfirmed);
   const [unreachable, setUnreachable] = useState(false);
+  const [maintenance, setMaintenance] = useState<MaintenanceInfo | null>(getMaintenance());
 
   // Lets `retryNow` run the same check the timer runs, without duplicating it.
   const checkRef = useRef<() => void>(() => {});
@@ -63,6 +79,18 @@ export function useBackendReady() {
         const res = await fetch(`${API_URL}/api/health/ready`, {
           cache: "no-store",
         });
+        if (!cancelled && res.status === 503) {
+          const body = await res.json().catch(() => null);
+          if (isMaintenanceBody(body)) {
+            // Answered, just not yet serving: say so, never "unreachable", and keep waiting.
+            reportMaintenance(body);
+            setMaintenance(body);
+            setUnreachable(false);
+            isFirstAttempt = false;
+            timer = setTimeout(check, POLL_INTERVAL_MS);
+            return;
+          }
+        }
         if (!cancelled && res.ok) {
           const body = await res.json();
           if (body.status === "ok") {
@@ -110,10 +138,48 @@ export function useBackendReady() {
     };
   }, [alreadyConfirmed]);
 
+  // A tab that was already working: the API client reports maintenance; poll until the backend is
+  // ready again and then clear it in place. No reload: the page and anything typed into it stay.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function recheck() {
+      try {
+        const res = await fetch(`${API_URL}/api/health/ready`, { cache: "no-store" });
+        if (!cancelled && res.ok) {
+          const body = await res.json();
+          if (body.status === "ok") {
+            sessionStorage.setItem(SESSION_KEY, "true");
+            clearMaintenance();
+            return;
+          }
+        }
+      } catch {
+        // Still down; keep waiting.
+      }
+      if (!cancelled) timer = setTimeout(recheck, POLL_INTERVAL_MS);
+    }
+
+    const unsubscribe = subscribeMaintenance((info) => {
+      setMaintenance(info);
+      if (info && !timer && !cancelled) void recheck();
+      if (!info) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    });
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, []);
+
   /** Check now instead of waiting out the interval. Wired to the splash's retry. */
   const retryNow = useCallback(() => {
     checkRef.current();
   }, []);
 
-  return { ready, unreachable, retryNow };
+  return { ready, unreachable, maintenance, retryNow };
 }

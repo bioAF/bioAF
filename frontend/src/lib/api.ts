@@ -1,6 +1,9 @@
 import { getToken, removeToken } from "./auth";
 import { clearPermissionsCache } from "@/hooks/permissionsCache";
 import { clearCapabilitiesCache } from "@/hooks/capabilitiesCache";
+import { isMaintenanceBody, reportMaintenance } from "@/lib/maintenance";
+
+const MAINTENANCE_MESSAGE = "bioAF is finishing an upgrade. Try again in a minute.";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -81,6 +84,10 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    if (response.status === 503 && isMaintenanceBody(error)) {
+      reportMaintenance(error);
+      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+    }
     throw new ApiError(
       response.status,
       extractErrorMessage(error),
@@ -129,6 +136,10 @@ async function uploadFile<T>(path: string, file: File, extraFields?: Record<stri
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    if (response.status === 503 && isMaintenanceBody(error)) {
+      reportMaintenance(error);
+      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+    }
     throw new ApiError(
       response.status,
       extractErrorMessage(error),
@@ -328,6 +339,10 @@ async function downloadFile(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Download failed" }));
+    if (response.status === 503 && isMaintenanceBody(error)) {
+      reportMaintenance(error);
+      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+    }
     throw new ApiError(
       response.status,
       extractErrorMessage(error),
