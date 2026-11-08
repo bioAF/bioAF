@@ -316,17 +316,25 @@ def run(conn: Connection, url: str, destination: str | None, migrate: Callable[[
             "started_at": _now(),
             "pid": os.getpid(),
         }
-        if current == destination or (current is None and destination == "base"):
-            migrate(conn)  # Alembic finds nothing to do
-            summary = _validate(conn, destination)
-            previous = read_status()
-            if previous.get("status") != "completed" or previous.get("target_revision") != destination:
-                write_status(
-                    {**record, "status": "completed", "step": "validated", "summary": summary, "completed_at": _now()}
-                )
-            return
-
         try:
+            if current == destination or (current is None and destination == "base"):
+                migrate(conn)  # Alembic finds nothing to do
+                # Validation still gates: a failure here is recorded like any other, closing the gate.
+                record["step"] = "validate"
+                summary = _validate(conn, destination)
+                previous = read_status()
+                if previous.get("status") != "completed" or previous.get("target_revision") != destination:
+                    write_status(
+                        {
+                            **record,
+                            "status": "completed",
+                            "step": "validated",
+                            "summary": summary,
+                            "completed_at": _now(),
+                        }
+                    )
+                return
+
             record["step"] = "backup"
             write_status(record)
             if current is None and not _tables(conn):
@@ -376,6 +384,8 @@ async def compatibility(engine) -> dict[str, Any]:
     if revision != head:
         reason = "upgrade_failed" if record.get("status") == "failed" else "upgrade_required"
         return {**result, "compatible": False, "reason": reason}
+    if record.get("status") == "failed":
+        return {**result, "compatible": False, "reason": "upgrade_failed"}
     if record.get("status") != "completed" or record.get("target_revision") != head:
         return {**result, "compatible": False, "reason": "upgrade_not_validated"}
     return {**result, "compatible": True, "reason": None}

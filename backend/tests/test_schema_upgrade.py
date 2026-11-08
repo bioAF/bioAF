@@ -320,6 +320,47 @@ def test_a_failed_migration_is_recorded_rolled_back_and_retryable(released):
     assert len(_dumps(case)) == 2, "the retry makes its own recovery set and keeps the first"
 
 
+@pytest.mark.asyncio
+async def test_a_database_at_head_that_fails_validation_closes_the_gate(released, monkeypatch):
+    """Validation on the nothing-to-migrate path records its failure too, so the gate stays shut."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app import schema_upgrade
+    from app.config import settings
+
+    case, _ = released
+    monkeypatch.setattr(settings, "update_status_dir", str(case.status))
+    assert (await asyncio.to_thread(case.run, *ENTRYPOINT_RUN)).returncode == 0
+
+    async def _sql(statement: str) -> None:
+        conn = await case.connect()
+        try:
+            await conn.execute(statement)
+        finally:
+            await conn.close()
+
+    await _sql("DROP INDEX uq_samples_experiment_external_id")
+    failed = await asyncio.to_thread(case.run, *ENTRYPOINT_RUN)
+    assert failed.returncode == 1
+    record = _record(case)
+    assert (record["status"], record["step"]) == ("failed", "validate")
+    assert "uq_samples_experiment_external_id" in record["error"]
+    engine = create_async_engine(case.url)
+    try:
+        stopped = await schema_upgrade.compatibility(engine)
+        assert (stopped["compatible"], stopped["reason"]) == (False, "upgrade_failed")
+
+        await _sql(
+            "CREATE UNIQUE INDEX uq_samples_experiment_external_id ON samples (experiment_id, external_id) "
+            "WHERE external_id IS NOT NULL"
+        )
+        assert (await asyncio.to_thread(case.run, *ENTRYPOINT_RUN)).returncode == 0
+        assert _record(case)["status"] == "completed"
+        assert (await schema_upgrade.compatibility(engine))["compatible"] is True
+    finally:
+        await engine.dispose()
+
+
 def test_a_fresh_install_has_nothing_to_back_up(case_db):
     done = case_db.run(*ENTRYPOINT_RUN)
     assert done.returncode == 0, done.stderr[-3000:]
