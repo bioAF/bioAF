@@ -313,3 +313,90 @@ async def assert_preserved(conn: asyncpg.Connection, ledger: Ledger, decrypt) ->
         if actual != value:
             problems.append(f"platform_config {key}: {value!r} became {actual!r}")
     return problems
+
+
+async def populate_legacy_nulls(conn: asyncpg.Connection, ledger: Ledger) -> dict[str, list[int]]:
+    """One row in each table behind the 28 legacy-nullable columns, then every one of them NULL.
+
+    Released schemas accept these NULLs and nothing records the lost values (plan 9, section 1), so
+    an upgrade must carry them through unchanged and the candidate must read them. Returns the rows
+    written, by table. For the latest released revision, after ``populate``.
+    """
+    from tests.test_migrations_apply import LEGACY_NULLABLE
+
+    schema = await Schema.read(conn)
+    org = min(ledger.rows["organizations"])
+    user = min(ledger.rows["users"])
+    experiment = min(ledger.rows["experiments"])
+    sample = min(ledger.rows["samples"])
+    file_id = min(ledger.rows["files"])
+    ids: dict[str, int | None] = {}
+
+    async def add(table: str, **values: Any) -> int | None:
+        ids[table] = await insert(conn, schema, ledger, table, **values)
+        return ids[table]
+
+    env = await add("environments", organization_id=org, name="legacy-env", created_by_user_id=user)
+    env_version = await add(
+        "environment_versions",
+        environment_id=env,
+        version_number=1,
+        definition_format="dockerfile",
+        definition_content="FROM scratch",
+        created_by_user_id=user,
+    )
+    pipeline = await add(
+        "custom_pipelines", organization_id=org, name="legacy", pipeline_key="legacy-pipeline", created_by_user_id=user
+    )
+    await add(
+        "custom_pipeline_versions",
+        custom_pipeline_id=pipeline,
+        version_number=1,
+        code_source_type="inline",
+        entrypoint_command="run.sh",
+        environment_version_id=env_version,
+        created_by_user_id=user,
+    )
+    await add("entity_snapshots", entity_type="sample", entity_id=sample, snapshot_json="{}")
+    config = await add(
+        "experiment_auto_runs",
+        organization_id=org,
+        experiment_id=experiment,
+        pipeline_key="p",
+        configured_by_user_id=user,
+    )
+    seq = await add("sequencing_batches", organization_id=org, code="LEGACY-SEQ", name="LEGACY-SEQ")
+    await add("manifest_entries", sequencing_batch_id=seq, expected_filename="a.fastq.gz", expected_md5="0" * 32)
+    await add("sample_batches", experiment_id=experiment, name="legacy prep")
+    run = await add("pipeline_runs", organization_id=org, pipeline_name="legacy", experiment_id=experiment)
+    await add("pipeline_run_input_files", pipeline_run_id=run, file_id=file_id)
+    await conn.execute(
+        "INSERT INTO pending_auto_runs (organization_id, auto_run_config_id, experiment_id, sample_id, "
+        "sample_completed_at, scheduled_at) VALUES ($1, $2, $3, $4, now(), now())",
+        org,
+        config,
+        experiment,
+        sample,
+    )
+    await add("samplesheet_mappings", organization_id=org, pipeline_key="legacy-pipeline", scope="organization")
+    await add("slack_channel_mappings", organization_id=org, channel_id="C1", channel_name="general")
+    await add(
+        "slack_installations",
+        organization_id=org,
+        team_id="T1",
+        team_name="Lab",
+        bot_token="xoxb-legacy",
+        bot_user_id="U1",
+        installed_by=user,
+    )
+    await conn.execute("INSERT INTO platform_config (key, value) VALUES ('legacy_unset_key', 'x')")
+
+    # roles, session_credentials and notebook_session_files already have rows from populate().
+    written: dict[str, list[int]] = {}
+    for table, column in sorted(LEGACY_NULLABLE):
+        # Every row, except platform_config, where only the added setting goes NULL (the others are
+        # the install's real settings).
+        where = " WHERE key = 'legacy_unset_key'" if table == "platform_config" else ""
+        await conn.execute(f'UPDATE "{table}" SET "{column}" = NULL{where}')
+        written.setdefault(table, [r[0] for r in await conn.fetch(f'SELECT id FROM "{table}"')])
+    return written

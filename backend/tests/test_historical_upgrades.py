@@ -108,6 +108,11 @@ async def _duplicate_seeds(conn: asyncpg.Connection) -> list[str]:
         problems += [f"{table} duplicate {tuple(d)}" for d in dupes]
     dupes = await conn.fetch("SELECT organization_id, name, count(*) FROM roles GROUP BY 1, 2 HAVING count(*) > 1")
     problems += [f"roles duplicate {tuple(d)}" for d in dupes]
+    # Permission backfills (071, 103, 118) add grants to existing roles; none may be added twice.
+    dupes = await conn.fetch(
+        "SELECT role_id, resource, action, count(*) FROM role_permissions GROUP BY 1, 2, 3 HAVING count(*) > 1"
+    )
+    problems += [f"role_permissions duplicate {tuple(d)}" for d in dupes]
     return problems
 
 
@@ -530,3 +535,70 @@ def test_076_encrypts_a_service_account_key_setting_and_leaves_an_empty_one(rele
     assert values["gcp_service_account_key"].startswith("gAAAA")
     assert _decrypt(values["gcp_service_account_key"]) == secret
     assert values["gcp_project_id"] == ""
+
+
+def test_every_legacy_null_survives_the_upgrade_and_reads_through_the_candidate(case_db, monkeypatch):
+    """All 28 columns the models used to call NOT NULL, NULL at the latest release (plan 9, section 1).
+
+    The upgrade must neither fail on them, nor fill them in, nor hold the install in maintenance; the
+    candidate's ORM must load every such row."""
+    release = max(_distinct_cases(), key=lambda r: int(r["head"]))
+    runner.build(release["commit"], release["head"], case_db.url)
+
+    async def _prepare():
+        conn = await case_db.connect()
+        try:
+            async with conn.transaction():
+                ledger = await historical_data.populate(conn, release["head"], _encrypt)
+                return ledger, await historical_data.populate_legacy_nulls(conn, ledger)
+        finally:
+            await conn.close()
+
+    ledger, written = asyncio.run(_prepare())
+    from tests.test_migrations_apply import LEGACY_NULLABLE
+
+    assert {t for t, _ in LEGACY_NULLABLE} <= {t for t, ids in written.items() if ids}, "a table has no row"
+
+    done = upgrade_with_candidate(case_db)
+    assert done.returncode == 0, done.stderr[-4000:]
+
+    async def _still_null():
+        conn = await case_db.connect()
+        try:
+            found = {}
+            for table, column in sorted(LEGACY_NULLABLE):
+                where = " AND key = 'legacy_unset_key'" if table == "platform_config" else ""
+                found[(table, column)] = await conn.fetchval(
+                    f'SELECT count(*) FROM "{table}" WHERE "{column}" IS NOT NULL{where}'
+                )
+            return found
+        finally:
+            await conn.close()
+
+    assert {k: v for k, v in asyncio.run(_still_null()).items() if v} == {}, "the upgrade invented values"
+
+    async def _gate_and_reads():
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+        import app.models  # noqa: F401
+        from app import schema_upgrade
+        from app.database import Base
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "update_status_dir", str(case_db.status))
+        engine = create_async_engine(case_db.url)
+        try:
+            assert (await schema_upgrade.compatibility(engine))["compatible"] is True
+            mappers = {m.class_.__tablename__: m.class_ for m in Base.registry.mappers}
+            async with AsyncSession(engine) as session:
+                for table in sorted({t for t, _ in LEGACY_NULLABLE}):
+                    rows = (await session.execute(select(mappers[table]))).scalars().all()
+                    assert rows, table
+        finally:
+            await engine.dispose()
+
+    from app.platform import encryption_service
+
+    monkeypatch.setattr(encryption_service, "_multifernet", MultiFernet([Fernet(runner.TEST_ENCRYPTION_KEY.encode())]))
+    asyncio.run(_gate_and_reads())
