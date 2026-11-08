@@ -71,21 +71,25 @@ class SampleService:
     async def ambiguous_label_candidates(
         session: AsyncSession, organization_id: int, experiment_id: int, label: str
     ) -> list[str]:
-        """The external IDs migration 080 gave samples that shared ``label`` in this experiment.
+        """The current external IDs of the samples that shared ``label`` before migration 080.
 
         Non-empty means ``label`` no longer names one sample: callers report the candidates rather
         than choosing one or creating another sample under it. Only answers for an experiment in
         ``organization_id``.
         """
+        # Each sample's ID today, not the one 080 recorded: a sample can be renamed and its old ID
+        # reused, and the mapping row stays as history.
         result = await session.execute(
-            select(SampleExternalIdTransition.external_id)
+            select(Sample.external_id)
+            .join(SampleExternalIdTransition, SampleExternalIdTransition.sample_id == Sample.id)
             .join(Experiment, Experiment.id == SampleExternalIdTransition.experiment_id)
             .where(
                 Experiment.organization_id == organization_id,
                 SampleExternalIdTransition.experiment_id == experiment_id,
                 SampleExternalIdTransition.source_label == label,
+                Sample.external_id.is_not(None),
             )
-            .order_by(SampleExternalIdTransition.external_id)
+            .order_by(Sample.external_id)
         )
         return list(result.scalars())
 

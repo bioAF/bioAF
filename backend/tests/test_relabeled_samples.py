@@ -274,3 +274,35 @@ async def test_the_candidate_lookup_is_scoped_to_the_organization(session, admin
         await SampleService.ambiguous_label_candidates(session, admin_user.organization_id, data["experiment"], "DUP")
         == []
     )
+
+
+@pytest.mark.asyncio
+async def test_candidates_follow_each_sample_to_its_current_id_after_a_rename_and_reuse(
+    client, session, admin_user, admin_token, integration_api_key
+):
+    """The mapping keeps the ID 080 assigned; candidates are the linked samples' IDs today."""
+    data = await _relabelled_experiment(session, admin_user.organization_id, admin_user.id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    assigned = f"DUP~{data['a']}"
+
+    renamed = await client.patch(f"/api/samples/{data['a']}", headers=headers, json={"external_id": "RENAMED"})
+    assert renamed.status_code == 200, renamed.text
+    reused = await client.post(
+        f"/api/experiments/{data['experiment']}/samples", headers=headers, json={"external_id": assigned}
+    )
+    assert reused.status_code == 200, reused.text
+
+    r = await client.get(
+        "/api/v1/integrations/samples/by-external/DUP",
+        headers=integration_api_key["headers"],
+        params={"experiment_id": data["experiment"]},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["candidates"] == sorted(["RENAMED", f"DUP~{data['b']}"])
+
+    recorded = (
+        await session.execute(
+            select(SampleExternalIdTransition.external_id).where(SampleExternalIdTransition.sample_id == data["a"])
+        )
+    ).scalar_one()
+    assert recorded == assigned  # the historical mapping is untouched
