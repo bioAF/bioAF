@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.api.sample_imports import run_sample_import
 from app.api.sample_responses import sample_response
 from app.api.scoped_loaders import require_owned_experiment
-from app.models.experiment import Experiment
 from app.schemas.audit import AuditLogEntry, AuditLogResponse
 from app.schemas.experiment import (
     CustomFieldResponse,
@@ -25,18 +24,12 @@ from app.schemas.experiment import (
 from app.schemas.sample import SampleBulkCreate, SampleCreate, SampleResponse
 from app.schemas.sample_batch import SampleBatchCreate, SampleBatchResponse
 from app.services.experiment_service import ExperimentService
-from app.services.sample_service import SampleService, http_error_text
+from app.services.sample_service import SampleService
+from app.services.sample_import_service import experiment_column_aliases
 from app.services.sample_batch_service import SampleBatchService
-from app.services.csv_service import generate_sample_template, parse_sample_csv, preview_sample_csv
+from app.services.csv_service import generate_sample_template, preview_sample_csv
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
-
-
-async def _experiment_column_aliases(session: AsyncSession, experiment_id: int) -> dict[str, str] | None:
-    """Return the persisted GSheet header aliases for an experiment, if any."""
-    result = await session.execute(select(Experiment.column_aliases).where(Experiment.id == experiment_id))
-    row = result.first()
-    return row[0] if row else None
 
 
 def _user_summary(user) -> UserSummary | None:
@@ -320,7 +313,7 @@ async def preview_samples_csv(
 ):
     await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     content = await file.read()
-    aliases = await _experiment_column_aliases(session, experiment_id)
+    aliases = await experiment_column_aliases(session, experiment_id, int(current_user["org_id"]))
     return preview_sample_csv(content, aliases=aliases)
 
 
@@ -335,7 +328,6 @@ async def confirm_samples_csv(
     import json as json_mod
 
     await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
-    user_id = int(current_user["sub"])
     content = await file.read()
 
     mappings: dict[str, str] = {}
@@ -345,47 +337,12 @@ async def confirm_samples_csv(
         except (json_mod.JSONDecodeError, TypeError):
             raise HTTPException(400, detail="Invalid column_mappings JSON")
 
-    aliases = await _experiment_column_aliases(session, experiment_id)
-    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(
-        content, experiment_id, column_mappings=mappings, aliases=aliases
-    )
-
-    if not parsed_samples and parse_errors:
-        raise HTTPException(400, detail={"errors": parse_errors})
-
-    # Collect unique custom field names from mappings
-    custom_field_names: list[str] = sorted({name for row in custom_field_rows for name in row})
-
-    created = []
-    create_errors = []
-    for i, sample_data in enumerate(parsed_samples):
-        try:
-            sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
-            created.append(sample)
-
-            # Store custom fields on the sample
-            if i < len(custom_field_rows) and custom_field_rows[i]:
-                from app.models.sample_custom_field import SampleCustomField
-
-                for field_name, field_value in custom_field_rows[i].items():
-                    session.add(
-                        SampleCustomField(
-                            sample_id=sample.id,
-                            field_name=field_name,
-                            field_value=str(field_value),
-                        )
-                    )
-        except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
-
-    if created:
-        await session.commit()
-
+    result = await run_sample_import(session, current_user, experiment_id, content, mappings)
     return {
-        "created_count": len(created),
-        "error_count": len(parse_errors) + len(create_errors),
-        "errors": parse_errors + create_errors,
-        "custom_fields_created": custom_field_names,
+        "created_count": result.created_count,
+        "error_count": len(result.errors),
+        "errors": result.errors,
+        "custom_fields_created": result.custom_fields_created,
     }
 
 
@@ -396,42 +353,13 @@ async def upload_samples_csv(
     current_user: dict = require_permission("experiments", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
-    from app.models.sample_custom_field import SampleCustomField
-
     await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
-    user_id = int(current_user["sub"])
     content = await file.read()
-    aliases = await _experiment_column_aliases(session, experiment_id)
-    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(content, experiment_id, aliases=aliases)
-
-    if not parsed_samples and parse_errors:
-        raise HTTPException(400, detail={"errors": parse_errors})
-
-    created = []
-    create_errors = []
-    for i, sample_data in enumerate(parsed_samples):
-        try:
-            sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
-            created.append(sample)
-            if i < len(custom_field_rows) and custom_field_rows[i]:
-                for field_name, field_value in custom_field_rows[i].items():
-                    session.add(
-                        SampleCustomField(
-                            sample_id=sample.id,
-                            field_name=field_name,
-                            field_value=str(field_value),
-                        )
-                    )
-        except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
-
-    if created:
-        await session.commit()
-
+    result = await run_sample_import(session, current_user, experiment_id, content)
     return {
-        "created_count": len(created),
-        "error_count": len(parse_errors) + len(create_errors),
-        "errors": parse_errors + create_errors,
+        "created_count": result.created_count,
+        "error_count": len(result.errors),
+        "errors": result.errors,
     }
 
 

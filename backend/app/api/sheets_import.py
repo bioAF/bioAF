@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.api.sample_imports import run_sample_import
+from app.api.scoped_loaders import require_owned_experiment
 from app.database import get_session
 from app.models.experiment_field_default import DEFAULTABLE_SAMPLE_FIELDS
 from app.schemas.sheets_import import (
@@ -20,7 +22,8 @@ from app.schemas.sheets_import import (
     SheetSampleConfirmRequest,
 )
 from app.services import sheets_reader_sa_service
-from app.services.csv_service import COLUMN_MAP, SAMPLE_FIELDS, _normalize_header, parse_sample_csv, preview_sample_csv
+from app.services.sample_import_service import experiment_column_aliases
+from app.services.csv_service import COLUMN_MAP, SAMPLE_FIELDS, _normalize_header, preview_sample_csv
 from app.exceptions import ValidationError
 from app.services.google_sheets_service import parse_sheet_url, read_all_rows_as_csv, read_header_row
 
@@ -227,10 +230,9 @@ async def preview_sheet_samples(
     Returns the same format as the CSV preview endpoint so the frontend
     can reuse the same mapping UI.
     """
-    from app.api.experiments import _experiment_column_aliases
-
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
+    aliases = await experiment_column_aliases(session, experiment_id, int(current_user["org_id"]))
     csv_bytes, _ = await _read_sheet_as_csv(body, session)
-    aliases = await _experiment_column_aliases(session, experiment_id)
     return preview_sample_csv(csv_bytes, aliases=aliases)
 
 
@@ -243,50 +245,14 @@ async def confirm_sheet_samples(
 ) -> dict:
     """Read a Google Sheet, parse it into samples, and create them.
 
-    Uses the same parsing and creation logic as the CSV confirm endpoint.
+    Uses the same import workflow as the CSV confirm endpoint.
     """
-    from app.api.experiments import _experiment_column_aliases
-    from app.models.sample_custom_field import SampleCustomField
-    from app.services.sample_service import SampleService, http_error_text
-
-    user_id = int(current_user["sub"])
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     csv_bytes, _ = await _read_sheet_as_csv(SheetPreviewRequest(sheet_url=body.sheet_url), session)
-
-    aliases = await _experiment_column_aliases(session, experiment_id)
-    parsed_samples, parse_errors, custom_field_rows = parse_sample_csv(
-        csv_bytes, experiment_id, column_mappings=body.column_mappings or None, aliases=aliases
-    )
-
-    if not parsed_samples and parse_errors:
-        raise HTTPException(400, detail={"errors": parse_errors})
-
-    custom_field_names: list[str] = sorted({name for row in custom_field_rows for name in row})
-
-    created = []
-    create_errors = []
-    for i, sample_data in enumerate(parsed_samples):
-        try:
-            sample = await SampleService.create_sample(session, experiment_id, user_id, sample_data)
-            created.append(sample)
-
-            if i < len(custom_field_rows) and custom_field_rows[i]:
-                for field_name, field_value in custom_field_rows[i].items():
-                    session.add(
-                        SampleCustomField(
-                            sample_id=sample.id,
-                            field_name=field_name,
-                            field_value=str(field_value),
-                        )
-                    )
-        except HTTPException as e:
-            create_errors.append(f"Sample {i + 1}: {http_error_text(e.detail)}")
-
-    if created:
-        await session.commit()
-
+    result = await run_sample_import(session, current_user, experiment_id, csv_bytes, body.column_mappings)
     return {
-        "created_count": len(created),
-        "error_count": len(parse_errors) + len(create_errors),
-        "errors": parse_errors + create_errors,
-        "custom_fields_created": custom_field_names,
+        "created_count": result.created_count,
+        "error_count": len(result.errors),
+        "errors": result.errors,
+        "custom_fields_created": result.custom_fields_created,
     }
