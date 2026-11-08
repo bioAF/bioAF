@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -268,18 +267,33 @@ class UpgradeService:
 
     @staticmethod
     async def resolve_pending_upgrades(session: AsyncSession) -> None:
-        """Check for 'started' upgrades and resolve them based on current version.
+        """Settle requested upgrades from evidence, after the upgrade gate let this process start.
 
-        Called on application startup to handle the case where the app was
-        restarted after an update completed.
+        Completed needs both this version running and this code's schema upgrade recorded complete
+        (app.schema_upgrade); the image version alone does not show the database upgraded. An update
+        the host still reports in progress stays pending. A different version means the update did
+        not take; the host's failure reason, when it wrote one, goes into the notes. The status files
+        are left in place: they are the diagnostics.
         """
+        from app import schema_upgrade
+
         current = settings.app_version
+        schema = schema_upgrade.read_status()
+        schema_done = (
+            schema.get("status") == "completed" and schema.get("target_revision") == schema_upgrade.code_head()
+        )
+        host = await UpgradeService.get_update_status()
 
         result = await session.execute(select(UpgradeHistory).where(UpgradeHistory.status == "started"))
-        pending = result.scalars().all()
-
-        for upgrade in pending:
+        for upgrade in result.scalars().all():
             if upgrade.to_version == current:
+                if not schema_done:
+                    logger.warning(
+                        "Upgrade %d: running %s but the database upgrade is not recorded complete; left pending",
+                        upgrade.id,
+                        current,
+                    )
+                    continue
                 upgrade.status = "completed"
                 upgrade.completed_at = datetime.now(timezone.utc)
                 logger.info(
@@ -288,27 +302,23 @@ class UpgradeService:
                     upgrade.from_version,
                     upgrade.to_version,
                 )
+                continue
+            if host.get("status") == "in_progress" and host.get("to_version") == upgrade.to_version:
+                continue
+            upgrade.status = "failed"
+            upgrade.completed_at = datetime.now(timezone.utc)
+            if host.get("status") == "failed" and host.get("to_version") == upgrade.to_version:
+                upgrade.notes = f"Update failed at step {host.get('step', 'unknown')}: {host.get('error', 'no detail')}"
             else:
-                # Version didn't change -- mark as failed
-                upgrade.status = "failed"
-                upgrade.completed_at = datetime.now(timezone.utc)
                 upgrade.notes = f"Expected version {upgrade.to_version} after restart, but running {current}"
-                logger.warning(
-                    "Resolved pending upgrade %d: expected %s but running %s (failed)",
-                    upgrade.id,
-                    upgrade.to_version,
-                    current,
-                )
+            logger.warning(
+                "Resolved pending upgrade %d: expected %s but running %s (failed)",
+                upgrade.id,
+                upgrade.to_version,
+                current,
+            )
 
         await session.flush()
-
-        # Clear the status file after resolving
-        status_file = Path(settings.update_status_dir) / "current.json"
-        if status_file.exists():
-            try:
-                os.remove(status_file)
-            except OSError:
-                pass
 
     @staticmethod
     async def background_version_check(org_id: int) -> None:

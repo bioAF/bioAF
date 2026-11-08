@@ -969,7 +969,12 @@ function ExperimentDetailPageInner() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {s.external_id || `#${s.id}`}
+                      {s.relabeled_from && (
+                        <span className="block text-xs text-gray-600">before upgrade: {s.relabeled_from}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm">{s.organism || "---"}</td>
                     <td className="px-4 py-3 text-sm">{s.tissue_type || "---"}</td>
                     <td className="px-4 py-3 text-sm">{s.molecule_type || "---"}</td>
@@ -1016,6 +1021,9 @@ function ExperimentDetailPageInner() {
               fields={[
                 { label: "Internal ID", value: `#${viewingSample.id}` },
                 { label: "External ID", value: viewingSample.external_id },
+                ...(viewingSample.relabeled_from
+                  ? [{ label: "Label before upgrade", value: viewingSample.relabeled_from }]
+                  : []),
                 { label: "Status", value: viewingSample.status.replace(/_/g, " ") },
                 { label: "Organism", value: viewingSample.organism },
                 { label: "Tissue Type", value: viewingSample.tissue_type },

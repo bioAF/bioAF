@@ -31,7 +31,9 @@ class PendingAutoRun(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="waiting")
     pipeline_run_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("pipeline_runs.id"), nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     organization = relationship("Organization")
     auto_run_config = relationship("ExperimentAutoRun", back_populates="pending_runs")

@@ -19,9 +19,11 @@ class SampleBatch(Base):
     instrument_platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
     quality_score_encoding: Mapped[str | None] = mapped_column(String(50), server_default="Phred+33", nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True
     )
 
     experiment = relationship("Experiment", back_populates="sample_batches")

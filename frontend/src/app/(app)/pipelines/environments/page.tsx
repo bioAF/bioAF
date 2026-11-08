@@ -27,6 +27,7 @@ import type {
   VersionCreateRequest,
   BuildLogsResponse,
 } from "@/lib/types";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 const DEFAULT_PIPELINE_CONDA_YML = `name: bioaf-pipeline
 channels:
@@ -382,7 +383,7 @@ export default function PipelineEnvironmentsPage() {
                           {env.created_by?.name || env.created_by?.email || "--"}
                         </td>
                         <td className="px-4 py-3 text-gray-500">
-                          {new Date(env.updated_at).toLocaleString()}
+                          {formatRecordedTime(env.updated_at)}
                         </td>
                       </tr>
                     ))}
@@ -558,7 +559,7 @@ export default function PipelineEnvironmentsPage() {
                             </div>
                             <div className="flex items-center gap-3">
                               <span className="text-xs text-gray-500">
-                                {new Date(v.created_at).toLocaleDateString()}
+                                {formatRecordedTime(v.created_at, "date")}
                               </span>
                               {canBuild && (v.status === "draft" || v.status === "failed") && (
                                 <button

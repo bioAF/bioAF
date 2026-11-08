@@ -15,6 +15,8 @@ class EntitySnapshot(Base):
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     audit_log_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("audit_log.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     audit_log = relationship("AuditLog")

@@ -14,7 +14,9 @@ class Role(Base):
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_roles_org_name"),)
 

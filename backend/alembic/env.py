@@ -91,6 +91,26 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
+def _destination() -> str | None:
+    """The revision this command moves to; None for read-only commands (current, history, ...)."""
+    argument = context.get_revision_argument()
+    if argument is None:
+        return None
+    if argument == "base":
+        return "base"
+    revision = context.script.get_revision(argument)
+    if revision is None:
+        raise SystemExit(f"cannot resolve revision {argument!r}; name an explicit revision")
+    return revision.revision
+
+
+def run_through_lifecycle(connection: Connection) -> None:
+    """Every production schema change: lock, verified recovery backup, migrate, validate, record."""
+    from app import schema_upgrade
+
+    schema_upgrade.run(connection, settings.database_url, _destination(), do_run_migrations)
+
+
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with an async engine."""
     connectable = create_async_engine(
@@ -99,7 +119,7 @@ async def run_async_migrations() -> None:
     )
 
     async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+        await connection.run_sync(run_through_lifecycle)
 
     await connectable.dispose()
 
@@ -114,8 +134,10 @@ def run_migrations_online() -> None:
 # test, which is the only user here: it lets the suite run `upgrade head`
 # against a throwaway schema on a connection it controls, instead of letting
 # env.py build its own engine from settings.database_url and reach for the
-# real database. Nothing sets this attribute in production, so the deploy path
-# below is unchanged.
+# real database. Nothing sets this attribute in production: every production
+# run (entrypoint, ./bioaf migrate, the update agent, an old updater's own
+# `alembic upgrade head`) builds its engine below and goes through
+# app.schema_upgrade, so none can skip the lock or the recovery backup.
 _injected_connection = config.attributes.get("connection", None)
 
 if _injected_connection is not None:

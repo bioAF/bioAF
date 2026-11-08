@@ -32,7 +32,7 @@ class EnvironmentVersionSummary(BaseModel):
     status: str
     definition_format: str
     image_uri: str | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -46,8 +46,8 @@ class EnvironmentResponse(BaseModel):
     version_count: int = 0
     latest_version: EnvironmentVersionSummary | None = None
     created_by: UserSummary | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -65,8 +65,8 @@ class EnvironmentDetailResponse(BaseModel):
     environment_type: str = "notebook"
     versions: list[EnvironmentVersionSummary]
     created_by: UserSummary | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -90,7 +90,7 @@ class VersionResponse(BaseModel):
     build_id: str | None = None
     image_uri: str | None = None
     created_by: UserSummary | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

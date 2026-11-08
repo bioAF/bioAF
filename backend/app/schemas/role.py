@@ -30,7 +30,7 @@ class RoleResponse(BaseModel):
     organization_id: int
     is_system: bool
     permissions: list[PermissionEntry] = []
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

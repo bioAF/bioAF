@@ -10,6 +10,8 @@ import { usePermissions, clearPermissionsCache } from "@/hooks/usePermissions";
 import { useComponents, invalidateComponentCache } from "@/hooks/useComponents";
 import { ToastProvider } from "@/components/shared/Toast";
 import { BootSplash } from "@/components/layout/BootSplash";
+import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
+import { maintenanceMessage } from "@/components/layout/maintenanceMessage";
 
 /**
  * Shared shell for every authenticated page. It mounts the Sidebar + Header ONCE
@@ -26,7 +28,7 @@ import { BootSplash } from "@/components/layout/BootSplash";
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { ready: backendReady, unreachable: backendUnreachable, retryNow } = useBackendReady();
+  const { ready: backendReady, unreachable: backendUnreachable, maintenance, retryNow } = useBackendReady();
   const { loading: permissionsLoading, failed: permissionsFailed } = usePermissions();
   const { loading: componentsLoading } = useComponents();
 
@@ -68,6 +70,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   // One full-screen splash while the app boots, instead of a flash of empty shell.
+  // A backend finishing an upgrade is neither loading nor failing; the splash says which it is.
+  if (!backendReady && maintenance) {
+    return <BootSplash failed message={maintenanceMessage(maintenance, "booting")} />;
+  }
   if (booting || bootFailed) {
     return (
       <BootSplash
@@ -96,6 +102,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Sidebar mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header onOpenNav={() => setNavOpen(true)} navOpen={navOpen} />
+          {maintenance && <MaintenanceBanner info={maintenance} />}
           {children}
         </div>
       </div>

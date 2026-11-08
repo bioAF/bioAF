@@ -171,7 +171,7 @@ class SampleBatchResponseBrief(BaseModel):
     id: int
     name: str
     sample_count: int = 0
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

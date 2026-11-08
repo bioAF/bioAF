@@ -551,7 +551,8 @@ async def test_execute_upgrade_accepts_calver_target(client: AsyncClient, admin_
 
 @pytest.mark.asyncio
 async def test_resolve_pending_upgrade_on_startup():
-    """Pending 'started' upgrades should be resolved when the app version matches the target."""
+    """Pending 'started' upgrades are resolved when the app version matches the target and the schema
+    upgrade is recorded complete (plan 9: version alone is not evidence; see test_upgrade_completion)."""
     from app.services.upgrade_service import UpgradeService
 
     mock_upgrade = MagicMock()
@@ -566,7 +567,12 @@ async def test_resolve_pending_upgrade_on_startup():
     mock_session.execute = AsyncMock(return_value=mock_result)
     mock_session.flush = AsyncMock()
 
-    with patch("app.services.upgrade_service.settings") as mock_settings:
+    with (
+        patch("app.services.upgrade_service.settings") as mock_settings,
+        patch("app.schema_upgrade.read_status", return_value={"status": "completed", "target_revision": "HEAD"}),
+        patch("app.schema_upgrade.code_head", return_value="HEAD"),
+        patch.object(UpgradeService, "get_update_status", AsyncMock(return_value={"status": "idle"})),
+    ):
         mock_settings.app_version = "0.6.4"
 
         await UpgradeService.resolve_pending_upgrades(mock_session)

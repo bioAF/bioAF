@@ -165,6 +165,18 @@ class Settings(BaseSettings):
     update_requests_dir: str = "/app/update-requests"
     update_status_dir: str = "/app/update-status"
 
+    # Database upgrade lifecycle (app/schema_upgrade.py). Recovery dumps go to a host bind mount
+    # (docker-compose.yml: ../backups:/app/backups) so they survive container replacement, made with
+    # the image's pinned PostgreSQL 16 client (Dockerfile.backend), never whatever is on PATH.
+    upgrade_backups_dir: str = "/app/backups"
+    upgrade_pg_bin_dir: str = "/usr/lib/postgresql/16/bin"
+    upgrade_backup_reserve_bytes: int = 512 * 1024 * 1024
+    upgrade_backup_timeout_seconds: int = 3600
+    upgrade_lock_timeout_seconds: int = 7200
+    # Set in the image (Dockerfile.backend): a dump in the container's writable layer would be lost
+    # when Compose replaces the container, so there the backups directory must be a mount.
+    upgrade_require_mounted_backups: bool = False
+
     # Bcrypt
     bcrypt_rounds: int = 12
 

@@ -22,7 +22,9 @@ class EnvironmentVersion(Base):
     build_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_uri: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     environment = relationship("Environment", back_populates="versions")
     created_by = relationship("User", lazy="selectin")

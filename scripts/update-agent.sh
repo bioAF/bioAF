@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TRIGGER_DIR="$SCRIPT_DIR/update-requests"
 STATUS_DIR="$SCRIPT_DIR/update-status"
 LOG_FILE="$SCRIPT_DIR/update-status/agent.log"
@@ -55,15 +55,23 @@ process_trigger() {
     else
         log "ERROR: Update to $version failed with exit code $exit_code"
 
-        # Write failure status so the backend can pick it up on restart
-        cat > "$STATUS_DIR/current.json" <<EOF
+        # Keep the failure the update recorded (its step and reason). Write a generic one only when
+        # the update stopped without recording why.
+        if grep -q '"status": "failed"' "$STATUS_DIR/current.json" 2>/dev/null; then
+            log "Update recorded its own failure in $STATUS_DIR/current.json"
+        else
+            cat > "$STATUS_DIR/current.json" <<EOF
 {"status": "failed", "to_version": "$version", "upgrade_id": "$upgrade_id", "error": "Update process exited with code $exit_code", "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 EOF
+        fi
     fi
 
     # Remove the processed trigger
     rm -f "$trigger_file"
 }
+
+# Sourcing the file (tests) defines the functions without starting the loop.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 log "Update agent started. Watching $TRIGGER_DIR"
 

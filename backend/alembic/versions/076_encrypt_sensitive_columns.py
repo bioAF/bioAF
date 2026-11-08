@@ -24,14 +24,32 @@ import sys
 import sqlalchemy as sa
 from alembic import op
 
+from cryptography.fernet import Fernet, MultiFernet
+
+# The installation's own keys, received at runtime like every other process; never frozen here.
 from app.config import settings, validate_encryption_keys
-from app.platform import encryption_service
-from app.platform.platform_config_service import SENSITIVE_PLATFORM_CONFIG_KEYS
 
 revision = "076"
 down_revision = "075"
 branch_labels = None
 depends_on = None
+
+# Frozen here (plan 9) as published with this migration in v0.13.0, instead of importing the
+# application's encryption service and sensitive-key set, so a later change to either cannot change
+# what an install skipping releases runs (held by tests/test_frozen_migrations.py):
+# - which platform_config keys are secrets;
+# - the transformation: Fernet with the first configured key (MultiFernet's writer);
+# - the idempotency rule: a value starting with the Fernet version prefix is already ciphertext.
+SENSITIVE_PLATFORM_CONFIG_KEYS: frozenset[str] = frozenset({"gcp_service_account_key"})
+FERNET_TOKEN_PREFIX = "gAAAA"
+
+
+def _looks_like_ciphertext(value: str | None) -> bool:
+    return bool(value) and value.startswith(FERNET_TOKEN_PREFIX)
+
+
+def _encrypter(raw_keys: str) -> MultiFernet:
+    return MultiFernet([Fernet(k.encode()) for k in validate_encryption_keys(raw_keys)])
 
 
 # (table, column, widen_to_text)
@@ -72,6 +90,7 @@ def upgrade() -> None:
             op.alter_column(table, column, type_=sa.Text(), existing_nullable=True)
 
     bind = op.get_bind()
+    fernet = _encrypter(settings.encryption_keys)
 
     # 2. Backfill each encrypted column. Encrypts every non-null row whose
     # current value does not already look like Fernet ciphertext.
@@ -80,9 +99,9 @@ def upgrade() -> None:
         for row_id, value in rows:
             if value is None:
                 continue
-            if encryption_service.looks_like_ciphertext(value):
+            if _looks_like_ciphertext(value):
                 continue
-            ciphertext = encryption_service.encrypt(value)
+            ciphertext = fernet.encrypt(value.encode("utf-8")).decode("ascii")
             bind.execute(
                 sa.text(f"UPDATE {table} SET {column} = :v WHERE id = :id"),
                 {"v": ciphertext, "id": row_id},
@@ -98,9 +117,9 @@ def upgrade() -> None:
         for row_id, _key, value in pc_rows:
             if value is None or value == "":
                 continue
-            if encryption_service.looks_like_ciphertext(value):
+            if _looks_like_ciphertext(value):
                 continue
-            ciphertext = encryption_service.encrypt(value)
+            ciphertext = fernet.encrypt(value.encode("utf-8")).decode("ascii")
             bind.execute(
                 sa.text("UPDATE platform_config SET value = :v WHERE id = :id"),
                 {"v": ciphertext, "id": row_id},
@@ -117,13 +136,14 @@ def downgrade() -> None:
     """
     _ensure_keys_configured()
     bind = op.get_bind()
+    fernet = _encrypter(settings.encryption_keys)
 
     for table, column, _widen in _ENCRYPTED_COLUMNS:
         rows = bind.execute(sa.text(f"SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL")).fetchall()
         for row_id, value in rows:
-            if value is None or not encryption_service.looks_like_ciphertext(value):
+            if value is None or not _looks_like_ciphertext(value):
                 continue
-            plaintext = encryption_service.decrypt(value)
+            plaintext = fernet.decrypt(value.encode("ascii")).decode("utf-8")
             bind.execute(
                 sa.text(f"UPDATE {table} SET {column} = :v WHERE id = :id"),
                 {"v": plaintext, "id": row_id},
@@ -136,9 +156,9 @@ def downgrade() -> None:
             )
         ).fetchall()
         for row_id, _key, value in pc_rows:
-            if value is None or not encryption_service.looks_like_ciphertext(value):
+            if value is None or not _looks_like_ciphertext(value):
                 continue
-            plaintext = encryption_service.decrypt(value)
+            plaintext = fernet.decrypt(value.encode("ascii")).decode("utf-8")
             bind.execute(
                 sa.text("UPDATE platform_config SET value = :v WHERE id = :id"),
                 {"v": plaintext, "id": row_id},

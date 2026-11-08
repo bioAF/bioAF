@@ -17,6 +17,8 @@ class PipelineRunInputFile(Base):
     )
     file_id: Mapped[int] = mapped_column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[str] = mapped_column(String(30), nullable=False, server_default="primary_input")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
 
     __table_args__ = (UniqueConstraint("pipeline_run_id", "file_id", name="uq_pipeline_run_input_file"),)

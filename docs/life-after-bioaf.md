@@ -57,4 +57,5 @@ Nightly config backups in GCS contain:
 2. **Copy files**: `gsutil -m cp -r gs://bioaf-raw-myorg-*/ ./local-backup/`
 3. **Download notebooks**: download from the GCS working or results bucket
 4. **Save pipeline configs**: copy from GCS results bucket
-5. **Run teardown**: `bioaf destroy` removes only bioAF-managed infrastructure, not your data buckets (unless explicitly requested)
+5. **Run teardown**: on **Infrastructure > Components**, use **Teardown** to remove the bioAF-managed compute stack. Your storage buckets are kept. **Destroy Storage** (offered once compute is down) empties and deletes the bioAF-managed buckets, so only use it after step 2 and only if you want that data gone.
+6. **Stop the server**: on the bioAF host, `./bioaf stop` (see [Teardown](deployment-guide.md#teardown) in the deployment guide). Delete the VM itself through your cloud provider; bioAF has no command for that.

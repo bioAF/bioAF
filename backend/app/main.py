@@ -9,6 +9,7 @@ from app.database import engine
 from app.logging_config import attach_cloud_logging, configure_logging
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.maintenance import MaintenanceMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
@@ -63,6 +64,30 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1"))
     logger.info("Database connection verified")
+
+    # The upgrade gate (plan 9). Until the database is at this code's completed head, do none of the
+    # normal work below: no startup writes, no background loops, and every API request answers 503
+    # (MaintenanceMiddleware). Diagnostics stay readable and a controlled retry
+    # (`python -m app.schema_upgrade run`) is how it is lifted; the watcher then asks for a restart.
+    from app import schema_upgrade
+
+    gate = await schema_upgrade.compatibility(engine)
+    if not gate["compatible"]:
+        app.state.maintenance = gate
+        logger.error(
+            "Database not ready for this version (%s: at %s, need %s); serving maintenance responses only. Details: %s",
+            gate["reason"],
+            gate.get("revision"),
+            gate.get("target"),
+            schema_upgrade.status_path(),
+        )
+        watcher = asyncio.create_task(_maintenance_watch(app), name="bioaf-maintenance-watch")
+        yield
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+        await engine.dispose()
+        return
+    app.state.maintenance = None
 
     # Bootstrap identity from VM metadata. cloud_provider first (the foundational
     # identity every BAL seam resolves from): explicit installer-stamped value, else
@@ -330,6 +355,31 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await engine.dispose()
     logger.info("bioAF backend shut down")
+
+
+MAINTENANCE_RECHECK_SECONDS = 15.0
+
+
+def _request_restart() -> None:
+    """Exit so the container restarts into normal startup (Compose: restart: unless-stopped)."""
+    import os
+    import signal
+
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+async def _maintenance_watch(app: FastAPI) -> None:
+    """While in maintenance, re-read the gate; once it opens, restart rather than start work mid-flight."""
+    from app import schema_upgrade
+
+    while True:
+        await asyncio.sleep(MAINTENANCE_RECHECK_SECONDS)
+        gate = await schema_upgrade.compatibility(engine)
+        if gate["compatible"]:
+            logger.info("Database upgrade completed; restarting to start normally")
+            _request_restart()
+            return
+        app.state.maintenance = gate
 
 
 async def _job_status_sync_loop():
@@ -983,10 +1033,12 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if is_dev else None,
     )
 
-    # Middleware (applied in reverse order -- last added is outermost)
+    # Middleware (applied in reverse order -- last added is outermost). Maintenance sits outside
+    # auth and rate limiting: while the upgrade gate is closed nothing reaches them or the database.
     application.add_middleware(AuthMiddleware)
     application.add_middleware(LoggingMiddleware)
     application.add_middleware(RateLimitMiddleware)
+    application.add_middleware(MaintenanceMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
 
     from app.api.router import api_router

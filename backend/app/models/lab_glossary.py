@@ -14,10 +14,12 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +33,7 @@ class LabGlossaryTerm(Base):
     __tablename__ = "lab_glossary_terms"
     __table_args__ = (
         CheckConstraint("source IN ('manual', 'import', 'llm_scan')", name="ck_lab_glossary_terms_source"),
+        Index("uq_lab_glossary_terms_org_lower_term", "organization_id", func.lower(text("term")), unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

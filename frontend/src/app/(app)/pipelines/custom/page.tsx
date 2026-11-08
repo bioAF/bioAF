@@ -18,13 +18,14 @@ import type {
   PipelineRun,
   PipelineRunListResponse,
 } from "@/lib/types";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 interface PipelineRow {
   id: number;
   name: string;
   description: string | null;
   pipeline_key: string;
-  created_at: string;
+  created_at: string | null;
   created_by_username: string | null;
   latest_version_number: number | null;
   last_run: PipelineRun | null;
@@ -206,7 +207,7 @@ export default function CustomPipelineListPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
-                      {new Date(row.created_at).toLocaleString()}
+                      {formatRecordedTime(row.created_at)}
                     </td>
                   </tr>
                 ))}

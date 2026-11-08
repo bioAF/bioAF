@@ -25,6 +25,7 @@ from app.adapters.registry import get_storage_adapter
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
+from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.schemas.sample import SampleCreate
 from app.services.file_service import FileService
 from app.services.sample_service import SampleService
@@ -168,6 +169,16 @@ class FetchngsIngestService:
         existing = set(
             (
                 await session.execute(select(Sample.external_id).where(Sample.experiment_id == run.experiment_id))
+            ).scalars()
+        )
+        # A label migration 080 split may not name a new sample either (SampleService refuses it).
+        existing |= set(
+            (
+                await session.execute(
+                    select(SampleExternalIdTransition.source_label).where(
+                        SampleExternalIdTransition.experiment_id == run.experiment_id
+                    )
+                )
             ).scalars()
         )
         fresh: list[SampleCreate] = []

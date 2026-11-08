@@ -23,6 +23,7 @@ import type {
   VersionCreateRequest,
   BuildLogsResponse,
 } from "@/lib/types";
+import { formatRecordedTime, recordedTimeValue } from "@/lib/recordedTime";
 
 type Tab = "versions" | "new-version";
 
@@ -88,7 +89,7 @@ export default function EnvironmentsPage() {
           api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
         ]);
         envs = [...nb.environments, ...wn.environments].sort(
-          (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+          (a, b) => recordedTimeValue(b.created_at) - recordedTimeValue(a.created_at)
         );
       } else {
         const data = await api.get<EnvironmentListResponse>(`/api/v1/environments?type=${filterType}`);
@@ -506,7 +507,7 @@ export default function EnvironmentsPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-gray-500">
-                            {new Date(v.created_at).toLocaleDateString()}
+                            {formatRecordedTime(v.created_at, "date")}
                           </span>
                           {canBuild && (v.status === "draft" || v.status === "failed") && (
                             <button

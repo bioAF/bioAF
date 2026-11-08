@@ -124,3 +124,50 @@ EOF
     # File must not have been amended.
     [ "$(grep -c "^BIOAF_ENCRYPTION_KEYS=" "$HOST_ENV")" -eq 1 ]
 }
+
+# ---------------------------------------------------------------------------
+# run_database_upgrade (plan 9)
+# ---------------------------------------------------------------------------
+
+stub_python() {
+    mkdir -p "$TEST_DIR/bin"
+    printf '%s\n' '#!/bin/sh' "echo \"python \$*\" >> \"$TEST_DIR/calls\"" "exit \${STUB_STATUS:-0}" > "$TEST_DIR/bin/python"
+    chmod +x "$TEST_DIR/bin/python"
+}
+
+@test "upgrade: the application server's start runs the shared database upgrade" {
+    stub_python
+    run env PATH="$TEST_DIR/bin:$PATH" BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh -c "
+        . $TEST_DIR/shim.sh
+        run_database_upgrade uvicorn app.main:app"
+    [ "$status" -eq 0 ]
+    grep -q "python -m app.schema_upgrade run" "$TEST_DIR/calls"
+}
+
+@test "upgrade: a failed upgrade still lets the server start, in maintenance" {
+    stub_python
+    run env PATH="$TEST_DIR/bin:$PATH" STUB_STATUS=1 BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh -c "
+        . $TEST_DIR/shim.sh
+        run_database_upgrade uvicorn app.main:app && echo STARTS"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"STARTS"* ]]
+    [[ "$output" == *"maintenance"* ]]
+    [[ "$output" == *"./bioaf migrate"* ]]
+}
+
+@test "upgrade: one-off commands do not run it" {
+    stub_python
+    run env PATH="$TEST_DIR/bin:$PATH" sh -c ". $TEST_DIR/shim.sh; run_database_upgrade alembic current"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_DIR/calls" ]
+}
+
+@test "upgrade: the entrypoint upgrades before starting the server, even with an old RUN_MIGRATIONS=false" {
+    stub_python
+    printf '%s\n' '#!/bin/sh' "echo \"uvicorn \$*\" >> \"$TEST_DIR/calls\"" > "$TEST_DIR/bin/uvicorn"
+    chmod +x "$TEST_DIR/bin/uvicorn"
+    run env PATH="$TEST_DIR/bin:$PATH" RUN_MIGRATIONS=false BIOAF_ENCRYPTION_KEYS=abc \
+        BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh "$ENTRYPOINT" uvicorn app.main:app
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_DIR/calls")" = "$(printf 'python -m app.schema_upgrade run\nuvicorn app.main:app')" ]
+}
