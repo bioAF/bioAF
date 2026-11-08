@@ -354,3 +354,11 @@ def test_files_that_failed_on_a_migrated_route_stay_on_the_existing_one():
     assert not (fixture_routes.MIGRATED_RESET_PILOT & fixture_routes.ROLLBACK_PILOT)
     for name in fixture_routes.KEPT_EXISTING:
         assert fixture_routes.route_for(name) == "existing"
+
+
+def test_seed_assuming_files_stay_on_the_existing_route():
+    pilots = fixture_routes.MIGRATED_RESET_PILOT | fixture_routes.ROLLBACK_PILOT
+    assert not (fixture_routes.SEED_ASSUMING & pilots)
+    assert not (fixture_routes.SEED_ASSUMING & fixture_routes.KEPT_EXISTING)
+    for name in fixture_routes.SEED_ASSUMING:
+        assert fixture_routes.route_for(name) == "existing"
