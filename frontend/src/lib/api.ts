@@ -1,9 +1,23 @@
 import { getToken, removeToken } from "./auth";
 import { clearPermissionsCache } from "@/hooks/permissionsCache";
 import { clearCapabilitiesCache } from "@/hooks/capabilitiesCache";
-import { isMaintenanceBody, reportMaintenance } from "@/lib/maintenance";
+import {
+  isMaintenanceBody,
+  reportMaintenance,
+  type MaintenanceInfo,
+} from "@/lib/maintenance";
 
-const MAINTENANCE_MESSAGE = "bioAF is finishing an upgrade. Try again in a minute.";
+const MAINTENANCE_MESSAGE =
+  "bioAF is finishing an upgrade. Try again in a minute.";
+const UPGRADE_FAILED_MESSAGE =
+  "bioAF\u2019s last upgrade failed. An administrator needs to review the failure and retry.";
+
+/** What a request refused during maintenance says: a failed upgrade is not one that is finishing. */
+function maintenanceMessage(body: MaintenanceInfo): string {
+  return body.reason === "upgrade_failed"
+    ? UPGRADE_FAILED_MESSAGE
+    : MAINTENANCE_MESSAGE;
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -83,10 +97,12 @@ async function fetchApi<T>(
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Unknown error" }));
     if (response.status === 503 && isMaintenanceBody(error)) {
       reportMaintenance(error);
-      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+      throw new ApiError(503, maintenanceMessage(error), "maintenance");
     }
     throw new ApiError(
       response.status,
@@ -103,7 +119,11 @@ async function fetchApi<T>(
   return response.json();
 }
 
-async function uploadFile<T>(path: string, file: File, extraFields?: Record<string, string>): Promise<T> {
+async function uploadFile<T>(
+  path: string,
+  file: File,
+  extraFields?: Record<string, string>,
+): Promise<T> {
   const token = getToken();
   const formData = new FormData();
   formData.append("file", file);
@@ -135,10 +155,12 @@ async function uploadFile<T>(path: string, file: File, extraFields?: Record<stri
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Unknown error" }));
     if (response.status === 503 && isMaintenanceBody(error)) {
       reportMaintenance(error);
-      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+      throw new ApiError(503, maintenanceMessage(error), "maintenance");
     }
     throw new ApiError(
       response.status,
@@ -233,9 +255,12 @@ async function uploadFileProxied<T>(
   options: SignedUploadOptions = {},
 ): Promise<T> {
   const params = new URLSearchParams();
-  if (options.projectId != null) params.set("project_id", String(options.projectId));
-  if (options.experimentId != null) params.set("experiment_id", String(options.experimentId));
-  if (options.sampleId != null) params.set("sample_ids", String(options.sampleId));
+  if (options.projectId != null)
+    params.set("project_id", String(options.projectId));
+  if (options.experimentId != null)
+    params.set("experiment_id", String(options.experimentId));
+  if (options.sampleId != null)
+    params.set("sample_ids", String(options.sampleId));
   if (options.isGlobal) params.set("is_global", "true");
   const qs = params.toString();
   const path = `/api/files/upload/simple${qs ? `?${qs}` : ""}`;
@@ -297,9 +322,7 @@ async function fetchWithRetry<T>(
       return await fetchApi<T>(path, options);
     } catch (err) {
       const isLastAttempt = attempt === retries;
-      const isRetryable =
-        !(err instanceof ApiError) ||
-        err.status >= 500;
+      const isRetryable = !(err instanceof ApiError) || err.status >= 500;
       if (isLastAttempt || !isRetryable) throw err;
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -338,10 +361,12 @@ async function downloadFile(
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Download failed" }));
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Download failed" }));
     if (response.status === 503 && isMaintenanceBody(error)) {
       reportMaintenance(error);
-      throw new ApiError(503, MAINTENANCE_MESSAGE, "maintenance");
+      throw new ApiError(503, maintenanceMessage(error), "maintenance");
     }
     throw new ApiError(
       response.status,
@@ -389,8 +414,7 @@ export const api = {
       method: "PUT",
       body: body ? JSON.stringify(body) : undefined,
     }),
-  delete: <T>(path: string) =>
-    fetchApi<T>(path, { method: "DELETE" }),
+  delete: <T>(path: string) => fetchApi<T>(path, { method: "DELETE" }),
   upload: <T>(path: string, file: File, extraFields?: Record<string, string>) =>
     uploadFile<T>(path, file, extraFields),
   uploadSigned: <T>(file: File, options?: SignedUploadOptions) =>
@@ -438,9 +462,7 @@ export async function fileContentUrl(fileId: number): Promise<string> {
   }
 }
 
-export async function plotThumbnailContentUrl(
-  plotId: number,
-): Promise<string> {
+export async function plotThumbnailContentUrl(plotId: number): Promise<string> {
   const base = `${API_URL}/api/plots/${plotId}/thumbnail/content`;
   try {
     const token = await fetchContentToken("plot_thumbnail", plotId);

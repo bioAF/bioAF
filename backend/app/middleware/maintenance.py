@@ -12,11 +12,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 RETRY_AFTER_SECONDS = "30"
 
+IN_PROGRESS_TEXT = "bioAF is finishing an upgrade and is not accepting requests yet."
+FAILED_TEXT = "bioAF\u2019s last upgrade failed. An administrator needs to review the failure and retry."
+
 
 def maintenance_body(gate: dict) -> dict:
     return {
         "status": "maintenance",
-        "detail": "bioAF is finishing an upgrade and is not accepting requests yet.",
+        "detail": FAILED_TEXT if gate.get("reason") == "upgrade_failed" else IN_PROGRESS_TEXT,
         "reason": gate.get("reason"),
         "revision": gate.get("revision"),
         "target": gate.get("target"),

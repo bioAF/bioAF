@@ -61,6 +61,18 @@ async def test_maintenance_fails_readiness_and_keeps_liveness(client, maintenanc
     assert ready.json()["status"] == "maintenance" and ready.json()["reason"] == "upgrade_failed"
 
 
+def test_the_maintenance_text_follows_the_reason():
+    from app.middleware.maintenance import maintenance_body
+
+    failed = maintenance_body(FAILED)
+    assert failed["detail"] == (
+        "bioAF\u2019s last upgrade failed. An administrator needs to review the failure and retry."
+    )
+    assert (failed["reason"], failed["upgrade"]) == ("upgrade_failed", FAILED["upgrade"])
+    running = maintenance_body({**FAILED, "reason": "upgrade_in_progress"})
+    assert running["detail"] == "bioAF is finishing an upgrade and is not accepting requests yet."
+
+
 @pytest.mark.asyncio
 async def test_readiness_fails_when_the_database_does_not_answer(client):
     from app.database import get_session
