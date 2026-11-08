@@ -116,3 +116,14 @@ def test_ci_validates_terraform_with_the_version_the_backend_image_ships(workflo
         if step.get("uses", "").startswith("hashicorp/setup-terraform")
     }
     assert versions == {shipped.group(1)}
+
+
+def test_every_run_step_fails_on_a_failure_anywhere_in_a_pipeline(workflow):
+    # GitHub's implicit shell is `bash -e {0}`, without pipefail: `pytest | tee out || status=$?` would
+    # record tee's success and pass a failed run. An explicit `bash` is `bash --noprofile --norc -eo
+    # pipefail {0}`.
+    assert workflow["defaults"]["run"]["shell"] == "bash"
+    for name, job in workflow["jobs"].items():
+        assert job.get("defaults", {}).get("run", {}).get("shell", "bash") == "bash", name
+        for step in job.get("steps", []):
+            assert step.get("shell", "bash") == "bash", (name, step.get("name"))

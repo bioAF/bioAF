@@ -11,6 +11,12 @@ concurrency:
 permissions:
   contents: read
 
+# An explicit bash runs steps with -eo pipefail. GitHub's implicit default is `bash -e` without
+# pipefail, under which `pytest | tee out || status=$?` records tee's success and a failed run passes.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # ──────────────────────────────────────────────
   # Terraform validation
@@ -172,7 +178,7 @@ jobs:
 
       - name: Run tests
         run: |
-          # The default shell is bash -eo pipefail; capture the status so the finish time is still written.
+          # The shell is bash -eo pipefail (workflow defaults); capture the status so the finish time is still written.
           # Not fail-fast (plan 8): every test runs, so a failed run still reports every failure.
           echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           status=0
