@@ -8,7 +8,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import {
   AgentReviewSummary,
   ReviewCard,
@@ -29,9 +31,7 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
   const { canAccess } = usePermissions();
   const canUse = canAccess("llm_integration", "use");
 
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [items, setItems] = useState<AgentReviewSummary[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [triggerOpen, setTriggerOpen] = useState(false);
@@ -42,37 +42,41 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
     setCollapsed(window.localStorage.getItem(collapseKey(pipelineRunId)) === "1");
   }, [pipelineRunId]);
 
-  const refresh = useCallback(async () => {
-    // Availability and the review list are fetched independently so a transient
-    // list error does not also hide the surface via a falsey "enabled".
-    try {
-      const avail = await api.get<{ enabled: boolean }>("/api/agent_reviews/availability");
-      setEnabled(avail?.enabled === true);
-    } catch {
-      setEnabled(false);
-    }
-    setError(null);
-    try {
-      const list = await api.get<ListResponse>(
-        `/api/agent_reviews?entity_type=pipeline_run&entity_id=${pipelineRunId}&filter=all`,
-      );
-      setItems(Array.isArray(list?.items) ? list.items : []);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [pipelineRunId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  // Availability and the review list are read independently so a transient
+  // list error does not also hide the surface via a falsey "enabled". A failed
+  // availability check is not a confirmed "off": it is reported, not hidden.
+  const availability = useResource(
+    "agent-review-availability",
+    useCallback(
+      () => api.get<{ enabled: boolean }>("/api/agent_reviews/availability"),
+      [],
+    ),
+    { onError: (e) => logError("checking whether AI review is available", e) },
+  );
+  const enabled = availability.data ? availability.data.enabled === true : null;
+  const availabilityFailed = availability.data === undefined && availability.error !== null;
 
   // Poll while a shown review is still running so its card resolves in place.
-  useEffect(() => {
-    const hasPending = items.some((i) => !i.dismissed && i.status === "pending");
-    if (!hasPending) return;
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, [items, refresh]);
+  const listPath = `/api/agent_reviews?entity_type=pipeline_run&entity_id=${pipelineRunId}&filter=all`;
+  const [hasPending, setHasPending] = useState(false);
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<ListResponse>(listPath, { signal }), [listPath]),
+    {
+      poll: hasPending ? 3000 : false,
+      onSuccess: (resp) =>
+        setHasPending(
+          Array.isArray(resp?.items) &&
+            resp.items.some((i) => !i.dismissed && i.status === "pending"),
+        ),
+    },
+  );
+  const items: AgentReviewSummary[] = Array.isArray(list.data?.items) ? list.data.items : [];
+  const error = triggerError ?? (list.error ? (list.error as Error).message : null);
+  const refresh = useCallback(async () => {
+    setTriggerError(null);
+    await list.refresh();
+  }, [list]);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -82,6 +86,24 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
       }
       return next;
     });
+  }
+
+  if (availabilityFailed) {
+    return (
+      <div
+        data-testid="qc-ai-review-unavailable"
+        role="status"
+        className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-center justify-between gap-3"
+      >
+        <span>
+          Whether AI review is available could not be checked. The technical detail is in the
+          application logs.
+        </span>
+        <Button variant="secondary" size="sm" onClick={() => void availability.refresh()}>
+          Retry
+        </Button>
+      </div>
+    );
   }
 
   // Hidden entirely unless AI Review is enabled for the org (active provider).
@@ -141,11 +163,11 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
           onCancel={() => setTriggerOpen(false)}
           onSubmitted={() => {
             setTriggerOpen(false);
-            refresh();
+            void refresh();
           }}
           onError={(m) => {
             setTriggerOpen(false);
-            setError(m);
+            setTriggerError(m);
           }}
         />
       )}
