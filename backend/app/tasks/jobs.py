@@ -216,16 +216,23 @@ async def _organizations(session) -> list:
     return list(result.scalars().all())
 
 
+async def _organization_ids(session) -> list[int]:
+    """Ids, not instances: a rollback expires instances, and reading one afterwards would load."""
+    return [org.id for org in await _organizations(session)]
+
+
 async def _storage_stats_refresh(session) -> None:
     """Refresh storage stats per organization, committing each."""
     from app.services.storage_service import StorageService
 
-    for org in await _organizations(session):
+    for org_id in await _organization_ids(session):
         try:
-            await StorageService.refresh_storage_stats(session, org.id)
+            await StorageService.refresh_storage_stats(session, org_id)
             await session.commit()
         except Exception as e:
-            logger.warning("Storage refresh failed for org %d: %s", org.id, e)
+            # A failed flush leaves the session unusable; the next organization needs a clean one.
+            await session.rollback()
+            logger.warning("Storage refresh failed for org %d: %s", org_id, e)
 
 
 async def _backup_health_check(session) -> None:
@@ -361,25 +368,25 @@ async def cost_billing_sync_once() -> None:
     # against the same UTC usage month even if the pass runs past midnight.
     period = billing_period()
     async with async_session_factory() as session:
-        result = await session.execute(select(Organization))
-        orgs = list(result.scalars().all())
-        for org in orgs:
+        result = await session.execute(select(Organization.id))
+        # Ids, not instances: the rollback below expires instances, and reading one would load.
+        for org_id in list(result.scalars().all()):
             try:
-                report = await CostService.sync_billing_data(session, org.id, period)
+                report = await CostService.sync_billing_data(session, org_id, period)
                 if report is not None and report.status != "imported":
                     logger.warning(
                         "Billing export import %s for org %d (usage %s to %s, end exclusive); existing cost records kept",
                         report.status,
-                        org.id,
+                        org_id,
                         report.usage_start,
                         report.usage_end,
                     )
-                await CostService.check_budget_thresholds(session, org.id, period)
+                await CostService.check_budget_thresholds(session, org_id, period)
                 # Per org, so one org's failure cannot discard another's sync.
                 await session.commit()
             except Exception as e:
                 await session.rollback()
-                logger.warning("Billing sync failed for org %d: %s", org.id, e)
+                logger.warning("Billing sync failed for org %d: %s", org_id, e)
 
 
 def _nf_core_registry_refresh() -> Iteration:
