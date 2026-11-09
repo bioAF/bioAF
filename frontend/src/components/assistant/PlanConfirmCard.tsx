@@ -69,6 +69,44 @@ function StepArgs({ tool, args }: { tool: string; args: Record<string, unknown> 
   );
 }
 
+/**
+ * Where a plan stands. Undefined means still proposed: the only state that can be confirmed or
+ * cancelled. "failed" means confirmation stopped partway (completed steps were kept);
+ * "executing" means it is being run now; "closed" covers any other server status.
+ */
+export type PlanState = "approved" | "cancelled" | "failed" | "executing" | "closed";
+
+/** Map the server's plan status to the card's state. */
+export function planStateFromStatus(status: string): PlanState | undefined {
+  switch (status) {
+    case "proposed":
+      return undefined;
+    case "approved":
+    case "executed":
+      return "approved";
+    case "failed":
+    case "executing":
+      return status;
+    case "declined":
+      return "cancelled";
+    default:
+      return "closed";
+  }
+}
+
+function stepOutcome(step: AssistantPlanStep, resolved: PlanState | undefined): string | null {
+  if (step.outcome === "failed") return "Failed";
+  if (step.outcome === "not_run") return "Not run";
+  if (step.result !== undefined || resolved === "approved") return "Done";
+  return null;
+}
+
+const OUTCOME_STYLES: Record<string, string> = {
+  Done: "text-green-700",
+  Failed: "text-red-700",
+  "Not run": "text-gray-500",
+};
+
 export function PlanConfirmCard({
   steps,
   busy,
@@ -78,7 +116,7 @@ export function PlanConfirmCard({
 }: {
   steps: AssistantPlanStep[];
   busy: boolean;
-  resolved?: "approved" | "cancelled";
+  resolved?: PlanState;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -119,20 +157,47 @@ export function PlanConfirmCard({
       )}
 
       <div className="space-y-3">
-        {steps.map((step, i) => (
-          <div key={i} className="bg-white rounded border border-amber-200 p-3">
-            <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-              {steps.length > 1 && <span className="text-amber-700">{`Step ${i + 1}: `}</span>}
-              {STEP_TITLES[step.tool] ?? step.tool}
-            </p>
-            <StepArgs tool={step.tool} args={step.args} />
-          </div>
-        ))}
+        {steps.map((step, i) => {
+          const outcome = stepOutcome(step, resolved);
+          return (
+            <div key={i} className="bg-white rounded border border-amber-200 p-3">
+              <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+                {steps.length > 1 && <span className="text-amber-700">{`Step ${i + 1}: `}</span>}
+                {STEP_TITLES[step.tool] ?? step.tool}
+                {outcome && (
+                  <span
+                    className={`ml-2 normal-case font-medium ${OUTCOME_STYLES[outcome]}`}
+                    data-testid="plan-step-outcome"
+                  >
+                    {outcome}
+                  </span>
+                )}
+              </p>
+              <StepArgs tool={step.tool} args={step.args} />
+            </div>
+          );
+        })}
       </div>
 
       {resolved === "approved" && (
         <p className="mt-3 text-sm font-medium text-green-700" data-testid="plan-approved">
           Approved.
+        </p>
+      )}
+      {resolved === "failed" && (
+        <p className="mt-3 text-sm font-medium text-red-700" data-testid="plan-failed">
+          This plan stopped partway. Steps marked Done ran and were kept; the failed step and any
+          steps after it did not run.
+        </p>
+      )}
+      {resolved === "executing" && (
+        <p className="mt-3 text-sm font-medium text-amber-800" data-testid="plan-executing">
+          In progress. Reopen this conversation later to see the outcome.
+        </p>
+      )}
+      {resolved === "closed" && (
+        <p className="mt-3 text-sm font-medium text-gray-500" data-testid="plan-closed">
+          This plan is no longer pending.
         </p>
       )}
       {resolved === "cancelled" && (
