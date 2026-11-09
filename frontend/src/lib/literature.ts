@@ -435,12 +435,12 @@ export const literature = {
     sources?: LiteratureSourceName[];
     max_per_source?: number;
   }) => api.post<SearchSummary>("/api/literature/searches", body),
-  listSearches: () =>
-    api.get<{ items: SearchSummary[]; total: number }>("/api/literature/searches"),
+  listSearches: (options: { signal?: AbortSignal } = {}) =>
+    api.get<{ items: SearchSummary[]; total: number }>("/api/literature/searches", options),
   getSearch: (id: number) =>
     api.get<SearchSummary>(`/api/literature/searches/${id}`),
-  getSearchResults: (id: number) =>
-    api.get<PaperListResponse>(`/api/literature/searches/${id}/results`),
+  getSearchResults: (id: number, options: { signal?: AbortSignal } = {}) =>
+    api.get<PaperListResponse>(`/api/literature/searches/${id}/results`, options),
 
   runLitReview: (experimentId: number, body?: {
     max_recommendations?: number;

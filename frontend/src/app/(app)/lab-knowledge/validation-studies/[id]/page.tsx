@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import Link from "next/link";
@@ -91,7 +91,6 @@ export default function ValidationStudyPage() {
 
   // While the driver is advancing the study on its own, poll so the stage/evidence stay current.
   // A gate action's answer replaces the study locally and supersedes a poll read in flight.
-  const [advancing, setAdvancing] = useState(false);
   const resource = useResource(
     `/api/validation-studies/${id}`,
     useCallback(
@@ -99,13 +98,11 @@ export default function ValidationStudyPage() {
       [id],
     ),
     {
-      poll: advancing ? 5000 : false,
+      poll: ({ data }) => (data && ADVANCING_STATES.has(data.state) ? 5000 : false),
       onError: (e) => logError(`loading validation study ${id}`, e),
     },
   );
   const study = resource.data ?? null;
-  const nowAdvancing = !!study && ADVANCING_STATES.has(study.state);
-  if (nowAdvancing !== advancing) setAdvancing(nowAdvancing);
   const loading = resource.loading;
   const setStudy = resource.mutate;
   const refresh = resource.refresh;

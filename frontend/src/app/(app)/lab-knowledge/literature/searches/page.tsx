@@ -33,7 +33,7 @@ export default function LiteratureSearchesPage() {
 
   const list = useResource(
     "literature-searches",
-    useCallback(() => literature.listSearches(), []),
+    useCallback((signal: AbortSignal) => literature.listSearches({ signal }), []),
     { onError: (e) => logError("loading searches", e) },
   );
   const searches: SearchSummary[] = list.data?.items ?? [];
@@ -48,7 +48,7 @@ export default function LiteratureSearchesPage() {
   const results = useResource(
     activeSearchId === null || activeSearchId === watchingId ? null : `search-results:${activeSearchId}`,
     useCallback(
-      () => literature.getSearchResults(activeSearchId as number),
+      (signal: AbortSignal) => literature.getSearchResults(activeSearchId as number, { signal }),
       [activeSearchId],
     ),
     { onError: (e) => logError(`loading results for search ${activeSearchId}`, e) },

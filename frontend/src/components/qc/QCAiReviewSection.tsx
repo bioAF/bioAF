@@ -48,7 +48,7 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
   const availability = useResource(
     "agent-review-availability",
     useCallback(
-      () => api.get<{ enabled: boolean }>("/api/agent_reviews/availability"),
+      (signal: AbortSignal) => api.get<{ enabled: boolean }>("/api/agent_reviews/availability", { signal }),
       [],
     ),
     { onError: (e) => logError("checking whether AI review is available", e) },
@@ -58,17 +58,14 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
 
   // Poll while a shown review is still running so its card resolves in place.
   const listPath = `/api/agent_reviews?entity_type=pipeline_run&entity_id=${pipelineRunId}&filter=all`;
-  const [hasPending, setHasPending] = useState(false);
   const list = useResource(
     listPath,
     useCallback((signal: AbortSignal) => api.get<ListResponse>(listPath, { signal }), [listPath]),
     {
-      poll: hasPending ? 3000 : false,
-      onSuccess: (resp) =>
-        setHasPending(
-          Array.isArray(resp?.items) &&
-            resp.items.some((i) => !i.dismissed && i.status === "pending"),
-        ),
+      poll: ({ data }) =>
+        Array.isArray(data?.items) && data.items.some((i) => !i.dismissed && i.status === "pending")
+          ? 3000
+          : false,
     },
   );
   const items: AgentReviewSummary[] = Array.isArray(list.data?.items) ? list.data.items : [];

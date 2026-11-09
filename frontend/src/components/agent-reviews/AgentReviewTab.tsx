@@ -58,14 +58,12 @@ export function AgentReviewTab({
 
   // Keyed by entity and filter: only the current filter's answer is shown.
   const path = `/api/agent_reviews?entity_type=${entityType}&entity_id=${entityId}&filter=${filter}`;
-  const [hasPending, setHasPending] = useState(false);
   const list = useResource(
     path,
     useCallback((signal: AbortSignal) => api.get<ListResponse>(path, { signal }), [path]),
     {
       // Poll while any item is still pending so the card resolves without a reload.
-      poll: hasPending ? 3000 : false,
-      onSuccess: (resp) => setHasPending(resp.items.some((i) => i.status === "pending")),
+      poll: ({ data }) => (data?.items.some((i) => i.status === "pending") ? 3000 : false),
     },
   );
   const items: AgentReviewSummary[] = list.data?.items ?? [];
