@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -103,7 +104,6 @@ export default function InfraBackupPage() {
     requirePhrase?: string;
     onConfirm: () => void;
   }>({ open: false, title: "", message: "", confirmLabel: "Confirm", variant: "default", onConfirm: () => {} });
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -139,23 +139,26 @@ export default function InfraBackupPage() {
     loadData();
   }, [router, permLoading, canAccess, loadData]);
 
-  // Poll restore status while active
-  useEffect(() => {
-    if (restoreStatus.active) {
-      pollRef.current = setInterval(async () => {
-        try {
-          const rStatus = await api.get<RestoreStatus>("/api/backups/restore/status");
-          setRestoreStatus(rStatus);
-          if (!rStatus.active) {
-            if (pollRef.current) clearInterval(pollRef.current);
-            setActionMessage("Restore review expired. Reverted to original database.");
-            await loadData();
-          }
-        } catch { /* ignore */ }
-      }, 30000);
-      return () => { if (pollRef.current) clearInterval(pollRef.current); };
-    }
-  }, [restoreStatus.active, loadData]);
+  // Poll restore status while a review is active. Each read starts after the previous one
+  // settles; accepting or rejecting ends the review, which drops any read still in flight.
+  const restorePoll = useResource(
+    restoreStatus.active ? "restore-status" : null,
+    useCallback(
+      (signal: AbortSignal) => api.get<RestoreStatus>("/api/backups/restore/status", { signal }),
+      [],
+    ),
+    {
+      poll: 30000,
+      onSuccess: (rStatus) => {
+        setRestoreStatus(rStatus);
+        if (!rStatus.active) {
+          setActionMessage("Restore review expired. Reverted to original database.");
+          void loadData();
+        }
+      },
+      onError: (e) => logError("reading restore review status", e),
+    },
+  );
 
   const handleConfigRestore = () => {
     // The old dialog said only "Are you sure you want to initiate a config
@@ -380,6 +383,11 @@ export default function InfraBackupPage() {
                 <p className="text-xs text-amber-700 mt-1">
                   Browse the application to verify data. Accept to make permanent, or reject to revert.
                 </p>
+                {restorePoll.error !== null && (
+                  <p className="text-xs text-red-700 mt-1" role="status">
+                    Restore status could not be refreshed, so the time shown may be out of date. bioAF keeps checking.
+                  </p>
+                )}
               </div>
               {canAccess("backups", "restore") && (
                 <div className="flex gap-2 ml-4">
