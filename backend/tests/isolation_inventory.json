@@ -3297,6 +3297,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_runtime.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "async_sessionmaker",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_s3_storage_adapter.py": {
    "category": "no_database",
    "evidence": [],
