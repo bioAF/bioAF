@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/shared/Toast";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -57,43 +58,48 @@ export default function SettingsInfoPage() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateError, setUpdateError] = useState("");
   const [now, setNow] = useState(() => Date.now());
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const canDeploy = canAccess("infrastructure", "deploy");
 
-  const pollUpdateStatus = useCallback(async () => {
-    try {
-      const status = await api.get<UpdateStatus>("/api/upgrades/status");
-      setUpdateStatus(status);
+  // Upgrade status is polled while an upgrade runs: every 3 s after the previous read
+  // settles, until a terminal status. Failed reads are expected while the backend restarts,
+  // so polling continues through them; the page says so instead of swallowing them.
+  const onUpgradeStatus = useCallback(async (status: UpdateStatus) => {
+    setUpdateStatus(status);
+    if (status.status === "completed" || status.status === "failed") {
+      // Stop polling
+      setUpdating(false);
 
-      if (status.status === "completed" || status.status === "failed") {
-        // Stop polling
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        setUpdating(false);
-
-        if (status.status === "failed") {
-          setUpdateError(status.error || "Update failed");
-        }
-
-        // Refresh version info and history
-        try {
-          const [version, history] = await Promise.all([
-            api.get<UpdateCheck>("/api/upgrades/check"),
-            api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
-          ]);
-          setUpdateCheck(version);
-          setUpgradeHistory(history.upgrades);
-        } catch {
-          // Backend may still be restarting
-        }
+      if (status.status === "failed") {
+        setUpdateError(status.error || "Update failed");
       }
-    } catch {
-      // Backend may be down during update -- keep polling
+
+      // Refresh version info and history
+      try {
+        const [version, history] = await Promise.all([
+          api.get<UpdateCheck>("/api/upgrades/check"),
+          api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
+        ]);
+        setUpdateCheck(version);
+        setUpgradeHistory(history.upgrades);
+      } catch {
+        // Backend may still be restarting
+      }
     }
   }, []);
+
+  const upgradePoll = useResource(
+    updating ? "upgrade-status" : null,
+    useCallback(
+      (signal: AbortSignal) => api.get<UpdateStatus>("/api/upgrades/status", { signal }),
+      [],
+    ),
+    {
+      poll: 3000,
+      onSuccess: (status) => void onUpgradeStatus(status),
+      onError: (e) => logError("reading upgrade status (expected while bioAF restarts)", e),
+    },
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -107,11 +113,9 @@ export default function SettingsInfoPage() {
         setUpgradeHistory(history.upgrades);
 
         if (status.status === "in_progress") {
+          // Re-attach to an upgrade already running; `updating` starts the status poll.
           setUpdateStatus(status);
           setUpdating(true);
-          if (!pollRef.current) {
-            pollRef.current = setInterval(pollUpdateStatus, 3000);
-          }
         }
       } catch (e) {
         // `updateCheck` stays null on any failure, and the render turns a null
@@ -123,13 +127,7 @@ export default function SettingsInfoPage() {
       }
     };
     load();
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-      }
-    };
-  }, [pollUpdateStatus]);
+  }, []);
 
   // Tick once per second while showing the reboot countdown
   useEffect(() => {
@@ -173,8 +171,6 @@ export default function SettingsInfoPage() {
         target_version: updateCheck.latest_version,
       });
 
-      // Start polling for status
-      pollRef.current = setInterval(pollUpdateStatus, 3000);
     } catch (e) {
       setUpdating(false);
       setUpdateError(e instanceof Error ? e.message : "Failed to start update");
@@ -245,6 +241,11 @@ export default function SettingsInfoPage() {
                 {updateStatus.step && (
                   <p className="text-sm text-amber-700 ml-7">
                     {STEP_LABELS[updateStatus.step] || updateStatus.step}...
+                  </p>
+                )}
+                {upgradePoll.error !== null && (
+                  <p data-testid="upgrade-status-unavailable" role="status" className="text-xs text-amber-700 ml-7 mt-1">
+                    Upgrade status could not be read, which is expected while bioAF restarts. Still checking.
                   </p>
                 )}
                 {updateStatus.step === "warn" && rebootCountdown !== null ? (
