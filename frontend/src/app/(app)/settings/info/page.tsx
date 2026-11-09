@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -64,11 +64,26 @@ export default function SettingsInfoPage() {
   // Upgrade status is polled while an upgrade runs: every 3 s after the previous read
   // settles, until a terminal status. Failed reads are expected while the backend restarts,
   // so polling continues through them; the page says so instead of swallowing them.
+  // Observation starts only once /execute has succeeded (or on re-attach to a running upgrade),
+  // so a status read can never answer for an upgrade that has not been started yet.
+  const [watching, setWatching] = useState(false);
+  // The last status seen before this upgrade began. Until the host agent picks the new upgrade
+  // up it can still report the previous one's terminal status, which is not this one's outcome.
+  const previousStatusRef = useRef<UpdateStatus | null>(null);
+
   const onUpgradeStatus = useCallback(async (status: UpdateStatus) => {
+    const previous = previousStatusRef.current;
+    const isPrevious =
+      previous !== null &&
+      status.status === previous.status &&
+      status.to_version === previous.to_version &&
+      status.started_at === previous.started_at;
+    if (isPrevious) return;
     setUpdateStatus(status);
     if (status.status === "completed" || status.status === "failed") {
       // Stop polling
       setUpdating(false);
+      setWatching(false);
 
       if (status.status === "failed") {
         setUpdateError(status.error || "Update failed");
@@ -89,7 +104,7 @@ export default function SettingsInfoPage() {
   }, []);
 
   const upgradePoll = useResource(
-    updating ? "upgrade-status" : null,
+    updating && watching ? "upgrade-status" : null,
     useCallback(
       (signal: AbortSignal) => api.get<UpdateStatus>("/api/upgrades/status", { signal }),
       [],
@@ -113,9 +128,12 @@ export default function SettingsInfoPage() {
         setUpgradeHistory(history.upgrades);
 
         if (status.status === "in_progress") {
-          // Re-attach to an upgrade already running; `updating` starts the status poll.
+          // Re-attach to an upgrade already running; this starts the status poll.
           setUpdateStatus(status);
           setUpdating(true);
+          setWatching(true);
+        } else {
+          previousStatusRef.current = status;
         }
       } catch (e) {
         // `updateCheck` stays null on any failure, and the render turns a null
@@ -163,14 +181,16 @@ export default function SettingsInfoPage() {
     if (!updateCheck?.latest_version) return;
 
     setUpdating(true);
+    setWatching(false);
     setUpdateError("");
+    if (updateStatus) previousStatusRef.current = updateStatus;
     setUpdateStatus({ status: "in_progress", step: "starting" });
 
     try {
       await api.post("/api/upgrades/execute", {
         target_version: updateCheck.latest_version,
       });
-
+      setWatching(true);
     } catch (e) {
       setUpdating(false);
       setUpdateError(e instanceof Error ? e.message : "Failed to start update");
