@@ -15,7 +15,6 @@ from app.tasks.periodic import run_periodic
 pytestmark = pytest.mark.asyncio
 
 
-
 def _one_iteration():
     calls = {"n": 0}
 
@@ -52,9 +51,7 @@ async def test_one_organizations_failed_storage_refresh_does_not_poison_the_next
     assert row is not None
 
 
-async def test_one_organizations_failed_billing_sync_is_reported_and_the_next_still_syncs(
-    session, monkeypatch, caplog
-):
+async def test_one_organizations_failed_billing_sync_is_reported_and_the_next_still_syncs(session, monkeypatch, caplog):
     import logging
 
     from app.services.cost_service import CostService

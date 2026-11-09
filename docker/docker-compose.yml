@@ -20,6 +20,10 @@ services:
 
   backend:
     image: ghcr.io/bioaf/bioaf-backend:${BIOAF_IMAGE_TAG:-latest}
+    # Hard stop for the backend's bounded shutdown (plan 14): uvicorn request grace 10 s, then the
+    # lifespan's drain 10 s, cancellation 20 s, and resource cleanup 5 s. Compose's default 10 s
+    # would SIGKILL a Terraform stop (10 s TERM + 5 s KILL) mid-cleanup. A maximum, not a delay.
+    stop_grace_period: 60s
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
