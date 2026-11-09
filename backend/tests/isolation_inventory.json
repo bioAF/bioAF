@@ -3764,9 +3764,11 @@
    "route": "none"
   },
   "test_shutdown_budget.py": {
-   "category": "no_database",
-   "evidence": [],
-   "route": "none"
+   "category": "real_commit",
+   "evidence": [
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_shutdown_process.py": {
    "category": "no_database",
