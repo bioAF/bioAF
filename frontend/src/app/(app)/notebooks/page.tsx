@@ -440,6 +440,11 @@ export default function NotebooksPage() {
                 )}
                 {" -- "}this one-time setup can take up to an hour. Sessions launched now may fail until it completes.
               </p>
+              {buildStatusResource.stale && (
+                <p data-testid="build-status-unavailable" role="status" className="text-xs text-amber-800 mt-1">
+                  The build status could not be read, so what is shown may be out of date. bioAF keeps checking.
+                </p>
+              )}
             </div>
           </div>
         </div>

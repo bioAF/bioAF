@@ -113,8 +113,8 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const fetchTerms = termList.refresh;
 
   // Refreshed after imports, scans, and reviews; a later refresh supersedes an
-  // earlier one still in flight. A failure is non-critical: the banner keeps its
-  // last count.
+  // earlier one still in flight. A failure keeps the last count and is said, so an
+  // unread count never reads as "nothing awaiting review".
   const pending = useResource(
     "glossary-pending",
     useCallback(
@@ -125,6 +125,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
         ),
       [],
     ),
+    { onError: (e) => logError("reading the glossary terms awaiting review", e) },
   );
   const pendingCount = pending.data?.pending_review_count ?? 0;
   const pendingJobIds = pending.data?.job_ids ?? [];
@@ -139,9 +140,9 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
 
   // Poll a dispatched AI scan until it finishes so the "scan is running" banner
   // clears and the freshly proposed terms surface in the pending-review banner.
-  // A failed read is transient: the next tick reads again.
+  // A failed read is said, and the next tick reads again.
   const scanPath = activeScanJobId === null ? null : `${API_BASE}/glossary/scan/${activeScanJobId}`;
-  useResource(
+  const scanPoll = useResource(
     scanPath,
     useCallback(
       (signal: AbortSignal) => api.get<ScanJob>(scanPath as string, { signal }),
@@ -158,6 +159,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           setScanError("The AI glossary scan could not be completed.");
         }
       },
+      onError: (e) => logError(`reading AI glossary scan ${activeScanJobId}`, e),
     },
   );
 
@@ -229,6 +231,17 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           />
           AI glossary scan is running. Proposed terms will appear here for your review when it
           finishes.
+          {scanPoll.error !== null && (
+            <span data-testid="scan-status-unavailable" role="status" className="text-amber-700">
+              Its status could not be read; bioAF keeps checking.
+            </span>
+          )}
+        </div>
+      )}
+
+      {canManage && pending.error !== null && (
+        <div data-testid="pending-count-unavailable" role="status" className="text-amber-700 text-sm mb-3">
+          Whether proposed terms are awaiting review could not be checked.
         </div>
       )}
 

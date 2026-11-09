@@ -26,6 +26,10 @@ import type {
 
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
+function isNotFound(error: unknown): boolean {
+  return (error as { status?: unknown } | null)?.status === 404;
+}
+
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return NOT_SET;
   if (bytes < 1024) return `${bytes} B`;
@@ -82,7 +86,7 @@ export default function DataReferenceDetailPage() {
     reference?.status === "uploading" && !importWatchStopped
       ? `/api/references/${id}/import-status`
       : null;
-  useResource(
+  const importPoll = useResource(
     importStatusPath,
     useCallback(
       (signal: AbortSignal) =>
@@ -100,8 +104,14 @@ export default function DataReferenceDetailPage() {
           void loadReference().then(() => setImportWatchStopped(false));
         }
       },
+      onError: (e) => {
+        if (!isNotFound(e)) logError(`reading import progress for reference ${id}`, e);
+      },
     },
   );
+  // A 404 means the progress row does not exist yet. Any other failure is said, because the
+  // progress shown is then only the last known state.
+  const importStatusUnavailable = importPoll.error !== null && !isNotFound(importPoll.error);
 
   async function handleCancelOrDelete() {
     setCancelling(true);
@@ -338,6 +348,11 @@ export default function DataReferenceDetailPage() {
               )}
             </div>
           </div>
+          {importStatusUnavailable && (
+            <p data-testid="import-status-unavailable" role="status" className="text-sm text-amber-700">
+              Import progress could not be read. What is shown is the last known state; bioAF keeps checking.
+            </p>
+          )}
           {importStatus && (
             <>
               <div className="text-sm text-blue-900">

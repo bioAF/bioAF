@@ -51,7 +51,11 @@ export default function LiteratureSearchesPage() {
       () => literature.getSearchResults(activeSearchId as number),
       [activeSearchId],
     ),
+    { onError: (e) => logError(`loading results for search ${activeSearchId}`, e) },
   );
+  // A failed load is said; a failed refresh (e.g. after Add to Library) keeps the results
+  // visible but marked out of date, since their Add buttons may no longer be right.
+  const resultsError = results.error && !results.stale ? loadFailureMessage("Search results") : null;
   const activeResults: Paper[] = results.data?.items ?? [];
 
   // The search being watched, if any. A new submission, Stop watching, or leaving
@@ -234,6 +238,25 @@ export default function LiteratureSearchesPage() {
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {resultsError && (
+          <div
+            data-testid="search-results-error"
+            role="status"
+            className="mt-6 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-center justify-between gap-3"
+          >
+            <span>{resultsError}</span>
+            <Button variant="secondary" size="sm" onClick={() => void results.refresh()}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {results.stale && (
+          <div className="mt-6">
+            <StaleNotice what="Search results" onRetry={() => void results.refresh()} />
           </div>
         )}
 
