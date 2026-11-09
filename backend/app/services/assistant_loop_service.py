@@ -26,7 +26,7 @@ from app.services.assistant_availability_service import AssistantAvailabilitySer
 from app.services.assistant_tool_catalog import list_tools
 from app.services.assistant_tool_service import AssistantToolService, ToolExecutionResult
 from app.services.assistant_untrusted import UNTRUSTED_BEGIN, UNTRUSTED_END
-from app.services.llm_provider_clients import get_client
+from app.services.llm_provider_clients import ProviderError, get_client
 from app.services.llm_provider_clients.tool_use import ToolUseResult
 
 SubmitFn = Callable[[list, list], Awaitable[ToolUseResult]]
@@ -161,13 +161,19 @@ class AssistantLoopService:
             provider, model = active.provider, active.model
 
             async def _provider_submit(messages: list, tools: list) -> ToolUseResult:
-                return await client.submit_with_tools(
-                    messages=messages,
-                    tools=tools,
-                    model=active.model,
-                    api_key=active.api_key,
-                    system=ASSISTANT_SYSTEM_PROMPT,
-                )
+                try:
+                    return await client.submit_with_tools(
+                        messages=messages,
+                        tools=tools,
+                        model=active.model,
+                        api_key=active.api_key,
+                        system=ASSISTANT_SYSTEM_PROMPT,
+                    )
+                except ProviderError as exc:
+                    # Expected provider failure: propagate it (the API boundary translates it) after
+                    # naming the provider for diagnostics. Nothing here records an answer.
+                    exc.provider = exc.provider or active.provider
+                    raise
 
             submit_fn = _provider_submit
 

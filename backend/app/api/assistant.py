@@ -9,6 +9,7 @@ boundary, and the confirm UI warns when an action will spend compute.
 """
 
 import json
+import logging
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import cast
@@ -33,9 +34,11 @@ from app.services.assistant_availability_service import AssistantAvailabilitySer
 from app.services.assistant_history import LINK_KEY, link_call, public_plan_steps, public_tool_calls
 from app.services.assistant_loop_service import AssistantLoopService
 from app.services.assistant_tool_catalog import get_tool
+from app.services.llm_provider_clients import ProviderError
 from app.services.pipeline_run_service import PipelineRunService
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
+logger = logging.getLogger("bioaf.assistant")
 
 
 class AvailabilityResponse(BaseModel):
@@ -295,6 +298,50 @@ async def get_conversation_transcript(
     )
 
 
+_LLM_SETTINGS = "Settings > Integrations > LLMs"
+_PROVIDER_UNAVAILABLE = (502, "The AI provider is temporarily unavailable. Try again in a few minutes.")
+# Fixed user-facing text per ProviderError class. The provider's own message is never shown.
+_PROVIDER_ERRORS: dict[str, tuple[int, str]] = {
+    "auth": (
+        502,
+        f"The AI provider did not accept bioAF's credentials. An administrator should check the API key in "
+        f"{_LLM_SETTINGS}.",
+    ),
+    "other": (
+        502,
+        f"The AI provider rejected the assistant's request. An administrator should check the provider and model "
+        f"configuration in {_LLM_SETTINGS}.",
+    ),
+    "rate_limit": (429, "The AI provider is limiting requests right now. Wait a minute and try again."),
+    "server": _PROVIDER_UNAVAILABLE,
+    "transport": _PROVIDER_UNAVAILABLE,
+    "incomplete": (502, "The AI provider stopped before finishing its response. Try again, or ask a shorter question."),
+    "parse": (502, "The AI provider returned a response the assistant could not use. Try again."),
+}
+_PROVIDER_TIMEOUT = (504, "The AI provider did not respond in time. Try again.")
+
+
+def _provider_http_error(exc: ProviderError, *, conversation_id: int) -> HTTPException:
+    """Translate an expected provider failure into a controlled error. Messages, tool results, and
+    plans committed earlier in the turn stay as they are; nothing is claimed as answered. Logs carry
+    only allowlisted metadata, never the provider's message."""
+    logger.warning(
+        "assistant provider request failed: conversation_id=%s provider=%s error_class=%s upstream_status=%s "
+        "upstream_code=%s timeout=%s",
+        conversation_id,
+        exc.provider or "unknown",
+        exc.error_class,
+        exc.upstream_status if exc.upstream_status is not None else "none",
+        exc.upstream_code or "none",
+        str(exc.timeout).lower(),
+    )
+    if exc.timeout:
+        code, detail = _PROVIDER_TIMEOUT
+    else:
+        code, detail = _PROVIDER_ERRORS.get(exc.error_class, _PROVIDER_ERRORS["other"])
+    return HTTPException(status_code=code, detail=detail)
+
+
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
 async def send_message(
     conversation_id: int,
@@ -303,12 +350,15 @@ async def send_message(
     session: AsyncSession = Depends(get_session),
 ):
     conversation = await _owned_conversation(session, conversation_id, current_user)
-    result = await AssistantLoopService.run_turn(
-        session,
-        conversation=conversation,
-        role_id=int(current_user["role_id"]),
-        user_text=data.text,
-    )
+    try:
+        result = await AssistantLoopService.run_turn(
+            session,
+            conversation=conversation,
+            role_id=int(current_user["role_id"]),
+            user_text=data.text,
+        )
+    except ProviderError as exc:
+        raise _provider_http_error(exc, conversation_id=conversation.id) from exc
     return MessageResponse(
         status=result.status,
         text=result.text,
