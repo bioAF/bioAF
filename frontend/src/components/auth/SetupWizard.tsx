@@ -1,7 +1,7 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useResource } from "@/hooks/useResource";
 import { logError } from "@/lib/errorReporting";
@@ -236,11 +236,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [selectedComponents, setSelectedComponents] = useState<string[]>(DEFAULT_SELECTED);
   const [componentsLoading, setComponentsLoading] = useState(false);
   const [componentsSubmitting, setComponentsSubmitting] = useState(false);
-
-  // Step 8: Deploying status snapshot
-  const [deployStatus, setDeployStatus] = useState<
-    { key: string; name: string; status: string }[]
-  >([]);
 
   // Learn the install's cloud as early as possible (pre-auth) so the
   // credentials step + stack labels match. bootstrap/status is the
@@ -684,18 +679,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         }>("/api/components", { signal }),
       [],
     ),
-    {
-      poll: 8000,
-      onSuccess: (data) => {
-        const selected = new Set(selectedComponents);
-        setDeployStatus(
-          data.components
-            .filter((c) => selected.has(c.key))
-            .map((c) => ({ key: c.key, name: c.name, status: c.status }))
-        );
-      },
-    },
+    { poll: 8000 },
   );
+  // The selected components' statuses from the latest answer (kept through a failed refresh).
+  const deployStatus = useMemo(() => {
+    const selected = new Set(selectedComponents);
+    return (deployPoll.data?.components ?? [])
+      .filter((c) => selected.has(c.key))
+      .map((c) => ({ key: c.key, name: c.name, status: c.status }));
+  }, [deployPoll.data, selectedComponents]);
 
   // Fetch the component catalog when entering step 7 so the picker has data.
   // Hits the same endpoint the post-install components page uses so the two

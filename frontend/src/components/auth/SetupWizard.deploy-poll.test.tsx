@@ -120,3 +120,40 @@ test("a failed component status read is said, and the next read recovers", async
   await settle(() => componentReads[1].resolve({ components: [] }));
   expect(screen.queryByTestId("deploy-status-unavailable")).not.toBeInTheDocument();
 });
+
+test("the statuses shown are the current read's; a failed refresh keeps them, marked unavailable", async () => {
+  jest.useFakeTimers();
+  await toDeployingStep();
+  await waitFor(() => expect(componentReads.length).toBe(1));
+
+  await settle(() =>
+    componentReads[0].resolve({
+      components: [
+        { key: "jupyterhub", name: "JupyterHub", status: "provisioning" },
+        { key: "rstudio", name: "RStudio", status: "enabled" },
+      ],
+    }),
+  );
+  expect(screen.getByTestId("deploy-status-jupyterhub")).toHaveTextContent(/Building/);
+  // Only the selected components are listed.
+  expect(screen.queryByTestId("deploy-status-rstudio")).not.toBeInTheDocument();
+
+  await tick(8_000);
+  await settle(() => componentReads[1].reject(new Error("502")));
+  expect(screen.getByTestId("deploy-status-jupyterhub")).toHaveTextContent(/Building/);
+  expect(screen.getByTestId("deploy-status-unavailable")).toBeInTheDocument();
+
+  await tick(8_000);
+  await settle(() =>
+    componentReads[2].resolve({ components: [{ key: "jupyterhub", name: "JupyterHub", status: "enabled" }] }),
+  );
+  expect(screen.getByTestId("deploy-status-jupyterhub")).toHaveTextContent(/Ready/);
+});
+
+test("the component status read carries a cancellation signal", async () => {
+  jest.useFakeTimers();
+  await toDeployingStep();
+  await waitFor(() => expect(componentReads.length).toBe(1));
+  const call = mockApiGet.mock.calls.find(([url]) => url === "/api/components")!;
+  expect(call[1]?.signal).toBeInstanceOf(AbortSignal);
+});
