@@ -1,5 +1,5 @@
 /**
- * The dataset list searched on every keystroke and accepted answers in arrival order (plan 13).
+ * The dataset list searched on every keystroke and accepted answers in arrival order.
  * Search now waits for a pause, the list is keyed by query, page, and every server-side filter,
  * and only the current key's answer is shown. Selection survives a new search.
  */

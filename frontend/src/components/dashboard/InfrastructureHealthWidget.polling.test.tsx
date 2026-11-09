@@ -1,5 +1,5 @@
 /**
- * Service health polls every 60 s on the shared polling primitive (plan 13): reads do not
+ * Service health polls every 60 s on the shared polling primitive: reads do not
  * overlap, a failed background refresh keeps the last health visible and says it is stale, and
  * Retry recovers this widget alone.
  */

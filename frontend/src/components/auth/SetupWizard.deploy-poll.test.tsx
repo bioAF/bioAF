@@ -1,5 +1,5 @@
 /**
- * The Deploying step polls component status every 8 s while it is the current step (plan 13):
+ * The Deploying step polls component status every 8 s while it is the current step:
  * reads never overlap, leaving the step stops the poll and drops a read in flight, and a failed
  * read is said rather than swallowed.
  */

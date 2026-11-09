@@ -1,5 +1,5 @@
 /**
- * The application transport (plan 13): one auth, status, and error policy shared by JSON,
+ * The application transport: one auth, status, and error policy shared by JSON,
  * multipart, proxied XHR upload, blob/text/download, and stream requests.
  */
 const mockNavigateToLogin = jest.fn();

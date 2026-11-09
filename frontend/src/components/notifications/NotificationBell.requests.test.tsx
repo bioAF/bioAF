@@ -1,5 +1,5 @@
 /**
- * The unread count polled with setInterval (plan 13): reads could overlap, and a poll read in
+ * The unread count polled with setInterval: reads could overlap, and a poll read in
  * flight when the dropdown changed the count (mark all read) could put the old count back.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

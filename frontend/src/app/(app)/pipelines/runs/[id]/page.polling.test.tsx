@@ -1,5 +1,5 @@
 /**
- * A run's metadata (every 10 s) and logs (every 5 s) are re-read while it is active (plan 13).
+ * A run's metadata (every 10 s) and logs (every 5 s) are re-read while it is active.
  * The intervals could overlap slow reads, a previously selected process's late logs could replace
  * the current process's, a failed refresh left the page looking current, and a first logs read
  * that failed rendered as "(empty)".

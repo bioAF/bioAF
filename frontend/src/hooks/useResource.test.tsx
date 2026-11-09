@@ -1,5 +1,5 @@
 /**
- * The keyed request/polling owner (plan 13). Only the current generation of a key may change what
+ * The keyed request/polling owner. Only the current generation of a key may change what
  * the consumer sees: data, errors, loading, refresh state, or completion callbacks.
  */
 import React from "react";

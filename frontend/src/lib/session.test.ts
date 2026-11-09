@@ -1,5 +1,5 @@
 /**
- * One session-ending path serves explicit logout and an expired session (plan 13). Ending a
+ * One session-ending path serves explicit logout and an expired session. Ending a
  * session drops the token, empties every session-bound holder, and makes any request still in
  * flight from that session unable to write into the next one.
  */

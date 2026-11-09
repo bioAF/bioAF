@@ -1,5 +1,5 @@
 /**
- * Logout and session expiry share one teardown (plan 13). Logging out must clear the browser's
+ * Logout and session expiry share one teardown. Logging out must clear the browser's
  * session even when the server's logout request fails.
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";

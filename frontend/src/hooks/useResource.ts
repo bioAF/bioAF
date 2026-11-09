@@ -5,7 +5,7 @@ import { isAbortError } from "@/lib/abort";
 import { onSessionReset } from "@/lib/session";
 
 /**
- * One consumer's ownership of a keyed read, with optional polling (plan 13).
+ * One consumer's ownership of a keyed read, with optional polling.
  *
  * The key names everything that selects the result (IDs, query, filters, page, sort); `null`
  * disables the read. Every read gets a generation: changing the key, disabling, unmounting, a

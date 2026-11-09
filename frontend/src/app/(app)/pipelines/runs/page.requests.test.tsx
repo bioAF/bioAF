@@ -1,6 +1,6 @@
 /**
  * The runs list polled with setInterval: a slow read was overlapped by the next one, and a read
- * for the previous filter or page could land after the current one (plan 13). Reads are now
+ * for the previous filter or page could land after the current one. Reads are now
  * serialized and keyed by page, size, filter, and sort; the filter stays on screen while a new
  * selection loads.
  */

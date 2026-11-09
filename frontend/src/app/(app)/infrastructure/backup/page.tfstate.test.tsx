@@ -1,6 +1,6 @@
 /**
  * The tfstate download used `window.open` on a relative URL, which sends no session Bearer header
- * and so was refused by the backend's auth middleware (plan 13). It is now an authenticated blob
+ * and so was refused by the backend's auth middleware. It is now an authenticated blob
  * download through the shared client.
  */
 import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";

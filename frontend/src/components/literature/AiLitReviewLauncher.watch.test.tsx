@@ -1,5 +1,5 @@
 /**
- * Watching an AI lit review run (plan 13). The watch belonged to a shared flag, so stopping one
+ * Watching an AI lit review run. The watch belonged to a shared flag, so stopping one
  * run and starting another revived the first run's loop: its status overwrote the second run's
  * message and the completion callback fired for both from one loop. Each run's watch is now its
  * own, stopping it ends it, and each run notifies once.

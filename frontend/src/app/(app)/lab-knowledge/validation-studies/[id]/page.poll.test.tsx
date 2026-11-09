@@ -1,5 +1,5 @@
 /**
- * A validation study advancing on its own is polled (plan 13): reads never overlap, polling stops
+ * A validation study advancing on its own is polled: reads never overlap, polling stops
  * when the study leaves the advancing states, and a failed background read keeps the study on
  * screen, labelled as possibly out of date.
  */

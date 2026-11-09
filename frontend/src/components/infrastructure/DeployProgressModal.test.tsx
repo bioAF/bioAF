@@ -1,6 +1,6 @@
 /**
  * A failed progress read used to be swallowed, so the modal kept showing the last state as if it
- * were current (plan 13). It now says the progress could not be read.
+ * were current. It now says the progress could not be read.
  */
 import { render, screen } from "@testing-library/react";
 import { DeployProgressModal } from "./DeployProgressModal";

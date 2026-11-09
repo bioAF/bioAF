@@ -1,5 +1,5 @@
 /**
- * While a restored database is under review the page polls its status every 30 s (plan 13).
+ * While a restored database is under review the page polls its status every 30 s.
  * Reads do not overlap, an expired review reloads the page data with its message, and a failed
  * status read is not an expiry.
  */

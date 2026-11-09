@@ -1,5 +1,5 @@
 /**
- * Watch a server job until it settles, a deadline passes, or the watcher stops (plan 13).
+ * Watch a server job until it settles, a deadline passes, or the watcher stops.
  *
  * Reads are serialized: the next starts `intervalMs` after the previous one settles. Stopping
  * (aborting `signal`) ends the watch at once, including during the wait, and rejects with an

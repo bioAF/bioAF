@@ -1,6 +1,6 @@
 /**
  * The experiment list requested on every keystroke and accepted answers in arrival order, so an
- * older search could replace a newer one (plan 13). Search now waits for a pause, the list is
+ * older search could replace a newer one. Search now waits for a pause, the list is
  * keyed by query, page, status, and project, and only the current key's answer is shown.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

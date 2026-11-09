@@ -1,6 +1,6 @@
 /**
- * The experiment, project, and GEO export modals request through the shared application client
- * (plan 13): the configured API base, the session credential, the shared status policy, the
+ * The experiment, project, and GEO export modals request through the shared application client:
+ * the configured API base, the session credential, the shared status policy, the
  * server's attachment filename with the old name as fallback, and the backend's error text.
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";

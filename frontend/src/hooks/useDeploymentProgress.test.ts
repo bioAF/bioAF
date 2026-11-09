@@ -1,7 +1,7 @@
 /**
  * Deployment progress polled with setInterval: reads overlapped, a slow older read could land
  * after a newer one, a read outstanding when polling was disabled still updated the view, and
- * failures were swallowed so they looked like "no deployment" (plan 13).
+ * failures were swallowed so they looked like "no deployment".
  */
 import { renderHook, act } from "@testing-library/react";
 

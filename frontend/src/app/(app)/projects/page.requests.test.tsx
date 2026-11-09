@@ -1,6 +1,6 @@
 /**
  * The project list requested on every keystroke and accepted answers in arrival order, so an
- * older search could replace a newer one (plan 13). Search now waits for typing to pause, only
+ * older search could replace a newer one. Search now waits for typing to pause, only
  * the current query's answer is shown, and a failed refresh keeps the list, labelled as stale.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

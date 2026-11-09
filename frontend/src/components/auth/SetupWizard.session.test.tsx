@@ -1,6 +1,6 @@
 /**
  * Setup's code check and first-admin request use their own credentials (none, then the setup
- * token), never the session's, and a refusal there is not a session expiry (plan 13). A created
+ * token), never the session's, and a refusal there is not a session expiry. A created
  * admin starts a new session.
  */
 import { render, screen, waitFor } from "@/testing/renderWithProviders";

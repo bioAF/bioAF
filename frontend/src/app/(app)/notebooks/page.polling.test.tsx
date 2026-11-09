@@ -1,6 +1,6 @@
 /**
  * Notebook sessions are re-read every 10 s while one is starting, and the notebook image build
- * status every 15 s while it builds (plan 13). The session interval could overlap a slow read; a
+ * status every 15 s while it builds. The session interval could overlap a slow read; a
  * bucket's late answer could replace the current bucket's; and each bucket change started another
  * recursive build-status timer that nothing ever cancelled.
  */

@@ -1,5 +1,5 @@
 /**
- * The lab-document list and URL import (plan 13). A late answer for an earlier tag/archive/query
+ * The lab-document list and URL import. A late answer for an earlier tag/archive/query
  * selection must not replace the current list, a failed load is not "No documents found", and
  * the URL-import watch stops when its dialog closes, keeping its deadline message.
  */

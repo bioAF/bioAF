@@ -1,5 +1,5 @@
 /**
- * Reference import progress (plan 13): status reads never overlap, a terminal status reloads
+ * Reference import progress: status reads never overlap, a terminal status reloads
  * the dataset and stops the watch, and cancelling stops the watch.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

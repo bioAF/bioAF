@@ -1,6 +1,6 @@
 /**
  * Terraform progress is a consequential POST whose answer is a server-sent event stream. It goes
- * through the shared client (plan 13): the status policy applies before the stream opens, the
+ * through the shared client: the status policy applies before the stream opens, the
  * existing event parsing is unchanged, closing the modal stops observing, and the POST is never
  * sent again on its own.
  */

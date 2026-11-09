@@ -1,5 +1,5 @@
 /**
- * Publications are re-read every 5 s while one is publishing (plan 13). Reads must not overlap,
+ * Publications are re-read every 5 s while one is publishing. Reads must not overlap,
  * polling stops once nothing is publishing, a failed background read keeps the list but says it
  * may be out of date, and an older filter's answer cannot replace the current filter's.
  */

@@ -1,5 +1,5 @@
 /**
- * Upgrade status polling (plan 13): reads every 3 s that never overlap, keep going through the
+ * Upgrade status polling: reads every 3 s that never overlap, keep going through the
  * restart (failed reads are expected then, and are said, not swallowed), and stop at the
  * terminal status with the version and history refreshed.
  */

@@ -1,5 +1,5 @@
 /**
- * The plot archive searched on every keystroke and accepted answers in arrival order (plan 13).
+ * The plot archive searched on every keystroke and accepted answers in arrival order.
  * Search now waits for a pause, the grid is keyed by query, page, experiment, run, and dates, and
  * only the current key's answer is shown.
  */

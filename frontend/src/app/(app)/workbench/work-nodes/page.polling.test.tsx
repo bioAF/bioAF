@@ -1,5 +1,5 @@
 /**
- * Work nodes are re-read every 10 s while one is starting or stopping (plan 13). Reads must not
+ * Work nodes are re-read every 10 s while one is starting or stopping. Reads must not
  * overlap, a failed background read must keep the list but say so, and switching the session
  * bucket must not show the previous bucket's nodes as the new bucket's, or let its late answer in.
  */

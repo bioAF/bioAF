@@ -1,6 +1,6 @@
 /**
  * Copying a citation used to resolve with the error response's text and put that on the
- * clipboard as the citation (plan 13). A failed citation request must say so and copy nothing.
+ * clipboard as the citation. A failed citation request must say so and copy nothing.
  */
 import { fireEvent, render, screen, waitFor } from "@/testing/renderWithProviders";
 import PaperDetailPage from "./page";

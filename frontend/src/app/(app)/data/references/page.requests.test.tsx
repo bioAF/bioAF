@@ -1,5 +1,5 @@
 /**
- * The reference list searched on every keystroke and accepted answers in arrival order (plan 13).
+ * The reference list searched on every keystroke and accepted answers in arrival order.
  * Name search now waits for a pause, the list is keyed by query, category, scope, and status, and
  * only the current key's answer is shown.
  */

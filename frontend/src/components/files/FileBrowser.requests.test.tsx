@@ -1,6 +1,6 @@
 /**
  * The file list accepted answers in arrival order and swallowed failures, so an older search
- * could replace a newer one and an outage read as "No files found." (plan 13). The list (with its
+ * could replace a newer one and an outage read as "No files found.". The list (with its
  * lab-document hits) is keyed by the submitted query, scope, filters, and page; only the current
  * key's answer is shown; a failure says so.
  */

@@ -1,5 +1,5 @@
 /**
- * Literature searches (plan 13). The watch used one shared cancel flag, so a new submission
+ * Literature searches. The watch used one shared cancel flag, so a new submission
  * revived a stopped watch; results loaded in arrival order, so an earlier click's late answer
  * replaced the search the user chose; and a watched search finishing took over the selection.
  */

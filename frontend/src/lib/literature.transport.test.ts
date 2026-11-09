@@ -1,6 +1,6 @@
 /**
- * Literature's PDF, citation, and attachment requests go through the shared application client
- * (plan 13), keeping the DOI-conflict translation at the feature boundary.
+ * Literature's PDF, citation, and attachment requests go through the shared application client,
+ * keeping the DOI-conflict translation at the feature boundary.
  */
 const mockNavigateToLogin = jest.fn();
 jest.mock("@/lib/navigation", () => ({ navigateToLogin: () => mockNavigateToLogin() }));

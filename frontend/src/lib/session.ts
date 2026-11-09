@@ -1,5 +1,5 @@
 /**
- * The application session's lifetime (plan 13).
+ * The application session's lifetime.
  *
  * A session starts at login (or setup's first admin) and ends at logout or when the active
  * session's credential is refused. Re-issuing the token inside a session (a profile change) is

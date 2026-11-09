@@ -1,5 +1,5 @@
 /**
- * Requests belong to the session that started them (plan 13, owner review). Ending the session
+ * Requests belong to the session that started them (owner review). Ending the session
  * aborts them; an answer, a downloaded body, a retry, or a re-issued credential that arrives
  * afterwards must not reach the next session.
  */

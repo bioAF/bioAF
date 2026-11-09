@@ -1,5 +1,5 @@
 /**
- * The review list (plan 13): a filter change must not show the previous filter's late answer,
+ * The review list: a filter change must not show the previous filter's late answer,
  * polling runs only while a review is pending and never overlaps, a failed load is not "no
  * reviews", and the parent's refresh signal re-reads the list.
  */

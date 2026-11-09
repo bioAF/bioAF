@@ -1,6 +1,6 @@
 /**
  * The activity feed accepted answers in arrival order, so a slow answer for an earlier filter or
- * page could replace the current one (plan 13). The feed is keyed by page and every filter, and
+ * page could replace the current one. The feed is keyed by page and every filter, and
  * only the current key's answer is shown.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

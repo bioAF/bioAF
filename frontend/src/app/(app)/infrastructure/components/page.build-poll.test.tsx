@@ -1,5 +1,5 @@
 /**
- * Image-build status on the Components page (plan 13). Reads poll every 15 s while a component
+ * Image-build status on the Components page. Reads poll every 15 s while a component
  * is provisioning and never overlap; a finished build refreshes the page data, but a build that
  * has already finished must not reload the page in a loop; and a failed read is said.
  */

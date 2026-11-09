@@ -1,6 +1,6 @@
 /**
  * The audit log accepted list answers in arrival order, so a slow answer for an earlier page or
- * filter could replace the current one (plan 13). The list is keyed by page, entity, action, and
+ * filter could replace the current one. The list is keyed by page, entity, action, and
  * dates, and only the current key's answer is shown.
  */
 import { render, screen, fireEvent, act } from "@testing-library/react";

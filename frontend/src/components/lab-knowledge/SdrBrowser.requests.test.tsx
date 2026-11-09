@@ -1,5 +1,5 @@
 /**
- * The decision-record list (plan 13): debounced search already existed, but a late answer for an
+ * The decision-record list: debounced search already existed, but a late answer for an
  * earlier query or filter still replaced the current one, and a failed load also claimed "No
  * decision records yet".
  */

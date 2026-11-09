@@ -1,5 +1,5 @@
 /**
- * The audit-log CSV export goes through the shared application client (plan 13): the configured
+ * The audit-log CSV export goes through the shared application client: the configured
  * API base and session credential, the page's filters, and the backend's error text on failure.
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";

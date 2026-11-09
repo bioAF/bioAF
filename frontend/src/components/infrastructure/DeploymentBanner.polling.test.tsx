@@ -1,5 +1,5 @@
 /**
- * The deployment banner's status poll (plan 13): reads never overlap, and a failed read is not a
+ * The deployment banner's status poll: reads never overlap, and a failed read is not a
  * finished deployment.
  */
 import { render, screen, act } from "@testing-library/react";

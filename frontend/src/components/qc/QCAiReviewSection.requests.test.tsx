@@ -1,5 +1,5 @@
 /**
- * The QC AI review surface (plan 13): an availability check that failed is not a confirmed
+ * The QC AI review surface: an availability check that failed is not a confirmed
  * "AI review is off", and polling for pending reviews never overlaps and stops when they finish.
  */
 import { render, screen, act } from "@testing-library/react";

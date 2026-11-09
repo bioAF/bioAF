@@ -1,5 +1,5 @@
 /**
- * Pipeline templates are re-read every 5 s while a build is running (plan 13). The old interval
+ * Pipeline templates are re-read every 5 s while a build is running. The old interval
  * fired list and detail reads regardless of whether the previous ones had answered, swallowed a
  * failed list refresh, and a slow detail for one template could replace another the user had
  * since opened.

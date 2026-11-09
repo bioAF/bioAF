@@ -1,5 +1,5 @@
 /**
- * The glossary list and AI scan watch (plan 13). A late answer for an earlier query/source must
+ * The glossary list and AI scan watch. A late answer for an earlier query/source must
  * not replace the current list; the scan poll never overlaps, stops at a terminal status, and a
  * completed scan refreshes the pending-review count.
  */

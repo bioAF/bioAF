@@ -1,5 +1,5 @@
 /**
- * Readiness is an unauthenticated probe (plan 13): it never carries the session credential, and
+ * Readiness is an unauthenticated probe: it never carries the session credential, and
  * it resolves its URL the same way the API client does.
  */
 import { renderHook, waitFor } from "@testing-library/react";
