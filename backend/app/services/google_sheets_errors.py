@@ -12,9 +12,9 @@ import json
 import logging
 from dataclasses import dataclass
 
-import httplib2
-from google.auth import exceptions as google_auth_exceptions
 from googleapiclient.errors import HttpError
+
+from app.adapters.credentials import get_credentials_provider
 
 logger = logging.getLogger("bioaf.sheets")
 
@@ -104,15 +104,26 @@ def _classify_http_error(exc: HttpError, phase: str) -> SheetsFailure:
     return SheetsFailure(category, phase, status)
 
 
+_CREDENTIAL_KINDS = {"auth": UPSTREAM_AUTH, "timeout": TIMEOUT, "transport": UNAVAILABLE}
+
+
+def _is_http_transport_error(exc: BaseException) -> bool:
+    """googleapiclient's HTTP transport (httplib2) raises its own error family for DNS and
+    connection failures. It is not a declared dependency of bioAF, so it is recognized by module
+    rather than imported."""
+    return any(cls.__module__.split(".")[0] == "httplib2" for cls in type(exc).__mro__)
+
+
 def classify(exc: BaseException, phase: str) -> SheetsFailure:
     """Classify a failure raised while reading a sheet (credential refresh happens lazily here)."""
     if isinstance(exc, HttpError):
         return _classify_http_error(exc, phase)
-    if isinstance(exc, (TimeoutError, google_auth_exceptions.TimeoutError)):
+    if isinstance(exc, TimeoutError):
         return SheetsFailure(TIMEOUT, phase)
-    if isinstance(exc, (google_auth_exceptions.RefreshError, google_auth_exceptions.DefaultCredentialsError)):
-        return SheetsFailure(UPSTREAM_AUTH, phase)
-    if isinstance(exc, (google_auth_exceptions.TransportError, httplib2.HttpLib2Error, ConnectionError)):
+    credential_kind = get_credentials_provider().credential_failure_kind(exc)
+    if credential_kind is not None:
+        return SheetsFailure(_CREDENTIAL_KINDS[credential_kind], phase)
+    if isinstance(exc, ConnectionError) or _is_http_transport_error(exc):
         return SheetsFailure(UNAVAILABLE, phase)
     return SheetsFailure(UNEXPECTED, phase, exception_type=type(exc).__name__)
 
@@ -123,7 +134,7 @@ def classify_credential_construction(exc: BaseException) -> SheetsFailure | None
     Only the narrow credential-construction call is wrapped with this, so malformed stored key
     data (ValueError/KeyError/TypeError from JSON or key parsing) is a credential problem there.
     Returns None for anything else so it propagates as an unexpected failure."""
-    if isinstance(exc, google_auth_exceptions.GoogleAuthError):
+    if get_credentials_provider().credential_failure_kind(exc) is not None:
         return classify(exc, CREDENTIALS)
     if isinstance(exc, (ValueError, KeyError, TypeError)):
         return SheetsFailure(UPSTREAM_AUTH, CREDENTIALS)

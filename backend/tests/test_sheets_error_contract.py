@@ -10,7 +10,6 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
-import httplib2
 import pytest
 from google.auth import exceptions as google_auth_exceptions
 from googleapiclient.errors import HttpError
@@ -84,9 +83,22 @@ def _google_error_body(code: int, status: str, *, legacy_reason: str | None = No
     return {"error": error}
 
 
+class _Resp(dict):
+    """The two attributes HttpError reads from googleapiclient's HTTP response."""
+
+    def __init__(self, status: int):
+        super().__init__(status=str(status))
+        self.status = status
+        self.reason = "SYNTH-SECRET-PROVIDER-BODY reason"
+
+
+# googleapiclient's transport (httplib2, not a declared dependency) raises its own error family for
+# DNS failures; the classifier recognizes that family by module.
+ServerNotFoundError = type("ServerNotFoundError", (Exception,), {"__module__": "httplib2.error"})
+
+
 def _http_error(status: int, body) -> HttpError:
-    resp = httplib2.Response({"status": status})
-    resp.reason = "SYNTH-SECRET-PROVIDER-BODY reason"
+    resp = _Resp(status)
     content = json.dumps(body).encode() if isinstance(body, dict) else body
     return HttpError(resp, content, uri=SECRET_URI)
 
@@ -217,7 +229,14 @@ UPSTREAM_CASES = [
     ("timeout", TimeoutError("SYNTH-SECRET-URL-TOKEN timed out"), None, 504, "did not respond in time"),
     (
         "transport failure",
-        httplib2.ServerNotFoundError("Unable to find SYNTH-SECRET-URL-TOKEN"),
+        ServerNotFoundError("Unable to find SYNTH-SECRET-URL-TOKEN"),
+        None,
+        502,
+        "temporarily unavailable",
+    ),
+    (
+        "connection reset",
+        ConnectionResetError("SYNTH-SECRET-URL-TOKEN reset"),
         None,
         502,
         "temporarily unavailable",
