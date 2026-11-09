@@ -4,9 +4,15 @@
   field values to the wrong samples when an earlier row is rejected.
 - A row that conflicts with an existing sample (a duplicate sample ID or a
   taken sequencing-batch position) is now reported as a row error, and the
-  other rows still import. Before, one conflict failed the whole import.
-- Google Sheet sample preview and import now refuse an experiment outside your
-  organization before reading the sheet.
+  other rows still import. Before, one conflict failed the whole import with a
+  server error and nothing was saved.
+- A rejected row no longer leaves anything behind: no partial sample, custom
+  field, new batch or audit entry.
+- A custom field name longer than 255 characters is now reported as a row error
+  instead of failing the whole import.
+- Google Sheet sample preview and import now answer "Experiment not found" for
+  an experiment that is missing or outside your organization, before the sheet
+  is read.
 
 ### Notebooks
 
