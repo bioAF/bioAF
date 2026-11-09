@@ -83,6 +83,7 @@ UNOWNED = {
     ("runtime.py", "spawn_threadsafe.start"): "thread callback while no owner is bound",
     ("services/post_commit_events.py", "_publish_after_commit"): "legacy path for unbound sessions",
     ("main.py", "lifespan"): "maintenance watcher, released by the lifespan's exit stack",
+    ("startup.py", "bounded"): "a shutdown step run after the owner closed; abandoned at its deadline",
 }
 
 

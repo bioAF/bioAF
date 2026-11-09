@@ -417,10 +417,16 @@ NORMAL_STEPS = [
 
 
 async def bounded(awaitable: Awaitable[Any], seconds: float, what: str) -> bool:
-    """Await ``awaitable`` for at most ``seconds``; log and give up past that."""
-    try:
-        await asyncio.wait_for(awaitable, timeout=seconds)
+    """Run ``awaitable`` for at most ``seconds``; past that, cancel it once and abandon it.
+
+    Unlike ``wait_for``, this returns at the deadline even if the step suppresses cancellation, so
+    a shutdown phase cannot overrun its share of the budget. Returns whether the step finished.
+    """
+    task = asyncio.ensure_future(awaitable)
+    done, _ = await asyncio.wait({task}, timeout=seconds)
+    if done:
+        task.result()
         return True
-    except TimeoutError:
-        logger.error("shutdown step=%s outcome=timed_out budget=%.0fs", what, seconds)
-        return False
+    task.cancel()
+    logger.error("shutdown step=%s outcome=abandoned budget=%.1fs", what, seconds)
+    return False

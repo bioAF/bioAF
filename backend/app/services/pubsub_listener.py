@@ -271,6 +271,13 @@ class ListenerManager:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    def stop_nowait(self) -> None:
+        """Signal and cancel the listener without waiting (shutdown: its owner awaits the task)."""
+        if self._listener is not None:
+            self._listener.stop()
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+
     @staticmethod
     async def _run(listener: PubSubListener) -> None:
         # The factory current when the listener starts, as before: it binds for the listener's life.

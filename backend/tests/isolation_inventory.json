@@ -3298,6 +3298,7 @@
     "fixture:client",
     "fixture:db_engine",
     "fixture:session",
+    "async_session_factory",
     "create_task",
     "http requests use their own sessions"
    ],
@@ -3758,6 +3759,11 @@
    "route": "none"
   },
   "test_shuffle_plugin.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_shutdown_budget.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"

@@ -108,12 +108,16 @@ async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
 
 
 async def _stop_owned_work(owner: TaskOwner) -> None:
-    """Stop producers at once, let active work settle, then cancel what remains (bounded)."""
-    from app.services.pubsub_listener import stop_listener
+    """Stop producers at once, let active work settle, then cancel what remains.
+
+    One budget for all of it: drain ``DRAIN_SECONDS``, then cancellation ``CANCEL_SECONDS``.
+    The listener is stopped without waiting; its owned task settles inside those phases.
+    """
+    from app.services.pubsub_listener import listener_manager
 
     # Closing admission also signals the periodic jobs and the webhook worker to stop.
     owner.close_admission()
-    await startup.bounded(stop_listener(), startup.CANCEL_SECONDS, "pubsub_listener")
+    listener_manager().stop_nowait()
     await owner.shutdown(drain_seconds=startup.DRAIN_SECONDS, cancel_seconds=startup.CANCEL_SECONDS)
 
 
