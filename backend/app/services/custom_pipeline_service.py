@@ -36,6 +36,7 @@ from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
 from app.services.post_commit_events import defer_event
 from app.services.quota_service import QuotaService
+from app import runtime
 
 logger = logging.getLogger("bioaf.custom_pipeline")
 
@@ -571,6 +572,7 @@ class CustomPipelineService:
         ``pipeline_id``, when given, is the pipeline the caller addressed (the
         launch URL's); the version must belong to it.
         """
+        runtime.require_admission("pipeline launch")
         if data.experiment_id is None and data.project_id is None:
             raise ValidationError("Either experiment_id or project_id must be provided")
 

@@ -4,8 +4,11 @@
   the production session factory (``from app.database import
   async_session_factory`` binds a copy at import) at the test one, and puts
   them all back afterwards, including modules first imported during the test.
-- ``drain_and_cancel`` waits for post-commit events the test scheduled, then
-  cancels and awaits application tasks the test started. Tasks that existed
+- ``settle_owner`` lets the test's events finish, then cancels and awaits
+  everything the test's task owner holds.
+- ``cancel_escaped_tasks`` is the backstop after that: application tasks the
+  test started that the owner did not hold are cancelled, awaited, and logged.
+  Pre-existing and non-application tasks are left alone. Tasks that existed
   before the test, and tasks that are not application code (pytest, anyio,
   httpx), are left alone.
 - ``run_all`` runs every cleanup step even if an earlier one raises.
@@ -19,6 +22,7 @@ import asyncio
 import importlib
 import inspect
 import sys
+import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,6 +31,7 @@ from typing import Any
 import app as _app_package
 
 _APP_DIR = str(Path(_app_package.__file__).resolve().parent)
+
 
 # Module state that persists between tests unless reset: (module, attribute).
 RESET_STATE: tuple[tuple[str, str], ...] = (
@@ -46,7 +51,7 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.literature.fulltext_service", "_parses_running"),
     ("app.services.backup_service", "_restore_state"),
     ("app.services.networking_applier", "_mock_singleton"),
-    ("app.services.pubsub_listener", "_listener"),
+    ("app.services.pubsub_listener", "_manager"),
     ("app.platform.cloud_provider", "_resolved_backends"),
     ("app.adapters.work_nodes.ec2", "_local_vms"),
     ("app.adapters.work_nodes.gce", "_local_vms"),
@@ -70,7 +75,7 @@ NOT_RESET: dict[tuple[str, str], str] = {
     ("app.adapters.registry", "_cellxgene_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_work_node_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_initialized"): "reset by the _init_adapter_registry fixture",
-    ("app.services.post_commit_events", "_in_flight"): "drained by drain_and_cancel; tasks remove themselves",
+    ("app.services.post_commit_events", "_in_flight"): "drained by settle_owner; tasks remove themselves",
     ("app.adapters.validation.gcp", "RECOMMENDED_ROLES"): "built once at import from a static map",
     ("app.adapters.validation.gcp", "_APP_PERMS"): "built once at import from a static probe file",
     ("app.adapters.validation.gcp", "_BOOTSTRAP_PERMS"): "built once at import from a static probe file",
@@ -134,28 +139,41 @@ def _is_app_task(task: asyncio.Task) -> bool:
     return filename.startswith(_APP_DIR)
 
 
-async def cancel_owned_tasks(before: set[asyncio.Task]) -> int:
-    """Cancel and await unfinished application tasks started after ``before`` was taken."""
+async def cancel_escaped_tasks(before: set[asyncio.Task]) -> list[str]:
+    """Backstop after the owner settles: cancel and await application tasks the test started that
+    the owner did not hold (pre-existing and non-application tasks are left alone).
+
+    Anything caught here escaped ownership; it is logged so the escape can be fixed at its source.
+    """
     current = asyncio.current_task()
-    owned = [
+    escaped = [
         t for t in asyncio.all_tasks() if t is not current and t not in before and not t.done() and _is_app_task(t)
     ]
-    for task in owned:
+    for task in escaped:
         task.cancel()
-    if owned:
-        await asyncio.gather(*owned, return_exceptions=True)
-    return len(owned)
+    if escaped:
+        await asyncio.gather(*escaped, return_exceptions=True)
+    names = [getattr(t.get_coro(), "__qualname__", "?") for t in escaped]
+    if names:
+        logging.getLogger("tests.lifecycle").warning("app tasks escaped the test's owner: %s", names)
+    return names
 
 
-async def drain_and_cancel(before: set[asyncio.Task], drain_timeout: float = 10.0) -> int:
-    """Let scheduled post-commit emissions finish, then cancel what the test left running."""
+async def settle_owner(owner: Any, event_seconds: float = 10.0, cancel_seconds: float = 10.0) -> None:
+    """Let the test's events finish, then cancel and await everything else its owner holds.
+
+    Events committed through a session with no owner (the retained post-commit fallback) are waited
+    for too. Tasks the test did not start through the owner (pre-existing, library, or foreign
+    tasks) are left alone.
+    """
     from app.services.post_commit_events import wait_for_deferred_events
 
+    await owner.drain_events(event_seconds)
     try:
-        await asyncio.wait_for(wait_for_deferred_events(), timeout=drain_timeout)
+        await asyncio.wait_for(wait_for_deferred_events(), timeout=event_seconds)
     except TimeoutError:
-        pass  # whatever is still running is cancelled below
-    return await cancel_owned_tasks(before)
+        pass  # cancelled below if owned; a legacy emission still running is the test's problem
+    await owner.shutdown(drain_seconds=0, cancel_seconds=cancel_seconds)
 
 
 async def run_all(*steps: Callable[[], Any]) -> None:

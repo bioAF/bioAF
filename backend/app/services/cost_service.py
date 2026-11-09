@@ -1,6 +1,5 @@
 """Cost center service with billing sync, budget config, and threshold checks."""
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -16,6 +15,7 @@ from app.models.cost_record import CostRecord
 from app.services.billing_period import BillingPeriod, billing_period
 from app.services.event_bus import event_bus
 from app.services.event_types import BUDGET_THRESHOLD_50, BUDGET_THRESHOLD_80, BUDGET_THRESHOLD_100
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.cost_service")
 
@@ -459,7 +459,7 @@ class CostService:
         usage_pct = float(current_spend) / float(config.monthly_budget) * 100
 
         if usage_pct >= 100 and config.threshold_100_enabled:
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     BUDGET_THRESHOLD_100,
                     {
@@ -470,10 +470,11 @@ class CostService:
                         "severity": "critical",
                         "summary": f"Monthly budget 100% reached: ${current_spend:.2f}/${config.monthly_budget:.2f}",
                     },
-                )
+                ),
+                event_type=BUDGET_THRESHOLD_100,
             )
         elif usage_pct >= 80 and config.threshold_80_enabled:
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     BUDGET_THRESHOLD_80,
                     {
@@ -484,10 +485,11 @@ class CostService:
                         "severity": "warning",
                         "summary": f"Monthly budget at {usage_pct:.0f}%",
                     },
-                )
+                ),
+                event_type=BUDGET_THRESHOLD_80,
             )
         elif usage_pct >= 50 and config.threshold_50_enabled:
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     BUDGET_THRESHOLD_50,
                     {
@@ -498,5 +500,6 @@ class CostService:
                         "severity": "info",
                         "summary": f"Monthly budget at {usage_pct:.0f}%",
                     },
-                )
+                ),
+                event_type=BUDGET_THRESHOLD_50,
             )

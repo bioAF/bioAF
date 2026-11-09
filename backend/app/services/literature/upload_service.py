@@ -12,7 +12,6 @@ a bytes buffer.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -28,6 +27,7 @@ from app.models.literature import (
 )
 from app.services import audit_service
 from app.services.literature import extraction, storage
+from app import runtime
 
 logger = logging.getLogger("bioaf.literature.upload_service")
 
@@ -108,7 +108,7 @@ async def upload_extracted_text_to_gcs(
 
 async def schedule_extraction(*, paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None = None) -> None:
     """Spawn an asyncio task that re-extracts and persists in a fresh session."""
-    asyncio.create_task(_extract_and_persist(paper_id, pdf_bytes, user_id, api_key_id))
+    runtime.spawn(_extract_and_persist(paper_id, pdf_bytes, user_id, api_key_id), role="paper-extraction")
 
 
 async def _extract_and_persist(paper_id: int, pdf_bytes: bytes, user_id: int, api_key_id: int | None) -> None:

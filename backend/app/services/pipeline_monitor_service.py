@@ -18,6 +18,7 @@ from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELI
 from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.pipeline import nextflow_trace
+from app.runtime import spawn_event
 
 if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
@@ -467,7 +468,6 @@ class PipelineMonitorService:
             )
 
             # Emit OOM event for notifications
-            import asyncio
 
             experiment_name = ""
             if run.experiment_id:
@@ -476,7 +476,7 @@ class PipelineMonitorService:
                 exp_result = await session.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
                 experiment_name = exp_result.scalar_one_or_none() or ""
 
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     PIPELINE_OOM,
                     {
@@ -499,7 +499,8 @@ class PipelineMonitorService:
                         "severity": "critical",
                         "summary": (f"Pipeline '{run.pipeline_name}' run {run.id} failed: out of memory"),
                     },
-                )
+                ),
+                event_type=PIPELINE_OOM,
             )
             return
 
@@ -755,10 +756,9 @@ class PipelineMonitorService:
         )
 
         # Emit event for activity feed / notifications
-        import asyncio
 
         if run.status == "completed":
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     PIPELINE_COMPLETED,
                     {
@@ -772,10 +772,11 @@ class PipelineMonitorService:
                         "message": f"Run {run.id} finished successfully",
                         "summary": f"Pipeline '{run.pipeline_name}' run {run.id} completed",
                     },
-                )
+                ),
+                event_type=PIPELINE_COMPLETED,
             )
         else:
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     PIPELINE_FAILED,
                     {
@@ -790,7 +791,8 @@ class PipelineMonitorService:
                         "severity": "critical",
                         "summary": f"Pipeline '{run.pipeline_name}' run {run.id} failed",
                     },
-                )
+                ),
+                event_type=PIPELINE_FAILED,
             )
 
         # Auto-generate QC dashboard if component is enabled and run succeeded

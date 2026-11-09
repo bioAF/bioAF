@@ -39,6 +39,7 @@ from app.exceptions import StateError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
 from app.services.terraform_stream import INTERRUPTED_EVENT, commit_interruption
+from app import runtime
 
 logger = logging.getLogger("bioaf.infra_update_service")
 
@@ -422,4 +423,4 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
 def launch_background_apply(modules: list[str], user_id: int) -> None:
     """Kick off the additive-only apply in the background. Isolated as a seam
     so endpoints can trigger it and tests can assert it was scheduled."""
-    asyncio.create_task(apply_modules_sequentially(modules, user_id))
+    runtime.spawn(apply_modules_sequentially(modules, user_id), role="infra-update-apply")

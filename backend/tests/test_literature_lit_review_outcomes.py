@@ -745,11 +745,11 @@ async def test_scheduled_sweep_skips_org_without_enabled_sources(h):
 
 @pytest.mark.asyncio
 async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, monkeypatch):
-    import types
     from datetime import UTC, datetime, timedelta
 
-    import app.main as main_mod
     from app.services.literature import lit_review_auto_service as auto
+    from app.tasks.jobs import PERIODIC_JOBS
+    from app.tasks.periodic import run_periodic
 
     await _make_due(h)
     await _set_sources_enabled(h, False)
@@ -776,21 +776,15 @@ async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, 
     monkeypatch.setattr(auto, "run_due_sweep", sweep)
     monkeypatch.setattr(auto, "advance_next_run", advance)
 
-    import asyncio as real_asyncio
-
     ticks = {"n": 0}
 
-    async def fake_sleep(seconds):
+    async def fake_wait(seconds, stopping):
         ticks["n"] += 1
-        if ticks["n"] > 1:
-            raise real_asyncio.CancelledError()
+        return ticks["n"] > 1
 
-    monkeypatch.setattr(
-        main_mod, "asyncio", types.SimpleNamespace(sleep=fake_sleep, CancelledError=real_asyncio.CancelledError)
-    )
-
+    job = next(j for j in PERIODIC_JOBS if j.role == "lit-review-auto")
     before = datetime.now(UTC)
-    await main_mod._lit_review_auto_loop()
+    await run_periodic(job, wait=fake_wait)
     after = datetime.now(UTC)
 
     assert [s["skipped_reason"] for s in sweeps] == ["no_literature_sources_enabled"]

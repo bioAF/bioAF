@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from sqlalchemy import func, select
@@ -8,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.models.document import Document
 from app.models.file import File
 from app.services.audit_service import log_action
+from app import runtime
 
 logger = logging.getLogger("bioaf.document_service")
 
@@ -49,7 +49,7 @@ class DocumentService:
         )
 
         # Trigger background text extraction (fire-and-forget)
-        asyncio.create_task(DocumentService._extract_text_background(doc.id, content))
+        runtime.spawn(DocumentService._extract_text_background(doc.id, content), role="document-text-extraction")
 
         return doc
 

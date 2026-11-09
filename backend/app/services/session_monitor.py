@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.notebook_session import NotebookSession
 from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.session_monitor")
 
@@ -81,9 +82,7 @@ class SessionMonitorService:
         ns.stopped_at = now
 
         try:
-            import asyncio
-
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     SESSION_IDLE,
                     {
@@ -97,7 +96,8 @@ class SessionMonitorService:
                         "message": (f"Your {ns.session_type} session was stopped after exceeding the idle timeout"),
                         "summary": f"Notebook session {ns.id} auto-stopped",
                     },
-                )
+                ),
+                event_type=SESSION_IDLE,
             )
         except Exception as e:
             logger.warning("Failed to emit idle session event: %s", e)
@@ -110,9 +110,7 @@ class SessionMonitorService:
     ) -> None:
         """Send a warning notification that the session will be terminated soon."""
         try:
-            import asyncio
-
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     SESSION_IDLE,
                     {
@@ -130,7 +128,8 @@ class SessionMonitorService:
                         ),
                         "summary": f"Idle warning for session {ns.id}",
                     },
-                )
+                ),
+                event_type=SESSION_IDLE,
             )
             logger.info("Sent idle warning for session %d", ns.id)
         except Exception as e:

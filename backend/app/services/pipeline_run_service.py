@@ -33,6 +33,7 @@ from app.services.samplesheet_mapping_service import SamplesheetMappingService
 from app.adapters.job_specs import NextflowJobSpec
 from app.adapters.registry import get_compute_adapter
 from app.services.vocabulary_validator import VocabularyValidator
+from app import runtime
 
 logger = logging.getLogger("bioaf.pipeline_runs")
 
@@ -844,6 +845,7 @@ class PipelineRunService:
         ``drop_samples_without_files`` it may instead be that sheet less some rows.
         """
         # 1. Load pipeline from catalog
+        runtime.require_admission("pipeline launch")
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
             raise ValidationError(f"Pipeline '{data.pipeline_key}' not found or not enabled")

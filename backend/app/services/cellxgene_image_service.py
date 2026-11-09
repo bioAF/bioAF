@@ -20,6 +20,7 @@ from app.adapters.image_registry import get_image_registry_provider
 from app.exceptions import ValidationError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.image_build_platform import ImagePlatform, resolve_image_credentials, resolve_image_platform
+from app import runtime
 
 logger = logging.getLogger("bioaf.cellxgene_image")
 
@@ -87,6 +88,7 @@ async def _upload_build_context(session: AsyncSession, working_bucket: str) -> s
 
 async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> str:
     """Submit a build job for the cellxgene image. Returns the build ID."""
+    runtime.require_admission("image build")
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
         raise ValidationError("Working bucket not configured. Deploy storage first.")

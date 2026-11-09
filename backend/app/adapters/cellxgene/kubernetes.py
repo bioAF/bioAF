@@ -17,6 +17,7 @@ from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.models import CellxgeneInstance, ServiceState
+from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.cellxgene.k8s")
 
@@ -269,7 +270,7 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         logger.info("Created cellxgene service %s in %s", name, namespace)
 
         # Poll for readiness in background
-        asyncio.create_task(self._poll_deployment_ready(publication_id, name, namespace))
+        runtime.spawn(self._poll_deployment_ready(publication_id, name, namespace), role="cellxgene-readiness")
 
         return CellxgeneInstance(
             publication_id=publication_id,

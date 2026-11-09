@@ -1,5 +1,3 @@
-import asyncio
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,6 +17,7 @@ from app.services.code_service import CodeService
 from app.services.event_bus import event_bus
 from app.services.event_types import EXPERIMENT_STATUS_CHANGED
 from app.services.vocabulary_validator import VocabularyValidator
+from app.runtime import spawn_event
 
 
 class ExperimentService:
@@ -262,7 +261,7 @@ class ExperimentService:
             snapshot=snap,
         )
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 EXPERIMENT_STATUS_CHANGED,
                 {
@@ -276,7 +275,8 @@ class ExperimentService:
                     "summary": f"Experiment '{experiment.name}' is now {new_status}",
                     "metadata": {"old_status": old_status, "new_status": new_status},
                 },
-            )
+            ),
+            event_type=EXPERIMENT_STATUS_CHANGED,
         )
 
         return experiment

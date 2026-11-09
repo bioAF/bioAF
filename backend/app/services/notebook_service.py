@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -8,6 +7,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.models.file import File
@@ -103,6 +104,7 @@ class NotebookService:
         environment_version_id: int | None = None,
     ) -> NotebookSession:
         # Check quota
+        runtime.require_admission("notebook launch")
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
@@ -458,7 +460,7 @@ class NotebookService:
                     idle_duration = (now - ns.idle_since).total_seconds() / 3600
                     if idle_duration >= idle_timeout_hours:
                         logger.info("Auto-stopping idle session %d (idle %.1fh)", ns.id, idle_duration)
-                        asyncio.create_task(
+                        spawn_event(
                             event_bus.emit(
                                 SESSION_IDLE,
                                 {
@@ -472,7 +474,8 @@ class NotebookService:
                                     "message": f"Your {ns.session_type} session was stopped due to inactivity",
                                     "summary": f"Notebook session {ns.id} auto-stopped (idle {idle_duration:.1f}h)",
                                 },
-                            )
+                            ),
+                            event_type=SESSION_IDLE,
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now

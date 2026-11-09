@@ -193,7 +193,8 @@ async def start_postgres_restore(
     """Start a database restore from a pg_dump backup. Enters review mode."""
     result = await RestoreService.start(session, current_user["org_id"], body.filename)
     if result["status"] == "error":
-        status_code = 409 if "already active" in result["message"] else 500
+        conflict = "already active" in result["message"] or "still running" in result["message"]
+        status_code = 409 if conflict else 500
         raise HTTPException(status_code, detail=result["message"])
     return result
 

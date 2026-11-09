@@ -21,6 +21,7 @@ from app.adapters.models import (
 )
 from app.exceptions import ValidationError
 from app.adapters.credentials.credential_injector import load_gcp_credentials
+from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
@@ -540,7 +541,9 @@ class GceVmInstance(VmInstance):
         # Launch background poller
         creds = vm_spec.get("session_credentials", {})
         ssh_username = creds.get("username", "")
-        asyncio.create_task(self._poll_vm_ready(session_id, instance_name, project, zone, ssh_username))
+        runtime.spawn(
+            self._poll_vm_ready(session_id, instance_name, project, zone, ssh_username), role="work-node-readiness"
+        )
 
         return {
             "instance_name": instance_name,

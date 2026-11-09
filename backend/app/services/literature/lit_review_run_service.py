@@ -66,6 +66,7 @@ from app.services.event_types import (
 from app.services.literature import association_service, paper_service, sources_config_service
 from app.services.literature.sources import PaperRecord, get_adapter
 from app.services.llm_provider_clients import ProviderError, get_client
+from app import runtime
 
 logger = logging.getLogger("bioaf.literature.lit_review_run_service")
 
@@ -223,7 +224,7 @@ async def create_run(
 
 
 async def schedule_run(*, run_id: int) -> None:
-    asyncio.create_task(_execute_run(run_id))
+    runtime.spawn(_execute_run(run_id), role="lit-review-run")
 
 
 _TERMINAL_STATUSES = (SEARCH_COMPLETE, SEARCH_PARTIAL, SEARCH_FAILED)
@@ -293,7 +294,7 @@ async def _execute_run(run_id: int) -> None:
                 audit_error=f"unexpected_error: {type(e).__name__}",
             )
     except asyncio.CancelledError:
-        await asyncio.shield(_fail(execution, _CANCELLED))
+        await runtime.shielded(_fail(execution, _CANCELLED), role="lit-review-run-cancelled")
         raise
 
 
@@ -407,7 +408,7 @@ async def _collect_candidates(ctx: _RunContext, queries: list[str], outcome: Sou
     seen_keys: set[str] = set()
     for q in queries:
         tasks = {
-            src: asyncio.create_task(_safe_source_search(src, q, api_key))
+            src: runtime.spawn(_safe_source_search(src, q, api_key), role="lit-review-source")
             for src, api_key in ctx.source_api_keys.items()
         }
         try:

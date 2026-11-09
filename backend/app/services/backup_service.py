@@ -21,10 +21,16 @@ from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
+from app.runtime import spawn_event
+from app import runtime
 
 logger = logging.getLogger("bioaf.backup_service")
 
 RESTORE_REVIEW_SECONDS = 3600  # 1 hour
+# How long the swap waits for in-flight automatic work to settle before refusing the restore.
+RESTORE_SETTLE_SECONDS = 30.0
+# How often a failed revert is logged again while work stays paused.
+RESTORE_REMINDER_SECONDS = 600.0
 
 _PG_FILENAME_RE = re.compile(r"^pgdump-(\d{8}-\d{6})\.dump$")
 _CONFIG_FILENAME_RE = re.compile(r"^config-(\d{8}-\d{6})\.json$")
@@ -821,7 +827,7 @@ class BackupService:
             if tier["last_backup"] and tier["status"] in ("warning", "error"):
                 last = datetime.fromisoformat(tier["last_backup"])
                 hours_ago = (now - last).total_seconds() / 3600
-                asyncio.create_task(
+                spawn_event(
                     event_bus.emit(
                         BACKUP_FAILURE,
                         {
@@ -833,7 +839,8 @@ class BackupService:
                             "severity": "critical" if tier["status"] == "error" else "warning",
                             "summary": f"Backup overdue for {tier['name']}",
                         },
-                    )
+                    ),
+                    event_type=BACKUP_FAILURE,
                 )
 
 
@@ -841,15 +848,31 @@ class BackupService:
 # Database Restore
 # ---------------------------------------------------------------------------
 
+# "phase" is the review's decision state: "reviewing" (accept, reject, or timeout may decide),
+# "deciding" (one of them holds the decision), "revert_failed" (traffic may not be back on the
+# primary; only a retried revert, through reject, may proceed). "_decision" serializes accept,
+# reject, and timeout so exactly one of them acts on a review.
 _restore_state: dict = {
     "active": False,
+    "phase": "idle",
     "original_url": "",
     "restore_url": "",
     "backup_filename": "",
     "started_at": None,
     "expires_at": None,
     "_timeout_task": None,
+    "_decision": None,
+    "_owner": None,
 }
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _admin_url() -> str:
+    """The configured URL with the database switched to ``postgres``; credentials unchanged."""
+    return urlparse(settings.database_url)._replace(path="/postgres").geturl()
 
 
 def _build_restore_url() -> str:
@@ -881,12 +904,36 @@ async def _run_admin_sql(statements: list[str]) -> None:
         await conn.close()
 
 
+async def _existing_databases() -> set[str]:
+    """Database names on the server, read through the postgres maintenance database."""
+    import asyncpg
+
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    conn = await asyncpg.connect(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 5432,
+        user=parsed.username or "bioaf_app",
+        password=parsed.password or "",
+        database="postgres",
+    )
+    try:
+        return {row[0] for row in await conn.fetch("SELECT datname FROM pg_database")}
+    finally:
+        await conn.close()
+
+
+_RECOVERY_REQUIRED = (
+    "The restore review stopped partway through renaming databases. bioAF has paused background work. "
+    "An administrator must repair the databases, then restart bioAF."
+)
+
+
 class RestoreService:
     """Manages the database restore review flow."""
 
     @staticmethod
     def get_status() -> dict:
-        now = datetime.now(timezone.utc)
+        now = _now()
         if not _restore_state["active"]:
             return {"active": False}
         expires = _restore_state["expires_at"]
@@ -974,6 +1021,23 @@ class RestoreService:
 
             os.remove(dump_path)
 
+            # Pause automatic work and wait for in-flight work to settle: during the
+            # review, nothing automatic may write the review copy, and nothing external may start.
+            owner = runtime.current_owner()
+            busy = await _pause_work(owner)
+            if busy:
+                await _resume_work(owner)
+                logger.warning(
+                    "Restore refused before the swap: background work still running (roles=%s)", ",".join(busy)
+                )
+                await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
+                return {
+                    "status": "error",
+                    "message": "Background work is still running, so the database cannot be swapped safely. "
+                    "Try the restore again when it finishes.",
+                }
+            _restore_state["_owner"] = owner
+
             # Swap connection to bioaf_restore
             from app.database import swap_database
 
@@ -982,19 +1046,23 @@ class RestoreService:
             _restore_state["restore_url"] = restore_url
             _restore_state["backup_filename"] = filename
             _restore_state["active"] = True
-            _restore_state["started_at"] = datetime.now(timezone.utc)
-            _restore_state["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=RESTORE_REVIEW_SECONDS)
+            _restore_state["phase"] = "reviewing"
+            _restore_state["_decision"] = asyncio.Lock()
+            _restore_state["started_at"] = _now()
+            _restore_state["expires_at"] = _now() + timedelta(seconds=RESTORE_REVIEW_SECONDS)
 
             await swap_database(restore_url)
             logger.info("Swapped to bioaf_restore for review")
 
             # Start timeout task
-            _restore_state["_timeout_task"] = asyncio.create_task(_restore_timeout())
+            _restore_state["_timeout_task"] = runtime.spawn(_restore_timeout(), role="restore-review-timeout")
 
             return {"status": "reviewing", "message": f"Restore from {filename} active. You have 1 hour to review."}
 
         except Exception:
             logger.exception("Restore failed")
+            if not _restore_state["active"]:
+                await _resume_work(runtime.current_owner())
             if os.path.exists(dump_path):
                 os.remove(dump_path)
             try:
@@ -1005,72 +1073,233 @@ class RestoreService:
 
     @staticmethod
     async def accept() -> dict:
-        """Accept the restored database: rename and make permanent."""
-        if not _restore_state["active"]:
+        """Accept the restored database: rename and make permanent.
+
+        Refused, before any swap or SQL, once the review has expired or another decision has
+        taken it, whether or not the timeout has run or its cleanup succeeded.
+        """
+        decision = _restore_state["_decision"]
+        if not _restore_state["active"] or decision is None:
             return {"status": "error", "message": "No active restore to accept"}
 
-        if _restore_state["_timeout_task"]:
-            _restore_state["_timeout_task"].cancel()
-
-        try:
-            from app.database import swap_database
-
-            # Point at postgres maintenance DB temporarily so we're not connected
-            # to any DB we're about to rename
-            admin_async_url = settings.database_url.replace("/bioaf", "/postgres")
-            await swap_database(admin_async_url)
-
-            await _run_admin_sql(
-                [
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid != pg_backend_pid()",
-                    "ALTER DATABASE bioaf RENAME TO bioaf_old",
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf_restore' AND pid != pg_backend_pid()",
-                    "ALTER DATABASE bioaf_restore RENAME TO bioaf",
-                    "DROP DATABASE IF EXISTS bioaf_old",
-                ]
-            )
-            logger.info("Database rename complete: bioaf_restore -> bioaf")
-
-            # Swap back to the original URL (which now points to the restored data)
-            await swap_database(_restore_state["original_url"])
-
-            _restore_state["active"] = False
-            _restore_state["_timeout_task"] = None
-            return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
-
-        except Exception:
-            logger.exception("Accept restore failed")
-            try:
-                from app.database import swap_database
-
-                await swap_database(_restore_state["original_url"])
-            except Exception:
-                pass
-            return {"status": "error", "message": "Accept restore failed; check server logs."}
+        async with decision:
+            refusal = _acceptance_refusal()
+            if refusal:
+                return refusal
+            _restore_state["phase"] = "deciding"
+            _cancel_timeout()
+            return await _accept_review()
 
     @staticmethod
     async def reject() -> dict:
         """Reject the restored database and revert to the original."""
-        if not _restore_state["active"]:
+        decision = _restore_state["_decision"]
+        if not _restore_state["active"] or decision is None:
             return {"status": "error", "message": "No active restore to reject"}
-        return await _revert_restore("Restore rejected by admin")
+        async with decision:
+            if not _restore_state["active"]:
+                return {"status": "error", "message": "No active restore to reject"}
+            if _restore_state["phase"] == "recovery_required":
+                return {"status": "error", "message": _RECOVERY_REQUIRED}
+            return await _revert_restore("Restore rejected by admin")
+
+
+def _acceptance_refusal() -> dict | None:
+    if not _restore_state["active"]:
+        return {"status": "error", "message": "No active restore to accept"}
+    if _restore_state["phase"] == "revert_failed":
+        return {
+            "status": "error",
+            "message": "The restore review could not be reverted. Reject it to retry the revert.",
+        }
+    if _restore_state["phase"] == "recovery_required":
+        return {"status": "error", "message": _RECOVERY_REQUIRED}
+    if _restore_state["phase"] != "reviewing":
+        return {"status": "error", "message": "This restore review is already being decided"}
+    expires = _restore_state["expires_at"]
+    if expires is None or _now() >= expires:
+        return {"status": "error", "message": "The restore review has expired. The original database was kept."}
+    return None
+
+
+def _cancel_timeout() -> None:
+    """Cancel the review timer, unless it is the task calling (it must finish its own revert)."""
+    task = _restore_state["_timeout_task"]
+    if task is not None and task is not asyncio.current_task():
+        task.cancel()
+
+
+async def _pause_work(owner: runtime.TaskOwner | None) -> list[str]:
+    """Stop the listener and pause the owner's automatic work; roles still busy, if any."""
+    if owner is None:
+        return []
+    from app.services.pubsub_listener import stop_listener
+
+    await stop_listener()
+    return await owner.pause("restore_review", settle_seconds=RESTORE_SETTLE_SECONDS)
+
+
+async def _resume_work(owner: runtime.TaskOwner | None) -> None:
+    """Resume automatic work against the primary, and restart the listener if it is enabled."""
+    if owner is None:
+        return
+    owner.resume()
+    from app.services.pubsub_listener import restart_listener_if_needed
+
+    try:
+        await restart_listener_if_needed()
+    except Exception:
+        logger.exception("Restarting the Pub/Sub listener after the restore review failed")
+
+
+async def _clear_review() -> None:
+    """The review ended with a usable primary: clear it and resume paused work."""
+    owner = _restore_state["_owner"]
+    _restore_state["active"] = False
+    _restore_state["phase"] = "idle"
+    _restore_state["_timeout_task"] = None
+    _restore_state["_decision"] = None
+    _restore_state["_owner"] = None
+    await _resume_work(owner)
+
+
+async def _remind_revert_failed() -> None:
+    """While a failed revert keeps work paused, say so again periodically (rate-limited)."""
+    while _restore_state["phase"] == "revert_failed":
+        await asyncio.sleep(RESTORE_REMINDER_SECONDS)
+        if _restore_state["phase"] == "revert_failed":
+            logger.warning(
+                "Restore review revert failed earlier; automatic work is still paused. "
+                "Reject the restore review to retry the revert, or repair the databases and restart."
+            )
+
+
+async def _rename_state() -> str:
+    """Where the Accept renames stand, from the server's database names.
+
+    ``untouched``: the primary and the review copy both exist and nothing was renamed aside.
+    ``replaced``: the review copy became the primary and the original was dropped (Accept's
+    database work finished). ``uncertain``: anything else, or the names could not be read.
+    """
+    primary = urlparse(_restore_state["original_url"]).path.lstrip("/")
+    try:
+        names = await _existing_databases()
+    except Exception:
+        logger.exception("Could not read the database names to verify the primary")
+        return "uncertain"
+    has_primary, has_review, has_old = primary in names, f"{primary}_restore" in names, f"{primary}_old" in names
+    if has_primary and has_review and not has_old:
+        return "untouched"
+    if has_primary and not has_review and not has_old:
+        return "replaced"
+    return "uncertain"
+
+
+def _require_recovery(reason: str) -> None:
+    """Keep the review active and work paused; neither Accept nor reject may act any further."""
+    _restore_state["phase"] = "recovery_required"
+    logger.error(
+        "Restore review needs operator recovery (%s). Background work stays paused. Inspect the "
+        "bioaf, bioaf_old, and bioaf_restore databases, put the intended primary back as bioaf, then "
+        "restart bioAF.",
+        reason,
+    )
+    runtime.spawn(_remind_recovery_required(), role="restore-recovery-reminder")
+
+
+async def _remind_recovery_required() -> None:
+    while _restore_state["phase"] == "recovery_required":
+        await asyncio.sleep(RESTORE_REMINDER_SECONDS)
+        if _restore_state["phase"] == "recovery_required":
+            logger.warning(
+                "Restore review still needs operator recovery; background work is still paused. "
+                "Repair the databases (the original may be bioaf_old), then restart bioAF."
+            )
+
+
+async def _accept_review() -> dict:
+    try:
+        from app.database import swap_database
+
+        # Point at postgres maintenance DB temporarily so we're not connected
+        # to any DB we're about to rename
+        await swap_database(_admin_url())
+
+        await _run_admin_sql(
+            [
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid != pg_backend_pid()",
+                "ALTER DATABASE bioaf RENAME TO bioaf_old",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf_restore' AND pid != pg_backend_pid()",
+                "ALTER DATABASE bioaf_restore RENAME TO bioaf",
+                "DROP DATABASE IF EXISTS bioaf_old",
+            ]
+        )
+        logger.info("Database rename complete: bioaf_restore -> bioaf")
+
+        # Swap back to the original URL (which now points to the restored data)
+        await swap_database(_restore_state["original_url"])
+
+        await _clear_review()
+        return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
+
+    except Exception:
+        logger.exception("Accept restore failed")
+        from app.database import swap_database
+
+        state = await _rename_state()
+        if state == "replaced":
+            # The database work finished; only reconnecting failed. The original is gone, so the
+            # review cannot reopen: retry the connection to the (now restored) primary.
+            try:
+                await swap_database(_restore_state["original_url"])
+            except Exception:
+                logger.exception("Reconnecting to the restored primary failed")
+                _require_recovery("the replacement completed but reconnecting to it failed")
+                return {"status": "error", "message": _RECOVERY_REQUIRED}
+            logger.info("Database rename complete: bioaf_restore -> bioaf (reconnected on retry)")
+            await _clear_review()
+            return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
+        if state == "untouched":
+            # Nothing was renamed: the review stays open to accept (until it expires) or reject.
+            _restore_state["phase"] = "reviewing"
+        else:
+            _require_recovery("accept failed partway through the rename")
+        try:
+            await swap_database(_restore_state["original_url"])
+        except Exception:
+            pass
+        return {"status": "error", "message": "Accept restore failed; check server logs."}
 
 
 async def _restore_timeout() -> None:
     """Background task that reverts the restore after the review period expires."""
     try:
         await asyncio.sleep(RESTORE_REVIEW_SECONDS)
-        if _restore_state["active"]:
-            logger.warning("Restore review timed out, reverting to original database")
-            await _revert_restore("Restore review timed out")
+        decision = _restore_state["_decision"]
+        if decision is None:
+            return
+        async with decision:
+            if _restore_state["active"] and _restore_state["phase"] == "reviewing":
+                logger.warning("Restore review timed out, reverting to original database")
+                await _revert_restore("Restore review timed out")
     except asyncio.CancelledError:
         pass
 
 
 async def _revert_restore(reason: str) -> dict:
-    """Swap back to the original database and drop bioaf_restore."""
-    if _restore_state["_timeout_task"]:
-        _restore_state["_timeout_task"].cancel()
+    """Swap back to the original database and drop bioaf_restore. The caller holds the decision.
+
+    On failure the review stays active and ineligible for acceptance: the database state is
+    uncertain, so no flag is cleared that would admit another destructive operation.
+    """
+    _restore_state["phase"] = "deciding"
+    _cancel_timeout()
+
+    # Resume only against a verified primary: after a partial rename the primary may be missing,
+    # and dropping the review copy then could destroy the only intact database.
+    if await _rename_state() != "untouched":
+        _require_recovery("the primary or the review copy is not where a revert needs it")
+        return {"status": "error", "message": _RECOVERY_REQUIRED}
 
     try:
         from app.database import swap_database
@@ -1081,11 +1310,12 @@ async def _revert_restore(reason: str) -> dict:
         await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
         logger.info("Dropped bioaf_restore database")
 
-        _restore_state["active"] = False
-        _restore_state["_timeout_task"] = None
+        await _clear_review()
         return {"status": "reverted", "message": reason}
 
     except Exception:
-        logger.exception("Failed to revert restore")
-        _restore_state["active"] = False
+        logger.exception("Failed to revert restore; reject the restore review to retry the revert")
+        _restore_state["phase"] = "revert_failed"
+        # Work stays paused: the primary is not known to be usable.
+        runtime.spawn(_remind_revert_failed(), role="restore-revert-reminder")
         return {"status": "error", "message": "Revert restore failed; check server logs."}

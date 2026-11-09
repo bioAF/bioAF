@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 
@@ -11,6 +10,7 @@ from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
 from app.services.sequencing_enrichment import enrich_from_header
 from app.services.file_service import FileService
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.upload_service")
 
@@ -231,7 +231,7 @@ class UploadService:
         if experiment_id and file_type == "fastq":
             await UploadService._auto_update_experiment_status(session, experiment_id, org_id, pending["user_id"])
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 DATA_UPLOADED,
                 UploadService._data_uploaded_event(
@@ -242,7 +242,8 @@ class UploadService:
                     file_type=file_type,
                     experiment_id=experiment_id,
                 ),
-            )
+            ),
+            event_type=DATA_UPLOADED,
         )
 
         return file

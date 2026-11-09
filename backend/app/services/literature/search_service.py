@@ -37,6 +37,7 @@ from app.services.event_types import (
 )
 from app.services.literature import paper_service
 from app.services.literature.sources import PaperRecord, get_adapter
+from app import runtime
 
 logger = logging.getLogger("bioaf.literature.search_service")
 
@@ -90,7 +91,7 @@ async def schedule_search_run(
     user_id: int,
     max_per_source: int = _DEFAULT_MAX_PER_SOURCE,
 ) -> None:
-    asyncio.create_task(_run_search(search_id, user_id, max_per_source))
+    runtime.spawn(_run_search(search_id, user_id, max_per_source), role="literature-search")
 
 
 async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None:
@@ -112,14 +113,24 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
     # Run all source coroutines in their own fresh session to avoid contention.
     results: dict[str, list[PaperRecord] | Exception] = {}
     tasks = {
-        src: asyncio.create_task(_run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source))
+        src: runtime.spawn(
+            _run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source),
+            role="literature-search-source",
+        )
         for src in sources
     }
-    for src, task in tasks.items():
-        try:
-            results[src] = await task
-        except Exception as e:  # pragma: no cover
-            results[src] = e
+    try:
+        for src, task in tasks.items():
+            try:
+                results[src] = await task
+            except Exception as e:  # pragma: no cover
+                results[src] = e
+    finally:
+        # On cancellation, stop the source calls not yet awaited too, and wait for them all.
+        for task in tasks.values():
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     async with factory() as s:  # type: ignore[misc]
         rs = await s.execute(select(LiteratureSearch).where(LiteratureSearch.id == search_id))

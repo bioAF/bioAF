@@ -47,6 +47,8 @@ from app.services.terraform_stream import (
     stop_process,
     stream_terraform_output,
 )
+from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.services.terraform_cloud import TerraformCloud
@@ -99,6 +101,7 @@ class TerraformExecutor:
         6. Run `terraform show -json tfplan` to get structured plan output
         7. Parse output and update the run record
         """
+        runtime.require_admission("deployment")
         await TerraformExecutor._recover_stale_runs(session)
         await TerraformExecutor._check_no_active_run(session)
 
@@ -362,7 +365,7 @@ class TerraformExecutor:
                 # Notify admins of a real deploy failure. Terraform runs are
                 # global (single org); fire-and-forget so the stream is not
                 # blocked on notification delivery.
-                asyncio.create_task(
+                spawn_event(
                     event_bus.emit(
                         TERRAFORM_APPLY_FAILURE,
                         {
@@ -376,7 +379,8 @@ class TerraformExecutor:
                             "severity": "critical",
                             "summary": f"Terraform apply failed for {module_name}",
                         },
-                    )
+                    ),
+                    event_type=TERRAFORM_APPLY_FAILURE,
                 )
 
         if interrupted:
@@ -635,6 +639,7 @@ class TerraformExecutor:
         Creates a TerraformRun record, runs `terraform destroy -auto-approve -json`,
         and yields progress events as resources are destroyed.
         """
+        runtime.require_admission("deployment")
         await TerraformExecutor._recover_stale_runs(session)
 
         run = TerraformRun(

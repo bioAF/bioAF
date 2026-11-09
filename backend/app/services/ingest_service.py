@@ -5,7 +5,6 @@ parses filenames against naming profiles, resolves or auto-creates
 entities, and catalogs files in the database.
 """
 
-import asyncio
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +29,7 @@ from app.services.file_type_utils import detect_file_type
 from app.services.naming_profile_parser import match_filename, resolve_entities
 from app.services.naming_profile_service import NamingProfileService
 from app.services.sample_service import SampleService
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.ingest_service")
 
@@ -324,7 +324,7 @@ async def process_ingest_event(
         )
         db.add(event)
         await db.flush()
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 DUPLICATE_FILE,
                 {
@@ -336,7 +336,8 @@ async def process_ingest_event(
                     "message": f"File '{filename}' matches existing file #{existing_file.id}",
                     "severity": "info",
                 },
-            )
+            ),
+            event_type=DUPLICATE_FILE,
         )
         return event
 
@@ -493,7 +494,7 @@ async def process_ingest_event(
 
     # Step 9: Emit events for notifications and pipeline triggers
     if ingest_status == "cataloged":
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 FILES_CATALOGED,
                 {
@@ -506,10 +507,11 @@ async def process_ingest_event(
                     "severity": "info",
                     "metadata": {"file_id": file_record.id, "file_type": file_type},
                 },
-            )
+            ),
+            event_type=FILES_CATALOGED,
         )
     elif ingest_status == "unmatched":
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 UNMATCHED_FILE,
                 {
@@ -521,12 +523,13 @@ async def process_ingest_event(
                     "message": f"File '{filename}' did not match any naming profile",
                     "severity": "warning",
                 },
-            )
+            ),
+            event_type=UNMATCHED_FILE,
         )
 
     # Emit unclaimed entity notifications
     if auto_created["projects"] or auto_created["experiments"] or auto_created["samples"]:
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 UNCLAIMED_ENTITY,
                 {
@@ -541,7 +544,8 @@ async def process_ingest_event(
                     "severity": "warning",
                     "metadata": auto_created,
                 },
-            )
+            ),
+            event_type=UNCLAIMED_ENTITY,
         )
 
     await log_action(

@@ -21,6 +21,7 @@ from app.adapters.image_registry import get_image_registry_provider
 from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.exceptions import StateError, ValidationError
 from app.services.image_build_platform import ImagePlatform, resolve_image_credentials, resolve_image_platform
+from app import runtime
 
 logger = logging.getLogger("bioaf.notebook_image")
 
@@ -287,6 +288,7 @@ async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> 
 
     Returns the backend build ID (Cloud Build id on GCP, CodeBuild id on AWS).
     """
+    runtime.require_admission("image build")
     working_bucket = await _read_config(session, "working_bucket_name")
     if not working_bucket or working_bucket == "null":
         raise ValidationError("Working bucket not configured. Deploy storage first.")

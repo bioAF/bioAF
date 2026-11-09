@@ -12,9 +12,12 @@ import base64
 import binascii
 import json
 import logging
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import runtime
 from app.adapters.messaging import create_messaging_provider
 from app.platform.platform_config_service import PlatformConfigService
 
@@ -50,21 +53,40 @@ class PubSubListener:
         self._stop_event.set()
 
     async def start(self, session: AsyncSession) -> None:
-        """Start pulling messages from the Pub/Sub subscription.
+        """Start pulling messages, using ``session`` for the config read and every message.
 
         Checks platform_config for auto_ingest_enabled and
-        pubsub_subscription_name before entering the pull loop.
+        pubsub_subscription_name before entering the pull loop. A failed message's
+        transaction is rolled back before the nack, so the session stays usable.
         """
+
+        @asynccontextmanager
+        async def same_session() -> AsyncIterator[AsyncSession]:
+            yield session
+
+        prepared = await self._prepare(session)
+        if prepared is not None:
+            await self._pull(*prepared, same_session)
+
+    async def run(self, session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]) -> None:
+        """Start pulling messages: config in a short-lived session, then a session per message."""
+        async with session_factory() as session:
+            prepared = await self._prepare(session)
+        if prepared is not None:
+            await self._pull(*prepared, session_factory)
+
+    async def _prepare(self, session: AsyncSession) -> tuple[object, str] | None:
+        """The messaging provider and subscription path, or None when auto-ingest is off."""
         config = await self._read_config(session)
 
         if config.get("auto_ingest_enabled", "false") != "true":
             logger.info("Auto-ingest is disabled, skipping Pub/Sub listener")
-            return
+            return None
 
         subscription_name = config.get("pubsub_subscription_name", "null")
         if not subscription_name or subscription_name == "null":
             logger.warning("No Pub/Sub subscription configured, skipping listener")
-            return
+            return None
 
         project_id = config.get("gcp_project_id", "")
 
@@ -79,10 +101,18 @@ class PubSubListener:
         from app.platform.cloud_provider import backend_for
 
         provider = create_messaging_provider(credentials=credentials, backend=backend_for("messaging"))
-        subscription_path = f"projects/{project_id}/subscriptions/{subscription_name}"
+        return provider, f"projects/{project_id}/subscriptions/{subscription_name}"
 
+    async def _pull(
+        self,
+        provider,
+        subscription_path: str,
+        message_session: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    ) -> None:
+        # A stop requested while the listener was starting still applies.
+        if self._stop_event.is_set():
+            return
         self._running = True
-        self._stop_event.clear()
         retry_delay = RETRY_BASE_SECONDS
         logger.info("Pub/Sub listener started on %s", subscription_path)
 
@@ -93,16 +123,18 @@ class PubSubListener:
                     retry_delay = RETRY_BASE_SECONDS  # reset on success
 
                     for received in messages:
-                        try:
-                            msg_data = json.loads(received.data)
-                            await self._handle_message(msg_data, session)
-                            await provider.acknowledge(subscription_path, [received.ack_id])
-                        except Exception:
-                            logger.exception(
-                                "Failed to process message %s, nacking",
-                                received.ack_id,
-                            )
-                            await provider.nack(subscription_path, [received.ack_id])
+                        async with message_session() as session:
+                            try:
+                                msg_data = json.loads(received.data)
+                                await self._handle_message(msg_data, session)
+                                await provider.acknowledge(subscription_path, [received.ack_id])
+                            except Exception:
+                                logger.exception(
+                                    "Failed to process message %s, nacking",
+                                    received.ack_id,
+                                )
+                                await _rollback(session)
+                                await provider.nack(subscription_path, [received.ack_id])
 
                 except (ConnectionError, OSError) as exc:
                     logger.error("Pub/Sub connection error: %s, retrying in %.0fs", exc, retry_delay)
@@ -190,40 +222,107 @@ class PubSubListener:
         return await PlatformConfigService.get_many(session, keys)
 
 
-# Module-level instance for the background task
-_listener: PubSubListener | None = None
+async def _rollback(session: AsyncSession) -> None:
+    try:
+        await session.rollback()
+    except Exception:
+        logger.exception("Rolling back a failed Pub/Sub message's transaction failed")
+
+
+class ListenerManager:
+    """Owns the one Pub/Sub listener and its task; start and stop are serialized.
+
+    Startup and the auto-ingest settings both start through here, so a second start while the
+    first listener is still reading its config does not queue a second pull loop. Each task runs
+    the listener instance it was created with, never whichever one is current when it runs.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._listener: PubSubListener | None = None
+        self._task: asyncio.Task | None = None
+
+    @property
+    def listener(self) -> PubSubListener | None:
+        return self._listener
+
+    async def start(self) -> None:
+        """Start a listener unless one is already starting or running, or work is paused.
+
+        Every start (startup, the auto-ingest settings, resuming after a restore review) comes
+        through here, so a paused owner (a restore review) never gets a listener pulling messages
+        into whatever database the pool points at. Resuming the owner starts it again.
+        """
+        async with self._lock:
+            if self._task is not None and not self._task.done():
+                return
+            owner = runtime.current_owner()
+            if owner is not None and owner.paused is not None:
+                logger.info("Pub/Sub listener not started: work is paused (%s)", owner.paused)
+                return
+            listener = PubSubListener()
+            self._listener = listener
+            if owner is not None:
+                self._task = owner.spawn(self._run(listener), role="pubsub-listener", worker=True)
+            else:
+                self._task = runtime.spawn(self._run(listener), role="pubsub-listener")
+
+    async def stop(self) -> None:
+        """Stop the listener (starting or running) and wait for its task to finish."""
+        async with self._lock:
+            task, listener = self._task, self._listener
+            self._task = None
+            if task is None:
+                return
+            if listener is not None:
+                listener.stop()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    def stop_nowait(self) -> None:
+        """Signal and cancel the listener without waiting (shutdown: its owner awaits the task)."""
+        if self._listener is not None:
+            self._listener.stop()
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+
+    @staticmethod
+    async def _run(listener: PubSubListener) -> None:
+        # The factory current when the listener starts, as before: it binds for the listener's life.
+        from app.database import async_session_factory
+
+        try:
+            await listener.run(async_session_factory)
+        except Exception as e:
+            logger.error("Pub/Sub listener error: %s", e)
+
+
+_manager: ListenerManager | None = None
+
+
+def listener_manager() -> ListenerManager:
+    global _manager
+    if _manager is None:
+        _manager = ListenerManager()
+    return _manager
 
 
 def get_listener() -> PubSubListener | None:
     """Return the current listener instance, if any."""
-    return _listener
+    return listener_manager().listener
 
 
-async def start_pubsub_listener_task(session: AsyncSession) -> PubSubListener:
-    """Create and start the Pub/Sub listener. Used by the lifespan handler."""
-    global _listener
-    _listener = PubSubListener()
-    await _listener.start(session)
-    return _listener
+async def start_listener() -> None:
+    await listener_manager().start()
+
+
+async def stop_listener() -> None:
+    await listener_manager().stop()
 
 
 async def restart_listener_if_needed() -> None:
-    """Start or restart the listener after config changes.
+    """Start the listener after config changes, unless one is already starting or running.
 
-    Called from the auto-ingest settings endpoint when the user enables
-    auto-ingest. If the listener is already running, this is a no-op.
+    Called from the auto-ingest settings endpoint when the user enables auto-ingest.
     """
-    global _listener
-    if _listener and _listener.running:
-        return
-
-    from app.database import async_session_factory
-
-    _listener = PubSubListener()
-
-    async def _run() -> None:
-        async with async_session_factory() as session:
-            assert _listener is not None
-            await _listener.start(session)
-
-    asyncio.create_task(_run())
+    await listener_manager().start()

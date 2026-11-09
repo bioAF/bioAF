@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,6 +11,7 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import QUOTA_WARNING
 from app.services.post_commit_events import defer_event
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.quotas")
 
@@ -103,7 +103,7 @@ class QuotaService:
             if isolate_denial:
                 await QuotaService._record_denial_isolated(user_id, quota.id, audit_details, warning)
             else:
-                asyncio.create_task(event_bus.emit(QUOTA_WARNING, warning))
+                spawn_event(event_bus.emit(QUOTA_WARNING, warning), event_type=QUOTA_WARNING)
                 await log_action(
                     session,
                     user_id=user_id,
