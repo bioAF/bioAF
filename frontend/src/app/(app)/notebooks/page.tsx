@@ -155,7 +155,11 @@ export default function NotebooksPage() {
       },
       // Polled while building, so a toast per tick would bury the page. The log is the record.
       onError: (e) => {
-        if (isPermissionDenied(e)) return;
+        // Expected, not transient: clear any earlier failure so the notice and re-checks stop.
+        if (isPermissionDenied(e)) {
+          setBuildStatusFailed(false);
+          return;
+        }
         logError("loading the notebook image build status", e);
         setBuildStatusFailed(true);
       },

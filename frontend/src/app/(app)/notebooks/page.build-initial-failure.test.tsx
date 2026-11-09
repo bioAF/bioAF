@@ -107,3 +107,17 @@ test("a 403 (no infrastructure view) is expected: no notice and no further reads
   await advance(45_000);
   expect(buildReads).toBe(1);
 });
+
+test("a 403 after a failed first read clears the notice and stops re-checking", async () => {
+  buildReplies = [upstream, () => Promise.reject(new ApiError(403, "Forbidden"))];
+  render(<NotebooksPage />);
+  await flush();
+  expect(screen.getByTestId("build-status-load-failed")).toBeInTheDocument();
+
+  await advance(15_000);
+  expect(buildReads).toBe(2);
+  expect(screen.queryByTestId("build-status-load-failed")).not.toBeInTheDocument();
+
+  await advance(45_000);
+  expect(buildReads).toBe(2);
+});
