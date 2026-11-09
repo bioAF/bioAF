@@ -3,8 +3,10 @@
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
 import { useConfirm } from "@/hooks/useConfirm";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -44,6 +46,7 @@ dependencies:
 `;
 
 const POLL_INTERVAL_MS = 5000;
+const LIST_PATH = "/api/v1/environments?type=pipeline";
 
 type Tab = "versions" | "new-version";
 
@@ -53,11 +56,8 @@ export default function PipelineEnvironmentsPage() {
   const canBuild = user?.role_name === "admin" || user?.role_name === "comp_bio";
   const canDelete = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
-  const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
   const toast = useToast();
   const confirm = useConfirm();
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentDetailResponse | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("versions");
@@ -85,92 +85,85 @@ export default function PipelineEnvironmentsPage() {
     { kind: "build" | "rebuild"; envId: number; versionId: number } | null
   >(null);
 
-  const selectedEnvIdRef = useRef<number | null>(null);
-  const selectedVersionIdRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    selectedEnvIdRef.current = selectedEnv?.id ?? null;
-  }, [selectedEnv]);
-
-  useEffect(() => {
-    selectedVersionIdRef.current = selectedVersion?.id ?? null;
-  }, [selectedVersion]);
-
-  useEffect(() => {
-    loadEnvironments();
-  }, []);
-
   // Status polling: while any environment (or the open detail) has a build in
-  // progress, refresh in the background so the UI reflects the new status.
-  useEffect(() => {
-    const listHasBuilding = environments.some((e) => e.latest_version?.status === "building");
-    const detailHasBuilding =
-      selectedEnv?.versions.some((v) => v.status === "building") ?? false;
-    const versionIsBuilding = selectedVersion?.status === "building";
+  // progress, refresh in the background so the UI reflects the new status. Each
+  // read starts after the previous one settles, so slow answers never overlap.
+  const [listHasBuilding, setListHasBuilding] = useState(false);
+  const detailHasBuilding = selectedEnv?.versions.some((v) => v.status === "building") ?? false;
+  const versionIsBuilding = selectedVersion?.status === "building";
+  const anyBuilding = listHasBuilding || detailHasBuilding || versionIsBuilding;
 
-    if (!listHasBuilding && !detailHasBuilding && !versionIsBuilding) return;
+  const list = useResource(
+    LIST_PATH,
+    useCallback(() => api.get<EnvironmentListResponse>(LIST_PATH), []),
+    {
+      poll: anyBuilding ? POLL_INTERVAL_MS : false,
+      onSuccess: (data) =>
+        setListHasBuilding(data.environments.some((e) => e.latest_version?.status === "building")),
+      onError: (e) => logError("loading the pipeline templates", e),
+    },
+  );
+  const environments: EnvironmentResponse[] = list.data?.environments ?? [];
+  const loading = list.loading;
+  // A failed background refresh keeps the list and is labelled stale below; only a
+  // first load that failed is an error in place of the list.
+  const loadError =
+    list.error && !list.stale
+      ? list.error instanceof Error
+        ? list.error.message
+        : "Failed to load pipeline templates"
+      : null;
+  const loadEnvironments = list.refresh;
 
-    const interval = setInterval(() => {
-      void loadEnvironments(true);
-      const envId = selectedEnvIdRef.current;
-      if (envId !== null) {
-        void refreshSelectedEnv(envId);
-      }
-      const versionId = selectedVersionIdRef.current;
-      if (envId !== null && versionId !== null) {
-        void refreshSelectedVersion(envId, versionId);
-      }
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [environments, selectedEnv, selectedVersion]);
+  // The open template (and version) re-read while it is building, keyed by what is
+  // open: an answer for a template or version the user has left changes nothing.
+  const selectedEnvId = selectedEnv?.id ?? null;
+  const selectedVersionId = selectedVersion?.id ?? null;
+  const selection = useResource(
+    selectedEnvId !== null && (detailHasBuilding || versionIsBuilding)
+      ? `${selectedEnvId}:${selectedVersionId ?? ""}`
+      : null,
+    useCallback(async () => {
+      if (selectedEnvId === null) return null;
+      const [detail, version] = await Promise.all([
+        api.get<EnvironmentDetailResponse>(`/api/v1/environments/${selectedEnvId}`),
+        selectedVersionId !== null
+          ? api.get<EnvironmentVersionResponse>(
+              `/api/v1/environments/${selectedEnvId}/versions/${selectedVersionId}`,
+            )
+          : Promise.resolve(null),
+      ]);
+      return { detail, version };
+    }, [selectedEnvId, selectedVersionId]),
+    {
+      poll: POLL_INTERVAL_MS,
+      onSuccess: (data) => {
+        if (!data) return;
+        setSelectedEnv((prev) => (prev && prev.id === data.detail.id ? data.detail : prev));
+        if (data.version) {
+          const version = data.version;
+          setSelectedVersion((prev) => (prev && prev.id === version.id ? version : prev));
+        }
+      },
+      onError: (e) => logError("refreshing the open pipeline template", e),
+    },
+  );
 
-  async function loadEnvironments(silent = false) {
-    try {
-      const data = await api.get<EnvironmentListResponse>(
-        "/api/v1/environments?type=pipeline",
-      );
-      setEnvironments(data.environments);
-      setLoadError(null);
-    } catch (err) {
-      if (!silent) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load pipeline templates");
-      }
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }
-
-  async function refreshSelectedEnv(id: number) {
-    try {
-      const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${id}`);
-      setSelectedEnv((prev) => (prev && prev.id === id ? detail : prev));
-    } catch (e) {
-      logError("refreshing the environment", e);
-      toast.error(loadFailureMessage("The pipeline template"));
-    }
-  }
-
-  async function refreshSelectedVersion(envId: number, versionId: number) {
-    try {
-      const version = await api.get<EnvironmentVersionResponse>(
-        `/api/v1/environments/${envId}/versions/${versionId}`,
-      );
-      setSelectedVersion((prev) => (prev && prev.id === versionId ? version : prev));
-    } catch (e) {
-      logError("refreshing the environment version", e);
-      toast.error(loadFailureMessage("The pipeline template version"));
-    }
-  }
+  // Opening a template: only the most recent click may take over the detail view.
+  const openRequestRef = useRef(0);
 
   async function selectEnvironment(id: number) {
+    const request = ++openRequestRef.current;
     try {
       const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${id}`);
+      if (request !== openRequestRef.current) return;
       setSelectedEnv(detail);
       setActiveTab("versions");
       setSelectedVersion(null);
       setBuildLogs(null);
       setNewVersionContent(DEFAULT_PIPELINE_CONDA_YML);
     } catch (err) {
+      if (request !== openRequestRef.current) return;
       toast.error(err instanceof Error ? err.message : "Failed to load pipeline template");
     }
   }
@@ -257,7 +250,7 @@ export default function PipelineEnvironmentsPage() {
     try {
       await api.post(`/api/v1/environments/${envId}/versions/${versionId}/${path}`);
       await selectEnvironment(envId);
-      await loadEnvironments(true);
+      await loadEnvironments();
     } catch (err) {
       const fallback = kind === "rebuild" ? "Rebuild failed to start" : "Build failed to start";
       toast.error(err instanceof Error ? err.message : fallback);
@@ -265,16 +258,20 @@ export default function PipelineEnvironmentsPage() {
   }
 
   async function loadVersionDetail(envId: number, versionId: number) {
+    const request = ++openRequestRef.current;
     try {
       const version = await api.get<EnvironmentVersionResponse>(
         `/api/v1/environments/${envId}/versions/${versionId}`,
       );
+      if (request !== openRequestRef.current) return;
       setSelectedVersion(version);
       const logs = await api.get<BuildLogsResponse>(
         `/api/v1/environments/${envId}/versions/${versionId}/logs`,
       );
+      if (request !== openRequestRef.current) return;
       setBuildLogs(logs);
     } catch (err) {
+      if (request !== openRequestRef.current) return;
       toast.error(err instanceof Error ? err.message : "Failed to load version detail");
     }
   }
@@ -306,6 +303,14 @@ export default function PipelineEnvironmentsPage() {
                   Retry
                 </button>
               </div>
+            )}
+            {list.stale && (
+              <StaleNotice what="Pipeline templates" onRetry={() => void loadEnvironments()} />
+            )}
+            {/* The open template on screen came from opening it; any failed re-read means
+                it may be behind the build, whether or not an earlier re-read succeeded. */}
+            {selectedEnv && selection.error !== null && (
+              <StaleNotice what="This pipeline template" onRetry={() => void selection.refresh()} />
             )}
 
             <div className="flex items-center justify-between mb-6">
@@ -401,6 +406,7 @@ export default function PipelineEnvironmentsPage() {
               <div>
                 <button
                   onClick={() => {
+                    openRequestRef.current += 1;
                     setSelectedVersion(null);
                     setBuildLogs(null);
                   }}
@@ -486,7 +492,10 @@ export default function PipelineEnvironmentsPage() {
             ) : (
               <div>
                 <button
-                  onClick={() => setSelectedEnv(null)}
+                  onClick={() => {
+                    openRequestRef.current += 1;
+                    setSelectedEnv(null);
+                  }}
                   className="text-sm text-bioaf-600 mb-4 hover:underline"
                 >
                   &larr; Back to pipeline environments
