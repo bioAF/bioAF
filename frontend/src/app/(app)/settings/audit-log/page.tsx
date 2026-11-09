@@ -50,7 +50,6 @@ export default function AuditLogPage() {
   const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
-  const [loadError, setLoadError] = useState<string | null>(null);
   // The last successful total, which keeps pagination in place while the next page loads.
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -80,18 +79,13 @@ export default function AuditLogPage() {
       [listPath],
     ),
     {
-      onSuccess: (data) => {
-        setLoadError(null);
-        setTotal(data.total);
-      },
-      onError: (e) => {
-        logError("loading the audit log", e);
-        setLoadError(loadFailureMessage("The audit log"));
-      },
+      onSuccess: (data) => setTotal(data.total),
+      onError: (e) => logError("loading the audit log", e),
     },
   );
   const entries: AuditEntry[] = list.data?.entries ?? [];
   const loading = list.loading;
+  const loadError = list.error ? loadFailureMessage("The audit log") : null;
   const load = list.refresh;
 
   const totalPages = Math.ceil(total / pageSize);
