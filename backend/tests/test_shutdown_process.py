@@ -1,4 +1,4 @@
-"""Bounded shutdown through a real uvicorn process (plan 14, delivery E).
+"""Bounded shutdown through a real uvicorn process.
 
 SIGTERM to uvicorn: requests drain, then the lifespan stops owned work (finishing work completes,
 cancellable work is cancelled, uncooperative work is reported and abandoned) within the budgets,

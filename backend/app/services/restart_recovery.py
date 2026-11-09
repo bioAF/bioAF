@@ -1,4 +1,4 @@
-"""Fail local jobs a restart interrupted (plan 14).
+"""Fail local jobs a restart interrupted.
 
 A literature search, an AI lit-review run, a lab-document URL import, and a paper's PDF extraction run in this process
 with no external job to reconcile, so after a restart nothing will ever finish them. Startup marks

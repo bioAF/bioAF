@@ -1,4 +1,4 @@
-"""Ordered startup and shutdown of the backend (plan 14).
+"""Ordered startup and shutdown of the backend.
 
 Startup is a list of named steps run in order, each with a declared failure policy:
 
@@ -15,7 +15,7 @@ anyone else are kept.
 The schema gate (plan 9) precedes every normal step that writes, subscribes, or starts work.
 Steps are never run in parallel.
 
-Shutdown budgets (proposed defaults, plan 14): active work gets ``DRAIN_SECONDS`` to settle, then
+Shutdown budgets: active work gets ``DRAIN_SECONDS`` to settle, then
 cancellation and event/child cleanup get ``CANCEL_SECONDS``, then owned resources get
 ``RESOURCE_SECONDS``. The container's 60 s stop grace (docker-compose) is the hard stop when work
 does not cooperate; uvicorn's own request grace runs before the lifespan's shutdown and is separate.

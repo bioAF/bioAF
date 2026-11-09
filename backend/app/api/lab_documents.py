@@ -218,7 +218,7 @@ async def import_document_from_url(
     _assert_public_url(body.url)
 
     # Admission is reserved before the job is committed and the import starts on the application's
-    # owner after the commit, so the response does not wait for it (plan 14).
+    # owner after the commit, so the response does not wait for it.
     with runtime.admission(role="lab-document-url-import") as ticket:
         row = await LabDocumentUploadService.create_url_import(
             session,

@@ -143,7 +143,7 @@ async def db_engine(worker_id, request):
     import app.database as database_module
 
     restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
-    # The test's task owner (plan 14): work the test starts through the application's spawn points,
+    # The test's task owner: work the test starts through the application's spawn points,
     # requests through `client`, and committed events all belong to it.
     from app import runtime
 

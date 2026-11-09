@@ -1,4 +1,4 @@
-"""The shared periodic scheduler (plan 14).
+"""The shared periodic scheduler.
 
 A ``PeriodicJob`` says when to run and how to report a failure; its iteration does the work and
 owns its sessions, commits, rollbacks, and persisted schedules. ``run_periodic`` waits the first

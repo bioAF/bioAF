@@ -1,4 +1,4 @@
-"""Local jobs interrupted by a restart are failed at startup (plan 14, delivery D5).
+"""Local jobs interrupted by a restart are failed at startup.
 
 A literature search, a lab-document URL import, and a paper's PDF extraction are local work with no
 external job to reconcile. A restart (orderly or not) leaves their rows unfinished forever, showing

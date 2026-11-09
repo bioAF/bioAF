@@ -1,4 +1,4 @@
-"""The application task owner (plan 14, delivery B).
+"""The application task owner.
 
 One owner per application lifespan (or test) holds every task it admits: strong references, named
 roles, observed outcomes, independent failures, closed admission, and a shutdown bounded by shared

@@ -1,4 +1,4 @@
-"""Response jobs handed to the application owner (plan 14, delivery D3).
+"""Response jobs handed to the application owner.
 
 Hosted reviews, glossary scans, and lab-document URL imports used to run as response background
 tasks inside the request, so a long job held the server's request drain open at shutdown. Now the

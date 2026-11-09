@@ -1,9 +1,9 @@
-"""The backend's periodic jobs (plan 14): one iteration each, scheduled by app/tasks/periodic.py.
+"""The backend's periodic jobs: one iteration each, scheduled by app/tasks/periodic.py.
 
 Each ``prepare`` binds what the old loop bound for its lifetime (most bound the session factory
 current when the loop started; billing and idempotency cleanup resolve it per pass, as before) and
 returns the iteration. Iterations keep their services' commit boundaries and log lines. Restore
-coordination (plan 14) decides later whether workers follow a database swap; until then these
+coordination decides later whether workers follow a database swap; until then these
 bindings are unchanged.
 """
 

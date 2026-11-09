@@ -1,4 +1,4 @@
-"""The lifespan's shutdown limits are enforced, not advisory (plan 14 review, finding 4).
+"""The lifespan's shutdown limits are enforced, not advisory.
 
 Every phase draws on one budget: the listener stop is part of the drain and cancel phases, not an
 extra allowance, and a step that suppresses cancellation is abandoned at its deadline rather than
@@ -106,7 +106,7 @@ def test_request_grace_and_lifespan_phases_fit_the_container_stop_grace():
     assert total <= stop_grace - 10, f"{total}s of shutdown leaves under 10s margin in {stop_grace}s"
 
 
-# --- admitted request work is inside the shutdown fence (review 2, finding 1) ----------------------
+# --- admitted request work is inside the shutdown fence ----------------------
 
 
 async def test_shutdown_waits_for_a_cancelled_requests_cleanup_before_reporting_clean():

@@ -1,4 +1,4 @@
-"""Ordered startup and its unwinding (plan 14, delivery B5).
+"""Ordered startup and its unwinding.
 
 The real lifespan, on this test's database. Startup runs its steps in the existing order with the
 existing policies (fatal steps stop startup, optional ones log and continue), and whatever it had

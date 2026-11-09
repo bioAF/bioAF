@@ -1,4 +1,4 @@
-"""Application task ownership (plan 14).
+"""Application task ownership.
 
 A ``TaskOwner`` holds the tasks one application lifespan (or one test) starts: strong references,
 a stable role name per task, the observed outcome of each, and a shutdown bounded by shared

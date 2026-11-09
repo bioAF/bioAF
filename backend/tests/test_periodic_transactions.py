@@ -1,4 +1,4 @@
-"""A failed iteration step leaves a usable transaction for the next (plan 14, delivery C4).
+"""A failed iteration step leaves a usable transaction for the next.
 
 Per-organization jobs commit each organization on its own. One organization's failed write must
 not poison the session for the organizations after it.

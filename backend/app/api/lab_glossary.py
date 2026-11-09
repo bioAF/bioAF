@@ -213,7 +213,7 @@ async def start_scan(
 ):
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
     # Admission is reserved before the job is committed and the scan starts on the application's
-    # owner after the commit, so the response does not wait for it (plan 14).
+    # owner after the commit, so the response does not wait for it.
     with runtime.admission(role="glossary-scan") as ticket:
         job = await scan_svc.create_scan_job(
             session, org_id=org_id, user_id=user_id, scan_type=body.scan_type, scan_input=body.scan_input

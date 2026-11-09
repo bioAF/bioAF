@@ -5,7 +5,7 @@
   async_session_factory`` binds a copy at import) at the test one, and puts
   them all back afterwards, including modules first imported during the test.
 - ``settle_owner`` lets the test's events finish, then cancels and awaits
-  everything the test's task owner holds (plan 14).
+  everything the test's task owner holds.
 - ``cancel_escaped_tasks`` is the backstop after that: application tasks the
   test started that the owner did not hold are cancelled, awaited, and logged.
   Pre-existing and non-application tasks are left alone. Tasks that existed

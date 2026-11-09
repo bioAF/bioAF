@@ -1,4 +1,4 @@
-"""Bind the application's task owner around each request (plan 14).
+"""Bind the application's task owner around each request.
 
 Pure ASGI, outermost, so everything the request runs (routes of the mounted integration app,
 streaming bodies, response background tasks) sees the owner the lifespan installed on

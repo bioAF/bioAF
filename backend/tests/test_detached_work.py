@@ -1,4 +1,4 @@
-"""Detached work and its parent-owned children (plan 14, delivery D1).
+"""Detached work and its parent-owned children.
 
 - A detached job started while an owner is bound belongs to that owner, under a stable role.
 - A parent that fans work out owns those children: cancelling it cancels and awaits every child,

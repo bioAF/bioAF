@@ -1,4 +1,4 @@
-"""Children of owned work stay owned through repeated cancellation (plan 14 review, finding 2).
+"""Children of owned work stay owned through repeated cancellation.
 
 A shielded cleanup, an event's subscriber calls, and a literature fan-out's source calls are
 children of an owned task. Repeated cancellation interrupts the parent's wait on them, so the parent

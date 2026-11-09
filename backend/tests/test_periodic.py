@@ -1,4 +1,4 @@
-"""The shared periodic scheduler (plan 14, delivery C).
+"""The shared periodic scheduler.
 
 Each job keeps its timing (first run after its first delay, the next delay counted from when the
 previous iteration settled, never overlapping), its own error message, and its transaction
@@ -162,7 +162,7 @@ async def test_prepare_runs_once_per_job_lifetime():
     assert prepared == [True]
 
 
-# The timing contract of every job (plan 14, "Startup and scheduling contracts").
+# The timing contract of every job.
 TIMINGS = {
     "pipeline-monitor": (30, 30),
     "auto-run-launch": (30, 30),
@@ -193,7 +193,7 @@ TIMINGS = {
     "nf-core-registry-refresh": (60, 86400),
 }
 
-# Each job's existing error message (the loops' logger.error lines in app/main.py before plan 14).
+# Each job's existing error message (the logger.error lines its loop had in app/main.py).
 MESSAGES = {
     "job-status-sync": "Job status sync error: %s",
     "idle-session-check": "Idle session check error: %s",

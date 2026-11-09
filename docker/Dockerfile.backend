@@ -59,6 +59,6 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
-# Requests get 10 s to finish on SIGTERM, then the lifespan's bounded shutdown runs (plan 14;
-# docker-compose's 60 s stop grace is the hard stop).
+# Requests get 10 s to finish on SIGTERM, then the lifespan's bounded shutdown runs
+# (docker-compose's 60 s stop grace is the hard stop).
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--timeout-graceful-shutdown", "10"]

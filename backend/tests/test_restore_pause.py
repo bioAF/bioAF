@@ -1,4 +1,4 @@
-"""Automatic and external work pause around a restore review (plan 14, restore pause/quiesce).
+"""Automatic and external work pause around a restore review.
 
 During a review, requests read and write the review copy by design, but automatic work must not
 (it would write the review copy, or the ``postgres`` database while Accept renames), and work with
@@ -211,7 +211,7 @@ async def test_every_external_work_boundary_refuses_while_paused(boundary):
             await (anext(result) if inspect.isasyncgen(result) else result)
 
 
-# --- admission covers the operation's lifetime (plan 14 review, finding 1) ------------------------
+# --- admission covers the operation's lifetime ------------------------
 
 
 async def test_an_admitted_operation_in_progress_keeps_the_pause_waiting():
@@ -291,7 +291,7 @@ async def test_response_job_routes_refuse_during_a_review_before_writing(client,
         assert (await s.execute(select(func.count(model.id)))).scalar() == 0
 
 
-# --- listener starts respect the pause (review 2, finding 3) ---------------------------------------
+# --- listener starts respect the pause ---------------------------------------
 
 
 async def test_a_listener_start_during_a_review_does_not_start_one_until_work_resumes(session):

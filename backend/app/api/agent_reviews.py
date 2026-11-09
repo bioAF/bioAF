@@ -186,7 +186,7 @@ async def run_review(
     user_id = int(current_user["sub"])
 
     # Admission is reserved before the job is committed and a hosted review starts on the
-    # application's owner after the commit, so the response does not wait for it (plan 14).
+    # application's owner after the commit, so the response does not wait for it.
     with runtime.admission(role="hosted-review") as ticket:
         return await _create_and_start(session, ticket, body, org_id=org_id, user_id=user_id)
 

@@ -1021,7 +1021,7 @@ class RestoreService:
 
             os.remove(dump_path)
 
-            # Pause automatic work and wait for in-flight work to settle (plan 14): during the
+            # Pause automatic work and wait for in-flight work to settle: during the
             # review, nothing automatic may write the review copy, and nothing external may start.
             owner = runtime.current_owner()
             busy = await _pause_work(owner)

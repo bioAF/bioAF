@@ -1,9 +1,9 @@
-"""How work finds its task owner (plan 14, delivery B3 and the first migrated cohort).
+"""How work finds its task owner.
 
 - Requests (the mounted integration app included) run with the application's owner bound.
 - A session opened for an owner hands its post-commit events to that owner; an unbound session
   keeps the legacy path, and a commit never fails because the owner stopped admitting events.
-- Direct event emissions (the first migrated cohort) are owned by the bound owner.
+- Direct event emissions are owned by the bound owner.
 """
 
 import ast
