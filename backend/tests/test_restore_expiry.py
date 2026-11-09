@@ -394,3 +394,60 @@ async def test_a_partial_rename_is_never_reported_as_a_successful_revert(monkeyp
             await owner.shutdown(drain_seconds=0, cancel_seconds=1)
     finally:
         await asyncio.to_thread(provisioned.__exit__, None, None, None)
+
+
+@needs_initdb
+@pytest.mark.parametrize("reconnect_failures", [1, 2], ids=["retry-reconnects", "retry-fails"])
+async def test_a_failure_after_the_replacement_completed_is_never_reverted(monkeypatch, tmp_path, reconnect_failures):
+    """The renames and drop finished, then reconnecting failed. The replacement is live and the
+    original is gone, so the review cannot reopen: it is either accepted (the reconnect retry
+    worked) or needs recovery. Reject must never report a revert."""
+    from app import runtime
+    from app.runtime import TaskOwner
+
+    provisioned = dpg.provision()
+    server = await asyncio.to_thread(provisioned.__enter__)
+    owner = TaskOwner()
+    try:
+        await _prepare_real_primary(server, monkeypatch, tmp_path)
+        real_swap = database_module.swap_database
+        state = {"renamed": False, "failures": reconnect_failures}
+        real_admin = backup_service._run_admin_sql
+
+        async def admin(statements):
+            await real_admin(statements)
+            if any("RENAME TO bioaf" in s and s.startswith("ALTER DATABASE bioaf_restore") for s in statements):
+                state["renamed"] = True
+
+        async def swap(url):
+            if state["renamed"] and url.endswith("/bioaf") and state["failures"]:
+                state["failures"] -= 1
+                raise ConnectionError("could not reconnect")
+            await real_swap(url)
+
+        try:
+            with runtime.bound(owner):
+                assert (await RestoreService.start(None, org_id=1, filename=FILENAME))["status"] == "reviewing"
+                monkeypatch.setattr(backup_service, "_run_admin_sql", admin)
+                monkeypatch.setattr(database_module, "swap_database", swap)
+                accepted = await RestoreService.accept()
+                rejected = await RestoreService.reject()
+
+            databases = {
+                r[0] for r in await asyncio.to_thread(_sql, server, server.database, "SELECT datname FROM pg_database")
+            }
+            assert "bioaf" in databases and "bioaf_restore" not in databases
+            assert rejected["status"] == "error"
+            if reconnect_failures == 1:
+                assert accepted["status"] == "accepted"
+                assert RestoreService.get_status() == {"active": False}
+                assert owner.paused is None
+            else:
+                assert accepted["status"] == "error"
+                assert RestoreService.get_status()["active"] is True
+                assert owner.paused == "restore_review"
+        finally:
+            await database_module.engine.dispose()
+            await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+    finally:
+        await asyncio.to_thread(provisioned.__exit__, None, None, None)

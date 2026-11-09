@@ -1174,15 +1174,25 @@ async def _remind_revert_failed() -> None:
             )
 
 
-async def _names_untouched() -> bool:
-    """The primary and the review copy both exist and no half-renamed primary is left over."""
+async def _rename_state() -> str:
+    """Where the Accept renames stand, from the server's database names.
+
+    ``untouched``: the primary and the review copy both exist and nothing was renamed aside.
+    ``replaced``: the review copy became the primary and the original was dropped (Accept's
+    database work finished). ``uncertain``: anything else, or the names could not be read.
+    """
     primary = urlparse(_restore_state["original_url"]).path.lstrip("/")
     try:
         names = await _existing_databases()
     except Exception:
         logger.exception("Could not read the database names to verify the primary")
-        return False
-    return primary in names and f"{primary}_old" not in names
+        return "uncertain"
+    has_primary, has_review, has_old = primary in names, f"{primary}_restore" in names, f"{primary}_old" in names
+    if has_primary and has_review and not has_old:
+        return "untouched"
+    if has_primary and not has_review and not has_old:
+        return "replaced"
+    return "uncertain"
 
 
 def _require_recovery(reason: str) -> None:
@@ -1234,15 +1244,27 @@ async def _accept_review() -> dict:
 
     except Exception:
         logger.exception("Accept restore failed")
-        # Only if nothing was renamed may the review stay open to accept (until it expires) or
-        # reject. Otherwise the primary is not where it was: keep work paused for an operator.
-        if await _names_untouched():
+        from app.database import swap_database
+
+        state = await _rename_state()
+        if state == "replaced":
+            # The database work finished; only reconnecting failed. The original is gone, so the
+            # review cannot reopen: retry the connection to the (now restored) primary.
+            try:
+                await swap_database(_restore_state["original_url"])
+            except Exception:
+                logger.exception("Reconnecting to the restored primary failed")
+                _require_recovery("the replacement completed but reconnecting to it failed")
+                return {"status": "error", "message": _RECOVERY_REQUIRED}
+            logger.info("Database rename complete: bioaf_restore -> bioaf (reconnected on retry)")
+            await _clear_review()
+            return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
+        if state == "untouched":
+            # Nothing was renamed: the review stays open to accept (until it expires) or reject.
             _restore_state["phase"] = "reviewing"
         else:
             _require_recovery("accept failed partway through the rename")
         try:
-            from app.database import swap_database
-
             await swap_database(_restore_state["original_url"])
         except Exception:
             pass
@@ -1275,8 +1297,8 @@ async def _revert_restore(reason: str) -> dict:
 
     # Resume only against a verified primary: after a partial rename the primary may be missing,
     # and dropping the review copy then could destroy the only intact database.
-    if not await _names_untouched():
-        _require_recovery("the primary database is missing or the rename was partial")
+    if await _rename_state() != "untouched":
+        _require_recovery("the primary or the review copy is not where a revert needs it")
         return {"status": "error", "message": _RECOVERY_REQUIRED}
 
     try:
