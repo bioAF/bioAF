@@ -66,3 +66,12 @@ test("a failed background refresh keeps the last health visible, marked stale, a
   expect(screen.queryByTestId("widget-stale")).not.toBeInTheDocument();
   expect(screen.getByText("Storage")).toBeInTheDocument();
 });
+
+test("the health read carries a cancellation signal that aborts on unmount", () => {
+  const { unmount } = render(<InfrastructureHealthWidget />);
+  const [path, options] = mockGet.mock.calls[0];
+  expect(path).toBe("/api/health/services");
+  expect(options?.signal).toBeInstanceOf(AbortSignal);
+  unmount();
+  expect(options.signal.aborted).toBe(true);
+});
