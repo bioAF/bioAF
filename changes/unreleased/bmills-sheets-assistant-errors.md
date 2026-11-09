@@ -15,6 +15,9 @@
   the plan card says the plan stopped partway and marks each step Done,
   Failed, or Not run. Confirm and Cancel are offered only while a plan is
   still pending, and reopened conversations show each plan's real state.
+- When a confirmed step fails unexpectedly, the chat says which action failed
+  without showing internal error details. Asking the assistant to add a sample
+  with an ID that already exists in the experiment now says so plainly.
 
 ### Google Sheets import
 
