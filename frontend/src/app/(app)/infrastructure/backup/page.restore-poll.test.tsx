@@ -109,3 +109,44 @@ test("a failed status read keeps the review on screen and is not an expiry", asy
   expect(screen.getByText(/Restore status could not be refreshed/)).toBeInTheDocument();
   expect(screen.queryByText(/Restore review expired/)).not.toBeInTheDocument();
 });
+
+test("no review in progress: the status is read once and not polled", async () => {
+  const { requests } = serveRestoreStatus([{ json: { active: false } }]);
+  render(<InfraBackupPage />);
+  await flush();
+  expect(statusReads(requests)).toBe(1);
+  await tick(120_000);
+  expect(statusReads(requests)).toBe(1);
+});
+
+test("a failed first status read is said with the page's load error, and Retry recovers", async () => {
+  serveRestoreStatus([{ status: 502, json: { detail: "Bad gateway" } }, { json: REVIEWING }]);
+  render(<InfraBackupPage />);
+  await flush();
+  expect(screen.getByText(/Backup status could not be loaded/i)).toBeInTheDocument();
+
+  await act(async () => {
+    screen.getByRole("button", { name: "Retry" }).click();
+  });
+  await flush();
+  expect(screen.queryByText(/Backup status could not be loaded/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Reviewing restored database/)).toBeInTheDocument();
+});
+
+test("leaving the page cancels a restore status read in flight", async () => {
+  const { fetchMock } = serveRestoreStatus([{ json: REVIEWING }]);
+  const signals: AbortSignal[] = [];
+  const answered = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: RequestInfo | URL, init: RequestInit = {}) => {
+    if (String(url).includes("/api/backups/restore/status")) {
+      signals.push(init.signal!);
+      return new Promise<Response>(() => {});
+    }
+    return answered(url, init);
+  });
+  const { unmount } = render(<InfraBackupPage />);
+  await flush();
+  expect(signals.length).toBeGreaterThan(0);
+  unmount();
+  expect(signals.every((s) => s.aborted)).toBe(true);
+});

@@ -84,7 +84,6 @@ export default function InfraBackupPage() {
   const [pgSnapshots, setPgSnapshots] = useState<PostgresSnapshot[]>([]);
   const [tfstateFiles, setTfstateFiles] = useState<TfstateFile[]>([]);
   const [settings, setSettings] = useState<BackupSettings | null>(null);
-  const [restoreStatus, setRestoreStatus] = useState<RestoreStatus>({ active: false });
   const [loading, setLoading] = useState(true);
   const [actionMessage, setActionMessage] = useState("");
   const [runningAction, setRunningAction] = useState("");
@@ -107,13 +106,12 @@ export default function InfraBackupPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [status, snaps, pgSnaps, tfFiles, backupSettings, rStatus] = await Promise.all([
+      const [status, snaps, pgSnaps, tfFiles, backupSettings] = await Promise.all([
         api.get<{ tiers: BackupTier[]; overall_status: string }>("/api/backups/status"),
         api.get<{ snapshots: ConfigSnapshot[] }>("/api/backups/config-snapshots"),
         api.get<{ snapshots: PostgresSnapshot[] }>("/api/backups/postgres-snapshots"),
         api.get<{ files: TfstateFile[] }>("/api/backups/tfstate-files"),
         api.get<BackupSettings>("/api/backups/settings"),
-        api.get<RestoreStatus>("/api/backups/restore/status"),
       ]);
       setTiers(status.tiers);
       setOverallStatus(status.overall_status);
@@ -121,7 +119,6 @@ export default function InfraBackupPage() {
       setPgSnapshots(pgSnaps.snapshots);
       setTfstateFiles(tfFiles.files);
       setSettings(backupSettings);
-      setRestoreStatus(rStatus);
       setLoadError(null);
     } catch (e) {
       // Falling through to the empty states told an admin there were NO backups,
@@ -139,19 +136,19 @@ export default function InfraBackupPage() {
     loadData();
   }, [router, permLoading, canAccess, loadData]);
 
-  // Poll restore status while a review is active. Each read starts after the previous one
-  // settles; accepting or rejecting ends the review, which drops any read still in flight.
+  // The restore review status, re-read every 30 s while a review is active (each read after the
+  // previous one settles). A review that was active and no longer is has expired: that is said
+  // once and the page data reloads.
   const restorePoll = useResource(
-    restoreStatus.active ? "restore-status" : null,
+    !permLoading && canAccess("backups", "view") ? "restore-status" : null,
     useCallback(
       (signal: AbortSignal) => api.get<RestoreStatus>("/api/backups/restore/status", { signal }),
       [],
     ),
     {
-      poll: 30000,
+      poll: ({ data }) => (data?.active ? 30000 : false),
       onSuccess: (rStatus) => {
-        setRestoreStatus(rStatus);
-        if (!rStatus.active) {
+        if (!rStatus.active && restorePoll.data?.active) {
           setActionMessage("Restore review expired. Reverted to original database.");
           void loadData();
         }
@@ -159,6 +156,15 @@ export default function InfraBackupPage() {
       onError: (e) => logError("reading restore review status", e),
     },
   );
+  const restoreStatus: RestoreStatus = restorePoll.data ?? { active: false };
+  // A first status read that failed fails the page's load like any other section.
+  const pageLoadError =
+    loadError ??
+    (restorePoll.error !== null && restorePoll.data === undefined ? loadFailureMessage("Backup status") : null);
+  const reloadAll = () => {
+    void loadData();
+    void restorePoll.refresh();
+  };
 
   const handleConfigRestore = () => {
     // The old dialog said only "Are you sure you want to initiate a config
@@ -269,7 +275,8 @@ export default function InfraBackupPage() {
         try {
           const data = await api.post<{ status: string; message: string }>("/api/backups/restore/accept", {});
           setActionMessage(data.message);
-          setRestoreStatus({ active: false });
+          restorePoll.mutate({ active: false });
+          void restorePoll.refresh();
           await loadData();
         } catch (e) {
           setActionMessage(e instanceof Error ? e.message : "Accept failed");
@@ -291,7 +298,8 @@ export default function InfraBackupPage() {
         try {
           const data = await api.post<{ status: string; message: string }>("/api/backups/restore/reject", {});
           setActionMessage(data.message);
-          setRestoreStatus({ active: false });
+          restorePoll.mutate({ active: false });
+          void restorePoll.refresh();
           await loadData();
         } catch (e) {
           setActionMessage(e instanceof Error ? e.message : "Reject failed");
@@ -357,11 +365,11 @@ export default function InfraBackupPage() {
         <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
           Scheduled backups of the platform database, and the restore points you can recover to.
         </p>
-        {loadError && (
+        {pageLoadError && (
           <div className="mb-6">
             <ErrorState
-              message={loadError}
-              onRetry={() => loadData()}
+              message={pageLoadError}
+              onRetry={reloadAll}
             />
           </div>
         )}
@@ -690,7 +698,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loadError ? null : pgSnapshots.length === 0 ? (
+                  {pageLoadError ? null : pgSnapshots.length === 0 ? (
                     <tr>
                       <td colSpan={canAccess("backups", "restore") ? 4 : 3} className="px-4 py-8 text-center text-gray-500">
                         No snapshots available
@@ -731,7 +739,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loadError ? null : snapshots.length === 0 ? (
+                  {pageLoadError ? null : snapshots.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                         No snapshots available
@@ -762,7 +770,7 @@ export default function InfraBackupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loadError ? null : tfstateFiles.length === 0 ? (
+                  {pageLoadError ? null : tfstateFiles.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
                         No state files available
