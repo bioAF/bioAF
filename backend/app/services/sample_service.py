@@ -1,4 +1,5 @@
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,6 +26,23 @@ SAMPLE_STATUS_TRANSITIONS = {
     "pipeline_complete": ["analysis_complete"],
     "analysis_complete": [],
 }
+
+
+# Unique constraints a sample's own values can break.
+EXTERNAL_ID_UNIQUE = "uq_samples_experiment_external_id"
+SEQ_BATCH_POSITION_UNIQUE = "uq_sample_seq_batch_position"
+
+
+def violated_unique_constraint(exc: IntegrityError) -> str | None:
+    """The constraint name of a PostgreSQL unique violation (SQLSTATE 23505), else None."""
+    orig = exc.orig
+    if getattr(orig, "sqlstate", None) != "23505" and getattr(orig, "pgcode", None) != "23505":
+        return None
+    return getattr(getattr(orig, "__cause__", None), "constraint_name", None)
+
+
+def duplicate_external_id_text(external_id: str | None) -> str:
+    return f"Sample ID \u201c{external_id}\u201d already exists in this experiment."
 
 
 class SampleService:

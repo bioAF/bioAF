@@ -18,10 +18,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.exceptions import ConflictError
 from app.models.audit_log import AuditLog
-from app.models.sample import Sample
 from app.schemas.experiment import ExperimentCreate
 from app.schemas.sample import SampleCreate
 from app.services.agent_review_artifact_builder import (
@@ -35,7 +35,12 @@ from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.pipeline_run_service import PipelineRunService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.recommend_pipeline_service import PipelineRecommendation, RecommendPipelineService
-from app.services.sample_service import SampleService
+from app.services.sample_service import (
+    EXTERNAL_ID_UNIQUE,
+    SampleService,
+    duplicate_external_id_text,
+    violated_unique_constraint,
+)
 
 ToolHandler = Callable[..., Awaitable[Any]]
 
@@ -296,15 +301,6 @@ async def _create_sample_handler(session, *, org_id, user_id, arguments):
     experiment = await ExperimentService.get_experiment(session, experiment_id, org_id)
     if experiment is None:
         raise LookupError(f"experiment {experiment_id} not found in org {org_id}")
-    external_id = arguments.get("external_id")
-    taken = (
-        await session.execute(
-            select(Sample.id).where(Sample.experiment_id == experiment_id, Sample.external_id == external_id)
-        )
-    ).first()
-    if external_id and taken is not None:
-        # A clear conflict instead of the database's unique-constraint error.
-        raise ConflictError(f"Sample ID \u201c{external_id}\u201d already exists in this experiment.")
     data = SampleCreate(
         external_id=arguments.get("external_id"),
         organism=arguments.get("organism"),
@@ -315,7 +311,14 @@ async def _create_sample_handler(session, *, org_id, user_id, arguments):
         tissue_type=arguments.get("tissue_type"),
         treatment_condition=arguments.get("treatment_condition"),
     )
-    sample = await SampleService.create_sample(session, experiment_id, user_id, data, via_assistant=True)
+    try:
+        sample = await SampleService.create_sample(session, experiment_id, user_id, data, via_assistant=True)
+    except IntegrityError as exc:
+        # The database decides a duplicate sample ID, so a concurrent duplicate is the same clear
+        # conflict as a sequential one. (Confirmation runs each step in a savepoint, which this rolls back.)
+        if violated_unique_constraint(exc) == EXTERNAL_ID_UNIQUE:
+            raise ConflictError(duplicate_external_id_text(data.external_id)) from exc
+        raise
     return {
         "sample_id": sample.id,
         "external_id": sample.external_id,

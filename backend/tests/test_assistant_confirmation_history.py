@@ -427,3 +427,45 @@ async def test_a_duplicate_sample_id_is_a_clear_conflict(client, session, admin_
     assert (await session.get(AssistantActionPlan, plan.id)).status == "failed"
     outputs = await _next_turn_outputs(session, admin_user, conv)
     assert '"failed"' in outputs["call_dupe"]
+
+
+async def test_concurrent_plans_for_the_same_sample_id_yield_one_sample_and_one_conflict(
+    client, session, admin_user, admin_token
+):
+    """Two plans add the same sample ID and are confirmed at the same time. The database's unique
+    constraint decides the winner; the loser gets the same 409 conflict as a sequential duplicate,
+    not a generic failure."""
+    import asyncio
+
+    from app.models.sample import Sample
+
+    exp = Experiment(organization_id=admin_user.organization_id, name="Race", owner_user_id=admin_user.id)
+    session.add(exp)
+    await session.commit()
+    plans = []
+    for call_id in ("call_one", "call_two"):
+        conv = await _conversation(session, admin_user)
+        plans.append(
+            await _propose(
+                session,
+                admin_user,
+                conv,
+                ToolCall(tool="create_sample", args={"experiment_id": exp.id, "external_id": "RACE-1"}, id=call_id),
+            )
+        )
+
+    responses = await asyncio.gather(
+        *(client.post(f"/api/assistant/action-plans/{p.id}/confirm", headers=_auth(admin_token)) for p in plans)
+    )
+
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    loser = next(r for r in responses if r.status_code == 409)
+    assert loser.json()["detail"] == "Sample ID “RACE-1” already exists in this experiment."
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(Sample)
+            .where(Sample.experiment_id == exp.id, Sample.external_id == "RACE-1")
+        )
+    ).scalar_one()
+    assert count == 1
