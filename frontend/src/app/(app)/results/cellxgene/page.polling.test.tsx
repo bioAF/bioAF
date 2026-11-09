@@ -107,3 +107,16 @@ test("an older filter's late answer does not replace the current filter's", asyn
   expect(screen.getByText("Dataset 2")).toBeInTheDocument();
   expect(screen.queryByText("Dataset 1")).not.toBeInTheDocument();
 });
+
+test("a filter change aborts the previous filter's read", async () => {
+  render(<CellxgenePage />);
+  await answer("/api/cellxgene", [pub(1, "published", 1), pub(2, "published", 2)]);
+  fireEvent.change(screen.getByLabelText("Filter by experiment"), { target: { value: "1" } });
+  const signal = mockGet.mock.calls
+    .filter(([url]) => url === "/api/cellxgene?experiment_id=1")
+    .at(-1)?.[1]?.signal as AbortSignal;
+  expect(signal).toBeInstanceOf(AbortSignal);
+
+  fireEvent.change(screen.getByLabelText("Filter by experiment"), { target: { value: "2" } });
+  expect(signal.aborted).toBe(true);
+});

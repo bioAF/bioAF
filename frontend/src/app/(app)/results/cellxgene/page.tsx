@@ -320,8 +320,6 @@ export default function CellxgenePage() {
   // The filter's options come from the publications seen so far, so the dropdown stays put while
   // a newly filtered list loads.
   const [knownExperimentIds, setKnownExperimentIds] = useState<number[]>([]);
-  // Auto-refresh while any publication is still publishing.
-  const [hasPublishing, setHasPublishing] = useState(false);
   const [publicationsError, setPublicationsError] = useState<string | null>(null);
 
   // Keyed by the experiment filter; re-read every 5 s while any publication is still publishing.
@@ -333,15 +331,14 @@ export default function CellxgenePage() {
   const list = useResource(
     publicationsPath,
     useCallback(
-      () => api.get<CellxgenePublicationResponse[]>(publicationsPath),
+      (signal: AbortSignal) => api.get<CellxgenePublicationResponse[]>(publicationsPath, { signal }),
       [publicationsPath],
     ),
     {
-      poll: hasPublishing ? 5000 : false,
+      poll: ({ data }) => (data?.some((p) => p.status === "publishing") ? 5000 : false),
       onSuccess: (data) => {
         // A retry that succeeds must leave the failure state behind it.
         setPublicationsError(null);
-        setHasPublishing(data.some((p) => p.status === "publishing"));
         setKnownExperimentIds((known) => [
           ...new Set([
             ...known,
