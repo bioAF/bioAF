@@ -8,7 +8,7 @@ mutations require ``lab_glossary:manage``.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -29,6 +29,7 @@ from app.schemas.lab_glossary import (
 )
 from app.services import lab_glossary_scan_service as scan_svc
 from app.services.lab_glossary_service import DuplicateTermError, LabGlossaryService
+from app import runtime
 
 router = APIRouter(prefix="/api/lab-knowledge", tags=["lab-knowledge"])
 
@@ -207,16 +208,18 @@ async def delete_term(
 @router.post("/glossary/scan", response_model=LabGlossaryScanJobResponse)
 async def start_scan(
     body: LabGlossaryScanRequest,
-    background_tasks: BackgroundTasks,
     current_user: dict = require_permission("lab_glossary", "manage"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id, user_id = int(current_user["org_id"]), int(current_user["sub"])
-    job = await scan_svc.create_scan_job(
-        session, org_id=org_id, user_id=user_id, scan_type=body.scan_type, scan_input=body.scan_input
-    )
-    await session.commit()
-    background_tasks.add_task(scan_svc.execute_scan, async_session_factory, job_id=job.id)
+    # Admission is reserved before the job is committed and the scan starts on the application's
+    # owner after the commit, so the response does not wait for it (plan 14).
+    with runtime.admission(role="glossary-scan") as ticket:
+        job = await scan_svc.create_scan_job(
+            session, org_id=org_id, user_id=user_id, scan_type=body.scan_type, scan_input=body.scan_input
+        )
+        await session.commit()
+        ticket.start(scan_svc.execute_scan(async_session_factory, job_id=job.id))
     return _job_response(job)
 
 

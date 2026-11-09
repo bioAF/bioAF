@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ from app.services.agent_review_section_catalog import (
     SECTIONS,
     default_sub_item_ids,
 )
+from app import runtime
 
 router = APIRouter(prefix="/api/agent_reviews", tags=["agent-reviews"])
 
@@ -178,13 +179,21 @@ async def _to_summary(session: AsyncSession, review: AgentReview) -> AgentReview
 @router.post("/run", response_model=RunReviewResponse, status_code=202)
 async def run_review(
     body: RunReviewRequest,
-    background_tasks: BackgroundTasks,
     current_user: dict = require_permission("llm_integration", "use"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
+    # Admission is reserved before the job is committed and a hosted review starts on the
+    # application's owner after the commit, so the response does not wait for it (plan 14).
+    with runtime.admission(role="hosted-review") as ticket:
+        return await _create_and_start(session, ticket, body, org_id=org_id, user_id=user_id)
+
+
+async def _create_and_start(
+    session: AsyncSession, ticket: runtime.Ticket, body: RunReviewRequest, *, org_id: int, user_id: int
+) -> RunReviewResponse:
     try:
         job, review = await job_service.create(
             session,
@@ -218,11 +227,7 @@ async def run_review(
         # The card surfaces as pending until the orchestrator wakes it up.
         return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
 
-    background_tasks.add_task(
-        job_service.execute_hosted,
-        async_session_factory,
-        job_id=job.id,
-    )
+    ticket.start(job_service.execute_hosted(async_session_factory, job_id=job.id))
     return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
 
 

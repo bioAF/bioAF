@@ -79,6 +79,7 @@ async def test_cancelling_a_search_run_cancels_and_awaits_every_source_call(sess
 UNOWNED = {
     ("runtime.py", "TaskOwner.spawn"): "the owner itself",
     ("runtime.py", "spawn"): "legacy fallback while no owner is bound",
+    ("runtime.py", "Ticket.start"): "response job started while no owner is bound",
     ("services/post_commit_events.py", "_publish_after_commit"): "legacy path for unbound sessions",
     ("services/literature/search_service.py", "_run_search"): "parent-owned fan-out, cancelled and awaited",
     ("services/literature/lit_review_run_service.py", "_collect_candidates"): "parent-owned fan-out",

@@ -80,6 +80,7 @@ class TaskOwner:
         self._tasks: dict[asyncio.Task[Any], _Entry] = {}
         self._admitting = True
         self._admitting_events = True
+        self._reservations = 0
         self.stopping = asyncio.Event()
         self.report: ShutdownReport | None = None
 
@@ -93,7 +94,9 @@ class TaskOwner:
     def tasks(self) -> list[asyncio.Task[Any]]:
         return list(self._tasks)
 
-    def spawn(self, coro: Coroutine[Any, Any, Any], *, role: str, event: bool = False) -> asyncio.Task[Any]:
+    def spawn(
+        self, coro: Coroutine[Any, Any, Any], *, role: str, event: bool = False, reserved: bool = False
+    ) -> asyncio.Task[Any]:
         """Start ``coro`` as an owned task.
 
         Closed admission refuses new work, but not a descendant of work already owned: a task
@@ -101,7 +104,8 @@ class TaskOwner:
         event admission closes.
         """
         admitted = self._admitting_events if event else self._admitting
-        if not admitted and not (asyncio.current_task() in self._tasks and self._admitting_events):
+        descendant = asyncio.current_task() in self._tasks and self._admitting_events
+        if not admitted and not descendant and not (reserved and self._admitting_events):
             coro.close()
             _lifecycle(logging.WARNING, role, "refused", reason="shutting_down")
             raise OwnerClosed(f"{self.name} is shutting down")
@@ -137,6 +141,16 @@ class TaskOwner:
             return
         _lifecycle(logging.DEBUG, entry.role, "settled", outcome="finished", elapsed=elapsed, remaining=remaining)
 
+    def reserve(self, role: str) -> None:
+        """Hold admission for one job a request is about to commit; refused once closed."""
+        if not self._admitting:
+            _lifecycle(logging.WARNING, role, "refused", reason="shutting_down")
+            raise OwnerClosed(f"{self.name} is shutting down")
+        self._reservations += 1
+
+    def release(self) -> None:
+        self._reservations -= 1
+
     def close_admission(self) -> None:
         """Refuse new ordinary work; events stay admitted (stopping jobs may still commit some)."""
         self._admitting = False
@@ -150,11 +164,15 @@ class TaskOwner:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + seconds
         current = asyncio.current_task()
-        while pending := [t for t in self._tasks if t is not current]:
+        while (pending := [t for t in self._tasks if t is not current]) or self._reservations:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 return False
-            await asyncio.wait(pending, timeout=remaining)
+            # A reserved job not yet started counts too: its request is committing it.
+            if not pending:
+                await asyncio.sleep(min(remaining, 0.01))
+            else:
+                await asyncio.wait(pending, timeout=min(remaining, 0.05) if self._reservations else remaining)
         return True
 
     async def cancel_all(self, seconds: float) -> tuple[list[str], list[str]]:
@@ -239,6 +257,40 @@ def spawn_event(coro: Coroutine[Any, Any, Any], *, event_type: str) -> asyncio.T
         return spawn(coro, role=f"event:{event_type}", event=True)
     except OwnerClosed:
         return None
+
+
+class Ticket:
+    """A reserved admission: ``start`` the job once its row is committed."""
+
+    def __init__(self, owner: TaskOwner | None, role: str) -> None:
+        self._owner = owner
+        self._role = role
+        self.task: asyncio.Task[Any] | None = None
+
+    def start(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+        if self._owner is None:
+            self.task = asyncio.create_task(coro, name=f"bioaf:{self._role}")
+        else:
+            self.task = self._owner.spawn(coro, role=self._role, reserved=True)
+        return self.task
+
+
+@contextmanager
+def admission(role: str) -> Iterator[Ticket]:
+    """Reserve admission for one job before committing it; start it after the commit.
+
+    Raises ``OwnerClosed`` before the caller writes anything when the owner is shutting down. If
+    the block ends without starting the job (a rollback, a failure), the reservation is released
+    and nothing runs. Without a bound owner the job starts as a plain task.
+    """
+    owner = _current.get()
+    if owner is not None:
+        owner.reserve(role)
+    try:
+        yield Ticket(owner, role)
+    finally:
+        if owner is not None:
+            owner.release()
 
 
 def owned_sessions(factory: Callable[..., Any], owner: TaskOwner) -> Callable[..., Any]:
