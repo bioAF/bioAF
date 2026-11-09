@@ -55,9 +55,10 @@ export default function ActivityFeedPage() {
   const feedPath = `/api/activity-feed?${params.toString()}`;
   const feed = useResource(
     feedPath,
-    // No signal passed: existing page tests assert the single-argument call. The resource's
-    // generation guard still drops superseded answers.
-    useCallback(() => api.get<{ events: ActivityEvent[]; total: number }>(feedPath), [feedPath]),
+    useCallback(
+      (signal: AbortSignal) => api.get<{ events: ActivityEvent[]; total: number }>(feedPath, { signal }),
+      [feedPath],
+    ),
     {
       onSuccess: (data) => setTotal(data.total),
       // The old comment claimed the api client handled this. It does not:

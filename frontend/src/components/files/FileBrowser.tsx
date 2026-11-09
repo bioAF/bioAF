@@ -142,9 +142,7 @@ export function FileBrowser({
     `${filesPath}|${labDocPath ?? ""}`,
     useCallback(
       async (signal: AbortSignal) => {
-        // No signal on the list call: existing page tests assert its single-argument form. The
-        // resource's generation guard still drops superseded answers.
-        const data = await api.get<FileListResponse>(filesPath);
+        const data = await api.get<FileListResponse>(filesPath, { signal });
         let labDocHits: LabDocHit[] = [];
         if (labDocPath) {
           try {
