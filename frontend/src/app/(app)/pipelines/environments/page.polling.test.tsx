@@ -126,3 +126,20 @@ test("a failed refresh of an open template keeps it on screen and says it may be
   expect(screen.getByRole("heading", { name: "Template 1" })).toBeInTheDocument();
   expect(screen.getByTestId("stale-notice")).toBeInTheDocument();
 });
+
+test("list and open-template reads carry a signal that aborts when the page closes", async () => {
+  const { unmount } = render(<PipelineEnvironmentsPage />);
+  await answer(LIST, { environments: [env(1, "building")] });
+  fireEvent.click(screen.getByText("Template 1"));
+  await answer("/api/v1/environments/1", detail(1, "building"));
+  await tick(5000);
+  if (reads("/api/v1/environments/1").length === 0) await tick(5000);
+
+  const inFlight = pending
+    .filter((p) => p.url === LIST || p.url === "/api/v1/environments/1")
+    .map((p) => mockGet.mock.calls.filter(([url]) => url === p.url).at(-1)?.[1]?.signal);
+  expect(inFlight.length).toBeGreaterThan(0);
+  expect(inFlight.every((s) => s instanceof AbortSignal)).toBe(true);
+  unmount();
+  expect(inFlight.every((s) => s.aborted)).toBe(true);
+});

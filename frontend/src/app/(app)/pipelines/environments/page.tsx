@@ -88,18 +88,19 @@ export default function PipelineEnvironmentsPage() {
   // Status polling: while any environment (or the open detail) has a build in
   // progress, refresh in the background so the UI reflects the new status. Each
   // read starts after the previous one settles, so slow answers never overlap.
-  const [listHasBuilding, setListHasBuilding] = useState(false);
   const detailHasBuilding = selectedEnv?.versions.some((v) => v.status === "building") ?? false;
   const versionIsBuilding = selectedVersion?.status === "building";
-  const anyBuilding = listHasBuilding || detailHasBuilding || versionIsBuilding;
 
   const list = useResource(
     LIST_PATH,
-    useCallback(() => api.get<EnvironmentListResponse>(LIST_PATH), []),
+    useCallback((signal: AbortSignal) => api.get<EnvironmentListResponse>(LIST_PATH, { signal }), []),
     {
-      poll: anyBuilding ? POLL_INTERVAL_MS : false,
-      onSuccess: (data) =>
-        setListHasBuilding(data.environments.some((e) => e.latest_version?.status === "building")),
+      poll: ({ data }) =>
+        data?.environments.some((e) => e.latest_version?.status === "building") ||
+        detailHasBuilding ||
+        versionIsBuilding
+          ? POLL_INTERVAL_MS
+          : false,
       onError: (e) => logError("loading the pipeline templates", e),
     },
   );
@@ -123,13 +124,14 @@ export default function PipelineEnvironmentsPage() {
     selectedEnvId !== null && (detailHasBuilding || versionIsBuilding)
       ? `${selectedEnvId}:${selectedVersionId ?? ""}`
       : null,
-    useCallback(async () => {
+    useCallback(async (signal: AbortSignal) => {
       if (selectedEnvId === null) return null;
       const [detail, version] = await Promise.all([
-        api.get<EnvironmentDetailResponse>(`/api/v1/environments/${selectedEnvId}`),
+        api.get<EnvironmentDetailResponse>(`/api/v1/environments/${selectedEnvId}`, { signal }),
         selectedVersionId !== null
           ? api.get<EnvironmentVersionResponse>(
               `/api/v1/environments/${selectedEnvId}/versions/${selectedVersionId}`,
+              { signal },
             )
           : Promise.resolve(null),
       ]);
