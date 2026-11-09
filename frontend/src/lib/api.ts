@@ -399,7 +399,7 @@ export interface TextRequest extends RequestControls {
   body?: unknown;
 }
 
-async function fetchText(path: string, options: TextRequest = {}): Promise<string> {
+export async function fetchText(path: string, options: TextRequest = {}): Promise<string> {
   const response = await send(path, {
     method: options.method ?? "GET",
     json: options.body,

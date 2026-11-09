@@ -18,7 +18,7 @@ import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButton
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { usePermissions } from "@/hooks/usePermissions";
 import { getToken } from "@/lib/auth";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, fetchText } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
@@ -292,15 +292,11 @@ export default function PipelineRunDetailPage() {
   async function loadReport() {
     setReportLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/pipeline-runs/${runId}/report`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("bioaf_token")}` },
-      });
-      // `fetch` does not reject on 4xx/5xx, and this used to pipe `res.text()`
-      // straight into `<iframe srcDoc>` under the heading "Nextflow Report". A 404
-      // body, a 500 stack trace or an nginx error page was therefore rendered as the
-      // pipeline's own report. Only a 2xx body is a report.
-      if (!res.ok) throw new Error(`HTTP ${res.status} from the report endpoint`);
-      setReport(await res.text());
+      // This used to pipe any response's text straight into `<iframe srcDoc>` under
+      // the heading "Nextflow Report", so a 404 body, a 500 stack trace or an nginx
+      // error page was rendered as the pipeline's own report. The shared client
+      // rejects every non-2xx answer, so only a 2xx body is a report.
+      setReport(await fetchText(`/api/pipeline-runs/${runId}/report`));
     } catch (e) {
       logError("loading the run report", e);
       toast.error(loadFailureMessage("The run report"));

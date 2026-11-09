@@ -2,9 +2,7 @@
 
 import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
-import { getToken } from "@/lib/auth";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { api } from "@/lib/api";
 
 interface SizeBreakdown {
   total_bytes: number;
@@ -61,13 +59,9 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
     setSizeLoading(true);
     setSizeError("");
     try {
-      const token = getToken();
-      const resp = await fetch(
-        `${API_URL}/api/experiments/${experimentId}/export/estimate?include_fastq=${includeFastq}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+      const data = await api.get<SizeBreakdown>(
+        `/api/experiments/${experimentId}/export/estimate?include_fastq=${includeFastq}`,
       );
-      if (!resp.ok) throw new Error(`Error ${resp.status}`);
-      const data: SizeBreakdown = await resp.json();
       setSizeData(data);
       setStep("size");
     } catch (err: unknown) {
@@ -82,24 +76,16 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
     setDownloadError("");
     setStep("download");
     try {
-      const token = getToken();
-      const resp = await fetch(`${API_URL}/api/experiments/${experimentId}/export/data`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await api.download(
+        `/api/experiments/${experimentId}/export/data`,
+        "POST",
+        {
           delivery_method: "direct",
           include_fastq: includeFastq,
           include_provenance: includeProvenance,
-        }),
-      });
-      if (!resp.ok) throw new Error(`Error ${resp.status}`);
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `experiment_${experimentId}_export.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
+        },
+        { filename: `experiment_${experimentId}_export.zip` },
+      );
     } catch (err: unknown) {
       setDownloadError(err instanceof Error ? err.message : "Download failed");
     } finally {
@@ -112,18 +98,11 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
     setDownloadError("");
     setStep("download");
     try {
-      const token = getToken();
-      const resp = await fetch(`${API_URL}/api/experiments/${experimentId}/export/data`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          delivery_method: "gcs",
-          include_fastq: includeFastq,
-          include_provenance: includeProvenance,
-        }),
+      const data = await api.post<GcsResponse>(`/api/experiments/${experimentId}/export/data`, {
+        delivery_method: "gcs",
+        include_fastq: includeFastq,
+        include_provenance: includeProvenance,
       });
-      if (!resp.ok) throw new Error(`Error ${resp.status}`);
-      const data: GcsResponse = await resp.json();
       setSignedUrl(data.signed_url);
     } catch (err: unknown) {
       setDownloadError(err instanceof Error ? err.message : "Failed to generate download link");

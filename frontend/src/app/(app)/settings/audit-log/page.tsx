@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -27,6 +27,23 @@ interface AuditEntry {
   previous_value: Record<string, unknown> | null;
 }
 
+interface AuditFilters {
+  entityType: string;
+  action: string;
+  startDate: string;
+  endDate: string;
+}
+
+/** The filter part of a list or export query, so both read the same entries. */
+function auditFilterQuery(filters: AuditFilters): string {
+  let query = "";
+  if (filters.entityType) query += `&entity_type=${filters.entityType}`;
+  if (filters.action) query += `&action=${filters.action}`;
+  if (filters.startDate) query += `&start_date=${filters.startDate}`;
+  if (filters.endDate) query += `&end_date=${filters.endDate}`;
+  return query;
+}
+
 export default function AuditLogPage() {
   const toast = useToast();
   const router = useRouter();
@@ -42,6 +59,10 @@ export default function AuditLogPage() {
   const [endDate, setEndDate] = useState("");
   const [exporting, setExporting] = useState(false);
   const pageSize = 25;
+  const filters = useMemo(
+    () => ({ entityType, action, startDate, endDate }),
+    [entityType, action, startDate, endDate],
+  );
 
   useEffect(() => {
     if (permLoading) return;
@@ -51,11 +72,7 @@ export default function AuditLogPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      let url = `/api/audit?page=${page}&page_size=${pageSize}`;
-      if (entityType) url += `&entity_type=${entityType}`;
-      if (action) url += `&action=${action}`;
-      if (startDate) url += `&start_date=${startDate}`;
-      if (endDate) url += `&end_date=${endDate}`;
+      const url = `/api/audit?page=${page}&page_size=${pageSize}${auditFilterQuery(filters)}`;
       const data = await api.get<{ entries: AuditEntry[]; total: number }>(url);
       setEntries(data.entries);
       setLoadError(null);
@@ -66,7 +83,7 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, entityType, action, startDate, endDate]);
+  }, [page, filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -75,23 +92,9 @@ export default function AuditLogPage() {
   async function handleExport() {
     setExporting(true);
     try {
-      let url = `/api/audit/export?format=csv`;
-      if (entityType) url += `&entity_type=${entityType}`;
-      if (action) url += `&action=${action}`;
-      if (startDate) url += `&start_date=${startDate}`;
-      if (endDate) url += `&end_date=${endDate}`;
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}${url}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("bioaf_token")}`,
-        },
+      await api.download(`/api/audit/export?format=csv${auditFilterQuery(filters)}`, "GET", undefined, {
+        filename: "audit_log.csv",
       });
-      if (!response.ok) throw new Error("Export failed");
-      const blob = await response.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "audit_log.csv";
-      a.click();
-      URL.revokeObjectURL(a.href);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not export the audit log.");
     } finally {
