@@ -3220,6 +3220,13 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_restore_expiry.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
+  },
   "test_result_set_normalizer.py": {
    "category": "no_database",
    "evidence": [],

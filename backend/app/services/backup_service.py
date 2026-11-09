@@ -841,15 +841,30 @@ class BackupService:
 # Database Restore
 # ---------------------------------------------------------------------------
 
+# "phase" is the review's decision state: "reviewing" (accept, reject, or timeout may decide),
+# "deciding" (one of them holds the decision), "revert_failed" (traffic may not be back on the
+# primary; only a retried revert, through reject, may proceed). "_decision" serializes accept,
+# reject, and timeout so exactly one of them acts on a review.
 _restore_state: dict = {
     "active": False,
+    "phase": "idle",
     "original_url": "",
     "restore_url": "",
     "backup_filename": "",
     "started_at": None,
     "expires_at": None,
     "_timeout_task": None,
+    "_decision": None,
 }
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _admin_url() -> str:
+    """The configured URL with the database switched to ``postgres``; credentials unchanged."""
+    return urlparse(settings.database_url)._replace(path="/postgres").geturl()
 
 
 def _build_restore_url() -> str:
@@ -886,7 +901,7 @@ class RestoreService:
 
     @staticmethod
     def get_status() -> dict:
-        now = datetime.now(timezone.utc)
+        now = _now()
         if not _restore_state["active"]:
             return {"active": False}
         expires = _restore_state["expires_at"]
@@ -982,8 +997,10 @@ class RestoreService:
             _restore_state["restore_url"] = restore_url
             _restore_state["backup_filename"] = filename
             _restore_state["active"] = True
-            _restore_state["started_at"] = datetime.now(timezone.utc)
-            _restore_state["expires_at"] = datetime.now(timezone.utc) + timedelta(seconds=RESTORE_REVIEW_SECONDS)
+            _restore_state["phase"] = "reviewing"
+            _restore_state["_decision"] = asyncio.Lock()
+            _restore_state["started_at"] = _now()
+            _restore_state["expires_at"] = _now() + timedelta(seconds=RESTORE_REVIEW_SECONDS)
 
             await swap_database(restore_url)
             logger.info("Swapped to bioaf_restore for review")
@@ -1005,72 +1022,126 @@ class RestoreService:
 
     @staticmethod
     async def accept() -> dict:
-        """Accept the restored database: rename and make permanent."""
-        if not _restore_state["active"]:
+        """Accept the restored database: rename and make permanent.
+
+        Refused, before any swap or SQL, once the review has expired or another decision has
+        taken it, whether or not the timeout has run or its cleanup succeeded.
+        """
+        decision = _restore_state["_decision"]
+        if not _restore_state["active"] or decision is None:
             return {"status": "error", "message": "No active restore to accept"}
 
-        if _restore_state["_timeout_task"]:
-            _restore_state["_timeout_task"].cancel()
-
-        try:
-            from app.database import swap_database
-
-            # Point at postgres maintenance DB temporarily so we're not connected
-            # to any DB we're about to rename
-            admin_async_url = settings.database_url.replace("/bioaf", "/postgres")
-            await swap_database(admin_async_url)
-
-            await _run_admin_sql(
-                [
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid != pg_backend_pid()",
-                    "ALTER DATABASE bioaf RENAME TO bioaf_old",
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf_restore' AND pid != pg_backend_pid()",
-                    "ALTER DATABASE bioaf_restore RENAME TO bioaf",
-                    "DROP DATABASE IF EXISTS bioaf_old",
-                ]
-            )
-            logger.info("Database rename complete: bioaf_restore -> bioaf")
-
-            # Swap back to the original URL (which now points to the restored data)
-            await swap_database(_restore_state["original_url"])
-
-            _restore_state["active"] = False
-            _restore_state["_timeout_task"] = None
-            return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
-
-        except Exception:
-            logger.exception("Accept restore failed")
-            try:
-                from app.database import swap_database
-
-                await swap_database(_restore_state["original_url"])
-            except Exception:
-                pass
-            return {"status": "error", "message": "Accept restore failed; check server logs."}
+        async with decision:
+            refusal = _acceptance_refusal()
+            if refusal:
+                return refusal
+            _restore_state["phase"] = "deciding"
+            _cancel_timeout()
+            return await _accept_review()
 
     @staticmethod
     async def reject() -> dict:
         """Reject the restored database and revert to the original."""
-        if not _restore_state["active"]:
+        decision = _restore_state["_decision"]
+        if not _restore_state["active"] or decision is None:
             return {"status": "error", "message": "No active restore to reject"}
-        return await _revert_restore("Restore rejected by admin")
+        async with decision:
+            if not _restore_state["active"]:
+                return {"status": "error", "message": "No active restore to reject"}
+            return await _revert_restore("Restore rejected by admin")
+
+
+def _acceptance_refusal() -> dict | None:
+    if not _restore_state["active"]:
+        return {"status": "error", "message": "No active restore to accept"}
+    if _restore_state["phase"] == "revert_failed":
+        return {
+            "status": "error",
+            "message": "The restore review could not be reverted. Reject it to retry the revert.",
+        }
+    if _restore_state["phase"] != "reviewing":
+        return {"status": "error", "message": "This restore review is already being decided"}
+    expires = _restore_state["expires_at"]
+    if expires is None or _now() >= expires:
+        return {"status": "error", "message": "The restore review has expired. The original database was kept."}
+    return None
+
+
+def _cancel_timeout() -> None:
+    """Cancel the review timer, unless it is the task calling (it must finish its own revert)."""
+    task = _restore_state["_timeout_task"]
+    if task is not None and task is not asyncio.current_task():
+        task.cancel()
+
+
+def _clear_review() -> None:
+    _restore_state["active"] = False
+    _restore_state["phase"] = "idle"
+    _restore_state["_timeout_task"] = None
+    _restore_state["_decision"] = None
+
+
+async def _accept_review() -> dict:
+    try:
+        from app.database import swap_database
+
+        # Point at postgres maintenance DB temporarily so we're not connected
+        # to any DB we're about to rename
+        await swap_database(_admin_url())
+
+        await _run_admin_sql(
+            [
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid != pg_backend_pid()",
+                "ALTER DATABASE bioaf RENAME TO bioaf_old",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf_restore' AND pid != pg_backend_pid()",
+                "ALTER DATABASE bioaf_restore RENAME TO bioaf",
+                "DROP DATABASE IF EXISTS bioaf_old",
+            ]
+        )
+        logger.info("Database rename complete: bioaf_restore -> bioaf")
+
+        # Swap back to the original URL (which now points to the restored data)
+        await swap_database(_restore_state["original_url"])
+
+        _clear_review()
+        return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
+
+    except Exception:
+        logger.exception("Accept restore failed")
+        # As before: the review stays open to accept (until it expires) or reject.
+        _restore_state["phase"] = "reviewing"
+        try:
+            from app.database import swap_database
+
+            await swap_database(_restore_state["original_url"])
+        except Exception:
+            pass
+        return {"status": "error", "message": "Accept restore failed; check server logs."}
 
 
 async def _restore_timeout() -> None:
     """Background task that reverts the restore after the review period expires."""
     try:
         await asyncio.sleep(RESTORE_REVIEW_SECONDS)
-        if _restore_state["active"]:
-            logger.warning("Restore review timed out, reverting to original database")
-            await _revert_restore("Restore review timed out")
+        decision = _restore_state["_decision"]
+        if decision is None:
+            return
+        async with decision:
+            if _restore_state["active"] and _restore_state["phase"] == "reviewing":
+                logger.warning("Restore review timed out, reverting to original database")
+                await _revert_restore("Restore review timed out")
     except asyncio.CancelledError:
         pass
 
 
 async def _revert_restore(reason: str) -> dict:
-    """Swap back to the original database and drop bioaf_restore."""
-    if _restore_state["_timeout_task"]:
-        _restore_state["_timeout_task"].cancel()
+    """Swap back to the original database and drop bioaf_restore. The caller holds the decision.
+
+    On failure the review stays active and ineligible for acceptance: the database state is
+    uncertain, so no flag is cleared that would admit another destructive operation.
+    """
+    _restore_state["phase"] = "deciding"
+    _cancel_timeout()
 
     try:
         from app.database import swap_database
@@ -1081,11 +1152,10 @@ async def _revert_restore(reason: str) -> dict:
         await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
         logger.info("Dropped bioaf_restore database")
 
-        _restore_state["active"] = False
-        _restore_state["_timeout_task"] = None
+        _clear_review()
         return {"status": "reverted", "message": reason}
 
     except Exception:
-        logger.exception("Failed to revert restore")
-        _restore_state["active"] = False
+        logger.exception("Failed to revert restore; reject the restore review to retry the revert")
+        _restore_state["phase"] = "revert_failed"
         return {"status": "error", "message": "Revert restore failed; check server logs."}
