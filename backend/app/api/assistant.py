@@ -29,6 +29,7 @@ from app.models.assistant import (
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services import audit_service, llm_provider_config_service, role_service
 from app.services.assistant_availability_service import AssistantAvailabilityService
+from app.services.assistant_history import public_plan_steps, public_tool_calls
 from app.services.assistant_loop_service import AssistantLoopService
 from app.services.assistant_tool_catalog import get_tool
 from app.services.pipeline_run_service import PipelineRunService
@@ -281,12 +282,15 @@ async def get_conversation_transcript(
                 id=m.id,
                 role=m.role,
                 content=m.content,
-                tool_calls=m.tool_calls_json,
+                tool_calls=public_tool_calls(m.tool_calls_json),
                 created_at=m.created_at,
             )
             for m in messages
         ],
-        plans=[TranscriptPlan(id=p.id, steps=p.steps_json, status=p.status, created_at=p.created_at) for p in plans],
+        plans=[
+            TranscriptPlan(id=p.id, steps=public_plan_steps(p.steps_json), status=p.status, created_at=p.created_at)
+            for p in plans
+        ],
     )
 
 
@@ -308,7 +312,7 @@ async def send_message(
         status=result.status,
         text=result.text,
         action_plan_id=result.action_plan.id if result.action_plan else None,
-        plan_steps=result.action_plan.steps_json if result.action_plan else None,
+        plan_steps=public_plan_steps(result.action_plan.steps_json) if result.action_plan else None,
         reason=result.reason,
     )
 
