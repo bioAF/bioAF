@@ -37,7 +37,7 @@ async def test_startup_fails_interrupted_local_jobs_and_leaves_finished_ones(ses
     counts = await restart_recovery.fail_interrupted_local_jobs(session)
     await session.commit()
 
-    assert counts == {"literature_search": 2, "lab_document_url_import": 2, "paper_extraction": 1}
+    assert counts == {"literature_search": 2, "lab_document_url_import": 2, "lit_review_run": 0, "paper_extraction": 1}
     session.expire_all()
     by_query = {s.query_text: s for s in (await session.execute(select(LiteratureSearch))).scalars()}
     assert [by_query[q].status for q in "abc"] == ["failed", "failed", "complete"]
@@ -62,3 +62,34 @@ async def test_startup_runs_the_recovery_as_an_optional_step():
     names = [s.name for s in startup.NORMAL_STEPS]
     assert step.policy == "optional"
     assert names.index("interrupted_local_jobs") == names.index("glossary_orphans") + 1
+
+
+async def test_startup_fails_lit_review_runs_a_crash_left_unfinished(session, admin_user):
+    from app.models.experiment import Experiment
+    from app.models.literature import LiteratureReviewRun
+
+    experiment = Experiment(organization_id=admin_user.organization_id, name="E")
+    session.add(experiment)
+    await session.flush()
+    runs = {
+        status: LiteratureReviewRun(
+            organization_id=admin_user.organization_id,
+            experiment_id=experiment.id,
+            triggered_by_user_id=admin_user.id,
+            status=status,
+            llm_provider="openai",
+            llm_model="m",
+        )
+        for status in ("queued", "running", "complete")
+    }
+    session.add_all(runs.values())
+    await session.commit()
+
+    counts = await restart_recovery.fail_interrupted_local_jobs(session)
+    await session.commit()
+
+    assert counts["lit_review_run"] == 2
+    session.expire_all()
+    rows = {r.id: r for r in (await session.execute(select(LiteratureReviewRun))).scalars()}
+    assert [rows[runs[s].id].status for s in ("queued", "running", "complete")] == ["failed", "failed", "complete"]
+    assert rows[runs["running"].id].error_message == restart_recovery.INTERRUPTED
