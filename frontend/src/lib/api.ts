@@ -221,7 +221,7 @@ async function send(path: string, options: SendOptions = {}): Promise<Response> 
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => undefined);
+    const body = await readErrorBody(response);
     throw errorForResponse({
       status: response.status,
       body,
@@ -231,6 +231,15 @@ async function send(path: string, options: SendOptions = {}): Promise<Response> 
     });
   }
   return response;
+}
+
+/** The parsed error body, or undefined when it is missing or not JSON. Never throws. */
+async function readErrorBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
 }
 
 async function readJson<T>(response: Response): Promise<T> {
