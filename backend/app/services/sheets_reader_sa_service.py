@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials import get_credentials_provider
 from app.platform.platform_config_service import PlatformConfigService
+from app.services.google_sheets_errors import SheetsReadError, classify_credential_construction
 
 # Patchable aliases for tests
 discovery_build = google_discovery.build
@@ -30,6 +31,11 @@ _READER_SA_KEYS = [
     "sheets_reader_sa_key",
     "sheets_reader_sa_created",
 ]
+
+
+class ReaderNotConfiguredError(RuntimeError):
+    """The reader SA is not set up. The message is fixed setup guidance, safe to show users."""
+
 
 _GCP_KEYS = [
     "gcp_project_id",
@@ -221,33 +227,42 @@ async def get_reader_credentials(session: AsyncSession):
     principal. On legacy ``service_account_key`` installs, build
     credentials from the stored JSON key.
 
-    Raises ``RuntimeError`` if the reader SA is not configured.
+    Raises ``ReaderNotConfiguredError`` (a ``RuntimeError``) if the reader SA is not configured,
+    and ``SheetsReadError`` if stored credential data or ADC cannot produce credentials.
     """
     config = await _read_keys(session, _READER_SA_KEYS + _GCP_KEYS)
     if config.get("sheets_reader_sa_created") != "true":
-        raise RuntimeError(
+        raise ReaderNotConfiguredError(
             "Google Sheets reader service account is not configured. Set it up in Settings > Integrations > GCP."
         )
 
     sa_email = config.get("sheets_reader_sa_email", "")
     if not sa_email:
-        raise RuntimeError("Reader SA email is missing from configuration")
+        raise ReaderNotConfiguredError("Reader SA email is missing from configuration")
 
     provider = get_credentials_provider()
 
-    # Legacy installs still use the stored JSON key (the reader SA's own key,
-    # scoped to Sheets readonly).
-    if config.get("gcp_credential_source") == "service_account_key":
-        key_json = config.get("sheets_reader_sa_key", "")
-        if not key_json:
-            raise RuntimeError("Reader SA key is missing from configuration")
-        return provider.load_credentials(config, scopes=_SHEETS_SCOPE, key_json=key_json)
+    try:
+        # Legacy installs still use the stored JSON key (the reader SA's own key,
+        # scoped to Sheets readonly).
+        if config.get("gcp_credential_source") == "service_account_key":
+            key_json = config.get("sheets_reader_sa_key", "")
+            if not key_json:
+                raise ReaderNotConfiguredError("Reader SA key is missing from configuration")
+            return provider.load_credentials(config, scopes=_SHEETS_SCOPE, key_json=key_json)
 
-    # Greenfield: impersonate the reader SA using bioaf-app's ADC, with a
-    # short-lived Sheets-scoped token.
-    return provider.load_credentials(
-        config,
-        scopes=_SHEETS_SCOPE,
-        impersonate_target=sa_email,
-        lifetime=3600,
-    )
+        # Greenfield: impersonate the reader SA using bioaf-app's ADC, with a
+        # short-lived Sheets-scoped token.
+        return provider.load_credentials(
+            config,
+            scopes=_SHEETS_SCOPE,
+            impersonate_target=sa_email,
+            lifetime=3600,
+        )
+    except ReaderNotConfiguredError:
+        raise
+    except Exception as exc:
+        failure = classify_credential_construction(exc)
+        if failure is None:
+            raise
+        raise SheetsReadError(failure) from exc
