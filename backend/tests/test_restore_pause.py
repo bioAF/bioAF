@@ -209,3 +209,83 @@ async def test_every_external_work_boundary_refuses_while_paused(boundary):
             result = fn(*args, **kwargs)
             # A streamed operation (Terraform destroy) refuses on its first step.
             await (anext(result) if inspect.isasyncgen(result) else result)
+
+
+# --- admission covers the operation's lifetime (plan 14 review, finding 1) ------------------------
+
+
+async def test_an_admitted_operation_in_progress_keeps_the_pause_waiting():
+    owner = TaskOwner()
+    admitted, release = asyncio.Event(), asyncio.Event()
+
+    async def launch():
+        runtime.require_admission("pipeline launch")
+        admitted.set()
+        await release.wait()  # submitting, writing rows
+
+    with runtime.bound(owner):
+        request = asyncio.create_task(launch())
+    await admitted.wait()
+    assert await owner.pause("restore_review", settle_seconds=0.1) == ["operation:pipeline launch"]
+    owner.resume()
+    release.set()
+    await request
+    assert await owner.pause("restore_review", settle_seconds=0.1) == []
+
+
+async def test_an_open_admission_reservation_keeps_the_pause_waiting():
+    owner = TaskOwner()
+    reserved, release = asyncio.Event(), asyncio.Event()
+
+    async def request():
+        with runtime.bound(owner):
+            with runtime.admission(role="hosted-review"):
+                reserved.set()
+                await release.wait()  # the job row is being committed
+
+    handler = asyncio.create_task(request())
+    await reserved.wait()
+    assert await owner.pause("restore_review", settle_seconds=0.1) == ["reservation:hosted-review"]
+    owner.resume()
+    release.set()
+    await handler
+
+
+async def test_response_jobs_are_refused_while_paused():
+    owner = TaskOwner()
+    await owner.pause("restore_review", settle_seconds=0)
+    with runtime.bound(owner):
+        with pytest.raises(OwnerPaused):
+            with runtime.admission(role="hosted-review"):
+                pytest.fail("admitted while paused")
+    assert owner.busy() == []
+
+
+@pytest.mark.parametrize("route", ["glossary-scan", "hosted-review"])
+async def test_response_job_routes_refuse_during_a_review_before_writing(client, admin_token, route, monkeypatch):
+    from sqlalchemy import func, select
+
+    import app.database as database_module
+    from app.models.agent_review_job import AgentReviewJob
+    from app.models.lab_glossary import LabGlossaryScanJob
+
+    owner = runtime.current_owner()
+    await owner.pause("restore_review", settle_seconds=0)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    try:
+        if route == "glossary-scan":
+            resp = await client.post(
+                "/api/lab-knowledge/glossary/scan", json={"scan_type": "platform_wide"}, headers=headers
+            )
+        else:
+            resp = await client.post(
+                "/api/agent_reviews/run",
+                json={"entity_type": "pipeline_run", "entity_id": 1, "selected_sub_item_ids": ["qc.metric_review"]},
+                headers=headers,
+            )
+    finally:
+        owner.resume()
+    assert resp.status_code == 409, resp.text
+    model = LabGlossaryScanJob if route == "glossary-scan" else AgentReviewJob
+    async with database_module.async_session_factory() as s:
+        assert (await s.execute(select(func.count(model.id)))).scalar() == 0

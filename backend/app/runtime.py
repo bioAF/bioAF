@@ -92,7 +92,9 @@ class TaskOwner:
         self._tasks: dict[asyncio.Task[Any], _Entry] = {}
         self._admitting = True
         self._admitting_events = True
-        self._reservations = 0
+        self._reservations: list[str] = []
+        # Request operations admitted past require_admission, by the task running them.
+        self._operations: dict[asyncio.Task[Any], str] = {}
         self._paused: str | None = None
         self._active: dict[str, int] = {}
         self.stopping = asyncio.Event()
@@ -180,10 +182,34 @@ class TaskOwner:
             self._active[role] -= 1
 
     def busy(self) -> list[str]:
-        """Work that could still write: iterations in progress, events, and detached jobs."""
+        """Work that could still write: worker iterations in progress, events, detached jobs,
+        admitted request operations, and admissions reserved but not yet started."""
         current = asyncio.current_task()
         detached = [e.role for t, e in self._tasks.items() if not e.worker and t is not current and not t.done()]
-        return sorted(detached + [role for role, n in self._active.items() if n])
+        operations = [f"operation:{kind}" for t, kind in self._operations.items() if t is not current and not t.done()]
+        reservations = [f"reservation:{role}" for role in self._reservations]
+        return sorted(detached + operations + reservations + [role for role, n in self._active.items() if n])
+
+    def enter_operation(self, kind: str) -> None:
+        """Admit a request-triggered external operation for the rest of its task (or request).
+
+        Refused while paused. Once admitted, the operation counts as busy until its task finishes
+        or ``end_operations`` is called for it (the request middleware does, per request), so a
+        pause waits for it instead of reporting that work has settled.
+        """
+        if self._paused is not None:
+            _lifecycle(logging.WARNING, kind, "refused", reason=self._paused)
+            raise OwnerPaused(kind, self._paused)
+        task = asyncio.current_task()
+        if task is None or task in self._tasks:
+            return  # owned work is already counted
+        if task not in self._operations:
+            self._operations[task] = kind
+            task.add_done_callback(self.end_operations)
+
+    def end_operations(self, task: asyncio.Task[Any] | None) -> None:
+        if task is not None:
+            self._operations.pop(task, None)
 
     async def pause(self, reason: str, *, settle_seconds: float) -> list[str]:
         """Pause automatic work, then wait up to ``settle_seconds`` for in-flight work to settle.
@@ -206,14 +232,17 @@ class TaskOwner:
         self._paused = None
 
     def reserve(self, role: str) -> None:
-        """Hold admission for one job a request is about to commit; refused once closed."""
+        """Hold admission for one job a request is about to commit; refused once closed or paused."""
         if not self._admitting:
             _lifecycle(logging.WARNING, role, "refused", reason="shutting_down")
             raise OwnerClosed(f"{self.name} is shutting down")
-        self._reservations += 1
+        if self._paused is not None:
+            _lifecycle(logging.WARNING, role, "refused", reason=self._paused)
+            raise OwnerPaused(role, self._paused)
+        self._reservations.append(role)
 
-    def release(self) -> None:
-        self._reservations -= 1
+    def release(self, role: str) -> None:
+        self._reservations.remove(role)
 
     def close_admission(self) -> None:
         """Refuse new ordinary work; events stay admitted (stopping jobs may still commit some)."""
@@ -322,12 +351,12 @@ def require_admission(kind: str) -> None:
     """Refuse request-triggered external work while the bound owner is paused.
 
     Called at a domain admission boundary (a pipeline launch, a deployment, an import), before the
-    job writes anything or reaches an external system.
+    job writes anything or reaches an external system. An admitted operation stays visible to a
+    pause until its request (or task) ends.
     """
     owner = _current.get()
-    if owner is not None and owner.paused is not None:
-        _lifecycle(logging.WARNING, kind, "refused", reason=owner.paused)
-        raise OwnerPaused(kind, owner.paused)
+    if owner is not None:
+        owner.enter_operation(kind)
 
 
 @contextmanager
@@ -399,7 +428,7 @@ def admission(role: str) -> Iterator[Ticket]:
         yield Ticket(owner, role)
     finally:
         if owner is not None:
-            owner.release()
+            owner.release(role)
 
 
 def spawn_threadsafe(
