@@ -17,7 +17,7 @@ and 'failed'. Anything else counts as active.
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException
+from app.exceptions import ValidationError
 
 
 VALID_BUCKETS = frozenset({"active", "recent", "all"})
@@ -33,13 +33,13 @@ def _bucket_filter(model, bucket: str | None):
     """Return a SQLAlchemy where-clause for the given bucket, or None.
 
     None means no extra filter (active=None and bucket='all' both fall here).
-    Raises HTTPException(400) for unknown values so the API rejects typos
+    Raises a 400 ValidationError for unknown values so the API rejects typos
     instead of silently treating them as 'all'.
     """
     if bucket is None or bucket == "all":
         return None
     if bucket not in VALID_BUCKETS:
-        raise HTTPException(status_code=400, detail=f"Unknown bucket '{bucket}'. Valid: active, recent, all.")
+        raise ValidationError(f"Unknown bucket '{bucket}'. Valid: active, recent, all.", plain_body=True)
     if bucket == "active":
         return model.status.notin_(TERMINAL_STATUSES)
     # bucket == "recent"

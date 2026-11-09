@@ -5,11 +5,11 @@ through the owning study. The extractor calls create_plan + add_comparison_targe
 the result views read via get_plan.
 """
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import NotFoundError, ValidationError
 from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
@@ -241,25 +241,25 @@ class ReproductionPlanService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
         if study.state != "plan_ready":
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot change the plan's pipeline from '{study.state}'; the study must be in 'plan_ready'.",
+                plain_body=True,
             )
         plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
         if plan is None:
-            raise HTTPException(404, "No reproduction plan for this study.")
+            raise NotFoundError("No reproduction plan for this study.", plain_body=True)
 
         conflict = deposit_conflict(plan.blockers_json, plan.library_strategy)
         if conflict is None:
-            raise HTTPException(400, "This plan does not contradict what the deposit says its data is.")
+            raise ValidationError("This plan does not contradict what the deposit says its data is.", plain_body=True)
         suggested = conflict["suggested_pipeline_key"]
         if not suggested:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"The deposit says this data is {conflict['library_strategy']}, which names no single "
                 "pipeline to move to. Choose a different accession, or record why this one should run anyway.",
+                plain_body=True,
             )
 
         # A route has to pin a version: it is what the catalog installs, what the gate's install
@@ -268,10 +268,10 @@ class ReproductionPlanService:
         offer = await _offer_by_key(session, org_id, await _candidates(session, org_id), suggested)
         version = offer[1] if offer else declared_route_version(suggested)
         if not version:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"{suggested} reads {conflict['library_strategy']} data, but this bioAF has no version "
                 "of it to move to: it is neither installed nor in the nf-core registry cache.",
+                plain_body=True,
             )
 
         previous = plan.pipeline_key
@@ -319,15 +319,15 @@ class ReproductionPlanService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
         if study.state != "plan_ready":
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot edit the differential design from '{study.state}'; the study must be in 'plan_ready'.",
+                plain_body=True,
             )
         plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
         if plan is None:
-            raise HTTPException(404, "No reproduction plan to attach the differential design to.")
+            raise NotFoundError("No reproduction plan to attach the differential design to.", plain_body=True)
 
         normalized = _normalize_differential_design(design)
         # Reject a design no differential analysis can fit, at the C1 gate, before any spend: too few
@@ -335,7 +335,7 @@ class ReproductionPlanService:
         # together so one round trip surfaces everything wrong with the design.
         errors = validate_replicates(normalized) + validate_paired_designs(normalized)
         if errors:
-            raise HTTPException(400, "Invalid differential design. " + " ".join(errors))
+            raise ValidationError("Invalid differential design. " + " ".join(errors), plain_body=True)
         plan.differential_design_json = _differential_design_or_none(normalized)
         await session.flush()
         await log_action(
@@ -375,7 +375,7 @@ class ReproductionPlanService:
         UI can show the parse for confirmation/correction. Only valid at the ``plan_ready`` C1 gate.
         """
         if kind not in ("gene", "interval"):
-            raise HTTPException(400, f"Unknown finding-set kind '{kind}'; expected 'gene' or 'interval'.")
+            raise ValidationError(f"Unknown finding-set kind '{kind}'; expected 'gene' or 'interval'.", plain_body=True)
 
         study = (
             await session.execute(
@@ -386,15 +386,15 @@ class ReproductionPlanService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
         if study.state != "plan_ready":
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot confirm a ground-truth set from '{study.state}'; the study must be in 'plan_ready'.",
+                plain_body=True,
             )
         plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
         if plan is None:
-            raise HTTPException(404, "No reproduction plan to attach the ground-truth set to.")
+            raise NotFoundError("No reproduction plan to attach the ground-truth set to.", plain_body=True)
 
         # The paper's own stated thresholds normalize its own table. Default to the captured design.
         design_thresholds = (plan.differential_design_json or {}).get("thresholds") or {}

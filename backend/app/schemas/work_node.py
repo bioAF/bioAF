@@ -5,13 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
-
-    model_config = {"from_attributes": True}
+from app.schemas.user_summary import UserSummary
 
 
 class ProjectSummary(BaseModel):

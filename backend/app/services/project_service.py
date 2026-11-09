@@ -1,8 +1,8 @@
-from fastapi import HTTPException
 from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import ConflictError, NotFoundError
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
@@ -26,7 +26,7 @@ class ProjectService:
         )
         missing = set(sample_ids) - {row[0] for row in result.all()}
         if missing:
-            raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+            raise NotFoundError(f"Samples not found: {sorted(missing)}", plain_body=True)
 
     @staticmethod
     async def create_project(session: AsyncSession, org_id: int, user_id: int, data: ProjectCreate) -> Project:
@@ -378,7 +378,7 @@ class ProjectService:
         )
         dupes = {row[0] for row in existing.all()}
         if dupes:
-            raise HTTPException(409, f"Samples already in project: {sorted(dupes)}")
+            raise ConflictError(f"Samples already in project: {sorted(dupes)}", plain_body=True)
 
         added = []
         for sid in data.sample_ids:
@@ -418,7 +418,7 @@ class ProjectService:
         )
         ps = result.scalar_one_or_none()
         if not ps:
-            raise HTTPException(404, "Sample not in project")
+            raise NotFoundError("Sample not in project", plain_body=True)
 
         await session.delete(ps)
         await log_action(

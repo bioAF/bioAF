@@ -8,7 +8,6 @@ shape) and delegates the allowed edges to ``app.models.validation_study``.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +22,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import VALIDATION_STUDY_ERROR
 from app.services.pipeline_mapper import deposit_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.exceptions import NotFoundError, ValidationError
 
 logger = logging.getLogger("bioaf.validation_study")
 
@@ -183,11 +183,10 @@ class ValidationStudyService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
         if study.state != "error":
-            raise HTTPException(
-                400,
-                f"Only a study in 'error' can be retried; this one is in '{study.state}'.",
+            raise ValidationError(
+                f"Only a study in 'error' can be retried; this one is in '{study.state}'.", plain_body=True
             )
 
         resumable = await _has_runnable_samples(session, study.experiment_id)
@@ -237,22 +236,22 @@ class ValidationStudyService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
 
         allowed = next_states(study.state)
         if new_state not in allowed:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot transition from '{study.state}' to '{new_state}'. "
                 f"Next valid status: {', '.join(allowed) if allowed else 'none (terminal state)'}.",
+                plain_body=True,
             )
 
         if new_state == "classified":
             if classification not in VALIDATION_STUDY_CLASSIFICATIONS:
-                raise HTTPException(
-                    400,
+                raise ValidationError(
                     f"A classification is required to reach 'classified'; got {classification!r}. "
                     f"One of: {', '.join(VALIDATION_STUDY_CLASSIFICATIONS)}.",
+                    plain_body=True,
                 )
             study.classification = classification
 
@@ -287,7 +286,7 @@ class ValidationStudyService:
             )
         ).scalar_one_or_none()
         if not study:
-            raise HTTPException(404, "Validation study not found")
+            raise NotFoundError("Validation study not found", plain_body=True)
         return study
 
     @staticmethod
@@ -295,9 +294,8 @@ class ValidationStudyService:
         """C1 gate: ratify the plan and advance plan_ready -> acquiring_data, stamping the approver."""
         study = await ValidationStudyService._load(session, study_id, org_id)
         if not can_transition(study.state, "acquiring_data"):
-            raise HTTPException(
-                400,
-                f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
+            raise ValidationError(
+                f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.", plain_body=True
             )
 
         # The one blocker that refuses rather than advises. Every other blocker a plan carries is
@@ -310,7 +308,7 @@ class ValidationStudyService:
         # Two ways past it, both deliberate: re-point the plan at the pipeline the deposit names
         # (which clears the blocker), or record why the deposit itself is wrong. Neither is implicit.
         if conflict and not (study.evidence_json or {}).get("deposit_override"):
-            raise HTTPException(400, conflict["message"])
+            raise ValidationError(conflict["message"], plain_body=True)
 
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
@@ -350,17 +348,18 @@ class ValidationStudyService:
         """
         study = await ValidationStudyService._load(session, study_id, org_id)
         if study.state != "plan_ready":
-            raise HTTPException(
-                400,
-                f"Cannot override the deposit from '{study.state}'; the study must be in 'plan_ready'.",
+            raise ValidationError(
+                f"Cannot override the deposit from '{study.state}'; the study must be in 'plan_ready'.", plain_body=True
             )
         if not (reason or "").strip():
-            raise HTTPException(400, "Say why the deposit should be overruled; the reason goes on the record.")
+            raise ValidationError(
+                "Say why the deposit should be overruled; the reason goes on the record.", plain_body=True
+            )
 
         plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
         conflict = deposit_conflict(plan.blockers_json if plan else None, plan.library_strategy if plan else None)
         if conflict is None:
-            raise HTTPException(400, "This plan does not contradict what the deposit says its data is.")
+            raise ValidationError("This plan does not contradict what the deposit says its data is.", plain_body=True)
 
         study.evidence_json = {
             **(study.evidence_json or {}),
@@ -396,14 +395,13 @@ class ValidationStudyService:
         automatic classifier (E4) supersedes it later. The classification must be one of the buckets."""
         study = await ValidationStudyService._load(session, study_id, org_id)
         if not can_transition(study.state, "classified"):
-            raise HTTPException(
-                400,
-                f"Cannot classify from '{study.state}'; the study must be in 'comparing'.",
+            raise ValidationError(
+                f"Cannot classify from '{study.state}'; the study must be in 'comparing'.", plain_body=True
             )
         if classification not in VALIDATION_STUDY_CLASSIFICATIONS:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Invalid classification {classification!r}. One of: {', '.join(VALIDATION_STUDY_CLASSIFICATIONS)}.",
+                plain_body=True,
             )
         old_state = study.state
         study.state = "classified"
@@ -427,9 +425,8 @@ class ValidationStudyService:
         """C1 gate: reject the plan (terminal plan_declined). ``reason`` is recorded on the study."""
         study = await ValidationStudyService._load(session, study_id, org_id)
         if not can_transition(study.state, "plan_declined"):
-            raise HTTPException(
-                400,
-                f"Cannot decline a plan from '{study.state}'; the study must be in 'plan_ready'.",
+            raise ValidationError(
+                f"Cannot decline a plan from '{study.state}'; the study must be in 'plan_ready'.", plain_body=True
             )
         if reason:
             study.failure_reason = reason

@@ -3,11 +3,11 @@
 import logging
 import time
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.controlled_vocabulary import ControlledVocabulary
+from app.exceptions import UnprocessableError
 
 logger = logging.getLogger("bioaf.vocabulary_validator")
 
@@ -58,7 +58,7 @@ class VocabularyValidator:
 
     @staticmethod
     async def validate_field(session: AsyncSession, field_name: str, value: str | None) -> None:
-        """Raise 422 HTTPException if value is not in the controlled vocabulary.
+        """Raise a 422 UnprocessableError if value is not in the controlled vocabulary.
 
         None values are always accepted (fields are optional).
         """
@@ -72,9 +72,9 @@ class VocabularyValidator:
 
         if value not in allowed:
             sorted_values = sorted(allowed)
-            raise HTTPException(
-                422,
+            raise UnprocessableError(
                 f"Invalid value '{value}' for field '{field_name}'. Allowed values: {', '.join(sorted_values)}",
+                plain_body=True,
             )
 
     @staticmethod

@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.api.sample_responses import sample_response
 from app.api.scoped_loaders import owned_sample_ids, require_owned_sample
 from app.schemas.sample import (
     SampleBulkUpdate,
@@ -28,8 +30,8 @@ router = APIRouter(prefix="/api/samples", tags=["samples"])
 @router.get("", response_model=SampleOptionListResponse)
 async def list_organization_samples(
     current_user: dict = require_permission("samples", "view"),
-    page: int = 1,
-    page_size: int = 100,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 100,
     session: AsyncSession = Depends(get_session),
 ):
     rows, total = await SampleService.list_organization_samples(session, int(current_user["org_id"]), page, page_size)
@@ -49,38 +51,6 @@ async def list_organization_samples(
         total=total,
         page=page,
         page_size=page_size,
-    )
-
-
-def _sample_response(s) -> SampleResponse:
-    return SampleResponse(
-        id=s.id,
-        external_id=s.external_id,
-        relabeled_from=s.relabeled_from,
-        organism=s.organism,
-        tissue_type=s.tissue_type,
-        donor_source=s.donor_source,
-        treatment_condition=s.treatment_condition,
-        chemistry_version=s.chemistry_version,
-        sample_batch={"id": s.sample_batch.id, "name": s.sample_batch.name} if s.sample_batch else None,
-        sequencing_batch={"id": s.sequencing_batch.id, "code": s.sequencing_batch.code} if s.sequencing_batch else None,
-        sequencing_batch_position=s.sequencing_batch_position,
-        viability_pct=float(s.viability_pct) if s.viability_pct is not None else None,
-        cell_count=s.cell_count,
-        prep_notes=s.prep_notes,
-        molecule_type=s.molecule_type,
-        library_prep_method=s.library_prep_method,
-        library_layout=s.library_layout,
-        assay=s.assay,
-        qc_status=s.qc_status,
-        qc_notes=s.qc_notes,
-        parent_sample_id=s.parent_sample_id,
-        collection_timestamp=s.collection_timestamp,
-        collection_method=s.collection_method,
-        status=s.status,
-        created_at=s.created_at,
-        updated_at=s.updated_at,
-        custom_fields=list(s.custom_fields or []),
     )
 
 
@@ -117,7 +87,7 @@ async def get_sample(
     sample = await SampleService.get_sample(session, sample_id)
     if not sample:
         raise HTTPException(404, "Sample not found")
-    return _sample_response(sample)
+    return sample_response(sample)
 
 
 @router.get("/{sample_id}/read-groups")
@@ -159,7 +129,7 @@ async def update_sample(
         raise HTTPException(404, "Sample not found")
     await session.commit()
     sample = await SampleService.get_sample(session, sample_id)
-    return _sample_response(sample)
+    return sample_response(sample)
 
 
 @router.patch("/{sample_id}/qc", response_model=SampleResponse)
@@ -176,7 +146,7 @@ async def update_sample_qc(
         raise HTTPException(404, "Sample not found")
     await session.commit()
     sample = await SampleService.get_sample(session, sample_id)
-    return _sample_response(sample)
+    return sample_response(sample)
 
 
 @router.patch("/{sample_id}/status", response_model=SampleResponse)
@@ -191,7 +161,7 @@ async def update_sample_status(
     sample = await SampleService.update_status(session, sample_id, user_id, body.status)
     await session.commit()
     sample = await SampleService.get_sample(session, sample_id)
-    return _sample_response(sample)
+    return sample_response(sample)
 
 
 @router.post("/bulk/delete")

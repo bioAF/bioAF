@@ -3,14 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.models.experiment import EXPERIMENT_STATUSES
-
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
-
-    model_config = {"from_attributes": True}
+from app.schemas.user_summary import UserSummary
 
 
 class CustomFieldValue(BaseModel):

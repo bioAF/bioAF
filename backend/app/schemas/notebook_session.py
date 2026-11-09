@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.user_summary import UserSummary
+
 
 class ExperimentSummary(BaseModel):
     id: int
@@ -14,14 +16,6 @@ class ExperimentSummary(BaseModel):
 class ProjectSummary(BaseModel):
     id: int
     name: str
-
-    model_config = {"from_attributes": True}
-
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
 
     model_config = {"from_attributes": True}
 

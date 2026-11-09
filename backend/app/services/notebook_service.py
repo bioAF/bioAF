@@ -423,8 +423,11 @@ class NotebookService:
         return sessions, total
 
     @staticmethod
-    async def get_session(session: AsyncSession, session_id: int) -> NotebookSession | None:
-        result = await session.execute(
+    async def get_session(
+        session: AsyncSession, session_id: int, *, org_id: int | None = None
+    ) -> NotebookSession | None:
+        """A session with its relationships loaded; with ``org_id``, only one in that Organization."""
+        query = (
             select(NotebookSession)
             .options(
                 selectinload(NotebookSession.user),
@@ -434,6 +437,9 @@ class NotebookService:
             )
             .where(NotebookSession.id == session_id)
         )
+        if org_id is not None:
+            query = query.where(NotebookSession.organization_id == org_id)
+        result = await session.execute(query)
         return result.scalar_one_or_none()
 
     @staticmethod

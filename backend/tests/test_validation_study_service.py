@@ -1,7 +1,7 @@
 """ValidationStudy aggregate: persistence + audited, state-machine-guarded transitions (A1)."""
 
 import pytest
-from fastapi import HTTPException
+from app.exceptions import DomainError
 
 from app.services.validation_study_service import ValidationStudyService
 
@@ -41,7 +41,7 @@ async def test_transition_follows_the_happy_path(session, admin_user):
 async def test_invalid_transition_is_rejected_with_next_valid_listed(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.transition(session, study.id, admin_user.organization_id, admin_user.id, "running")
     assert ei.value.status_code == 400
     assert "Cannot transition from 'requested' to 'running'" in ei.value.detail
@@ -53,13 +53,13 @@ async def test_reaching_classified_requires_a_valid_classification(session, admi
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     study = await _walk(session, study, admin_user.organization_id, admin_user.id, _HAPPY)
 
-    with pytest.raises(HTTPException) as ei:  # missing classification
+    with pytest.raises(DomainError) as ei:  # missing classification
         await ValidationStudyService.transition(
             session, study.id, admin_user.organization_id, admin_user.id, "classified"
         )
     assert ei.value.status_code == 400
 
-    with pytest.raises(HTTPException):  # invalid classification
+    with pytest.raises(DomainError):  # invalid classification
         await ValidationStudyService.transition(
             session, study.id, admin_user.organization_id, admin_user.id, "classified", classification="great"
         )
@@ -91,7 +91,7 @@ async def test_terminal_state_rejects_further_transitions(session, admin_user):
     study = await ValidationStudyService.transition(
         session, study.id, admin_user.organization_id, admin_user.id, "classified", classification="missing_data"
     )
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.transition(session, study.id, admin_user.organization_id, admin_user.id, "reading")
     assert ei.value.status_code == 400
     assert "none (terminal state)" in ei.value.detail
@@ -125,7 +125,7 @@ async def test_classify_by_hand_records_terminal_verdict(session, admin_user):
 async def test_classify_by_hand_rejects_non_comparing_state(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.classify_by_hand(
             session, study.id, admin_user.organization_id, admin_user.id, "validated"
         )
@@ -137,7 +137,7 @@ async def test_classify_by_hand_rejects_non_comparing_state(session, admin_user)
 async def test_classify_by_hand_rejects_invalid_bucket(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     study = await _walk(session, study, admin_user.organization_id, admin_user.id, _HAPPY)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.classify_by_hand(
             session, study.id, admin_user.organization_id, admin_user.id, "great"
         )
@@ -162,7 +162,7 @@ async def test_study_persists_linked_pipeline_run_ids(session, admin_user):
 async def test_transition_is_org_scoped(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(DomainError) as ei:
         await ValidationStudyService.transition(
             session, study.id, admin_user.organization_id + 999, admin_user.id, "acquiring_text"
         )

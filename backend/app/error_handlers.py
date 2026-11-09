@@ -15,6 +15,8 @@ from app.exceptions import DomainError
 
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Map any :class:`DomainError` to its declared status code and envelope."""
+    if exc.plain_body:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     content: dict = {"detail": str(exc), "code": exc.code}
     details = getattr(exc, "details", None)
     if details:
