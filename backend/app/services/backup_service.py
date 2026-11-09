@@ -904,6 +904,30 @@ async def _run_admin_sql(statements: list[str]) -> None:
         await conn.close()
 
 
+async def _existing_databases() -> set[str]:
+    """Database names on the server, read through the postgres maintenance database."""
+    import asyncpg
+
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    conn = await asyncpg.connect(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 5432,
+        user=parsed.username or "bioaf_app",
+        password=parsed.password or "",
+        database="postgres",
+    )
+    try:
+        return {row[0] for row in await conn.fetch("SELECT datname FROM pg_database")}
+    finally:
+        await conn.close()
+
+
+_RECOVERY_REQUIRED = (
+    "The restore review stopped partway through renaming databases. bioAF has paused background work. "
+    "An administrator must repair the databases, then restart bioAF."
+)
+
+
 class RestoreService:
     """Manages the database restore review flow."""
 
@@ -1075,6 +1099,8 @@ class RestoreService:
         async with decision:
             if not _restore_state["active"]:
                 return {"status": "error", "message": "No active restore to reject"}
+            if _restore_state["phase"] == "recovery_required":
+                return {"status": "error", "message": _RECOVERY_REQUIRED}
             return await _revert_restore("Restore rejected by admin")
 
 
@@ -1086,6 +1112,8 @@ def _acceptance_refusal() -> dict | None:
             "status": "error",
             "message": "The restore review could not be reverted. Reject it to retry the revert.",
         }
+    if _restore_state["phase"] == "recovery_required":
+        return {"status": "error", "message": _RECOVERY_REQUIRED}
     if _restore_state["phase"] != "reviewing":
         return {"status": "error", "message": "This restore review is already being decided"}
     expires = _restore_state["expires_at"]
@@ -1146,6 +1174,39 @@ async def _remind_revert_failed() -> None:
             )
 
 
+async def _names_untouched() -> bool:
+    """The primary and the review copy both exist and no half-renamed primary is left over."""
+    primary = urlparse(_restore_state["original_url"]).path.lstrip("/")
+    try:
+        names = await _existing_databases()
+    except Exception:
+        logger.exception("Could not read the database names to verify the primary")
+        return False
+    return primary in names and f"{primary}_old" not in names
+
+
+def _require_recovery(reason: str) -> None:
+    """Keep the review active and work paused; neither Accept nor reject may act any further."""
+    _restore_state["phase"] = "recovery_required"
+    logger.error(
+        "Restore review needs operator recovery (%s). Background work stays paused. Inspect the "
+        "bioaf, bioaf_old, and bioaf_restore databases, put the intended primary back as bioaf, then "
+        "restart bioAF.",
+        reason,
+    )
+    runtime.spawn(_remind_recovery_required(), role="restore-recovery-reminder")
+
+
+async def _remind_recovery_required() -> None:
+    while _restore_state["phase"] == "recovery_required":
+        await asyncio.sleep(RESTORE_REMINDER_SECONDS)
+        if _restore_state["phase"] == "recovery_required":
+            logger.warning(
+                "Restore review still needs operator recovery; background work is still paused. "
+                "Repair the databases (the original may be bioaf_old), then restart bioAF."
+            )
+
+
 async def _accept_review() -> dict:
     try:
         from app.database import swap_database
@@ -1173,8 +1234,12 @@ async def _accept_review() -> dict:
 
     except Exception:
         logger.exception("Accept restore failed")
-        # As before: the review stays open to accept (until it expires) or reject.
-        _restore_state["phase"] = "reviewing"
+        # Only if nothing was renamed may the review stay open to accept (until it expires) or
+        # reject. Otherwise the primary is not where it was: keep work paused for an operator.
+        if await _names_untouched():
+            _restore_state["phase"] = "reviewing"
+        else:
+            _require_recovery("accept failed partway through the rename")
         try:
             from app.database import swap_database
 
@@ -1207,6 +1272,12 @@ async def _revert_restore(reason: str) -> dict:
     """
     _restore_state["phase"] = "deciding"
     _cancel_timeout()
+
+    # Resume only against a verified primary: after a partial rename the primary may be missing,
+    # and dropping the review copy then could destroy the only intact database.
+    if not await _names_untouched():
+        _require_recovery("the primary database is missing or the rename was partial")
+        return {"status": "error", "message": _RECOVERY_REQUIRED}
 
     try:
         from app.database import swap_database

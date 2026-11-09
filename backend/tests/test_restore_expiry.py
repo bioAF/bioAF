@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import subprocess
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -25,7 +26,8 @@ from app.services.backup_service import RestoreService
 from tests.support import disposable_pg as dpg
 
 PRIMARY = "postgresql+asyncpg://bioaf:pw@db:5432/bioaf"
-FILENAME = "pgdump-20261109-030000.dump"
+# The service downloads to /tmp/<filename>; unique per test process so xdist workers never share it.
+FILENAME = f"pgdump-{os.getpid() % 10**8:08d}-{random.randrange(10**6):06d}.dump"
 
 pytestmark = pytest.mark.asyncio
 
@@ -90,8 +92,13 @@ def harness(monkeypatch):
     async def restore_exec(*args, **kwargs):
         return _Proc()
 
+    async def databases() -> set[str]:
+        return h.databases
+
+    h.databases = {"postgres", "bioaf", "bioaf_restore"}
     monkeypatch.setattr(database_module, "swap_database", swap)
     monkeypatch.setattr(backup_service, "_run_admin_sql", admin)
+    monkeypatch.setattr(backup_service, "_existing_databases", databases)
     monkeypatch.setattr(backup_service.asyncio, "create_subprocess_exec", restore_exec)
     monkeypatch.setattr(backup_service, "RESTORE_REVIEW_SECONDS", 3600)
     _fake_external_start(monkeypatch)
@@ -318,5 +325,72 @@ async def test_late_accept_on_a_real_server_keeps_the_primary_write(monkeypatch,
             assert notes == [("after timeout",), ("before backup",)]
         finally:
             await database_module.engine.dispose()
+    finally:
+        await asyncio.to_thread(provisioned.__exit__, None, None, None)
+
+
+async def _prepare_real_primary(server, monkeypatch, tmp_path) -> None:
+    """A `bioaf` database with one row, a dump of it served as the backup, and the pool on it."""
+    await asyncio.to_thread(_sql, server, server.database, "CREATE DATABASE bioaf")
+    await asyncio.to_thread(
+        _sql, server, "bioaf", "CREATE TABLE notes (body text)", "INSERT INTO notes VALUES ('before backup')"
+    )
+    dump = tmp_path / FILENAME
+    subprocess.run(
+        [str(server.pg_bin / "pg_dump"), "-h", "127.0.0.1", "-p", str(server.port), "-U", server.user]
+        + ["-Fc", "-f", str(dump), "bioaf"],
+        check=True,
+        capture_output=True,
+    )
+    primary = f"postgresql+asyncpg://{server.user}@127.0.0.1:{server.port}/bioaf"
+    monkeypatch.setattr(settings, "database_url", primary)
+    monkeypatch.setenv("PATH", f"{server.pg_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    _fake_external_start(monkeypatch, str(dump))
+    monkeypatch.setattr(database_module, "engine", database_module.engine)
+    monkeypatch.setattr(database_module, "async_session_factory", database_module.async_session_factory)
+    await database_module.swap_database(primary)
+
+
+@needs_initdb
+async def test_a_partial_rename_is_never_reported_as_a_successful_revert(monkeypatch, tmp_path):
+    """Accept fails after `bioaf` became `bioaf_old`: reject must not drop the review copy, must not
+    report success against a missing primary, and must leave work paused for an operator."""
+    from app import runtime
+    from app.runtime import TaskOwner
+
+    provisioned = dpg.provision()
+    server = await asyncio.to_thread(provisioned.__enter__)
+    owner = TaskOwner()
+    try:
+        await _prepare_real_primary(server, monkeypatch, tmp_path)
+        real_admin = backup_service._run_admin_sql
+
+        async def fails_mid_rename(statements):
+            for stmt in statements:
+                if stmt == "ALTER DATABASE bioaf_restore RENAME TO bioaf":
+                    raise RuntimeError("connection lost mid-rename")
+                await real_admin([stmt])
+
+        try:
+            with runtime.bound(owner):
+                assert (await RestoreService.start(None, org_id=1, filename=FILENAME))["status"] == "reviewing"
+                monkeypatch.setattr(backup_service, "_run_admin_sql", fails_mid_rename)
+                assert (await RestoreService.accept())["status"] == "error"
+                monkeypatch.setattr(backup_service, "_run_admin_sql", real_admin)
+
+                rejected = await RestoreService.reject()
+                accepted = await RestoreService.accept()
+
+            assert rejected["status"] == "error"
+            assert accepted["status"] == "error"
+            databases = {
+                r[0] for r in await asyncio.to_thread(_sql, server, server.database, "SELECT datname FROM pg_database")
+            }
+            assert {"bioaf_old", "bioaf_restore"} <= databases and "bioaf" not in databases
+            assert owner.paused == "restore_review"
+            assert RestoreService.get_status()["active"] is True
+        finally:
+            await database_module.engine.dispose()
+            await owner.shutdown(drain_seconds=0, cancel_seconds=1)
     finally:
         await asyncio.to_thread(provisioned.__exit__, None, None, None)
