@@ -39,7 +39,7 @@ import { useToast } from "@/components/shared/Toast";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
-import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
+import { isPermissionDenied, loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
@@ -139,19 +139,30 @@ export default function NotebooksPage() {
   // The notebook image build: one poll for the page, every 15 s while it is working
   // or queued, stopped when it finishes or the page closes. It used to be a recursive
   // timeout restarted on every bucket change, so watchers stacked up and outlived the page.
+  // A failed first read is said and re-checked on the same 15 s cadence, since nothing on screen
+  // would otherwise show a build is running. A 403 is expected: bench and viewer roles can open
+  // this page without infrastructure view, so that read stays silent and is not repeated.
   const [imageBuilding, setImageBuilding] = useState(false);
+  const [buildStatusFailed, setBuildStatusFailed] = useState(false);
   const buildStatusResource = useResource(
     BUILD_STATUS_PATH,
     useCallback(() => api.get<ImageBuildStatus>(BUILD_STATUS_PATH), []),
     {
-      poll: imageBuilding ? 15000 : false,
-      onSuccess: (status) =>
-        setImageBuilding(!!status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)),
+      poll: imageBuilding || buildStatusFailed ? 15000 : false,
+      onSuccess: (status) => {
+        setBuildStatusFailed(false);
+        setImageBuilding(!!status.build_status && ["WORKING", "QUEUED"].includes(status.build_status));
+      },
       // Polled while building, so a toast per tick would bury the page. The log is the record.
-      onError: (e) => logError("loading the notebook image build status", e),
+      onError: (e) => {
+        if (isPermissionDenied(e)) return;
+        logError("loading the notebook image build status", e);
+        setBuildStatusFailed(true);
+      },
     },
   );
   const imageBuildStatus = buildStatusResource.data ?? null;
+  const buildStatusLoadFailed = buildStatusFailed && imageBuildStatus === null;
 
   async function loadResourceProfiles() {
     try {
@@ -421,6 +432,21 @@ export default function NotebooksPage() {
           </div>
         )}
       </div>
+
+      {buildStatusLoadFailed && (
+        <div
+          data-testid="build-status-load-failed"
+          role="status"
+          className="mb-6 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800 flex items-center justify-between gap-3"
+        >
+          <span>
+            The notebook image build status could not be read, so a build in progress would not be shown here. bioAF keeps checking.
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => void buildStatusResource.refresh()}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Build Status Banner */}
       {imageBuildStatus?.build_status && ["WORKING", "QUEUED"].includes(imageBuildStatus.build_status) && (
