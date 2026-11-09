@@ -119,3 +119,46 @@ test("a failed /execute stops without reading status", async () => {
   expect(statusReads).toHaveLength(0);
   expect(screen.getByText(/Agent unavailable/)).toBeInTheDocument();
 });
+
+test("installing again after a failed upgrade observes the new upgrade to its own outcome", async () => {
+  const FAILED = { status: "failed", error: "build failed", to_version: "0.7.4", started_at: "2026-11-09T00:00:00Z" };
+  render(<SettingsInfoPage />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Install Update" }));
+  await flush();
+  await settle(() => execute.resolve({ upgrade_id: 2, status: "in_progress" }));
+  await settle(() => statusReads[0].resolve(FAILED));
+  expect(screen.getByText(/Update failed: build failed/)).toBeInTheDocument();
+  await tick(30_000);
+  expect(statusReads).toHaveLength(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Install Update" }));
+  await flush();
+  expect(screen.queryByText(/Update failed/)).not.toBeInTheDocument();
+  await settle(() => execute.resolve({ upgrade_id: 3, status: "in_progress" }));
+  expect(statusReads).toHaveLength(2);
+  // Still the failed attempt's status: not this upgrade's outcome.
+  await settle(() => statusReads[1].resolve(FAILED));
+  expect(screen.getByText(/Updating to 0\.7\.4/)).toBeInTheDocument();
+  expect(screen.queryByText(/Update failed/)).not.toBeInTheDocument();
+
+  await tick(3_000);
+  await settle(() =>
+    statusReads[2].resolve({ status: "completed", step: "done", to_version: "0.7.4", started_at: "2026-11-09T01:00:00Z" }),
+  );
+  expect(screen.queryByText(/Updating to 0\.7\.4/)).not.toBeInTheDocument();
+  await tick(30_000);
+  expect(statusReads).toHaveLength(3);
+});
+
+test("a status read in flight carries a signal that aborts when the page closes", async () => {
+  const { unmount } = render(<SettingsInfoPage />);
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Install Update" }));
+  await flush();
+  await settle(() => execute.resolve({ upgrade_id: 2, status: "in_progress" }));
+  const read = mockGet.mock.calls.filter(([url]) => url === "/api/upgrades/status").at(-1)!;
+  expect(read[1]?.signal).toBeInstanceOf(AbortSignal);
+  unmount();
+  expect(read[1].signal.aborted).toBe(true);
+});

@@ -54,67 +54,70 @@ export default function SettingsInfoPage() {
   const [versionLoadFailed, setVersionLoadFailed] = useState(false);
   const [upgradeHistory, setUpgradeHistory] = useState<UpgradeHistoryItem[]>([]);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [updateError, setUpdateError] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
   const canDeploy = canAccess("infrastructure", "deploy");
 
-  // Upgrade status is polled while an upgrade runs: every 3 s after the previous read
-  // settles, until a terminal status. Failed reads are expected while the backend restarts,
-  // so polling continues through them; the page says so instead of swallowing them.
-  // Observation starts only once /execute has succeeded (or on re-attach to a running upgrade),
-  // so a status read can never answer for an upgrade that has not been started yet.
-  const [watching, setWatching] = useState(false);
+  // The install workflow: idle, starting (/execute in flight, so no status is read yet), or
+  // observing one upgrade (after /execute succeeded, or on re-attach to a running upgrade). Each
+  // observation is its own read key, so a later install never reuses an earlier one's answer.
+  const [install, setInstall] = useState<{ phase: "idle" | "starting" | "observing"; attempt: number }>({
+    phase: "idle",
+    attempt: 0,
+  });
+  const [executeError, setExecuteError] = useState("");
   // The last status seen before this upgrade began. Until the host agent picks the new upgrade
   // up it can still report the previous one's terminal status, which is not this one's outcome.
   const previousStatusRef = useRef<UpdateStatus | null>(null);
-
-  const onUpgradeStatus = useCallback(async (status: UpdateStatus) => {
+  const isPrevious = (status: UpdateStatus) => {
     const previous = previousStatusRef.current;
-    const isPrevious =
+    return (
       previous !== null &&
       status.status === previous.status &&
       status.to_version === previous.to_version &&
-      status.started_at === previous.started_at;
-    if (isPrevious) return;
-    setUpdateStatus(status);
-    if (status.status === "completed" || status.status === "failed") {
-      // Stop polling
-      setUpdating(false);
-      setWatching(false);
+      status.started_at === previous.started_at
+    );
+  };
+  const isTerminal = (status: UpdateStatus) => status.status === "completed" || status.status === "failed";
 
-      if (status.status === "failed") {
-        setUpdateError(status.error || "Update failed");
-      }
-
-      // Refresh version info and history
-      try {
-        const [version, history] = await Promise.all([
-          api.get<UpdateCheck>("/api/upgrades/check"),
-          api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
-        ]);
-        setUpdateCheck(version);
-        setUpgradeHistory(history.upgrades);
-      } catch {
-        // Backend may still be restarting
-      }
+  const refreshVersionInfo = useCallback(async () => {
+    try {
+      const [version, history] = await Promise.all([
+        api.get<UpdateCheck>("/api/upgrades/check"),
+        api.get<{ upgrades: UpgradeHistoryItem[] }>("/api/upgrades/history"),
+      ]);
+      setUpdateCheck(version);
+      setUpgradeHistory(history.upgrades);
+    } catch {
+      // Backend may still be restarting
     }
   }, []);
 
+  // Read every 3 s after the previous read settles, until this upgrade reports a terminal status.
+  // Failed reads are expected while the backend restarts, so polling continues through them; the
+  // page says so instead of swallowing them.
   const upgradePoll = useResource(
-    updating && watching ? "upgrade-status" : null,
+    install.phase === "observing" ? `upgrade-status:${install.attempt}` : null,
     useCallback(
       (signal: AbortSignal) => api.get<UpdateStatus>("/api/upgrades/status", { signal }),
       [],
     ),
     {
-      poll: 3000,
-      onSuccess: (status) => void onUpgradeStatus(status),
+      poll: ({ data }) => (data && !isPrevious(data) && isTerminal(data) ? false : 3000),
+      onSuccess: (status) => {
+        if (!isPrevious(status) && isTerminal(status)) void refreshVersionInfo();
+      },
       onError: (e) => logError("reading upgrade status (expected while bioAF restarts)", e),
     },
   );
+  // This upgrade's latest status; the previous upgrade's leftover status is not it.
+  const observed = upgradePoll.data && !isPrevious(upgradePoll.data) ? upgradePoll.data : null;
+  const finished = observed !== null && isTerminal(observed);
+  const updating = install.phase === "starting" || (install.phase === "observing" && !finished);
+  const updateStatus: UpdateStatus | null =
+    observed ?? (install.phase === "idle" ? null : { status: "in_progress", step: "starting" });
+  const updateError =
+    executeError || (observed?.status === "failed" ? observed.error || "Update failed" : "");
 
   useEffect(() => {
     const load = async () => {
@@ -129,9 +132,7 @@ export default function SettingsInfoPage() {
 
         if (status.status === "in_progress") {
           // Re-attach to an upgrade already running; this starts the status poll.
-          setUpdateStatus(status);
-          setUpdating(true);
-          setWatching(true);
+          setInstall((i) => ({ phase: "observing", attempt: i.attempt + 1 }));
         } else {
           previousStatusRef.current = status;
         }
@@ -180,21 +181,18 @@ export default function SettingsInfoPage() {
   const handleInstallUpdate = async () => {
     if (!updateCheck?.latest_version) return;
 
-    setUpdating(true);
-    setWatching(false);
-    setUpdateError("");
-    if (updateStatus) previousStatusRef.current = updateStatus;
-    setUpdateStatus({ status: "in_progress", step: "starting" });
+    if (observed) previousStatusRef.current = observed;
+    setExecuteError("");
+    setInstall((i) => ({ phase: "starting", attempt: i.attempt }));
 
     try {
       await api.post("/api/upgrades/execute", {
         target_version: updateCheck.latest_version,
       });
-      setWatching(true);
+      setInstall((i) => ({ phase: "observing", attempt: i.attempt + 1 }));
     } catch (e) {
-      setUpdating(false);
-      setUpdateError(e instanceof Error ? e.message : "Failed to start update");
-      setUpdateStatus(null);
+      setExecuteError(e instanceof Error ? e.message : "Failed to start update");
+      setInstall((i) => ({ phase: "idle", attempt: i.attempt }));
     }
   };
 
