@@ -3,6 +3,7 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useResource } from "@/hooks/useResource";
 import { logError } from "@/lib/errorReporting";
 import { startSession } from "@/lib/session";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
@@ -671,33 +672,30 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // Poll per-component status on the Deploying step so the user can see
   // image builds completing, the cluster coming up, components flipping
-  // enabled. The orchestrator runs on the backend; this is just a window.
-  useEffect(() => {
-    if (step !== 8) return;
-    let cancelled = false;
-    const fetchStatus = async () => {
-      try {
-        const data = await api.get<{
+  // enabled. The orchestrator runs on the backend; this is just a window, open
+  // only while this step owns it. Each read starts 8 s after the previous one
+  // settles; a failed read is said, and the next tick retries.
+  const deployPoll = useResource(
+    step === 8 ? `deploy-status:${selectedComponents.join(",")}` : null,
+    useCallback(
+      (signal: AbortSignal) =>
+        api.get<{
           components: { key: string; name: string; status: string }[];
-        }>("/api/components");
-        if (cancelled) return;
+        }>("/api/components", { signal }),
+      [],
+    ),
+    {
+      poll: 8000,
+      onSuccess: (data) => {
         const selected = new Set(selectedComponents);
         setDeployStatus(
           data.components
             .filter((c) => selected.has(c.key))
             .map((c) => ({ key: c.key, name: c.name, status: c.status }))
         );
-      } catch {
-        // Polling failures are benign; the next tick will retry.
-      }
-    };
-    void fetchStatus();
-    const handle = setInterval(fetchStatus, 8000);
-    return () => {
-      cancelled = true;
-      clearInterval(handle);
-    };
-  }, [step, selectedComponents]);
+      },
+    },
+  );
 
   // Fetch the component catalog when entering step 7 so the picker has data.
   // Hits the same endpoint the post-install components page uses so the two
@@ -1378,6 +1376,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               prerequisites become ready; you do not need to come back here.
             </p>
           </div>
+          {deployPoll.error !== null && (
+            <p data-testid="deploy-status-unavailable" role="status" className="text-sm text-amber-700">
+              Component status could not be read. bioAF keeps checking.
+            </p>
+          )}
           {deployStatus.length > 0 && (
             <div className="border border-gray-200 rounded divide-y">
               {deployStatus.map((c) => (
