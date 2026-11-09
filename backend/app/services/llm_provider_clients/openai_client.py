@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 import httpx
 
@@ -125,11 +124,34 @@ async def submit(
         raise ProviderError(f"OpenAI completion response not parseable: {exc}", error_class="parse") from exc
 
 
-_SAFE_CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+# Provider error codes/types worth logging. Only these exact values are carried: a value merely
+# shaped like an identifier can still be a key or account id, so anything else is dropped.
+_KNOWN_CODES = frozenset(
+    {
+        "invalid_api_key",
+        "insufficient_quota",
+        "rate_limit_exceeded",
+        "model_not_found",
+        "unsupported_parameter",
+        "unsupported_value",
+        "invalid_value",
+        "missing_required_parameter",
+        "context_length_exceeded",
+        "request_timeout",
+        "server_error",
+        "invalid_request_error",
+        "authentication_error",
+        "permission_error",
+        "not_found_error",
+        "rate_limit_error",
+        "insufficient_quota_error",
+    }
+)
+_TIMEOUT_STATUSES = (408, 504)
 
 
 def _upstream_code(resp: httpx.Response) -> str | None:
-    """The provider's machine-readable error code (or type), only when it is a short identifier."""
+    """The provider's error code (or type), only when it is a recognized value."""
     try:
         error = resp.json().get("error") or {}
     except (ValueError, AttributeError):
@@ -138,7 +160,7 @@ def _upstream_code(resp: httpx.Response) -> str | None:
         return None
     for key in ("code", "type"):
         value = error.get(key)
-        if isinstance(value, str) and _SAFE_CODE.match(value):
+        if isinstance(value, str) and value in _KNOWN_CODES:
             return value
     return None
 
@@ -158,6 +180,7 @@ def _tool_http_error(resp: httpx.Response) -> ProviderError:
         error_class=error_class,
         upstream_status=status,
         upstream_code=_upstream_code(resp),
+        timeout=status in _TIMEOUT_STATUSES,
     )
 
 

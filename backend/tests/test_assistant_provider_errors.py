@@ -240,3 +240,25 @@ async def test_provider_failure_diagnostics_are_allowlisted(client, session, adm
     assert "error_class=other" in diagnostics and "upstream_status=400" in diagnostics
     assert "upstream_code=unsupported_parameter" in diagnostics
     assert "error_class=transport" in diagnostics
+
+
+@pytest.mark.parametrize("status", [408, 504])
+async def test_upstream_timeout_status_returns_504(client, session, admin_user, admin_token, status):
+    _, conv_id = await _setup(client, session, admin_user, admin_token)
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        r.post("/responses").mock(return_value=httpx.Response(status, json={"error": {"code": "request_timeout"}}))
+        response = await _send(client, admin_token, conv_id)
+    assert response.status_code == 504, response.text
+    assert "did not respond in time" in response.json()["detail"]
+
+
+async def test_unrecognized_upstream_code_never_reaches_logs(client, session, admin_user, admin_token, caplog):
+    marker = "sk-SYNTH-ORG-KEY-REVIEW-123456"
+    _, conv_id = await _setup(client, session, admin_user, admin_token)
+    caplog.set_level(logging.DEBUG)
+    with respx.mock(base_url="https://api.openai.com/v1") as r:
+        r.post("/responses").mock(return_value=httpx.Response(400, json={"error": {"code": marker, "type": marker}}))
+        response = await _send(client, admin_token, conv_id)
+    assert response.status_code == 502
+    assert marker not in caplog.text
+    assert "upstream_code=none" in caplog.text

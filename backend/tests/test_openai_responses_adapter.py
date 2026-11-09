@@ -273,3 +273,19 @@ async def test_history_without_state_is_rebuilt_from_normalized_calls():
         {"type": "function_call_output", "call_id": "call_z", "output": "RESULT"},
         {"role": "assistant", "content": "Done."},
     ]
+
+
+async def test_identifier_shaped_secrets_are_not_carried_as_codes():
+    """A character pattern does not make a value safe: only recognized provider codes are kept."""
+    for code in ("sk-SYNTH-ORG-KEY-REVIEW-123456", "SYNTH_PRIVATE_value", "acct_1234567890"):
+        with pytest.raises(ProviderError) as info:
+            await _submit(httpx.Response(400, json={"error": {"code": code, "type": code}}))
+        assert info.value.upstream_code is None
+
+
+@pytest.mark.parametrize("status", [408, 504])
+async def test_upstream_timeout_statuses_are_timeouts(status):
+    with pytest.raises(ProviderError) as info:
+        await _submit(httpx.Response(status, json={"error": {"code": "request_timeout"}}))
+    assert info.value.timeout is True
+    assert info.value.upstream_status == status

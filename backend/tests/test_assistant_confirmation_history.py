@@ -3,8 +3,9 @@
 Confirming a plan executes its steps; the actual outputs must be recorded as the results of the
 calls that proposed them, so the next chat turn tells the model what ran (including a launch the
 compute provider refused) without executing anything again. Confirming one plan resolves only its
-own invocations. A failed confirmation leaves the truthful pre-confirmation state, and the UI's
-local Cancel is never a server-side decline or an approval.
+own invocations. Each step is durable once it completes, so a later failure cannot erase a step
+(or an accepted compute job) that already ran, and the UI's local Cancel is never a server-side
+decline or an approval.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -182,31 +183,121 @@ async def test_confirming_one_plan_leaves_another_pending_plan_untouched(client,
     assert "awaiting_confirmation" in outputs["call_b"]
 
 
-async def test_a_failed_confirmation_keeps_the_truthful_pending_state(client, session, admin_user, admin_token):
-    """Steps run in one transaction: when a later step fails, the earlier step's writes roll back,
-    so nothing is recorded as having run and the plan stays pending."""
+async def test_a_failed_step_keeps_the_record_of_steps_that_already_ran(client, session, admin_user, admin_token):
+    """Each confirmed step is durable once it completes. When a later step fails, the earlier step's
+    effect and result stay recorded, the failed step and any later step are recorded as not done,
+    and the plan cannot be confirmed again."""
     conv = await _conversation(session, admin_user)
     plan = await _propose(
         session,
         admin_user,
         conv,
-        ToolCall(tool="create_experiment", args={"name": "Rolled back"}, id="call_ok"),
+        ToolCall(tool="create_experiment", args={"name": "Ran before failure"}, id="call_ok"),
         ToolCall(tool="create_sample", args={"experiment_id": 99_999_999, "external_id": "S1"}, id="call_bad"),
+        ToolCall(tool="create_experiment", args={"name": "Never reached"}, id="call_after"),
     )
 
     confirm = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
-    assert confirm.status_code >= 400
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"].startswith("action 'create_sample' failed")  # plan 12's body, unchanged
 
     session.expunge_all()
     conv = await session.get(AssistantConversation, conv.id)
-    assert await _experiments_named(session, "Rolled back") == 0
-    assert (await session.get(AssistantActionPlan, plan.id)).status == "proposed"
+    assert await _experiments_named(session, "Ran before failure") == 1
+    assert await _experiments_named(session, "Never reached") == 0
+    assert (await session.get(AssistantActionPlan, plan.id)).status == "failed"
     assert await _invocation_statuses(session, conv) == [
-        ("create_experiment", "awaiting_confirmation"),
-        ("create_sample", "awaiting_confirmation"),
+        ("create_experiment", "confirmed"),
+        ("create_sample", "failed"),
+        ("create_experiment", "failed"),
     ]
     outputs = await _next_turn_outputs(session, admin_user, conv)
-    assert all("awaiting_confirmation" in outputs[c] for c in ("call_ok", "call_bad"))
+    assert "Ran before failure" in outputs["call_ok"] and '"executed"' in outputs["call_ok"]
+    assert '"failed"' in outputs["call_bad"]
+    assert '"not_run"' in outputs["call_after"]
+    assert not any("awaiting_confirmation" in outputs[c] for c in ("call_ok", "call_bad", "call_after"))
+
+    again = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+    assert again.status_code == 409
+    assert await _experiments_named(session, "Ran before failure") == 1
+
+
+async def test_an_accepted_compute_job_survives_a_later_step_failure(client, session, admin_user, admin_token):
+    """The compute provider accepted the job before a later step failed. The run and its result stay
+    recorded, history says it launched, and reconfirming cannot submit it a second time."""
+    from app.adapters.models import JobSubmitResult
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id, name="Accepted", owner_user_id=admin_user.id, status="registered"
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/fetchngs",
+            name="nf-core/fetchngs",
+            source_type="nf-core",
+            version="1.12.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+    plan = await _propose(
+        session,
+        admin_user,
+        conv,
+        ToolCall(
+            tool="launch_run",
+            args={"experiment_id": exp.id, "pipeline_key": "nf-core/fetchngs", "accessions": ["SRR1"]},
+            id="call_launch",
+        ),
+        ToolCall(tool="create_sample", args={"experiment_id": 99_999_999, "external_id": "X"}, id="call_bad"),
+    )
+
+    adapter = MagicMock()
+    adapter.submit_job = AsyncMock(return_value=JobSubmitResult(job_id="accepted-job", status="running"))
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=adapter):
+        first = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+        again = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+
+    assert first.status_code == 400
+    assert again.status_code == 409
+    adapter.submit_job.assert_awaited_once()
+    session.expunge_all()
+    conv = await session.get(AssistantConversation, conv.id)
+    assert (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 1
+    outputs = await _next_turn_outputs(session, admin_user, conv)
+    assert '"launched": true' in outputs["call_launch"]
+    assert "awaiting_confirmation" not in outputs["call_launch"]
+
+
+async def test_a_denied_later_step_stops_the_plan_before_anything_runs(
+    client, session, admin_user, bench_user, bench_token
+):
+    """Permissions for every step are checked before any step executes. Proposal already rejects a
+    tool the user cannot run, so this models a permission that changed after the plan was proposed."""
+    conv = await _conversation(session, bench_user)
+    plan = AssistantActionPlan(
+        conversation_id=conv.id,
+        steps_json=[
+            {"tool": "create_experiment", "args": {"name": "Bench first step"}, "consequence_class": "mutating"},
+            {
+                "tool": "launch_run",
+                "args": {"experiment_id": 1, "pipeline_key": "nf-core/rnaseq"},
+                "consequence_class": "spend",
+            },
+        ],
+        status="proposed",
+    )
+    session.add(plan)
+    await session.commit()
+    confirm = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(bench_token))
+    assert confirm.status_code == 403
+    session.expunge_all()
+    assert await _experiments_named(session, "Bench first step") == 0
+    assert (await session.get(AssistantActionPlan, plan.id)).status == "proposed"
 
 
 async def test_unconfirmed_plan_stays_pending_and_unexecuted_across_turns(session, admin_user):
@@ -224,3 +315,54 @@ async def test_unconfirmed_plan_stays_pending_and_unexecuted_across_turns(sessio
     assert (await session.get(AssistantActionPlan, plan.id)).status == "proposed"
     assert await _experiments_named(session, "Cancelled") == 0
     assert await _invocation_statuses(session, conv) == [("create_experiment", "awaiting_confirmation")]
+
+
+async def test_concurrent_confirmations_run_the_plan_once(client, session, admin_user, admin_token):
+    """Steps commit as they complete, so the plan is claimed before the first step runs: a second
+    confirmation arriving mid-execution is refused instead of submitting the job again."""
+    import asyncio
+
+    from app.adapters.models import JobSubmitResult
+
+    exp = Experiment(
+        organization_id=admin_user.organization_id, name="Once", owner_user_id=admin_user.id, status="registered"
+    )
+    session.add(exp)
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/fetchngs",
+            name="nf-core/fetchngs",
+            source_type="nf-core",
+            version="1.12.0",
+            default_params_json={},
+            enabled=True,
+        )
+    )
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+    plan = await _propose(
+        session,
+        admin_user,
+        conv,
+        ToolCall(
+            tool="launch_run",
+            args={"experiment_id": exp.id, "pipeline_key": "nf-core/fetchngs", "accessions": ["SRR1"]},
+            id="call_launch",
+        ),
+    )
+
+    async def slow_submit(*args, **kwargs):
+        await asyncio.sleep(0.5)
+        return JobSubmitResult(job_id="once-job", status="running")
+
+    adapter = MagicMock()
+    adapter.submit_job = AsyncMock(side_effect=slow_submit)
+    url = f"/api/assistant/action-plans/{plan.id}/confirm"
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=adapter):
+        first, second = await asyncio.gather(
+            client.post(url, headers=_auth(admin_token)), client.post(url, headers=_auth(admin_token))
+        )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 409]
+    adapter.submit_job.assert_awaited_once()

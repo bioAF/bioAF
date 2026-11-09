@@ -16,7 +16,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -368,23 +368,40 @@ async def send_message(
     )
 
 
-async def _record_confirmed_step(
-    session: AsyncSession, conversation_id: int, step: dict, output: dict, *, user_id: int, now: datetime
+_FAILED_STEP = {"status": "failed", "note": "This step failed and did not complete."}
+_NOT_RUN_STEP = {"status": "not_run", "note": "Not run: an earlier step in the same plan failed."}
+
+
+async def _record_step_outcome(
+    session: AsyncSession,
+    conversation_id: int,
+    step: dict,
+    content: dict,
+    *,
+    invocation_status: str,
+    user_id: int,
+    now: datetime,
+    output: dict | None = None,
 ) -> None:
+    """Record what happened to one confirmed plan step as the result of the call that proposed it:
+    resolve its own invocation and write a linked tool result for the next provider turn."""
     link = step.get(LINK_KEY)
     if not link:
         return  # a plan proposed before call tracking has no call to attach the result to
     invocation = await session.get(AssistantToolInvocation, link.get("invocation_id"))
     if invocation is None or invocation.conversation_id != conversation_id:
         return
-    invocation.status = "confirmed"
+    invocation.status = invocation_status
     invocation.confirmed_by_user_id = user_id
     invocation.confirmed_at = now
-    invocation.result_json = output
+    if output is not None:
+        invocation.result_json = output
+    else:
+        invocation.error = content["note"]
     tool_message = AssistantMessage(
         conversation_id=conversation_id,
         role="tool",
-        content=json.dumps({"status": "executed", "result": output}, default=str),
+        content=json.dumps(content, default=str),
         tool_invocation_id=invocation.id,
     )
     session.add(tool_message)
@@ -394,6 +411,43 @@ async def _record_confirmed_step(
         proposing.tool_calls_json = link_call(
             proposing.tool_calls_json, link["call_index"], result_message_id=tool_message.id
         )
+
+
+async def _run_confirmed_step(session: AsyncSession, tool, step: dict, *, org_id: int, user_id: int) -> dict:
+    if tool.consequence_class == "spend":
+        # Build the request shape (folds accessions into parameters), then launch it for real
+        # through the canonical launch path, exactly as the UI's POST /api/pipeline-runs does.
+        built = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
+        run = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key=built["pipeline_key"],
+                experiment_id=built["experiment_id"],
+                # Scope to the samples the agent selected; without this the launch path runs
+                # against EVERY sample in the experiment and fails when any lack linked files.
+                sample_ids=built.get("sample_ids"),
+                parameters=built.get("parameters") or {},
+                reference_genome=built.get("reference_genome"),
+            ),
+            # Mark the launch audit entry as agent-driven (attribution stays the user).
+            via_assistant=True,
+        )
+        # A run the compute provider refused is still created (and committed with its step), but it
+        # was not launched; say so rather than reporting a start.
+        output = {
+            "launched": run.status != "failed",
+            "run_id": run.id,
+            "status": run.status,
+            "pipeline_key": built["pipeline_key"],
+            "experiment_id": built["experiment_id"],
+        }
+        if run.status == "failed":
+            output["error_message"] = run.error_message
+        return output
+    # A mutating handler applies its change (install, create_experiment/sample, import).
+    return await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
 
 
 @router.post("/action-plans/{plan_id}/confirm", response_model=ConfirmResponse)
@@ -415,15 +469,12 @@ async def confirm_action_plan(
     user_id = int(current_user["sub"])
     org_id = conversation.organization_id
 
-    # Re-check the underlying permission for every step server-side, then run it. The agent acts
-    # as the user: a user who cannot launch cannot confirm a launch. The confirm itself is the safety
-    # gate, so a confirmed spend action (launch_run) launches a real run rather than only building it.
+    # Re-check the underlying permission for every step server-side before ANY step runs, so a denied
+    # later step cannot strand an earlier one. The agent acts as the user: a user who cannot launch
+    # cannot confirm a launch. The confirm itself is the safety gate, so a confirmed spend action
+    # (launch_run) launches a real run rather than only building it.
     steps = plan.steps_json or []
-    new_steps: list[dict] = []
-    resolved_invocations: list[tuple[dict, dict]] = []
-    result: dict | None = None
-    executed = False
-    run_id: int | None = None
+    tools = []
     for step in steps:
         tool = get_tool(step["tool"])
         if tool is None:
@@ -431,63 +482,76 @@ async def confirm_action_plan(
         resource, action = tool.permission
         if not await role_service.has_permission(session, role_id, resource, action):
             raise HTTPException(403, f"permission denied for {resource}:{action}")
+        tools.append(tool)
+
+    # Claim the plan atomically before anything runs, so a second confirmation arriving while steps
+    # execute (and commit) is refused rather than running them again.
+    claimed = await session.execute(
+        update(AssistantActionPlan)
+        .where(AssistantActionPlan.id == plan.id, AssistantActionPlan.status == "proposed")
+        .values(status="executing")
+    )
+    if cast(CursorResult, claimed).rowcount != 1:
+        await session.rollback()
+        raise HTTPException(409, "action plan is not pending (status=executing)")
+    await session.commit()
+    await session.refresh(plan)
+
+    # Each step runs in its own savepoint and is committed, with its linked result, as soon as it
+    # completes. A later failure therefore cannot erase a step that already ran, including a compute
+    # job the provider accepted. On failure the failed step and every later step are recorded as not
+    # done, the plan becomes "failed" (so it cannot be confirmed again), and the step's own error is
+    # returned unchanged.
+    new_steps: list[dict] = []
+    result: dict | None = None
+    executed = False
+    run_id: int | None = None
+    failure: Exception | None = None
+    for index, (step, tool) in enumerate(zip(steps, tools)):
+        now = datetime.now(timezone.utc)
         try:
-            if tool.consequence_class == "spend":
-                # Build the request shape (folds accessions into parameters), then launch it for real
-                # through the canonical launch path, exactly as the UI's POST /api/pipeline-runs does.
-                built = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
-                run = await PipelineRunService.launch_run(
-                    session,
-                    org_id,
-                    user_id,
-                    PipelineRunLaunchRequest(
-                        pipeline_key=built["pipeline_key"],
-                        experiment_id=built["experiment_id"],
-                        # Scope to the samples the agent selected; without this the launch path runs
-                        # against EVERY sample in the experiment and fails when any lack linked files.
-                        sample_ids=built.get("sample_ids"),
-                        parameters=built.get("parameters") or {},
-                        reference_genome=built.get("reference_genome"),
-                    ),
-                    # Mark the launch audit entry as agent-driven (attribution stays the user).
-                    via_assistant=True,
-                )
-                # A run the compute provider refused is still created (and committed below), but it
-                # was not launched; say so rather than reporting a start.
-                output = {
-                    "launched": run.status != "failed",
-                    "run_id": run.id,
-                    "status": run.status,
-                    "pipeline_key": built["pipeline_key"],
-                    "experiment_id": built["experiment_id"],
-                }
-                if run.status == "failed":
-                    output["error_message"] = run.error_message
-                run_id = run.id
-            else:
-                # A mutating handler applies its change (install, create_experiment/sample, import).
-                output = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
-            executed = True
-        except (HTTPException, DomainError):
-            raise  # keep the failure's own status and body
+            async with session.begin_nested():
+                output = await _run_confirmed_step(session, tool, step, org_id=org_id, user_id=user_id)
+        except (HTTPException, DomainError) as exc:
+            failure = exc  # keep the failure's own status and body
         except Exception as exc:  # surface a failed action as a 400, not a 500
-            raise HTTPException(400, f"action '{step['tool']}' failed: {exc}") from exc
+            http_error = HTTPException(400, f"action '{step['tool']}' failed: {exc}")
+            http_error.__cause__ = exc
+            failure = http_error
+        if failure is not None:
+            await _record_step_outcome(
+                session, conversation.id, step, _FAILED_STEP, invocation_status="failed", user_id=user_id, now=now
+            )
+            new_steps.append({**step, "outcome": "failed"})
+            for later in steps[index + 1 :]:
+                await _record_step_outcome(
+                    session, conversation.id, later, _NOT_RUN_STEP, invocation_status="failed", user_id=user_id, now=now
+                )
+                new_steps.append({**later, "outcome": "not_run"})
+            break
+        executed = True
         result = output
+        if tool.consequence_class == "spend":
+            run_id = output["run_id"]
         new_steps.append({**step, "result": output})
-        resolved_invocations.append((step, output))
+        plan.steps_json = new_steps + steps[index + 1 :]
+        await _record_step_outcome(
+            session,
+            conversation.id,
+            step,
+            {"status": "executed", "result": output},
+            invocation_status="confirmed",
+            user_id=user_id,
+            now=now,
+            output=output,
+        )
+        await session.commit()
 
     now = datetime.now(timezone.utc)
     plan.steps_json = new_steps
-    plan.status = "approved"
+    plan.status = "failed" if failure is not None else "approved"
     plan.approved_by_user_id = user_id
     plan.approved_at = now
-
-    # Resolve only this plan's own calls: mark each linked invocation confirmed with its actual output,
-    # and record that output as the call's tool result so the next provider turn reports what ran.
-    # Written in the same transaction as the steps, so a failed confirmation records nothing.
-    for step, output in resolved_invocations:
-        await _record_confirmed_step(session, conversation.id, step, output, user_id=user_id, now=now)
-
     await session.flush()
     await audit_service.log_action(
         session,
@@ -500,9 +564,12 @@ async def confirm_action_plan(
             "conversation_id": conversation.id,
             "executed": executed,
             "run_id": run_id,
+            "failed": failure is not None,
         },
     )
     await session.commit()
+    if failure is not None:
+        raise failure
 
     # Every confirmed step ran: mutating actions applied, and a spend action (launch_run) launched a
     # real run (run_id set).
