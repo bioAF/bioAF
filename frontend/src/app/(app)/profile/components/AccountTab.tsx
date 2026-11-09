@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCurrentUser, setToken } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { replaceSessionToken } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 
@@ -45,7 +46,7 @@ export function AccountTab() {
       // Re-issue the token so the new name is reflected in the header and
       // anywhere else that reads it from the JWT.
       const res = await api.post<{ access_token: string }>("/api/auth/refresh");
-      setToken(res.access_token);
+      replaceSessionToken(res.access_token);
       window.dispatchEvent(new Event("profile-updated"));
       setNameMessage("Name updated");
     } catch (e) {

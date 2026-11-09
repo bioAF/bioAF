@@ -1,6 +1,5 @@
-import { getToken, removeToken } from "./auth";
-import { clearPermissionsCache } from "@/hooks/permissionsCache";
-import { clearCapabilitiesCache } from "@/hooks/capabilitiesCache";
+import { getToken } from "./auth";
+import { expireSession } from "./session";
 import {
   isMaintenanceBody,
   reportMaintenance,
@@ -83,13 +82,11 @@ async function fetchApi<T>(
   });
 
   if (response.status === 401) {
-    removeToken();
-    clearPermissionsCache();
-    clearCapabilitiesCache();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new ApiError(401, "Unauthorized");
+    expireSession(token);
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Unauthorized" }));
+    throw new ApiError(401, extractErrorMessage(error ?? {}));
   }
 
   if (response.status === 429) {
@@ -145,13 +142,11 @@ async function uploadFile<T>(
   });
 
   if (response.status === 401) {
-    removeToken();
-    clearPermissionsCache();
-    clearCapabilitiesCache();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new ApiError(401, "Unauthorized");
+    expireSession(token);
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Unauthorized" }));
+    throw new ApiError(401, extractErrorMessage(error ?? {}));
   }
 
   if (!response.ok) {
@@ -291,10 +286,7 @@ async function uploadFileProxied<T>(
           resolve(undefined as T);
         }
       } else if (xhr.status === 401) {
-        removeToken();
-        clearPermissionsCache();
-        clearCapabilitiesCache();
-        if (typeof window !== "undefined") window.location.href = "/login";
+        expireSession(token);
         reject(new ApiError(401, "Unauthorized"));
       } else {
         let message = "Upload failed";
@@ -351,13 +343,11 @@ async function downloadFile(
   });
 
   if (response.status === 401) {
-    removeToken();
-    clearPermissionsCache();
-    clearCapabilitiesCache();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new ApiError(401, "Unauthorized");
+    expireSession(token);
+    const error = await response
+      .json()
+      .catch(() => ({ detail: "Unauthorized" }));
+    throw new ApiError(401, extractErrorMessage(error ?? {}));
   }
 
   if (!response.ok) {

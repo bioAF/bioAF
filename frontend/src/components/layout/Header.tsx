@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getCurrentUser, removeToken } from "@/lib/auth";
-import { clearPermissionsCache } from "@/hooks/usePermissions";
-import { clearCapabilitiesCache } from "@/hooks/useCapabilities";
+import { getCurrentUser } from "@/lib/auth";
+import { endSession } from "@/lib/session";
 import { api } from "@/lib/api";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
@@ -39,11 +38,9 @@ export function Header({
     try {
       await api.post("/api/auth/logout");
     } catch {
-      // Best effort -- token may already be expired
+      // Best effort: the token may already be expired. Local state is cleared either way.
     }
-    removeToken();
-    clearPermissionsCache();
-    clearCapabilitiesCache();
+    endSession();
     router.push("/login");
   };
 

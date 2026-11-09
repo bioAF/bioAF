@@ -6,8 +6,9 @@ import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
 import { permissionsCache, clearPermissionsCache } from "@/hooks/permissionsCache";
+import { sessionGeneration } from "@/lib/session";
 
-// Re-exported so existing importers (Header, api.ts's leaf import, tests that mock
+// Re-exported so existing importers (the app layout's boot retry, tests that mock
 // this module) keep working. The cache state itself lives in the leaf
 // permissionsCache module to avoid the api.ts <-> usePermissions import cycle.
 export { clearPermissionsCache };
@@ -69,10 +70,15 @@ export function usePermissions() {
       return;
     }
 
+    // An answer that settles after the session ended (or another began) belongs to nobody.
+    const generation = sessionGeneration();
+    const current = () => generation === sessionGeneration();
+
     if (!permissionsCache.promise) {
       permissionsCache.promise = api
         .get<MeResponse>("/api/auth/me")
         .then((me) => {
+          if (!current()) return;
           const permSet = new Set<string>();
           for (const p of me.permissions) {
             permSet.add(permKey(p.resource, p.action));
@@ -82,6 +88,7 @@ export function usePermissions() {
           permissionsCache.failed = false;
         })
         .catch((err) => {
+          if (!current()) return;
           logError("loading your permissions", err);
           permissionsCache.failed = true;
           // Leave `permissions` null and drop the shared promise, so the next
@@ -91,6 +98,7 @@ export function usePermissions() {
     }
 
     permissionsCache.promise.then(() => {
+      if (!current()) return;
       setPermissions(permissionsCache.permissions ?? new Set());
       setRoleName(permissionsCache.roleName ?? "");
       setFailed(permissionsCache.failed);

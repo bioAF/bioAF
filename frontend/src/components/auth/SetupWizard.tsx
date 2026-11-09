@@ -4,7 +4,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
-import { setToken } from "@/lib/auth";
+import { startSession } from "@/lib/session";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
 import { Button } from "@/components/ui/Button";
@@ -444,7 +444,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         return;
       }
       const data = await resp.json();
-      setToken(data.access_token);
+      startSession(data.access_token);
       markStepCompleted(1, current);
       setStep(2);
     } catch {
