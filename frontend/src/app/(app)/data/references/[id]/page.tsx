@@ -40,6 +40,10 @@ function formatBytes(bytes: number | null): string {
 
 type Tab = "files" | "impact" | "details" | "versions";
 
+function isTerminalImport(status: string): boolean {
+  return status === "active" || status === "failed";
+}
+
 export default function DataReferenceDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -68,7 +72,6 @@ export default function DataReferenceDetailPage() {
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionsFailed, setVersionsFailed] = useState(false);
 
-  const [importStatus, setImportStatus] = useState<ReferenceImportStatusResponse | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
@@ -80,12 +83,12 @@ export default function DataReferenceDetailPage() {
   // progress bar updates as the in-process background task makes its way
   // through the source URL. Each read starts after the previous one settles;
   // a 404 (no progress row) or transient failure is retried on the next tick.
-  // A terminal status stops the watch until the reloaded dataset says otherwise.
-  const [importWatchStopped, setImportWatchStopped] = useState(false);
+  // A terminal progress status stops the watch: the dataset is reloaded once, and a dataset still
+  // "uploading" after that is a finished download awaiting Finalize, not more progress.
+  // Cancelling is the user's decision to stop watching, before the page navigates away.
+  const [importCancelled, setImportCancelled] = useState(false);
   const importStatusPath =
-    reference?.status === "uploading" && !importWatchStopped
-      ? `/api/references/${id}/import-status`
-      : null;
+    reference?.status === "uploading" && !importCancelled ? `/api/references/${id}/import-status` : null;
   const importPoll = useResource(
     importStatusPath,
     useCallback(
@@ -94,15 +97,11 @@ export default function DataReferenceDetailPage() {
       [id],
     ),
     {
-      poll: IMPORT_POLL_INTERVAL_MS,
+      poll: ({ data }) => (data && isTerminalImport(data.status) ? false : IMPORT_POLL_INTERVAL_MS),
       onSuccess: (s) => {
-        setImportStatus(s);
-        if (s.status === "active" || s.status === "failed") {
-          // Reload the dataset so the page transitions out of the
-          // in-flight banner once the task reaches a terminal state.
-          setImportWatchStopped(true);
-          void loadReference().then(() => setImportWatchStopped(false));
-        }
+        // Reload the dataset so the page transitions out of the in-flight banner once the task
+        // reaches a terminal state.
+        if (isTerminalImport(s.status)) void loadReference();
       },
       onError: (e) => {
         if (!isNotFound(e)) logError(`reading import progress for reference ${id}`, e);
@@ -112,12 +111,13 @@ export default function DataReferenceDetailPage() {
   // A 404 means the progress row does not exist yet. Any other failure is said, because the
   // progress shown is then only the last known state.
   const importStatusUnavailable = importPoll.error !== null && !isNotFound(importPoll.error);
+  const importStatus = importPoll.data ?? null;
 
   async function handleCancelOrDelete() {
     setCancelling(true);
     try {
       await api.post(`/api/references/${id}/import-cancel`);
-      setImportWatchStopped(true);
+      setImportCancelled(true);
       router.push("/data/references");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to cancel");

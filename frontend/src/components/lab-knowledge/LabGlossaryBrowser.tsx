@@ -73,6 +73,10 @@ const SOURCE_LABELS: Record<string, string> = {
   llm_scan: "AI scan",
 };
 
+function isTerminalScan(status: string): boolean {
+  return status === "complete" || status === "failed";
+}
+
 export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const { canAccess } = usePermissions();
   const canManage = canAccess("lab_glossary", "manage");
@@ -149,9 +153,9 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
       [scanPath],
     ),
     {
-      poll: 3000,
+      poll: ({ data }) => (data && isTerminalScan(data.status) ? false : 3000),
       onSuccess: (job) => {
-        if (job.status !== "complete" && job.status !== "failed") return;
+        if (!isTerminalScan(job.status)) return;
         setActiveScanJobId(null);
         if (job.status === "complete") {
           void fetchPending();
