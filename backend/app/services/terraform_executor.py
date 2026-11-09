@@ -47,6 +47,7 @@ from app.services.terraform_stream import (
     stop_process,
     stream_terraform_output,
 )
+from app.runtime import spawn_event
 
 if TYPE_CHECKING:
     from app.services.terraform_cloud import TerraformCloud
@@ -362,7 +363,7 @@ class TerraformExecutor:
                 # Notify admins of a real deploy failure. Terraform runs are
                 # global (single org); fire-and-forget so the stream is not
                 # blocked on notification delivery.
-                asyncio.create_task(
+                spawn_event(
                     event_bus.emit(
                         TERRAFORM_APPLY_FAILURE,
                         {
@@ -376,7 +377,8 @@ class TerraformExecutor:
                             "severity": "critical",
                             "summary": f"Terraform apply failed for {module_name}",
                         },
-                    )
+                    ),
+                    event_type=TERRAFORM_APPLY_FAILURE,
                 )
 
         if interrupted:

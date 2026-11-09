@@ -21,6 +21,7 @@ from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.backup_service")
 
@@ -821,7 +822,7 @@ class BackupService:
             if tier["last_backup"] and tier["status"] in ("warning", "error"):
                 last = datetime.fromisoformat(tier["last_backup"])
                 hours_ago = (now - last).total_seconds() / 3600
-                asyncio.create_task(
+                spawn_event(
                     event_bus.emit(
                         BACKUP_FAILURE,
                         {
@@ -833,7 +834,8 @@ class BackupService:
                             "severity": "critical" if tier["status"] == "error" else "warning",
                             "summary": f"Backup overdue for {tier['name']}",
                         },
-                    )
+                    ),
+                    event_type=BACKUP_FAILURE,
                 )
 
 

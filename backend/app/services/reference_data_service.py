@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
+from app.runtime import spawn_event
 
 if TYPE_CHECKING:
     from app.workers.reference_importer import ImportResult
@@ -233,7 +234,7 @@ class ReferenceDataService:
             )
 
             # Fire-and-forget notification
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     REFERENCE_DEPRECATED,
                     {
@@ -251,7 +252,8 @@ class ReferenceDataService:
                             "scope": dataset.scope,
                         },
                     },
-                )
+                ),
+                event_type=REFERENCE_DEPRECATED,
             )
         else:
             # Public: requires admin approval
@@ -304,7 +306,7 @@ class ReferenceDataService:
             previous_value=previous,
         )
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 REFERENCE_DEPRECATED,
                 {
@@ -322,7 +324,8 @@ class ReferenceDataService:
                         "scope": dataset.scope,
                     },
                 },
-            )
+            ),
+            event_type=REFERENCE_DEPRECATED,
         )
 
         return dataset

@@ -30,6 +30,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
+from app.runtime import OwnerClosed, session_owner
 from app.services.event_bus import event_bus
 
 logger = logging.getLogger("bioaf.post_commit_events")
@@ -88,7 +89,17 @@ def _publish_after_commit(session: Session) -> None:
     except RuntimeError:
         logger.warning("Dropped %d committed event(s): no running event loop", len(pending))
         return
+    # A session opened for an owner (or committed while one is bound) hands its events to that
+    # owner. An owner that stopped admitting events drops them: the commit already happened, so
+    # this must not raise. Unbound sessions keep the module's own strong references (legacy path).
+    owner = session_owner(session)
     for item in pending:
+        if owner is not None:
+            try:
+                owner.spawn(event_bus.emit(item.event_type, item.payload), role=f"event:{item.event_type}", event=True)
+            except OwnerClosed:
+                pass
+            continue
         task = loop.create_task(event_bus.emit(item.event_type, item.payload))
         _in_flight.add(task)
         task.add_done_callback(_in_flight.discard)

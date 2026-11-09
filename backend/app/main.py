@@ -12,6 +12,7 @@ from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.maintenance import MaintenanceMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.task_owner import TaskOwnerMiddleware
 
 configure_logging(debug=settings.debug)
 logger = logging.getLogger("bioaf")
@@ -1038,6 +1039,7 @@ def create_app() -> FastAPI:
     application.add_middleware(RateLimitMiddleware)
     application.add_middleware(MaintenanceMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(TaskOwnerMiddleware)
 
     from app.api.router import api_router
 

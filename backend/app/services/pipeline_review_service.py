@@ -1,6 +1,5 @@
 """Pipeline review service: handles review creation with all transactional side effects."""
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -15,6 +14,7 @@ from app.models.sample import Sample
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_RUN_REVIEWED
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.pipeline_review")
 
@@ -145,7 +145,7 @@ class PipelineReviewService:
 
         # 6. Emit notification event (fire-and-forget after commit)
         if run.experiment:
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     PIPELINE_RUN_REVIEWED,
                     {
@@ -163,7 +163,8 @@ class PipelineReviewService:
                             "verdict": verdict,
                         },
                     },
-                )
+                ),
+                event_type=PIPELINE_RUN_REVIEWED,
             )
 
         return review

@@ -1,6 +1,5 @@
 """Upgrade service with GitHub-based version checking and upgrade management."""
 
-import asyncio
 import json
 import logging
 import re
@@ -16,6 +15,7 @@ from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.upgrade_history import UpgradeHistory
 from app.services.event_bus import event_bus
 from app.services.event_types import PLATFORM_UPDATE_AVAILABLE
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.upgrade_service")
 
@@ -325,7 +325,7 @@ class UpgradeService:
         """Daily version check, emits event if new version found."""
         result = await UpgradeService.check_for_updates(org_id)
         if result.get("update_available"):
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     PLATFORM_UPDATE_AVAILABLE,
                     {
@@ -336,5 +336,6 @@ class UpgradeService:
                         "severity": "info",
                         "summary": f"Update available: {result['latest_version']}",
                     },
-                )
+                ),
+                event_type=PLATFORM_UPDATE_AVAILABLE,
             )

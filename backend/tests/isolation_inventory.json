@@ -3876,6 +3876,20 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_task_owner_binding.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_sessionmaker",
+    "defer_event",
+    "wait_for_deferred_events",
+    "http requests use their own sessions",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_template_notebooks.py": {
    "category": "real_commit",
    "evidence": [
