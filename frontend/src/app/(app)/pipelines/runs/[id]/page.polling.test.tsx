@@ -154,3 +154,24 @@ test("background log refreshes keep the log view mounted", async () => {
   await answer(`${RUN}/logs`, { stdout: "line 1\nline 2", stderr: "" });
   expect(screen.getByText(/line 2/)).toBe(pre);
 });
+
+test("the run read carries a signal that aborts when the page closes", async () => {
+  const { unmount } = render(<PipelineRunDetailPage />);
+  const signal = mockGet.mock.calls.find(([url]) => url === RUN)?.[1]?.signal;
+  expect(signal).toBeInstanceOf(AbortSignal);
+  unmount();
+  expect((signal as AbortSignal).aborted).toBe(true);
+});
+
+test("a failed refresh of an active run keeps polling both the run and its logs", async () => {
+  render(<PipelineRunDetailPage />);
+  await answer(RUN, run("running"));
+  await answer(`${RUN}/logs`, { stdout: "line 1", stderr: "" });
+  await tick(10_000);
+  await fail(RUN);
+  for (const p of reads(`${RUN}/logs`)) await answer(p.url, { stdout: "line 1", stderr: "" });
+
+  await tick(10_000);
+  expect(reads(RUN)).toHaveLength(1);
+  expect(reads(`${RUN}/logs`)).toHaveLength(1);
+});

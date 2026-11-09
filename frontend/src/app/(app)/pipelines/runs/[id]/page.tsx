@@ -151,6 +151,10 @@ function getUserRole(): string {
   }
 }
 
+function isRunActive(run: PipelineRunDetail): boolean {
+  return run.status === "running" || run.status === "pending";
+}
+
 export default function PipelineRunDetailPage() {
   const router = useRouter();
   const toast = useToast();
@@ -179,20 +183,23 @@ export default function PipelineRunDetailPage() {
   // The run, re-read every 10 s while it is running or pending. Each read starts
   // after the previous one settles; a failed re-read keeps the run on screen and
   // says it may be out of date.
-  const [runActive, setRunActive] = useState(false);
   const runPath = `/api/pipeline-runs/${runId}`;
   const runResource = useResource(
     runPath,
-    useCallback(() => api.get<PipelineRunDetail>(runPath), [runPath]),
+    useCallback(
+      (signal: AbortSignal) => api.get<PipelineRunDetail>(runPath, { signal }),
+      [runPath],
+    ),
     {
-      poll: runActive ? 10000 : false,
-      onSuccess: (data) => setRunActive(["running", "pending"].includes(data.status)),
+      poll: ({ data }) => (data && isRunActive(data) ? 10000 : false),
       onError: (e) => {
         if (!(e instanceof ApiError && e.status === 404)) logError("loading the run", e);
       },
     },
   );
   const run = runResource.data ?? null;
+  // The logs below are re-read while the run's last answer says it is active.
+  const runActive = run !== null && isRunActive(run);
   const loading = runResource.loading;
   // A 404 is a real "this run does not exist" and keeps its own wording. Any
   // other failure means we do not know, and must not be reported as absence.
