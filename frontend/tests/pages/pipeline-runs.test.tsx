@@ -42,6 +42,7 @@ jest.mock("@/lib/api", () => ({
     post: (...args: unknown[]) => mockApiPost(...args),
   },
   ApiError: class ApiError extends Error {},
+  fetchText: jest.requireActual("@/lib/api").fetchText,
 }));
 
 // Mock fetch for report endpoint

@@ -1,5 +1,6 @@
 import { getToken } from "./auth";
 import { expireSession } from "./session";
+import { apiUrl } from "./apiUrl";
 import {
   isMaintenanceBody,
   reportMaintenance,
@@ -21,24 +22,7 @@ function maintenanceMessage(body: MaintenanceInfo): string {
     : MAINTENANCE_MESSAGE;
 }
 
-/**
- * The application API's base URL. An explicitly empty value means the same origin; unset means
- * the local backend. Read at call time so every caller resolves it the same way.
- */
-export function apiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-}
-
-/**
- * The full URL for an application path. Only application-relative paths are accepted, so the
- * authenticated client can never send the session token to another destination.
- */
-export function apiUrl(path: string): string {
-  if (!path.startsWith("/") || path.startsWith("//")) {
-    throw new Error(`Not an application API path: ${JSON.stringify(path)}`);
-  }
-  return `${apiBaseUrl()}${path}`;
-}
+export { apiBaseUrl, apiUrl } from "./apiUrl";
 
 export interface ApiErrorExtras {
   /** The parsed error body, for feature wrappers that read nested conflict payloads. */
@@ -197,6 +181,8 @@ interface SendOptions extends RequestControls {
   jsonContentType?: boolean;
   /** A multipart body; the browser sets the boundary. */
   form?: FormData;
+  /** An Accept header, e.g. text/event-stream. */
+  accept?: string;
   fallback?: string;
 }
 
@@ -208,6 +194,9 @@ async function send(path: string, options: SendOptions = {}): Promise<Response> 
   const headers: Record<string, string> = {};
   if (options.jsonContentType || options.json) {
     headers["Content-Type"] = "application/json";
+  }
+  if (options.accept) {
+    headers["Accept"] = options.accept;
   }
   if (sentToken) {
     headers["Authorization"] = `Bearer ${sentToken}`;
@@ -236,6 +225,10 @@ async function send(path: string, options: SendOptions = {}): Promise<Response> 
 /** The parsed error body, or undefined when it is missing or not JSON. Never throws. */
 async function readErrorBody(response: Response): Promise<unknown> {
   try {
+    // Read the text and parse it, so an HTML error page cannot fail the read itself.
+    if (typeof response.text === "function") {
+      return parseJsonText(await response.text());
+    }
     return await response.json();
   } catch {
     return undefined;
@@ -411,6 +404,7 @@ export async function fetchText(path: string, options: TextRequest = {}): Promis
 export interface StreamRequest extends RequestControls {
   method?: "GET" | "POST";
   body?: unknown;
+  accept?: string;
 }
 
 /**
@@ -422,6 +416,7 @@ function openStream(path: string, options: StreamRequest = {}): Promise<Response
     method: options.method ?? "GET",
     json: options.body,
     jsonContentType: options.body !== undefined,
+    accept: options.accept,
     signal: options.signal,
   });
 }

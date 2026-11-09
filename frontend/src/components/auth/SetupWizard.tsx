@@ -8,8 +8,8 @@ import { startSession } from "@/lib/session";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
 import { Button } from "@/components/ui/Button";
+import { apiUrl } from "@/lib/apiUrl";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const STEPS = [
   "Setup Code",
@@ -378,7 +378,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     try {
       // Use raw fetch since the api module auto-redirects on 401
-      const resp = await fetch(`${API_URL}/api/bootstrap/verify-setup-code`, {
+      const resp = await fetch(apiUrl("/api/bootstrap/verify-setup-code"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: setupCode }),
@@ -430,7 +430,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     try {
       // Use raw fetch with setup token (not the stored auth token)
-      const resp = await fetch(`${API_URL}/api/bootstrap/create-admin`, {
+      const resp = await fetch(apiUrl("/api/bootstrap/create-admin"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
