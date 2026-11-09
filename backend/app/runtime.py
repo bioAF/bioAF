@@ -230,7 +230,7 @@ def spawn(coro: Coroutine[Any, Any, Any], *, role: str, event: bool = False) -> 
     owner = _current.get()
     if owner is not None:
         return owner.spawn(coro, role=role, event=event)
-    return asyncio.get_running_loop().create_task(coro, name=f"bioaf:{role}")
+    return asyncio.create_task(coro, name=f"bioaf:{role}")
 
 
 def spawn_event(coro: Coroutine[Any, Any, Any], *, event_type: str) -> asyncio.Task[Any] | None:

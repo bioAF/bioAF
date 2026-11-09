@@ -66,6 +66,7 @@ from app.services.event_types import (
 from app.services.literature import association_service, paper_service, sources_config_service
 from app.services.literature.sources import PaperRecord, get_adapter
 from app.services.llm_provider_clients import ProviderError, get_client
+from app import runtime
 
 logger = logging.getLogger("bioaf.literature.lit_review_run_service")
 
@@ -223,7 +224,7 @@ async def create_run(
 
 
 async def schedule_run(*, run_id: int) -> None:
-    asyncio.create_task(_execute_run(run_id))
+    runtime.spawn(_execute_run(run_id), role="lit-review-run")
 
 
 _TERMINAL_STATUSES = (SEARCH_COMPLETE, SEARCH_PARTIAL, SEARCH_FAILED)

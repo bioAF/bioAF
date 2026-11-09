@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 
@@ -45,6 +44,7 @@ from app.services.stack_deployment import (
 )
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
+from app import runtime
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
@@ -293,7 +293,7 @@ async def stack_deploy_background_endpoint(
             except Exception:
                 logger.exception("Background deploy failed")
 
-    asyncio.get_event_loop().create_task(_run_deploy())
+    runtime.spawn(_run_deploy(), role="stack-deploy")
 
     return {"message": "Deployment started"}
 
@@ -325,7 +325,7 @@ async def stack_teardown_background_endpoint(
             except Exception:
                 logger.exception("Background teardown failed")
 
-    asyncio.get_event_loop().create_task(_run_teardown())
+    runtime.spawn(_run_teardown(), role="stack-teardown")
 
     return {"message": "Teardown started"}
 
@@ -363,7 +363,7 @@ async def stack_destroy_storage_background_endpoint(
             except Exception:
                 logger.exception("Background storage destroy failed")
 
-    asyncio.get_event_loop().create_task(_run_destroy_storage())
+    runtime.spawn(_run_destroy_storage(), role="stack-destroy-storage")
 
     return {"message": "Storage destruction started"}
 
@@ -927,7 +927,7 @@ async def update_cluster_config(
     # Auto-apply: transition to applying and kick off background apply
     run.status = "applying"
     await session.commit()
-    asyncio.create_task(_run_apply_background(run.id, user_id))
+    runtime.spawn(_run_apply_background(run.id, user_id), role="cluster-config-apply")
 
     return {"message": "Cluster configuration update started", "run_id": run.id}
 

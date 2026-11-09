@@ -22,6 +22,7 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
 from app.runtime import spawn_event
+from app import runtime
 
 logger = logging.getLogger("bioaf.backup_service")
 
@@ -1008,7 +1009,7 @@ class RestoreService:
             logger.info("Swapped to bioaf_restore for review")
 
             # Start timeout task
-            _restore_state["_timeout_task"] = asyncio.create_task(_restore_timeout())
+            _restore_state["_timeout_task"] = runtime.spawn(_restore_timeout(), role="restore-review-timeout")
 
             return {"status": "reviewing", "message": f"Restore from {filename} active. You have 1 hour to review."}
 

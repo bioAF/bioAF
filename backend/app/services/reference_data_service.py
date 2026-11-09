@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.workers.reference_importer import ImportResult
@@ -748,8 +749,7 @@ class ReferenceDataService:
         monkey-patch this to avoid running the real importer.
         """
         job_id = f"refimport-{dataset_id}-inproc"
-        loop = asyncio.get_running_loop()
-        loop.create_task(ReferenceDataService._run_import_inproc(dataset_id, request))
+        runtime.spawn(ReferenceDataService._run_import_inproc(dataset_id, request), role="reference-import")
         return job_id
 
     @staticmethod

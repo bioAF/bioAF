@@ -937,6 +937,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_detached_work.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_disposable_pg.py": {
    "category": "no_database",
    "evidence": [],
