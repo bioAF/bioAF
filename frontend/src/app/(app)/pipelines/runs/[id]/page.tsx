@@ -4,7 +4,7 @@ import { NOT_SET } from "@/lib/placeholders";
 import { NotSet } from "@/components/shared/NotSet";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -19,6 +19,8 @@ import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBad
 import { usePermissions } from "@/hooks/usePermissions";
 import { getToken } from "@/lib/auth";
 import { api, ApiError, fetchText } from "@/lib/api";
+import { useResource } from "@/hooks/useResource";
+import { StaleNotice } from "@/components/shared/StaleNotice";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
@@ -159,15 +161,10 @@ export default function PipelineRunDetailPage() {
   const canViewResults =
     canAccess("experiments", "view") || canAccess("pipelines", "view");
 
-  const [run, setRun] = useState<PipelineRunDetail | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("logs");
   const [aiReviewSignal, setAiReviewSignal] = useState(0);
   const [report, setReport] = useState<string>("");
   const [reportLoading, setReportLoading] = useState(false);
-  const [logs, setLogs] = useState<LogResponse>({ stdout: "", stderr: "" });
-  const [logsLoading, setLogsLoading] = useState(false);
   const [selectedProcess, setSelectedProcess] = useState<string>("");
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null);
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
@@ -179,22 +176,30 @@ export default function PipelineRunDetailPage() {
   const [showRetriesModal, setShowRetriesModal] = useState(false);
   useDismissOnEscape(showRetriesModal, () => { setShowRetriesModal(false); });
 
-  const loadRun = useCallback(async () => {
-    try {
-      const data = await api.get<PipelineRunDetail>(`/api/pipeline-runs/${runId}`);
-      setRun(data);
-      setLoadError(null);
-    } catch (e) {
-      // A 404 is a real "this run does not exist" and keeps its own wording. Any
-      // other failure means we do not know, and must not be reported as absence.
-      if (e instanceof ApiError && e.status === 404) {
-        setLoadError(null);
-      } else {
-        logError("loading the run", e);
-        setLoadError(loadFailureMessage("This run"));
-      }
-    } finally { setLoading(false); }
-  }, [runId]);
+  // The run, re-read every 10 s while it is running or pending. Each read starts
+  // after the previous one settles; a failed re-read keeps the run on screen and
+  // says it may be out of date.
+  const [runActive, setRunActive] = useState(false);
+  const runPath = `/api/pipeline-runs/${runId}`;
+  const runResource = useResource(
+    runPath,
+    useCallback(() => api.get<PipelineRunDetail>(runPath), [runPath]),
+    {
+      poll: runActive ? 10000 : false,
+      onSuccess: (data) => setRunActive(["running", "pending"].includes(data.status)),
+      onError: (e) => {
+        if (!(e instanceof ApiError && e.status === 404)) logError("loading the run", e);
+      },
+    },
+  );
+  const run = runResource.data ?? null;
+  const loading = runResource.loading;
+  // A 404 is a real "this run does not exist" and keeps its own wording. Any
+  // other failure means we do not know, and must not be reported as absence.
+  const runNotFound = runResource.error instanceof ApiError && runResource.error.status === 404;
+  const loadError =
+    runResource.error && !runNotFound ? loadFailureMessage("This run") : null;
+  const loadRun = runResource.refresh;
 
   const isCustomRun = run?.custom_pipeline_version_id != null;
 
@@ -217,18 +222,9 @@ export default function PipelineRunDetailPage() {
   }, [run?.custom_pipeline_version_id]);
 
   useEffect(() => {
-    loadRun();
     loadReferences();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, loadRun]);
-
-  // Auto-refresh while active
-  useEffect(() => {
-    if (!run || !["running", "pending"].includes(run.status)) return;
-    const interval = setInterval(loadRun, 10000);
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run?.status, loadRun]);
+  }, [router, runId]);
 
   async function handleCancel() {
     // "Cancel" is the dismiss label on every dialog, so the accept button has
@@ -303,22 +299,46 @@ export default function PipelineRunDetailPage() {
     } finally { setReportLoading(false); }
   }
 
-  // showSpinner=false suppresses the loading state on background polls so
-  // the <pre> stays mounted and the user's scroll position is preserved;
-  // we only flash the spinner on the user-visible initial load.
-  async function loadLogs(processName?: string, showSpinner: boolean = true) {
-    if (showSpinner) setLogsLoading(true);
-    try {
-      const url = processName
-        ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(processName)}`
-        : `/api/pipeline-runs/${runId}/logs`;
-      const data = await api.get<LogResponse>(url);
-      setLogs(data);
-    } catch (e) {
+  // Logs, keyed by run and process, read while the logs tab is open and re-read
+  // every 5 s while the run is active. The run-metadata poll above does not
+  // reload logs, so without this the user stared at stale output until they
+  // refreshed the page. Only a new run/process key shows the spinner; background
+  // re-reads keep the <pre> mounted so the user's scroll position survives.
+  const logsPath =
+    activeTab !== "logs" || !run
+      ? null
+      : selectedProcess
+        ? `/api/pipeline-runs/${runId}/logs/${encodeURIComponent(selectedProcess)}`
+        : run.compute_job_ref
+          ? `/api/pipeline-runs/${runId}/logs`
+          : null;
+  const logsResource = useResource(
+    logsPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<LogResponse>(logsPath as string, { signal }),
+      [logsPath],
+    ),
+    {
+      poll: runActive ? 5000 : false,
       // Polled while the run is active, so this logs rather than raising a toast on every tick.
-      logError("loading run logs", e);
-    } finally { if (showSpinner) setLogsLoading(false); }
-  }
+      onError: (e) => logError("loading run logs", e),
+    },
+  );
+  const logs: LogResponse = logsResource.data ?? { stdout: "", stderr: "" };
+  const logsLoading = logsResource.loading;
+  const logsFailed = logsResource.error !== null && !logsResource.stale;
+
+  // When the run finishes, read its logs once more so the final output is shown.
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    if (runActive) {
+      wasActiveRef.current = true;
+    } else if (wasActiveRef.current) {
+      wasActiveRef.current = false;
+      void logsResource.refresh();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runActive]);
 
   async function loadSystemLogs() {
     setSystemLogsLoading(true);
@@ -364,43 +384,12 @@ export default function PipelineRunDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, runId, run?.status]);
 
-  useEffect(() => {
-    if (activeTab !== "logs") return;
-    if (run?.compute_job_ref) {
-      loadLogs();
-    } else if (selectedProcess) {
-      loadLogs(selectedProcess);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProcess, activeTab, run?.compute_job_ref]);
-
-  // Poll logs on a 5s interval while the run is active and the logs tab is
-  // open. The run-metadata poller above runs every 10s but is dep'd on
-  // run.compute_job_ref, so without this sibling interval logs only reload
-  // when that field changes (usually once, very early), leaving the user
-  // staring at stale output until they refresh the page. Polls suppress
-  // the spinner so the <pre> stays mounted and scroll position survives.
-  useEffect(() => {
-    if (activeTab !== "logs") return;
-    if (!run || !["running", "pending"].includes(run.status)) return;
-    if (!run.compute_job_ref && !selectedProcess) return;
-    const interval = setInterval(() => {
-      if (selectedProcess) {
-        loadLogs(selectedProcess, false);
-      } else if (run.compute_job_ref) {
-        loadLogs(undefined, false);
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, run?.status, run?.compute_job_ref, selectedProcess]);
-
   if (!loading && !run && loadError) {
     return (
       <main className="flex-1 flex items-center justify-center">
         <ErrorState
           message={loadError}
-          onRetry={() => { setLoading(true); void loadRun(); }}
+          onRetry={() => { void loadRun(); }}
         />
       </main>
     );
@@ -461,6 +450,7 @@ export default function PipelineRunDetailPage() {
           <ContentLoading />
         ) : run && (
         <>
+        {runResource.stale && <StaleNotice what="This run" onRetry={() => void loadRun()} />}
         <div className="flex items-center gap-4 mb-6">
           <button onClick={() => router.push("/pipelines/runs")} className="text-gray-500 hover:text-gray-700">← Back</button>
           <h1 className="text-2xl font-bold">Run #{run.id}: {run.pipeline_name}</h1>
@@ -902,9 +892,17 @@ export default function PipelineRunDetailPage() {
               </div>
             )}
 
+            {logsResource.stale && (
+              <StaleNotice what="The logs" onRetry={() => void logsResource.refresh()} />
+            )}
             {(run.compute_job_ref || selectedProcess) ? (
               logsLoading ? (
                 <div className="flex items-center gap-2 text-gray-500"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
+              ) : logsFailed ? (
+                // A failed read is not empty output: "(empty)" would say the run printed nothing.
+                <p data-testid="logs-load-failed" className="text-sm text-red-600">
+                  {loadFailureMessage("The logs")}
+                </p>
               ) : (
                 <div className="space-y-4">
                   <div>
