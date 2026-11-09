@@ -73,3 +73,13 @@ test("unmounting stops polling", async () => {
   });
   expect(mockGet).toHaveBeenCalledTimes(1);
 });
+
+test("the count read carries a cancellation signal that aborts on unmount", () => {
+  const { unmount } = render(<NotificationBell />);
+  const [path, options] = mockGet.mock.calls[0];
+  expect(path).toBe("/api/notifications/unread-count");
+  expect(options?.signal).toBeInstanceOf(AbortSignal);
+  expect(options.signal.aborted).toBe(false);
+  unmount();
+  expect(options.signal.aborted).toBe(true);
+});

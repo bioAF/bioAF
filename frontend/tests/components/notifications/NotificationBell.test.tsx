@@ -81,6 +81,6 @@ describe("NotificationBell", () => {
   it("polls /api/notifications/unread-count on mount", async () => {
     render(<NotificationBell />);
     await act(async () => { await Promise.resolve(); });
-    expect(mockApiGet).toHaveBeenCalledWith("/api/notifications/unread-count");
+    expect(mockApiGet).toHaveBeenCalledWith("/api/notifications/unread-count", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 });

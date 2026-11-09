@@ -10,24 +10,22 @@ export function NotificationBell() {
   // Polled every 30s after the previous read settles. A count changed in the
   // dropdown (mark read) replaces the count locally and supersedes any read
   // already in flight, so an older answer cannot put the old count back.
-  // The signal is not passed: an existing test asserts the exact call.
+  const count = useResource(
+    "unread-count",
+    useCallback(
+      (signal: AbortSignal) => api.get<{ count: number }>("/api/notifications/unread-count", { signal }),
+      [],
+    ),
+    {
+      poll: 30000,
+      onError: (e) => logError("loading the unread notification count", e),
+    },
+  );
   // A count that could not be read is not a count of zero. Measured on the
   // demo with 241 unread: the badge read "99+" healthy and rendered nothing at
   // all once the request failed, because the initial state and the failure
   // state are the same number.
-  const [countFailed, setCountFailed] = useState(false);
-  const count = useResource(
-    "unread-count",
-    useCallback(() => api.get<{ count: number }>("/api/notifications/unread-count"), []),
-    {
-      poll: 30000,
-      onSuccess: () => setCountFailed(false),
-      onError: (e) => {
-        logError("loading the unread notification count", e);
-        setCountFailed(true);
-      },
-    },
-  );
+  const countFailed = count.error !== null;
   const unreadCount = count.data?.count ?? 0;
   const setUnreadCount = (n: number) => count.mutate({ count: n });
   const [showDropdown, setShowDropdown] = useState(false);
