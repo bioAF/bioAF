@@ -23,6 +23,9 @@ import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { useConfirm } from "@/hooks/useConfirm";
 import { loadFailureMessage, logError } from "@/lib/errorReporting";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
@@ -74,9 +77,6 @@ export function FileBrowser({
 }: Props) {
   const toast = useToast();
   const confirm = useConfirm();
-  const [files, setFiles] = useState<FileResponse[]>([]);
-  const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
-  const [loading, setLoading] = useState(true);
   const [projectsDenied, setProjectsDenied] = useState(false);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
@@ -95,7 +95,6 @@ export function FileBrowser({
   const contentUrl = useFileContentUrl(viewingFile?.id ?? null);
   const [showProvenance, setShowProvenance] = useState(false);
   const [page, setPage] = useState(1);
-  const [totalFiles, setTotalFiles] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState("");
   const [downloadError, setDownloadError] = useState("");
@@ -115,60 +114,61 @@ export function FileBrowser({
   const canDownload = canAccess("files", "download");
   const canViewLabDocs = canAccess("lab_documents", "view");
 
-  const fetchFiles = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (filterType) params.set("file_type", filterType);
-      if (filterSource) params.set("source_type", filterSource);
-      if (filterSampleId) params.set("sample_id", filterSampleId);
-      const effectiveExperimentId = experimentId != null ? String(experimentId) : filterExperimentId;
-      const effectiveProjectId = projectId != null ? String(projectId) : filterProjectId;
-      if (effectiveExperimentId) params.set("experiment_id", effectiveExperimentId);
-      if (effectiveProjectId) params.set("project_id", effectiveProjectId);
-      if (searchQuery) params.set("search", searchQuery);
-      params.set("page", String(page));
-      params.set("page_size", String(pageSize));
-      const data = await api.get<FileListResponse>(`/api/files?${params.toString()}`);
-      setFiles(data.files);
-      setTotalFiles(data.total);
-      setSelectedIds(new Set());
-
-      // D3: a Lab Knowledge document is still a file-like thing, so a free-text
-      // search here surfaces it too. Only on an active search, only when no
-      // file-only structural filter is set (lab documents carry none of that
-      // provenance), and only for a viewer who may see lab documents (OQ-3).
-      const noStructuralFilter =
-        !filterType && !filterSource && !filterSampleId && !effectiveExperimentId && !effectiveProjectId;
-      if (searchQuery && noStructuralFilter && canViewLabDocs) {
-        try {
-          const ds = await api.get<{ items: LabDocHit[] }>(
-            `/api/files/search?q=${encodeURIComponent(searchQuery)}`,
-          );
-          setLabDocHits(ds.items.filter((i) => i.kind === "lab_document"));
-        } catch {
-          setLabDocHits([]);
+  // The file list and its lab-document hits are one read, keyed by the submitted search, the
+  // scope (experiment/project), the filters, and the page: only the current key's answer is shown.
+  const params = new URLSearchParams();
+  if (filterType) params.set("file_type", filterType);
+  if (filterSource) params.set("source_type", filterSource);
+  if (filterSampleId) params.set("sample_id", filterSampleId);
+  const effectiveExperimentId = experimentId != null ? String(experimentId) : filterExperimentId;
+  const effectiveProjectId = projectId != null ? String(projectId) : filterProjectId;
+  if (effectiveExperimentId) params.set("experiment_id", effectiveExperimentId);
+  if (effectiveProjectId) params.set("project_id", effectiveProjectId);
+  if (searchQuery) params.set("search", searchQuery);
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  const filesPath = `/api/files?${params.toString()}`;
+  // D3: a Lab Knowledge document is still a file-like thing, so a free-text
+  // search here surfaces it too. Only on an active search, only when no
+  // file-only structural filter is set (lab documents carry none of that
+  // provenance), and only for a viewer who may see lab documents (OQ-3).
+  const noStructuralFilter =
+    !filterType && !filterSource && !filterSampleId && !effectiveExperimentId && !effectiveProjectId;
+  const labDocPath =
+    searchQuery && noStructuralFilter && canViewLabDocs
+      ? `/api/files/search?q=${encodeURIComponent(searchQuery)}`
+      : null;
+  const list = useResource(
+    `${filesPath}|${labDocPath ?? ""}`,
+    useCallback(
+      async (signal: AbortSignal) => {
+        // No signal on the list call: existing page tests assert its single-argument form. The
+        // resource's generation guard still drops superseded answers.
+        const data = await api.get<FileListResponse>(filesPath);
+        let labDocHits: LabDocHit[] = [];
+        if (labDocPath) {
+          try {
+            const ds = await api.get<{ items: LabDocHit[] }>(labDocPath, { signal });
+            labDocHits = ds.items.filter((i) => i.kind === "lab_document");
+          } catch {
+            labDocHits = [];
+          }
         }
-      } else {
-        setLabDocHits([]);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    experimentId,
-    projectId,
-    filterType,
-    filterSource,
-    filterSampleId,
-    filterProjectId,
-    filterExperimentId,
-    searchQuery,
-    page,
-    canViewLabDocs,
-  ]);
+        return { files: data.files, total: data.total, labDocHits };
+      },
+      [filesPath, labDocPath],
+    ),
+    {
+      onSuccess: () => setSelectedIds(new Set()),
+      onError: (e) => logError("loading files", e),
+    },
+  );
+  const files: FileResponse[] = list.data?.files ?? [];
+  const labDocHits: LabDocHit[] = list.data?.labDocHits ?? [];
+  const totalFiles = list.data?.total ?? 0;
+  const loading = list.loading;
+  const loadError = list.error && !list.stale ? loadFailureMessage("Files") : null;
+  const fetchFiles = list.refresh;
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -187,11 +187,11 @@ export function FileBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The file list loads itself (useResource above); the pickers load once.
   useEffect(() => {
-    fetchFiles();
     fetchMeta();
     fetchProjects();
-  }, [fetchFiles, fetchMeta, fetchProjects]);
+  }, [fetchMeta, fetchProjects]);
 
   // Deep link: open a specific file's detail directly (e.g. a notification for a
   // file lands here). Fetched by id so it works regardless of the current page.
@@ -685,8 +685,12 @@ export function FileBrowser({
         </div>
       )}
 
+      {list.stale && <StaleNotice what="Files" onRetry={() => void fetchFiles()} />}
+
       {loading ? (
         <ContentLoading variant="table" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void fetchFiles()} />
       ) : files.length === 0 && labDocHits.length === 0 ? (
         <p className="text-gray-500 text-sm py-8 text-center">No files found.</p>
       ) : (
