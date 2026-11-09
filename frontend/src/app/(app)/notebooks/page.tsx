@@ -3,13 +3,14 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
+import { useResource } from "@/hooks/useResource";
 import type {
   NotebookSession,
   SessionListResponse,
@@ -52,6 +53,14 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
   "2xlarge": { label: "XX Large", description: "Very large or multi-sample integration" },
 };
 
+const BUILD_STATUS_PATH = "/api/v1/infrastructure/notebook-image/build-status";
+
+interface ImageBuildStatus {
+  build_id: string | null;
+  build_status: string | null;
+  image_uri: string | null;
+}
+
 export default function NotebooksPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -59,16 +68,9 @@ export default function NotebooksPage() {
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<NotebookSession[]>([]);
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   useDismissOnEscape(viewingSession !== null, () => { setViewingSession(null); setProvenance(null); });
-  const [loading, setLoading] = useState(true);
-  const [imageBuildStatus, setImageBuildStatus] = useState<{
-    build_id: string | null;
-    build_status: string | null;
-    image_uri: string | null;
-  } | null>(null);
 
   // Launch modal state
   const [showLaunchModal, setShowLaunchModal] = useState(false);
@@ -101,20 +103,55 @@ export default function NotebooksPage() {
   const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
   useEffect(() => {
-    loadSessions(bucket);
     loadExperiments();
     loadProjects();
-    loadBuildStatus();
     loadEnvironments();
     loadResourceProfiles();
   }, [bucket]);
 
-  useEffect(() => {
-    const hasStarting = sessions.some((s) => s.status === "starting");
-    if (!hasStarting) return;
-    const interval = setInterval(() => loadSessions(bucket), 10000);
-    return () => clearInterval(interval);
-  }, [sessions, bucket]);
+  // Sessions, keyed by bucket: re-read every 10 s while one is starting, each read
+  // after the previous one settles. A bucket's late answer cannot replace another's.
+  const [hasStarting, setHasStarting] = useState(false);
+  const sessionsPath = `/api/v1/notebooks/sessions?bucket=${bucket}`;
+  const sessionList = useResource(
+    sessionsPath,
+    useCallback(() => api.get<SessionListResponse>(sessionsPath), [sessionsPath]),
+    {
+      poll: hasStarting ? 10000 : false,
+      onSuccess: (data) => {
+        setHasStarting(data.sessions.some((s) => s.status === "starting"));
+        setLoadError(null);
+      },
+      onError: (e) => {
+        // These sessions bill while they run, so "you have none" must never stand
+        // in for "we could not ask". The comment was right and the render was not: the
+        // error row and the "No active sessions" row were separate conditions, so both
+        // rendered at once and the page said both things simultaneously. See below.
+        logError("loading the notebook sessions", e);
+        setLoadError(loadFailureMessage("Notebook sessions"));
+      },
+    },
+  );
+  const sessions: NotebookSession[] = sessionList.data?.sessions ?? [];
+  const loading = sessionList.loading;
+  const loadSessions = sessionList.refresh;
+
+  // The notebook image build: one poll for the page, every 15 s while it is working
+  // or queued, stopped when it finishes or the page closes. It used to be a recursive
+  // timeout restarted on every bucket change, so watchers stacked up and outlived the page.
+  const [imageBuilding, setImageBuilding] = useState(false);
+  const buildStatusResource = useResource(
+    BUILD_STATUS_PATH,
+    useCallback(() => api.get<ImageBuildStatus>(BUILD_STATUS_PATH), []),
+    {
+      poll: imageBuilding ? 15000 : false,
+      onSuccess: (status) =>
+        setImageBuilding(!!status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)),
+      // Polled while building, so a toast per tick would bury the page. The log is the record.
+      onError: (e) => logError("loading the notebook image build status", e),
+    },
+  );
+  const imageBuildStatus = buildStatusResource.data ?? null;
 
   async function loadResourceProfiles() {
     try {
@@ -131,42 +168,6 @@ export default function NotebooksPage() {
     } catch (e) {
       logError("loading resource profiles", e);
       toast.error(loadFailureMessage("Resource profile availability"));
-    }
-  }
-
-  async function loadBuildStatus() {
-    try {
-      const status = await api.get<{
-        build_id: string | null;
-        build_status: string | null;
-        image_uri: string | null;
-      }>("/api/v1/infrastructure/notebook-image/build-status");
-      setImageBuildStatus(status);
-      if (status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)) {
-        setTimeout(loadBuildStatus, 15000);
-      }
-    } catch (e) {
-      // Polled every few seconds, so a toast per tick would bury the page. The log is the record.
-      logError("loading the notebook image build status", e);
-    }
-  }
-
-  async function loadSessions(currentBucket: SessionBucket = bucket) {
-    try {
-      const data = await api.get<SessionListResponse>(
-        `/api/v1/notebooks/sessions?bucket=${currentBucket}`,
-      );
-      setSessions(data.sessions);
-      setLoadError(null);
-    } catch (e) {
-      // These sessions bill while they run, so "you have none" must never stand
-      // in for "we could not ask". The comment was right and the render was not: the
-      // error row and the "No active sessions" row were separate conditions, so both
-      // rendered at once and the page said both things simultaneously. See below.
-      logError("loading the notebook sessions", e);
-      setLoadError(loadFailureMessage("Notebook sessions"));
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -347,7 +348,7 @@ export default function NotebooksPage() {
       };
       await api.post("/api/v1/notebooks/sessions", req);
       setShowLaunchModal(false);
-      loadSessions(bucket);
+      void loadSessions();
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
     } finally {
@@ -367,7 +368,7 @@ export default function NotebooksPage() {
     setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);
-      loadSessions(bucket);
+      void loadSessions();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not stop the session. It may still be running and billing.");
     } finally {
@@ -556,7 +557,7 @@ export default function NotebooksPage() {
                     <p className="text-red-700 mb-3">{loadError}</p>
                     <button
                       type="button"
-                      onClick={() => loadSessions()}
+                      onClick={() => void loadSessions()}
                       className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
                     >
                       Retry
