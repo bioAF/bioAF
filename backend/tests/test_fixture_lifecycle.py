@@ -96,6 +96,7 @@ def test_redirect_leaves_unrelated_modules_alone():
 
 @pytest.mark.asyncio
 async def test_owned_app_tasks_are_cancelled_and_awaited_others_are_left():
+    from app import runtime
     from app.services.event_bus import EventBus
 
     bus = EventBus()
@@ -105,22 +106,21 @@ async def test_owned_app_tasks_are_cancelled_and_awaited_others_are_left():
         calls[-1].set()
         await asyncio.sleep(3600)
 
-    async def _emit_and_wait_until_running() -> asyncio.Task:
+    async def _emit_and_wait_until_running(start) -> asyncio.Task:
         calls.append(asyncio.Event())
-        task = asyncio.create_task(bus.emit("probe", {}))
+        task = start(bus.emit("probe", {}))
         await calls[-1].wait()
         return task
 
     bus.subscribe("probe", _forever)
-    existing = await _emit_and_wait_until_running()  # app code, running before the snapshot
-    before = lifecycle.snapshot_tasks()
-    owned = await _emit_and_wait_until_running()  # app code, started by "the test"
+    owner = runtime.TaskOwner(name="test")
+    existing = await _emit_and_wait_until_running(asyncio.create_task)  # app code, not the test's
+    owned = await _emit_and_wait_until_running(lambda c: owner.spawn(c, role="probe"))  # the test's
     foreign = asyncio.create_task(asyncio.sleep(3600))  # not app code
     await asyncio.sleep(0)
 
-    cancelled = await lifecycle.cancel_owned_tasks(before)
+    await lifecycle.settle_owner(owner, event_seconds=0.1, cancel_seconds=1)
 
-    assert cancelled >= 1
     assert owned.cancelled()
     assert not existing.done()
     assert not foreign.done()
@@ -131,6 +131,7 @@ async def test_owned_app_tasks_are_cancelled_and_awaited_others_are_left():
 
 @pytest.mark.asyncio
 async def test_deferred_events_are_drained_before_tasks_are_cancelled(session):
+    from app import runtime
     from app.services.event_bus import event_bus
     from app.services.post_commit_events import defer_event
 
@@ -143,9 +144,8 @@ async def test_deferred_events_are_drained_before_tasks_are_cancelled(session):
     event_bus.subscribe("lifecycle.probe", _slow)
     defer_event(session, "lifecycle.probe", {"n": 1})
     await session.commit()
-    before = set()  # treat every task as owned, as the fixture does for tasks the test started
 
-    await lifecycle.drain_and_cancel(before)
+    await lifecycle.settle_owner(runtime.current_owner())
 
     assert delivered == [{"n": 1}]
 

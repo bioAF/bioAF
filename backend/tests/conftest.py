@@ -143,7 +143,6 @@ async def db_engine(worker_id, request):
     import app.database as database_module
 
     restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
-    tasks_before = lifecycle.snapshot_tasks()
     # The test's task owner (plan 14): work the test starts through the application's spawn points,
     # requests through `client`, and committed events all belong to it.
     from app import runtime
@@ -155,12 +154,10 @@ async def db_engine(worker_id, request):
             yield engine
     finally:
         # While the test factory and schema still exist: let the test's events finish, then stop
-        # the work it started (owned first, then any legacy unowned task), so none keeps a
-        # transaction open (deadlocking the drop) or falls back to the production factory. Every
-        # step runs even if one fails.
+        # the work it started through its owner, so none keeps a transaction open (deadlocking the
+        # drop) or falls back to the production factory. Every step runs even if one fails.
         await lifecycle.run_all(
             lambda: lifecycle.settle_owner(owner),
-            lambda: lifecycle.drain_and_cancel(tasks_before),
             restore_factories,
             *cleanup,
             engine.dispose,

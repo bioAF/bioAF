@@ -271,12 +271,6 @@ class ListenerManager:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def wait(self) -> None:
-        """Wait for the current listener task to finish, without cancelling it if the caller is."""
-        task = self._task
-        if task is not None:
-            await asyncio.shield(task)
-
     @staticmethod
     async def _run(listener: PubSubListener) -> None:
         # The factory current when the listener starts, as before: it binds for the listener's life.

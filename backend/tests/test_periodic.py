@@ -254,7 +254,9 @@ async def test_slurm_job_sync_is_disabled_outside_slurm_mode(monkeypatch):
     from app.config import settings
 
     job = next(j for j in jobs.PERIODIC_JOBS if j.role == "job-status-sync")
+    enabled = job.enabled
+    assert enabled is not None
     monkeypatch.setattr(settings, "compute_mode", "kubernetes")
-    assert not job.enabled()
+    assert not enabled()
     monkeypatch.setattr(settings, "compute_mode", "slurm")
-    assert job.enabled()
+    assert enabled()
