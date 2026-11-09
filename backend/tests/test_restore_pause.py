@@ -1,0 +1,211 @@
+"""Automatic and external work pause around a restore review (plan 14, restore pause/quiesce).
+
+During a review, requests read and write the review copy by design, but automatic work must not
+(it would write the review copy, or the ``postgres`` database while Accept renames), and work with
+external effects must not start (cloud resources the primary would never learn about after a
+reject). So, before the swap:
+
+- automatic work pauses: periodic iterations are skipped, the Pub/Sub listener stops, and the swap
+  waits for in-flight iterations, events, and detached jobs to settle;
+- if they do not settle in time, the restore is refused before any swap, and work resumes;
+- request-triggered external work is refused at its domain boundary until the review ends;
+- a successful accept or revert resumes work; a failed revert keeps it paused, with a reminder.
+"""
+
+import asyncio
+import logging
+
+import pytest
+
+from app import runtime
+from app.runtime import OwnerPaused, TaskOwner
+from app.services import backup_service
+from app.services.backup_service import RestoreService
+from app.tasks.periodic import PeriodicJob, run_periodic
+from tests.test_restore_expiry import FILENAME, PRIMARY, _until, harness  # noqa: F401 -- fixture
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_a_paused_owner_skips_periodic_iterations_until_resumed():
+    owner = TaskOwner()
+    ran = []
+
+    async def iteration():
+        ran.append(owner.paused)
+
+    job = PeriodicJob(role="poller", prepare=lambda: iteration, interval=0.01, first_delay=0, error_message="x: %s")
+    with runtime.bound(owner):
+        assert await owner.pause("restore_review", settle_seconds=1) == []
+        task = owner.spawn(run_periodic(job), role="poller", worker=True)
+        await asyncio.sleep(0.05)
+        assert ran == []
+        owner.resume()
+        await _until(lambda: len(ran) >= 1)
+    assert set(ran) == {None}
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+    assert task.done()
+
+
+async def test_pausing_waits_for_an_iteration_in_progress():
+    owner = TaskOwner()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def iteration():
+        started.set()
+        await release.wait()
+
+    job = PeriodicJob(role="poller", prepare=lambda: iteration, interval=3600, first_delay=0, error_message="x: %s")
+    with runtime.bound(owner):
+        owner.spawn(run_periodic(job), role="poller", worker=True)
+    await started.wait()
+    pausing = asyncio.create_task(owner.pause("restore_review", settle_seconds=2))
+    await asyncio.sleep(0.05)
+    assert not pausing.done()
+    release.set()
+    assert await pausing == []
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+
+
+async def test_pausing_reports_detached_work_that_does_not_settle():
+    owner = TaskOwner()
+    owner.spawn(asyncio.Event().wait(), role="stack-deploy")
+    assert await owner.pause("restore_review", settle_seconds=0.1) == ["stack-deploy"]
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+
+
+async def test_external_work_is_refused_while_paused_and_admitted_after():
+    owner = TaskOwner()
+    with runtime.bound(owner):
+        runtime.require_admission("pipeline launch")
+        await owner.pause("restore_review", settle_seconds=0)
+        with pytest.raises(OwnerPaused):
+            runtime.require_admission("pipeline launch")
+        owner.resume()
+        runtime.require_admission("pipeline launch")
+
+
+async def test_a_restore_is_refused_before_the_swap_when_work_does_not_settle(harness, monkeypatch):  # noqa: F811
+    owner = TaskOwner()
+    monkeypatch.setattr(backup_service, "RESTORE_SETTLE_SECONDS", 0.1)
+    deploying = owner.spawn(asyncio.Event().wait(), role="stack-deploy")
+    with runtime.bound(owner):
+        result = await RestoreService.start(None, org_id=1, filename=FILENAME)
+
+    assert result["status"] == "error"
+    assert "still running" in result["message"]
+    assert not any(c[0] == "swap" for c in harness.calls)
+    assert ("sql", "DROP DATABASE IF EXISTS bioaf_restore") in harness.calls
+    assert owner.paused is None
+    assert RestoreService.get_status() == {"active": False}
+    deploying.cancel()
+
+
+async def test_the_review_keeps_work_paused_until_it_is_rejected(harness):  # noqa: F811
+    owner = TaskOwner()
+    with runtime.bound(owner):
+        assert (await RestoreService.start(None, org_id=1, filename=FILENAME))["status"] == "reviewing"
+        assert owner.paused == "restore_review"
+        with pytest.raises(OwnerPaused):
+            runtime.require_admission("pipeline launch")
+        assert (await RestoreService.reject())["status"] == "reverted"
+    assert owner.paused is None
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+
+
+async def test_an_accepted_review_resumes_work(harness):  # noqa: F811
+    owner = TaskOwner()
+    with runtime.bound(owner):
+        await RestoreService.start(None, org_id=1, filename=FILENAME)
+        assert (await RestoreService.accept())["status"] == "accepted"
+    assert owner.paused is None
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+
+
+async def test_a_failed_revert_keeps_work_paused_and_reminds(harness, monkeypatch, caplog):  # noqa: F811
+    monkeypatch.setattr(backup_service, "RESTORE_REMINDER_SECONDS", 0.02)
+    owner = TaskOwner()
+    with runtime.bound(owner):
+        await RestoreService.start(None, org_id=1, filename=FILENAME)
+        harness.fail = lambda stmt: stmt == "DROP DATABASE IF EXISTS bioaf_restore"
+        with caplog.at_level(logging.WARNING, logger="bioaf.backup_service"):
+            assert (await RestoreService.reject())["status"] == "error"
+            await asyncio.sleep(0.1)
+        assert owner.paused == "restore_review"
+        reminders = [r for r in caplog.records if "still paused" in r.getMessage()]
+        assert len(reminders) >= 2
+        harness.fail = None
+        assert (await RestoreService.reject())["status"] == "reverted"
+    assert owner.paused is None
+    await owner.shutdown(drain_seconds=0, cancel_seconds=1)
+
+
+async def test_launching_a_pipeline_during_a_review_is_refused_before_any_write(client, admin_token, monkeypatch):
+    from app.services.pipeline_catalog_service import PipelineCatalogService
+
+    owner = runtime.current_owner()
+    await owner.pause("restore_review", settle_seconds=0)
+    writes = []
+
+    async def must_not_create(*args, **kwargs):
+        writes.append(True)
+        raise AssertionError("launch reached the service")
+
+    monkeypatch.setattr(PipelineCatalogService, "get_pipeline", must_not_create)
+    try:
+        resp = await client.post(
+            "/api/pipeline-runs",
+            json={"pipeline_key": "nf-core/rnaseq", "experiment_id": 1},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        readable = await client.get("/api/backups/restore/status", headers={"Authorization": f"Bearer {admin_token}"})
+    finally:
+        owner.resume()
+    assert resp.status_code == 409
+    assert "restore review" in resp.json()["detail"].lower()
+    assert readable.status_code == 200
+    assert writes == []
+
+
+def _boundaries():
+    from app.services import cellxgene_image_service, notebook_image_service
+    from app.services.cellxgene_service import CellxgeneService
+    from app.services.custom_pipeline_service import CustomPipelineService
+    from app.services.notebook_service import NotebookService
+    from app.services.pipeline_run_service import PipelineRunService
+    from app.services.reference_data_service import ReferenceDataService
+    from app.services.slurm_service import SlurmService
+    from app.services.terraform_executor import TerraformExecutor
+    from app.services.work_node_service import WorkNodeService
+
+    return {
+        "pipeline launch": PipelineRunService.launch_run,
+        "custom pipeline launch": CustomPipelineService.launch_run,
+        "terraform plan": TerraformExecutor.run_plan,
+        "terraform destroy": TerraformExecutor.run_destroy,
+        "notebook launch": NotebookService.launch_session,
+        "cellxgene publish": CellxgeneService.publish_dataset,
+        "work node launch": WorkNodeService.launch_work_node,
+        "notebook image build": notebook_image_service.submit_image_build,
+        "cellxgene image build": cellxgene_image_service.submit_image_build,
+        "slurm submit": SlurmService.submit_job,
+        "reference import": ReferenceDataService.start_import,
+    }
+
+
+@pytest.mark.parametrize("boundary", sorted(_boundaries()))
+async def test_every_external_work_boundary_refuses_while_paused(boundary):
+    """Refused before the boundary reads any of its inputs (placeholders stand in for them)."""
+    import inspect
+
+    fn = _boundaries()[boundary]
+    params = inspect.signature(fn).parameters.values()
+    args = [None for p in params if p.default is p.empty and p.kind is p.POSITIONAL_OR_KEYWORD]
+    kwargs = {p.name: None for p in params if p.default is p.empty and p.kind is p.KEYWORD_ONLY}
+    owner = TaskOwner()
+    await owner.pause("restore_review", settle_seconds=0)
+    with runtime.bound(owner):
+        with pytest.raises(OwnerPaused):
+            result = fn(*args, **kwargs)
+            # A streamed operation (Terraform destroy) refuses on its first step.
+            await (anext(result) if inspect.isasyncgen(result) else result)

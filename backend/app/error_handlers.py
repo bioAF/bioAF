@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.exceptions import DomainError
-from app.runtime import OwnerClosed
+from app.runtime import OwnerClosed, OwnerPaused
 
 
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
@@ -34,6 +34,14 @@ async def owner_closed_handler(request: Request, exc: OwnerClosed) -> JSONRespon
     )
 
 
+async def owner_paused_handler(request: Request, exc: OwnerPaused) -> JSONResponse:
+    """External work refused during a restore review: nothing was written or started."""
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "A database restore review is in progress. Accept or reject it before starting this."},
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Register the shared domain-error handler on ``app``.
 
@@ -42,3 +50,4 @@ def register_error_handlers(app: FastAPI) -> None:
     """
     app.add_exception_handler(DomainError, domain_error_handler)
     app.add_exception_handler(OwnerClosed, owner_closed_handler)
+    app.add_exception_handler(OwnerPaused, owner_paused_handler)

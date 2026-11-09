@@ -48,6 +48,7 @@ from app.services.terraform_stream import (
     stream_terraform_output,
 )
 from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.services.terraform_cloud import TerraformCloud
@@ -100,6 +101,7 @@ class TerraformExecutor:
         6. Run `terraform show -json tfplan` to get structured plan output
         7. Parse output and update the run record
         """
+        runtime.require_admission("deployment")
         await TerraformExecutor._recover_stale_runs(session)
         await TerraformExecutor._check_no_active_run(session)
 
@@ -637,6 +639,7 @@ class TerraformExecutor:
         Creates a TerraformRun record, runs `terraform destroy -auto-approve -json`,
         and yields progress events as resources are destroyed.
         """
+        runtime.require_admission("deployment")
         await TerraformExecutor._recover_stale_runs(session)
 
         run = TerraformRun(

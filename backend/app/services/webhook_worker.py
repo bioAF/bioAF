@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import select
 
 from app.models.webhook import WebhookDelivery, WebhookSubscription
+from app import runtime
 from app.services import webhook_service
 from app.tasks.periodic import wait_or_stop
 
@@ -121,10 +123,14 @@ async def run_worker_loop(stop_event: asyncio.Event | None = None) -> None:
     while True:
         if stop_event is not None and stop_event.is_set():
             break
-        try:
-            await _drain_once()
-        except Exception:
-            logger.exception("webhook worker iteration failed")
+        owner = runtime.current_owner()
+        # Paused (a restore review): delivery rows would be read from and written to the review copy.
+        if owner is None or owner.paused is None:
+            try:
+                with owner.activity("webhook-worker") if owner is not None else nullcontext():
+                    await _drain_once()
+            except Exception:
+                logger.exception("webhook worker iteration failed")
         if await wait_or_stop(POLL_INTERVAL_SECONDS, stop_event):
             break
     logger.info("webhook worker stopped")

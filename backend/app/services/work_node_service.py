@@ -27,6 +27,7 @@ from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.runtime import spawn_event
+from app import runtime
 
 logger = logging.getLogger("bioaf.work_nodes")
 
@@ -50,6 +51,7 @@ class WorkNodeService:
         experiment_id: int | None = None,
     ) -> ComputeSession:
         # Validate machine type
+        runtime.require_admission("work node launch")
         mt = get_machine_type(machine_type)
         if not mt:
             valid_names = sorted(m["name"] for m in MACHINE_TYPES)

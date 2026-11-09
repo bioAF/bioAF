@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.models.file import File
@@ -103,6 +104,7 @@ class NotebookService:
         environment_version_id: int | None = None,
     ) -> NotebookSession:
         # Check quota
+        runtime.require_admission("notebook launch")
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")

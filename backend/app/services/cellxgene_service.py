@@ -10,6 +10,7 @@ from app.exceptions import NotFoundError, ValidationError
 from app.models.cellxgene_publication import CellxgenePublication
 from app.models.file import File
 from app.services.audit_service import log_action
+from app import runtime
 
 logger = logging.getLogger("bioaf.cellxgene_service")
 
@@ -26,6 +27,7 @@ class CellxgeneService:
     ) -> CellxgenePublication:
         """Publish an h5ad file to cellxgene."""
         # Validate file exists and is h5ad
+        runtime.require_admission("cellxgene publish")
         result = await session.execute(select(File).where(File.id == file_id, File.organization_id == org_id))
         file = result.scalar_one_or_none()
         if not file:

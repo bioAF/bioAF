@@ -27,6 +27,10 @@ from app import runtime
 logger = logging.getLogger("bioaf.backup_service")
 
 RESTORE_REVIEW_SECONDS = 3600  # 1 hour
+# How long the swap waits for in-flight automatic work to settle before refusing the restore.
+RESTORE_SETTLE_SECONDS = 30.0
+# How often a failed revert is logged again while work stays paused.
+RESTORE_REMINDER_SECONDS = 600.0
 
 _PG_FILENAME_RE = re.compile(r"^pgdump-(\d{8}-\d{6})\.dump$")
 _CONFIG_FILENAME_RE = re.compile(r"^config-(\d{8}-\d{6})\.json$")
@@ -858,6 +862,7 @@ _restore_state: dict = {
     "expires_at": None,
     "_timeout_task": None,
     "_decision": None,
+    "_owner": None,
 }
 
 
@@ -992,6 +997,23 @@ class RestoreService:
 
             os.remove(dump_path)
 
+            # Pause automatic work and wait for in-flight work to settle (plan 14): during the
+            # review, nothing automatic may write the review copy, and nothing external may start.
+            owner = runtime.current_owner()
+            busy = await _pause_work(owner)
+            if busy:
+                await _resume_work(owner)
+                logger.warning(
+                    "Restore refused before the swap: background work still running (roles=%s)", ",".join(busy)
+                )
+                await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
+                return {
+                    "status": "error",
+                    "message": "Background work is still running, so the database cannot be swapped safely. "
+                    "Try the restore again when it finishes.",
+                }
+            _restore_state["_owner"] = owner
+
             # Swap connection to bioaf_restore
             from app.database import swap_database
 
@@ -1015,6 +1037,8 @@ class RestoreService:
 
         except Exception:
             logger.exception("Restore failed")
+            if not _restore_state["active"]:
+                await _resume_work(runtime.current_owner())
             if os.path.exists(dump_path):
                 os.remove(dump_path)
             try:
@@ -1077,11 +1101,49 @@ def _cancel_timeout() -> None:
         task.cancel()
 
 
-def _clear_review() -> None:
+async def _pause_work(owner: runtime.TaskOwner | None) -> list[str]:
+    """Stop the listener and pause the owner's automatic work; roles still busy, if any."""
+    if owner is None:
+        return []
+    from app.services.pubsub_listener import stop_listener
+
+    await stop_listener()
+    return await owner.pause("restore_review", settle_seconds=RESTORE_SETTLE_SECONDS)
+
+
+async def _resume_work(owner: runtime.TaskOwner | None) -> None:
+    """Resume automatic work against the primary, and restart the listener if it is enabled."""
+    if owner is None:
+        return
+    owner.resume()
+    from app.services.pubsub_listener import restart_listener_if_needed
+
+    try:
+        await restart_listener_if_needed()
+    except Exception:
+        logger.exception("Restarting the Pub/Sub listener after the restore review failed")
+
+
+async def _clear_review() -> None:
+    """The review ended with a usable primary: clear it and resume paused work."""
+    owner = _restore_state["_owner"]
     _restore_state["active"] = False
     _restore_state["phase"] = "idle"
     _restore_state["_timeout_task"] = None
     _restore_state["_decision"] = None
+    _restore_state["_owner"] = None
+    await _resume_work(owner)
+
+
+async def _remind_revert_failed() -> None:
+    """While a failed revert keeps work paused, say so again periodically (rate-limited)."""
+    while _restore_state["phase"] == "revert_failed":
+        await asyncio.sleep(RESTORE_REMINDER_SECONDS)
+        if _restore_state["phase"] == "revert_failed":
+            logger.warning(
+                "Restore review revert failed earlier; automatic work is still paused. "
+                "Reject the restore review to retry the revert, or repair the databases and restart."
+            )
 
 
 async def _accept_review() -> dict:
@@ -1106,7 +1168,7 @@ async def _accept_review() -> dict:
         # Swap back to the original URL (which now points to the restored data)
         await swap_database(_restore_state["original_url"])
 
-        _clear_review()
+        await _clear_review()
         return {"status": "accepted", "message": "Restore accepted. Database has been permanently updated."}
 
     except Exception:
@@ -1155,10 +1217,12 @@ async def _revert_restore(reason: str) -> dict:
         await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
         logger.info("Dropped bioaf_restore database")
 
-        _clear_review()
+        await _clear_review()
         return {"status": "reverted", "message": reason}
 
     except Exception:
         logger.exception("Failed to revert restore; reject the restore review to retry the revert")
         _restore_state["phase"] = "revert_failed"
+        # Work stays paused: the primary is not known to be usable.
+        runtime.spawn(_remind_revert_failed(), role="restore-revert-reminder")
         return {"status": "error", "message": "Revert restore failed; check server logs."}

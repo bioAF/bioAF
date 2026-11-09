@@ -209,6 +209,7 @@ async def import_document_from_url(
     actual fetch runs as a background task that reads the URL back from the stored
     job (mirroring the Reference Data importer), so the user-supplied URL is never
     fetched directly in the request handler. Returns the import job to poll."""
+    runtime.require_admission("URL import")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 

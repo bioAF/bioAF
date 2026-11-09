@@ -46,6 +46,15 @@ class OwnerClosed(RuntimeError):
     """The owner is shutting down and admits no new work of this kind."""
 
 
+class OwnerPaused(RuntimeError):
+    """Automatic and external work is paused (a restore review is in progress)."""
+
+    def __init__(self, kind: str, reason: str) -> None:
+        super().__init__(f"{kind} refused: work is paused ({reason})")
+        self.kind = kind
+        self.reason = reason
+
+
 @dataclass
 class ShutdownReport:
     """What shutdown did: roles cancelled after the drain, and roles still running at the deadline."""
@@ -63,6 +72,7 @@ class _Entry:
     role: str
     started: float
     event: bool
+    worker: bool = False
 
 
 def _lifecycle(level: int, role: str, transition: str, **fields: Any) -> None:
@@ -82,6 +92,8 @@ class TaskOwner:
         self._admitting = True
         self._admitting_events = True
         self._reservations = 0
+        self._paused: str | None = None
+        self._active: dict[str, int] = {}
         self.stopping = asyncio.Event()
         self.report: ShutdownReport | None = None
 
@@ -96,7 +108,13 @@ class TaskOwner:
         return list(self._tasks)
 
     def spawn(
-        self, coro: Coroutine[Any, Any, Any], *, role: str, event: bool = False, reserved: bool = False
+        self,
+        coro: Coroutine[Any, Any, Any],
+        *,
+        role: str,
+        event: bool = False,
+        reserved: bool = False,
+        worker: bool = False,
     ) -> asyncio.Task[Any]:
         """Start ``coro`` as an owned task.
 
@@ -114,7 +132,7 @@ class TaskOwner:
         context = contextvars.copy_context()
         context.run(_current.set, self)
         task = loop.create_task(coro, name=f"bioaf:{role}", context=context)
-        self._tasks[task] = _Entry(role, loop.time(), event)
+        self._tasks[task] = _Entry(role, loop.time(), event, worker)
         task.add_done_callback(self._settled)
         _lifecycle(logging.DEBUG, role, "started")
         return task
@@ -141,6 +159,48 @@ class TaskOwner:
             )
             return
         _lifecycle(logging.DEBUG, entry.role, "settled", outcome="finished", elapsed=elapsed, remaining=remaining)
+
+    # --- pause (restore review) ---------------------------------------------------------------
+
+    @property
+    def paused(self) -> str | None:
+        """Why automatic and external work is paused, or None."""
+        return self._paused
+
+    @contextmanager
+    def activity(self, role: str) -> Iterator[None]:
+        """Mark a long-lived worker as mid-iteration, so a pause waits for it."""
+        self._active[role] = self._active.get(role, 0) + 1
+        try:
+            yield
+        finally:
+            self._active[role] -= 1
+
+    def busy(self) -> list[str]:
+        """Work that could still write: iterations in progress, events, and detached jobs."""
+        current = asyncio.current_task()
+        detached = [e.role for t, e in self._tasks.items() if not e.worker and t is not current and not t.done()]
+        return sorted(detached + [role for role, n in self._active.items() if n])
+
+    async def pause(self, reason: str, *, settle_seconds: float) -> list[str]:
+        """Pause automatic work, then wait up to ``settle_seconds`` for in-flight work to settle.
+
+        Periodic iterations are skipped and external work is refused from now on. Returns the roles
+        still busy at the deadline (empty: settled). The caller decides whether to proceed or to
+        ``resume``.
+        """
+        self._paused = reason
+        _lifecycle(logging.INFO, self.name, "paused", reason=reason)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + settle_seconds
+        while (still := self.busy()) and loop.time() < deadline:
+            await asyncio.sleep(min(0.02, max(0.0, deadline - loop.time())))
+        return still
+
+    def resume(self) -> None:
+        if self._paused is not None:
+            _lifecycle(logging.INFO, self.name, "resumed", reason=self._paused)
+        self._paused = None
 
     def reserve(self, role: str) -> None:
         """Hold admission for one job a request is about to commit; refused once closed."""
@@ -244,6 +304,18 @@ class TaskOwner:
 
 def current_owner() -> TaskOwner | None:
     return _current.get()
+
+
+def require_admission(kind: str) -> None:
+    """Refuse request-triggered external work while the bound owner is paused.
+
+    Called at a domain admission boundary (a pipeline launch, a deployment, an import), before the
+    job writes anything or reaches an external system.
+    """
+    owner = _current.get()
+    if owner is not None and owner.paused is not None:
+        _lifecycle(logging.WARNING, kind, "refused", reason=owner.paused)
+        raise OwnerPaused(kind, owner.paused)
 
 
 @contextmanager

@@ -3276,6 +3276,17 @@
    ],
    "route": "dedicated_schema"
   },
+  "test_restore_pause.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_result_set_normalizer.py": {
    "category": "no_database",
    "evidence": [],

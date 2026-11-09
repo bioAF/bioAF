@@ -230,6 +230,7 @@ async def stack_deploy_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Deploy the full compute stack via SSE stream."""
+    runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
@@ -249,6 +250,7 @@ async def stack_deploy_background_endpoint(
     an SSE connection. The DeploymentBanner polls terraform status to
     track progress.
     """
+    runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
@@ -305,6 +307,7 @@ async def stack_teardown_background_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Start a stack teardown in the background and return immediately."""
+    runtime.require_admission("deployment")
     if body and not body.confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
@@ -337,6 +340,7 @@ async def stack_destroy_storage_background_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Start storage destruction in the background and return immediately."""
+    runtime.require_admission("deployment")
     if body is not None and not body.confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
@@ -436,6 +440,7 @@ async def stack_teardown_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Teardown the compute stack via SSE stream."""
+    runtime.require_admission("deployment")
     if body and not body.confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
@@ -458,6 +463,7 @@ async def stack_destroy_storage_endpoint(
     """
     # A missing body is treated as confirmed -- the UI enforces the 3-step
     # confirmation (warning, checkbox, typed phrase) before calling this endpoint.
+    runtime.require_admission("deployment")
     if body is not None and not body.confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true.")
 
@@ -662,6 +668,7 @@ async def apply_infra_updates_endpoint(
     Used after the user reviews a plan that also contains destructive changes:
     each module is re-planned and only its create/update resources are applied
     (targeted), so a delete/replace is never carried out by this flow."""
+    runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
     allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
     modules = [m for m in body.modules if m in allowed]
@@ -894,6 +901,7 @@ async def update_cluster_config(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Update cluster config, plan, and auto-apply."""
+    runtime.require_admission("deployment")
     from app.adapters.registry import require_capability
 
     require_capability("autoscaling")

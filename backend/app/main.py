@@ -89,10 +89,10 @@ async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
 
     *periodic, idempotency = PERIODIC_JOBS
     for job in periodic[:_BEFORE_LISTENER]:
-        owner.spawn(run_periodic(job, stopping=owner.stopping), role=job.role)
+        owner.spawn(run_periodic(job, stopping=owner.stopping), role=job.role, worker=True)
     await listener_manager().start()
     for job in periodic[_BEFORE_LISTENER:]:
-        owner.spawn(run_periodic(job, stopping=owner.stopping), role=job.role)
+        owner.spawn(run_periodic(job, stopping=owner.stopping), role=job.role, worker=True)
 
     # LIMS integration (ADR-051): subscribe webhook dispatcher to internal
     # events, start the delivery worker, and add an idempotency-key cleanup
@@ -103,8 +103,8 @@ async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
         webhook_dispatcher.subscribe_all()
 
     await startup.run_steps([startup.Step("webhook_dispatcher", subscribe_webhooks)], ctx)
-    owner.spawn(_webhook_run_worker_loop(stop_event=owner.stopping), role="webhook-worker")
-    owner.spawn(run_periodic(idempotency, stopping=owner.stopping), role=idempotency.role)
+    owner.spawn(_webhook_run_worker_loop(stop_event=owner.stopping), role="webhook-worker", worker=True)
+    owner.spawn(run_periodic(idempotency, stopping=owner.stopping), role=idempotency.role, worker=True)
 
 
 async def _stop_owned_work(owner: TaskOwner) -> None:

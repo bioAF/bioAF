@@ -5,7 +5,8 @@ owns its sessions, commits, rollbacks, and persisted schedules. ``run_periodic``
 delay, runs one iteration at a time, and counts the next delay from when the previous one settled.
 A failed iteration is reported through the job's own message and the next one runs on the existing
 interval. A stop request ends the job between iterations (an iteration in progress finishes first);
-cancellation propagates.
+cancellation propagates. While the job's owner is paused (a restore review), iterations are skipped,
+and an iteration in progress is visible to the pause as activity.
 
 ``prepare`` runs once when the job starts and returns the iteration: it binds anything the job
 held for its lifetime (the session factory current at start, loop-local state such as the plot
@@ -17,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 # The loops' existing logger, so each job's error line reads exactly as before.
@@ -55,13 +57,20 @@ async def run_periodic(job: PeriodicJob, *, stopping: asyncio.Event | None = Non
     if job.enabled is not None and not job.enabled():
         lifecycle.info("task role=%s transition=disabled", job.role)
         return
+    from app import runtime
+
+    owner = runtime.current_owner()
     iteration = job.prepare()
     delay = job.first_delay
     while True:
         if await wait(delay, stopping):
             return
+        delay = job.interval
+        # Paused (a restore review): skip this iteration; the next runs on the existing interval.
+        if owner is not None and owner.paused is not None:
+            continue
         try:
-            await iteration()
+            with owner.activity(job.role) if owner is not None else nullcontext():
+                await iteration()
         except Exception as e:
             logger.error(job.error_message, e)
-        delay = job.interval

@@ -915,6 +915,7 @@ class ReferenceDataService:
     ) -> tuple[ReferenceDataset, str]:
         """Create the dataset, progress row, and launch the importer GKE Job."""
         # Up-front uniqueness check
+        runtime.require_admission("reference import")
         existing = await session.execute(
             select(ReferenceDataset.id).where(
                 ReferenceDataset.organization_id == org_id,

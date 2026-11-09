@@ -253,7 +253,11 @@ class ListenerManager:
                 return
             listener = PubSubListener()
             self._listener = listener
-            self._task = runtime.spawn(self._run(listener), role="pubsub-listener")
+            owner = runtime.current_owner()
+            if owner is not None:
+                self._task = owner.spawn(self._run(listener), role="pubsub-listener", worker=True)
+            else:
+                self._task = runtime.spawn(self._run(listener), role="pubsub-listener")
 
     async def stop(self) -> None:
         """Stop the listener (starting or running) and wait for its task to finish."""
