@@ -184,17 +184,19 @@ export function AssistantChat() {
   /**
    * Re-read a plan's state from the server after a confirmation error instead of guessing: a
    * permission denial leaves it proposed (still confirmable), while a step failure leaves it
-   * "failed" with the completed steps kept. If the re-read fails, the card is left as it was.
+   * "failed" with the completed steps kept. If the plan cannot be read back, its outcome is
+   * unknown: steps may have run, so Confirm and Cancel stay unavailable.
    */
   async function refreshPlan(planId: number) {
     const convId = conversationIdRef.current;
-    if (convId === null) return;
     try {
+      if (convId === null) throw new Error("no conversation");
       const t = await api.get<AssistantConversationTranscript>(`/api/assistant/conversations/${convId}/messages`);
       const plan = t.plans?.find((p) => p.id === planId);
-      if (plan) resolvePlan(planId, planStateFromStatus(plan.status), plan.steps ?? undefined);
+      if (!plan) throw new Error("plan not in transcript");
+      resolvePlan(planId, planStateFromStatus(plan.status), plan.steps ?? undefined);
     } catch {
-      // Keep the error message already shown; the card stays as it was.
+      resolvePlan(planId, "unknown");
     }
   }
 

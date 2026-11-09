@@ -143,3 +143,18 @@ test("a confirmation the server refused before running anything leaves the plan 
   expect(await screen.findByRole("button", { name: /^confirm$/i })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^cancel$/i })).toBeInTheDocument();
 });
+
+test("when the plan cannot be re-read after a confirmation error, its outcome is unknown and no controls return", async () => {
+  serve({ status: "failed", steps: failedSteps });
+  const serveImpl = mockGet.getMockImplementation()!;
+  mockGet.mockImplementation((url: string) =>
+    url === "/api/assistant/conversations/5/messages" ? Promise.reject(new Error("connection unavailable")) : serveImpl(url),
+  );
+  await proposeThenConfirm(new ApiError(400, "action 'create_sample' failed: experiment not found"));
+  await screen.findByText("action 'create_sample' failed: experiment not found");
+
+  expect(await screen.findByTestId("plan-unknown")).toHaveTextContent(/could not be checked/i);
+  expectNoControls();
+  expect(screen.queryByTestId("plan-approved")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Nothing was run/)).not.toBeInTheDocument();
+});

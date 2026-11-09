@@ -72,9 +72,11 @@ function StepArgs({ tool, args }: { tool: string; args: Record<string, unknown> 
 /**
  * Where a plan stands. Undefined means still proposed: the only state that can be confirmed or
  * cancelled. "failed" means confirmation stopped partway (completed steps were kept);
- * "executing" means it is being run now; "closed" covers any other server status.
+ * "executing" means it is being run now; "closed" covers any other server status; "unknown" means
+ * a confirmation errored and the plan's state could not be read back, so steps may or may not
+ * have run.
  */
-export type PlanState = "approved" | "cancelled" | "failed" | "executing" | "closed";
+export type PlanState = "approved" | "cancelled" | "failed" | "executing" | "closed" | "unknown";
 
 /** Map the server's plan status to the card's state. */
 export function planStateFromStatus(status: string): PlanState | undefined {
@@ -193,6 +195,12 @@ export function PlanConfirmCard({
       {resolved === "executing" && (
         <p className="mt-3 text-sm font-medium text-amber-800" data-testid="plan-executing">
           In progress. Reopen this conversation later to see the outcome.
+        </p>
+      )}
+      {resolved === "unknown" && (
+        <p className="mt-3 text-sm font-medium text-amber-800" data-testid="plan-unknown">
+          The outcome of this confirmation could not be checked, so some steps may have run. Reopen
+          this conversation from History to see what ran.
         </p>
       )}
       {resolved === "closed" && (
