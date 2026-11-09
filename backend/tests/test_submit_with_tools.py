@@ -6,7 +6,7 @@ into the normalized ToolUseResult (a final text answer OR a list of tool calls).
 the response parsing, which differs per provider; these tests pin both paths for all three,
 using respx to mock the HTTP so no real provider is contacted. All three providers now thread
 prior tool exchanges as native blocks (Anthropic tool_use/tool_result; OpenAI tool_calls +
-tool-role messages with tool_call_id; Google functionCall/functionResponse). These tests cover
+function_call / function_call_output items matched by call_id (Responses API); Google functionCall/functionResponse). These tests cover
 the response parse for all three plus, per provider, the native multi-turn request and the
 synthesized result for a tool call left unanswered by a spend stop.
 """
@@ -160,24 +160,20 @@ async def test_anthropic_synthesizes_result_for_unanswered_tool_use():
 
 async def test_openai_parses_tool_call():
     raw = {
-        "choices": [
+        "status": "completed",
+        "output": [
             {
-                "message": {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": "call_1",
-                            "type": "function",
-                            "function": {"name": "recommend_pipeline", "arguments": '{"experiment_id": 7}'},
-                        }
-                    ],
-                },
-                "finish_reason": "tool_calls",
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "recommend_pipeline",
+                "arguments": '{"experiment_id": 7}',
+                "status": "completed",
             }
-        ]
+        ],
     }
     with respx.mock(base_url="https://api.openai.com/v1") as r:
-        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        route = r.post("/responses").mock(return_value=_resp(raw))
         result = await openai_client.submit_with_tools(messages=_MESSAGES, tools=_TOOLS, model="gpt-x", api_key="sk")
     assert route.called
     assert result.is_final is False
@@ -187,18 +183,32 @@ async def test_openai_parses_tool_call():
 
 async def test_openai_parses_final_text():
     raw = {
-        "choices": [
-            {"message": {"content": "I recommend nf-core/rnaseq.", "tool_calls": None}, "finish_reason": "stop"}
-        ]
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "I recommend nf-core/rnaseq.", "annotations": []}],
+            }
+        ],
     }
     with respx.mock(base_url="https://api.openai.com/v1") as r:
-        r.post("/chat/completions").mock(return_value=_resp(raw))
+        r.post("/responses").mock(return_value=_resp(raw))
         result = await openai_client.submit_with_tools(messages=_MESSAGES, tools=_TOOLS, model="gpt-x", api_key="sk")
     assert result.is_final is True
     assert "rnaseq" in (result.text or "")
 
 
 # ---- OpenAI native multi-turn tool history (parity) ----
+
+_OPENAI_OK = {
+    "status": "completed",
+    "output": [
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok", "annotations": []}]}
+    ],
+}
 
 
 async def test_openai_threads_prior_tools_as_native_messages():
@@ -207,7 +217,7 @@ async def test_openai_threads_prior_tools_as_native_messages():
         {
             "role": "assistant",
             "content": "Let me check.",
-            "tool_calls": [{"tool": "list_samples", "args": {"experiment_id": 3}}],
+            "tool_calls": [{"tool": "list_samples", "args": {"experiment_id": 3}, "call_id": "call_9"}],
             "tool_invocation_id": None,
         },
         {
@@ -215,21 +225,19 @@ async def test_openai_threads_prior_tools_as_native_messages():
             "content": '{"status": "succeeded", "result": {"samples": [{"id": 1}]}}',
             "tool_calls": None,
             "tool_invocation_id": 11,
+            "tool_call_id": "call_9",
         },
     ]
-    raw = {"choices": [{"message": {"content": "ok", "tool_calls": None}, "finish_reason": "stop"}]}
     with respx.mock(base_url="https://api.openai.com/v1") as r:
-        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        route = r.post("/responses").mock(return_value=_resp(_OPENAI_OK))
         await openai_client.submit_with_tools(messages=history, tools=_TOOLS, model="gpt-x", api_key="sk")
 
-    body = json.loads(route.calls.last.request.content)
-    msgs = body["messages"]
-    assistant_msg = next(m for m in msgs if m["role"] == "assistant" and m.get("tool_calls"))
-    call = assistant_msg["tool_calls"][0]
-    assert call["function"]["name"] == "list_samples"
-    assert json.loads(call["function"]["arguments"]) == {"experiment_id": 3}
-    tool_msg = next(m for m in msgs if m["role"] == "tool")
-    assert tool_msg["tool_call_id"] == call["id"]
+    items = json.loads(route.calls.last.request.content)["input"]
+    call = next(i for i in items if i.get("type") == "function_call")
+    assert call["name"] == "list_samples"
+    assert json.loads(call["arguments"]) == {"experiment_id": 3}
+    output = next(i for i in items if i.get("type") == "function_call_output")
+    assert output["call_id"] == call["call_id"] == "call_9"
     raw_text = route.calls.last.request.content.decode()
     assert "[called tools:" not in raw_text and "[tool result]" not in raw_text
 
@@ -245,15 +253,13 @@ async def test_openai_synthesizes_tool_message_for_unanswered_call():
         },
         {"role": "user", "content": "actually wait", "tool_calls": None, "tool_invocation_id": None},
     ]
-    raw = {"choices": [{"message": {"content": "ok", "tool_calls": None}, "finish_reason": "stop"}]}
     with respx.mock(base_url="https://api.openai.com/v1") as r:
-        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        route = r.post("/responses").mock(return_value=_resp(_OPENAI_OK))
         await openai_client.submit_with_tools(messages=history, tools=_TOOLS, model="gpt-x", api_key="sk")
 
-    body = json.loads(route.calls.last.request.content)
-    msgs = body["messages"]
-    call = next(m for m in msgs if m.get("tool_calls"))["tool_calls"][0]
-    assert any(m["role"] == "tool" and m["tool_call_id"] == call["id"] for m in msgs)
+    items = json.loads(route.calls.last.request.content)["input"]
+    call = next(i for i in items if i.get("type") == "function_call")
+    assert any(i.get("type") == "function_call_output" and i["call_id"] == call["call_id"] for i in items)
 
 
 # ---- Google ----
@@ -358,14 +364,13 @@ async def test_anthropic_includes_system_prompt():
 
 
 async def test_openai_prepends_system_message():
-    raw = {"choices": [{"message": {"content": "ok"}}]}
     with respx.mock(base_url="https://api.openai.com/v1") as r:
-        route = r.post("/chat/completions").mock(return_value=_resp(raw))
+        route = r.post("/responses").mock(return_value=_resp(_OPENAI_OK))
         await openai_client.submit_with_tools(
             messages=_MESSAGES, tools=_TOOLS, model="gpt-x", api_key="sk", system="GUIDE ME"
         )
     body = json.loads(route.calls.last.request.content)
-    assert body["messages"][0] == {"role": "system", "content": "GUIDE ME"}
+    assert body["instructions"] == "GUIDE ME"
 
 
 async def test_google_sets_system_instruction():

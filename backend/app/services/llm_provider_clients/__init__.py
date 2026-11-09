@@ -20,12 +20,31 @@ class ProviderError(Exception):
 
     Carries the provider-supplied error text so the failed-card modal can show
     it verbatim. The error_class string is one of:
-        auth, rate_limit, transport, server, parse, other.
+        auth, rate_limit, transport, server, parse, incomplete, other.
+
+    Optional structured metadata (set by clients that have it; callers that only read the message
+    and error_class are unaffected): ``upstream_status`` (HTTP status), ``upstream_code`` (the
+    provider's machine-readable error code, only when it is a short identifier), and ``timeout``
+    (a transport failure that was a timeout), and ``provider`` (the provider name, when known).
+    These are safe to log; the message is not.
     """
 
-    def __init__(self, message: str, *, error_class: str = "other") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_class: str = "other",
+        upstream_status: int | None = None,
+        upstream_code: str | None = None,
+        timeout: bool = False,
+        provider: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.error_class = error_class
+        self.upstream_status = upstream_status
+        self.upstream_code = upstream_code
+        self.timeout = timeout
+        self.provider = provider
 
 
 from app.services.llm_provider_clients import (  # noqa: E402

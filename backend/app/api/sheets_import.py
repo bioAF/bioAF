@@ -25,9 +25,40 @@ from app.services import sheets_reader_sa_service
 from app.services.sample_import_service import experiment_column_aliases
 from app.services.csv_service import COLUMN_MAP, SAMPLE_FIELDS, _normalize_header, preview_sample_csv
 from app.exceptions import ValidationError
+from app.services import google_sheets_errors as sheets_errors
 from app.services.google_sheets_service import parse_sheet_url, read_all_rows_as_csv, read_header_row
 
 router = APIRouter(prefix="/api/v1/sheets", tags=["sheets_import"])
+
+_API_DISABLED_DETAIL = (
+    "The Google Sheets API is not enabled in your GCP project. "
+    "Enable it at: https://console.cloud.google.com/apis/library/sheets.googleapis.com"
+)
+
+# Fixed user-facing text per failure category. Access denial is built per request because it names
+# the reader account the user must share the sheet with.
+_SHEETS_ERRORS: dict[str, tuple[int, str]] = {
+    sheets_errors.INVALID_SELECTION: (
+        400,
+        "Google Sheets could not open that spreadsheet or tab. Check the spreadsheet URL, including the tab, "
+        "and try again.",
+    ),
+    sheets_errors.API_DISABLED: (403, _API_DISABLED_DETAIL),
+    sheets_errors.NOT_FOUND: (404, "Spreadsheet not found. Check the URL and try again."),
+    sheets_errors.UPSTREAM_AUTH: (
+        502,
+        "Google did not accept bioAF's reader credentials. An administrator should check the Google Sheets "
+        "reader setup in Settings > Integrations > GCP.",
+    ),
+    sheets_errors.RATE_LIMITED: (429, "Google Sheets is receiving too many requests. Wait a minute and try again."),
+    sheets_errors.TIMEOUT: (504, "Google Sheets did not respond in time. Try again."),
+    sheets_errors.UNAVAILABLE: (502, "Google Sheets is temporarily unavailable. Try again in a few minutes."),
+    sheets_errors.UNEXPECTED: (
+        500,
+        "Something went wrong reading the spreadsheet. Try again, and contact your administrator if it keeps "
+        "happening.",
+    ),
+}
 
 # All user-facing sample fields that column headers can be recognized against.
 _ALL_SAMPLE_FIELDS = set(SAMPLE_FIELDS)
@@ -98,47 +129,9 @@ async def preview_sheet_headers(
     are part of the defaultable sample fields list are returned as
     ``recognized_columns``.  Everything else lands in ``unknown_columns``.
     """
-    # Load reader SA credentials
-    try:
-        creds = await sheets_reader_sa_service.get_reader_credentials(session)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Parse the sheet URL
-    try:
-        spreadsheet_id, gid = parse_sheet_url(body.sheet_url)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Read headers from the sheet
-    try:
-        headers, sheet_name = read_header_row(creds, spreadsheet_id, gid)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        msg = str(exc)
-        if "403" in msg or "PERMISSION_DENIED" in msg:
-            status = await sheets_reader_sa_service.get_reader_sa_status(session)
-            sa_email = status.get("email", "the reader service account")
-            # Distinguish "API not enabled" from "sheet not shared"
-            if "has not been used" in msg or "it is disabled" in msg or "FORBIDDEN" in msg:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        "The Google Sheets API is not enabled in your GCP project. "
-                        "Enable it at: https://console.cloud.google.com/apis/library/sheets.googleapis.com"
-                    ),
-                ) from exc
-            raise HTTPException(
-                status_code=403,
-                detail=(f"Cannot access this spreadsheet. Share it with {sa_email} and try again."),
-            ) from exc
-        if "404" in msg or "not found" in msg.lower():
-            raise HTTPException(
-                status_code=404,
-                detail="Spreadsheet not found. Check the URL and try again.",
-            ) from exc
-        raise HTTPException(status_code=500, detail=f"Error reading spreadsheet: {msg}") from exc
+    (headers, sheet_name), spreadsheet_id = await _read_sheet(
+        session, body.sheet_url, read_header_row, operation="header_preview"
+    )
 
     # Classify columns using the existing CSV column map
     recognized: list[RecognizedColumn] = []
@@ -172,50 +165,47 @@ async def preview_sheet_headers(
 # ---------------------------------------------------------------------------
 
 
+async def _sheets_http_error(session: AsyncSession, failure: sheets_errors.SheetsFailure) -> HTTPException:
+    if failure.category == sheets_errors.ACCESS_DENIED:
+        status = await sheets_reader_sa_service.get_reader_sa_status(session)
+        sa_email = status.get("email") or "the reader service account"
+        return HTTPException(
+            status_code=403, detail=f"Cannot access this spreadsheet. Share it with {sa_email} and try again."
+        )
+    code, detail = _SHEETS_ERRORS.get(failure.category, _SHEETS_ERRORS[sheets_errors.UNEXPECTED])
+    return HTTPException(status_code=code, detail=detail)
+
+
+async def _read_sheet(session: AsyncSession, sheet_url: str, reader, *, operation: str):
+    """Shared read path for header and sample reads: load reader credentials, parse the URL, run
+    ``reader(creds, spreadsheet_id, gid)``, and translate every failure into a controlled error.
+
+    Returns ``(reader_result, spreadsheet_id)``."""
+    try:
+        creds = await sheets_reader_sa_service.get_reader_credentials(session)
+        spreadsheet_id, gid = parse_sheet_url(sheet_url)
+        return reader(creds, spreadsheet_id, gid), spreadsheet_id
+    except (sheets_reader_sa_service.ReaderNotConfiguredError, ValidationError) as exc:
+        # Fixed setup guidance or bioAF's own validation text about the sheet's shape.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sheets_errors.SheetsReadError as exc:
+        sheets_errors.log_failure(operation, exc.failure)
+        raise await _sheets_http_error(session, exc.failure) from exc
+    except Exception as exc:
+        failure = sheets_errors.SheetsFailure(
+            sheets_errors.UNEXPECTED, "application", exception_type=type(exc).__name__
+        )
+        sheets_errors.log_failure(operation, failure)
+        raise await _sheets_http_error(session, failure) from exc
+
+
 async def _read_sheet_as_csv(
     body: SheetPreviewRequest,
     session: AsyncSession,
 ) -> tuple[bytes, str]:
     """Shared helper: load reader SA creds, read entire sheet as CSV bytes."""
-    try:
-        creds = await sheets_reader_sa_service.get_reader_credentials(session)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        spreadsheet_id, gid = parse_sheet_url(body.sheet_url)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        csv_bytes, sheet_name = read_all_rows_as_csv(creds, spreadsheet_id, gid)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        msg = str(exc)
-        if "403" in msg or "PERMISSION_DENIED" in msg:
-            status = await sheets_reader_sa_service.get_reader_sa_status(session)
-            sa_email = status.get("email", "the reader service account")
-            if "has not been used" in msg or "it is disabled" in msg or "FORBIDDEN" in msg:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        "The Google Sheets API is not enabled in your GCP project. "
-                        "Enable it at: https://console.cloud.google.com/apis/library/sheets.googleapis.com"
-                    ),
-                ) from exc
-            raise HTTPException(
-                status_code=403,
-                detail=f"Cannot access this spreadsheet. Share it with {sa_email} and try again.",
-            ) from exc
-        if "404" in msg or "not found" in msg.lower():
-            raise HTTPException(
-                status_code=404,
-                detail="Spreadsheet not found. Check the URL and try again.",
-            ) from exc
-        raise HTTPException(status_code=500, detail=f"Error reading spreadsheet: {msg}") from exc
-
-    return csv_bytes, sheet_name
+    result, _ = await _read_sheet(session, body.sheet_url, read_all_rows_as_csv, operation="sample_read")
+    return result
 
 
 @router.post("/{experiment_id}/samples/preview")

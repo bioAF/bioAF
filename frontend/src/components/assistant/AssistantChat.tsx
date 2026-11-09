@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { PlanConfirmCard } from "@/components/assistant/PlanConfirmCard";
+import { PlanConfirmCard, planStateFromStatus, type PlanState } from "@/components/assistant/PlanConfirmCard";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/Button";
@@ -30,7 +30,7 @@ type ChatEntry =
       kind: "plan";
       planId: number;
       steps: AssistantPlanStep[];
-      resolved?: "approved" | "cancelled";
+      resolved?: PlanState;
     };
 
 /**
@@ -173,10 +173,31 @@ export function AssistantChat() {
     }
   }
 
-  function resolvePlan(planId: number, resolved: "approved" | "cancelled") {
+  function resolvePlan(planId: number, resolved: PlanState | undefined, steps?: AssistantPlanStep[]) {
     setEntries((prev) =>
-      prev.map((e) => (e.kind === "plan" && e.planId === planId ? { ...e, resolved } : e)),
+      prev.map((e) =>
+        e.kind === "plan" && e.planId === planId ? { ...e, resolved, steps: steps ?? e.steps } : e,
+      ),
     );
+  }
+
+  /**
+   * Re-read a plan's state from the server after a confirmation error instead of guessing: a
+   * permission denial leaves it proposed (still confirmable), while a step failure leaves it
+   * "failed" with the completed steps kept. If the plan cannot be read back, its outcome is
+   * unknown: steps may have run, so Confirm and Cancel stay unavailable.
+   */
+  async function refreshPlan(planId: number) {
+    const convId = conversationIdRef.current;
+    try {
+      if (convId === null) throw new Error("no conversation");
+      const t = await api.get<AssistantConversationTranscript>(`/api/assistant/conversations/${convId}/messages`);
+      const plan = t.plans?.find((p) => p.id === planId);
+      if (!plan) throw new Error("plan not in transcript");
+      resolvePlan(planId, planStateFromStatus(plan.status), plan.steps ?? undefined);
+    } catch {
+      resolvePlan(planId, "unknown");
+    }
   }
 
   async function handleConfirm(planId: number) {
@@ -195,6 +216,7 @@ export function AssistantChat() {
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Could not confirm the plan.";
       appendEntry({ id: makeId(), kind: "system", text: message });
+      await refreshPlan(planId);
     } finally {
       setConfirmingPlanId(null);
     }
@@ -243,13 +265,13 @@ export function AssistantChat() {
         items.push({
           ts: p.created_at,
           seq: p.id,
-          // A still-proposed plan stays confirmable on resume; anything else is shown as resolved.
+          // Only a still-proposed plan stays confirmable on resume; anything else shows its real state.
           entry: {
             id: makeId(),
             kind: "plan",
             planId: p.id,
             steps: p.steps ?? [],
-            resolved: p.status === "proposed" ? undefined : "approved",
+            resolved: planStateFromStatus(p.status),
           },
         });
       }

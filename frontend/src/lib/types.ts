@@ -2154,6 +2154,9 @@ export interface AssistantPlanStep {
   args: Record<string, unknown>;
   // read_only | mutating | spend - drives the cost warning on the confirm card.
   consequence_class?: string;
+  // Set on a confirmed plan's steps: the output of a step that ran, or why it did not.
+  result?: Record<string, unknown>;
+  outcome?: "failed" | "not_run";
 }
 
 export type AssistantTurnStatus =

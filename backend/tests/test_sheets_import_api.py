@@ -8,6 +8,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from googleapiclient.errors import HttpError
 from sqlalchemy import text
 
 
@@ -360,8 +361,9 @@ async def test_preview_sheet_not_shared(client, admin_token, session):
         ),
     ):
         mock_service = MagicMock()
-        mock_service.spreadsheets().get().execute.side_effect = Exception(
-            "HttpError 403: The caller does not have permission"
+        resp = MagicMock(status=403, reason="Forbidden")
+        mock_service.spreadsheets().get().execute.side_effect = HttpError(
+            resp, b'{"error": {"code": 403, "message": "The caller does not have permission"}}'
         )
         mock_build.return_value = mock_service
 

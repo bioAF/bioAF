@@ -1,10 +1,14 @@
 """OpenAI provider client.
 
 Uses the public REST API directly via httpx so we are not coupled to the
-upstream SDK's version dance. We hit two endpoints:
+upstream SDK's version dance. We hit three endpoints:
 
     GET  https://api.openai.com/v1/models
-    POST https://api.openai.com/v1/chat/completions
+    POST https://api.openai.com/v1/chat/completions   (non-tool review submissions)
+    POST https://api.openai.com/v1/responses          (assistant tool calling)
+
+Tool calling uses the Responses API because current models (for example gpt-6.1-sol) support
+function tools only there.
 """
 
 from __future__ import annotations
@@ -120,41 +124,89 @@ async def submit(
         raise ProviderError(f"OpenAI completion response not parseable: {exc}", error_class="parse") from exc
 
 
-def _raise_for_status(resp: httpx.Response) -> None:
-    if resp.status_code in (401, 403):
-        raise ProviderError(resp.text, error_class="auth")
-    if resp.status_code == 429:
-        raise ProviderError(resp.text, error_class="rate_limit")
-    if resp.status_code >= 500:
-        raise ProviderError(resp.text, error_class="server")
-    if resp.status_code >= 400:
-        raise ProviderError(resp.text, error_class="other")
+# Provider error codes/types worth logging. Only these exact values are carried: a value merely
+# shaped like an identifier can still be a key or account id, so anything else is dropped.
+_KNOWN_CODES = frozenset(
+    {
+        "invalid_api_key",
+        "insufficient_quota",
+        "rate_limit_exceeded",
+        "model_not_found",
+        "unsupported_parameter",
+        "unsupported_value",
+        "invalid_value",
+        "missing_required_parameter",
+        "context_length_exceeded",
+        "request_timeout",
+        "server_error",
+        "invalid_request_error",
+        "authentication_error",
+        "permission_error",
+        "not_found_error",
+        "rate_limit_error",
+        "insufficient_quota_error",
+    }
+)
+_TIMEOUT_STATUSES = (408, 504)
 
 
-def _tools_to_openai(tools: list[dict]) -> list[dict]:
+def _upstream_code(resp: httpx.Response) -> str | None:
+    """The provider's error code (or type), only when it is a recognized value."""
+    try:
+        error = resp.json().get("error") or {}
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(error, dict):
+        return None
+    for key in ("code", "type"):
+        value = error.get(key)
+        if isinstance(value, str) and value in _KNOWN_CODES:
+            return value
+    return None
+
+
+def _tool_http_error(resp: httpx.Response) -> ProviderError:
+    status = resp.status_code
+    if status in (401, 403):
+        error_class = "auth"
+    elif status == 429:
+        error_class = "rate_limit"
+    elif status >= 500:
+        error_class = "server"
+    else:
+        error_class = "other"
+    return ProviderError(
+        f"OpenAI responses request failed with HTTP {status}",
+        error_class=error_class,
+        upstream_status=status,
+        upstream_code=_upstream_code(resp),
+        timeout=status in _TIMEOUT_STATUSES,
+    )
+
+
+def _tools_to_responses(tools: list[dict]) -> list[dict]:
+    # strict=False keeps optional arguments optional; strict mode would require every property.
     return [
         {
             "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t["description"],
-                "parameters": object_schema(t["args_schema"]),
-            },
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": object_schema(t["args_schema"]),
+            "strict": False,
         }
         for t in tools
     ]
 
 
-def _messages_to_openai(messages: list[dict]) -> list[dict]:
-    """Translate the loop's messages into native OpenAI chat messages.
+def _messages_to_responses(messages: list[dict]) -> list[dict]:
+    """Translate the loop's history into Responses input items.
 
-    An assistant turn that called tools becomes an assistant message with a `tool_calls` array
-    (each call given a stable id and JSON-string arguments); the results that follow become
-    `tool`-role messages carrying the matching `tool_call_id`. OpenAI does not require role
-    alternation for tool messages, so each result is its own message. Every assistant tool_call
-    must be answered, so an unanswered call (a spend stop halts the loop) gets a synthesized
-    placeholder tool message. Results are paired to calls positionally (the loop persists them in
-    call order right after the assistant message)."""
+    A turn recorded by this provider and model carries its original output items
+    (``provider_state``): those are replayed verbatim and in order, which keeps encrypted reasoning
+    and each message's ``phase``. Otherwise the turn is rebuilt from its text and normalized calls.
+    Each call's result becomes a ``function_call_output`` matched by call id. A call with no result
+    entry (only possible for histories not built by the assistant history module) is answered with
+    a pending placeholder, since Responses requires every call to have an output."""
     out: list[dict] = []
     counter = 0
     i = 0
@@ -165,56 +217,87 @@ def _messages_to_openai(messages: list[dict]) -> list[dict]:
         if role == "user":
             out.append({"role": "user", "content": m.get("content") or "(no content)"})
             i += 1
-        elif role == "assistant":
-            tool_calls = m.get("tool_calls") or []
-            if not tool_calls:
-                out.append({"role": "assistant", "content": m.get("content") or "(no content)"})
-                i += 1
-                continue
-            call_ids: list[str] = []
-            native_calls: list[dict] = []
-            for call in tool_calls:
-                counter += 1
-                call_id = f"call_hist_{counter}"
-                call_ids.append(call_id)
-                native_calls.append(
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": call["tool"], "arguments": json.dumps(call.get("args") or {})},
-                    }
-                )
-            out.append({"role": "assistant", "content": m.get("content"), "tool_calls": native_calls})
-            i += 1
-            for call_id in call_ids:
-                if i < n and messages[i].get("role") == "tool":
-                    content = messages[i].get("content") or ""
-                    i += 1
-                else:
-                    content = "(awaiting confirmation; not yet executed)"
-                out.append({"role": "tool", "tool_call_id": call_id, "content": content})
-        elif role == "tool":
-            # Orphan tool result with no preceding tool_call (should not happen). Plain-text fallback.
+            continue
+        if role == "tool":
+            # Orphan tool result with no preceding call (should not happen). Plain-text fallback.
             out.append({"role": "user", "content": m.get("content") or "(no content)"})
             i += 1
-        else:
+            continue
+        if role != "assistant":
             i += 1
+            continue
+
+        calls = m.get("tool_calls") or []
+        state = m.get("provider_state")
+        call_ids: list[str] = []
+        for call in calls:
+            counter += 1
+            call_ids.append(call.get("call_id") or f"call_hist_{counter}")
+        if state and isinstance(state.get("items"), list):
+            out.extend(state["items"])
+        else:
+            if m.get("content"):
+                out.append({"role": "assistant", "content": m["content"]})
+            for call, call_id in zip(calls, call_ids):
+                out.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": call["tool"],
+                        "arguments": json.dumps(call.get("args") or {}),
+                    }
+                )
+        i += 1
+        for call_id in call_ids:
+            if i < n and messages[i].get("role") == "tool":
+                output = messages[i].get("content") or ""
+                i += 1
+            else:
+                output = "(awaiting confirmation; not yet executed)"
+            out.append({"type": "function_call_output", "call_id": call_id, "output": output})
     return out
 
 
-def _parse_openai_tool_use(data: dict) -> ToolUseResult:
-    message = data["choices"][0]["message"]
-    text = message.get("content") or None
-    tool_calls = []
-    for call in message.get("tool_calls") or []:
-        function = call.get("function", {})
-        raw_args = function.get("arguments") or "{}"
-        try:
-            args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
-        except (ValueError, TypeError):
-            args = {}
-        tool_calls.append(ToolCall(tool=function.get("name"), args=args, id=call.get("id")))
-    return ToolUseResult(text=text, tool_calls=tool_calls)
+def _parse_responses_tool_use(data: dict, model: str) -> ToolUseResult:
+    status = data.get("status")
+    if status == "incomplete":
+        raise ProviderError("OpenAI response incomplete", error_class="incomplete")
+    if status == "failed":
+        raise ProviderError("OpenAI response failed", error_class="server")
+    if status not in (None, "completed"):
+        raise ProviderError("OpenAI response not completed", error_class="incomplete")
+
+    output = data["output"]
+    if not isinstance(output, list):
+        raise TypeError("output is not a list")
+    texts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for item in output:
+        kind = item.get("type")
+        if kind == "message":
+            for part in item.get("content") or []:
+                if part.get("type") == "output_text" and part.get("text"):
+                    texts.append(part["text"])
+                elif part.get("type") == "refusal" and part.get("refusal"):
+                    texts.append(part["refusal"])
+        elif kind == "function_call":
+            try:
+                args = json.loads(item.get("arguments") or "{}")
+            except (ValueError, TypeError) as exc:
+                raise ProviderError("OpenAI function call arguments are not valid JSON", error_class="parse") from exc
+            if not isinstance(args, dict):
+                raise ProviderError("OpenAI function call arguments are not an object", error_class="parse")
+            if not item.get("name") or not item.get("call_id"):
+                raise ProviderError("OpenAI function call is missing its name or call id", error_class="parse")
+            tool_calls.append(ToolCall(tool=item["name"], args=args, id=item["call_id"]))
+    text = "\n\n".join(texts) or None
+    if text is None and not tool_calls:
+        raise ProviderError("OpenAI response has no text or function calls", error_class="parse")
+    return ToolUseResult(
+        text=text,
+        tool_calls=tool_calls,
+        provider_state={"provider": "openai", "model": model, "items": output},
+    )
 
 
 async def submit_with_tools(
@@ -222,27 +305,36 @@ async def submit_with_tools(
 ) -> ToolUseResult:
     if not api_key:
         raise ProviderError("OpenAI requires an API key", error_class="auth")
-    openai_messages = _messages_to_openai(messages)
-    if system:
-        openai_messages = [{"role": "system", "content": system}, *openai_messages]
-    body = {
+    # bioAF owns the conversation history (store=false) and replays it each request. No reasoning
+    # settings are sent: the model's own default applies.
+    body: dict = {
         "model": model,
-        "messages": openai_messages,
-        "tools": _tools_to_openai(tools),
+        "input": _messages_to_responses(messages),
+        "tools": _tools_to_responses(tools),
+        "store": False,
     }
+    if system:
+        body["instructions"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
-                f"{_BASE_URL}/chat/completions",
+                f"{_BASE_URL}/responses",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=body,
             )
+    except httpx.TimeoutException as exc:
+        logger.warning("openai submit_with_tools transport failure: exception_type=%s timeout=true", type(exc).__name__)
+        raise ProviderError("OpenAI request timed out", error_class="transport", timeout=True) from exc
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("openai submit_with_tools transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-    _raise_for_status(resp)
+        logger.warning(
+            "openai submit_with_tools transport failure: exception_type=%s timeout=false", type(exc).__name__
+        )
+        raise ProviderError(f"OpenAI transport failure: {type(exc).__name__}", error_class="transport") from exc
+    if resp.status_code >= 400:
+        raise _tool_http_error(resp)
     try:
-        return _parse_openai_tool_use(resp.json())
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ProviderError(f"OpenAI tool-use response not parseable: {exc}", error_class="parse") from exc
+        return _parse_responses_tool_use(resp.json(), model)
+    except ProviderError:
+        raise
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise ProviderError("OpenAI tool-use response not parseable", error_class="parse") from exc
