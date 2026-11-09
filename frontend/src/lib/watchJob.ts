@@ -12,6 +12,8 @@ export interface WatchOptions {
   intervalMs: number;
   /** Milliseconds from the start of the watch after which it gives up with `timedOut`. */
   deadlineMs?: number;
+  /** The most reads to make before giving up with `timedOut`. */
+  maxReads?: number;
   signal?: AbortSignal;
 }
 
@@ -45,13 +47,15 @@ export async function watchJob<T>(
   settled: (value: T) => boolean,
   options: WatchOptions,
 ): Promise<WatchResult<T>> {
-  const { intervalMs, deadlineMs, signal } = options;
+  const { intervalMs, deadlineMs, maxReads = Infinity, signal } = options;
   const deadline = deadlineMs === undefined ? Infinity : Date.now() + deadlineMs;
   let current = initial;
+  let reads = 0;
   while (!settled(current)) {
     if (signal?.aborted) throw abortError();
-    if (Date.now() > deadline) return { value: current, timedOut: true };
+    if (Date.now() > deadline || reads >= maxReads) return { value: current, timedOut: true };
     await wait(intervalMs, signal);
+    reads += 1;
     current = await read(signal);
     if (signal?.aborted) throw abortError();
   }
