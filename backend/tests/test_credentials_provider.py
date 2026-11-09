@@ -178,3 +178,37 @@ def test_is_permission_denied_false_for_other_errors():
     provider = GcpCredentialsProvider()
     assert provider.is_permission_denied(ValueError("boom")) is False
     assert provider.is_permission_denied(RuntimeError("nope")) is False
+
+
+# ---------------------------------------------------------------------------
+# Credential failure classification (plan 12.5): callers branch on the kind of a
+# credential failure without importing google-auth themselves.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "exc,kind",
+    [
+        ("refresh", "auth"),
+        ("default", "auth"),
+        ("malformed", "auth"),
+        ("timeout", "timeout"),
+        ("transport", "transport"),
+    ],
+)
+def test_gcp_credential_failure_kind(exc, kind):
+    from google.auth import exceptions as ga
+
+    errors = {
+        "refresh": ga.RefreshError("token exchange rejected"),
+        "default": ga.DefaultCredentialsError("no ADC"),
+        "malformed": ga.MalformedError("bad key"),
+        "timeout": ga.TimeoutError("slow"),
+        "transport": ga.TransportError("unreachable"),
+    }
+    assert GcpCredentialsProvider().credential_failure_kind(errors[exc]) == kind
+
+
+@pytest.mark.parametrize("exc", [ValueError("x"), RuntimeError("x"), KeyError("x")])
+def test_gcp_credential_failure_kind_ignores_non_credential_errors(exc):
+    assert GcpCredentialsProvider().credential_failure_kind(exc) is None

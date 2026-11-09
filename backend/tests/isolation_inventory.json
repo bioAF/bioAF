@@ -146,6 +146,26 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_assistant_call_identity.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_assistant_confirmation_history.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_assistant_loop_service.py": {
    "category": "single_connection",
    "evidence": [
@@ -161,6 +181,26 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_assistant_openai_round_trip.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_assistant_provider_errors.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_assistant_tool_service.py": {
    "category": "single_connection",
@@ -844,6 +884,16 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_dependency_authority.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_dependency_installers.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_deploy_progress.py": {
    "category": "real_commit",
@@ -2285,6 +2335,16 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_notebook_session_access.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_notebook_session_sync.py": {
    "category": "no_database",
    "evidence": [],
@@ -2322,6 +2382,11 @@
    "route": "committed_reset_candidate"
   },
   "test_observability_provider.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_openai_responses_adapter.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"
@@ -2370,6 +2435,16 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_pagination_contract.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_permissions_and_ownership.py": {
    "category": "real_commit",
@@ -3122,6 +3197,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_release_lock_rehearsal.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_reproduction_plan_service.py": {
    "category": "single_connection",
    "evidence": [
@@ -3221,6 +3301,26 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_sample_import_workflow.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_sample_response_contract.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_sample_sex_optional.py": {
    "category": "single_connection",
@@ -3476,6 +3576,16 @@
    "evidence": [],
    "route": "none"
   },
+  "test_service_error_contracts.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_session_credentials.py": {
    "category": "real_commit",
    "evidence": [
@@ -3529,6 +3639,16 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_sheets_error_contract.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_sheets_import_api.py": {
    "category": "real_commit",
@@ -3894,6 +4014,11 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_user_summary_contract.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_users.py": {
    "category": "real_commit",

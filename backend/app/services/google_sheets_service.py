@@ -12,6 +12,7 @@ import re
 from googleapiclient import discovery as google_discovery
 
 from app.exceptions import ValidationError
+from app.services.google_sheets_errors import METADATA, VALUES, SheetsReadError, classify
 
 _SHEET_URL_RE = re.compile(r"https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)")
 _GID_RE = re.compile(r"[#&]gid=(\d+)")
@@ -35,13 +36,22 @@ def parse_sheet_url(url: str) -> tuple[str, int | None]:
     return spreadsheet_id, gid
 
 
+def _execute(request: object, phase: str) -> dict:
+    """Run a Sheets API request, turning any failure (including a lazy credential refresh) into a
+    classified SheetsReadError that carries no upstream text."""
+    try:
+        return request.execute()  # type: ignore[union-attr]
+    except Exception as exc:
+        raise SheetsReadError(classify(exc, phase)) from exc
+
+
 def get_sheet_names(
     credentials: object,
     spreadsheet_id: str,
 ) -> list[str]:
     """Return the list of sheet/tab names in a spreadsheet."""
     service = discovery_build("sheets", "v4", credentials=credentials, cache_discovery=False)
-    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
+    meta = _execute(service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties"), METADATA)
     return [s["properties"]["title"] for s in meta.get("sheets", [])]
 
 
@@ -51,12 +61,11 @@ def _resolve_sheet_name(
     gid: int | None,
 ) -> str:
     """Resolve a gid to a sheet title, or return the first sheet's title."""
-    meta = (
-        service.spreadsheets()
-        .get(  # type: ignore[union-attr]
+    meta = _execute(
+        service.spreadsheets().get(  # type: ignore[union-attr]
             spreadsheetId=spreadsheet_id, fields="sheets.properties"
-        )
-        .execute()
+        ),
+        METADATA,
     )
     sheets = meta.get("sheets", [])
     if not sheets:
@@ -82,14 +91,14 @@ def read_header_row(
     """
     service = discovery_build("sheets", "v4", credentials=credentials, cache_discovery=False)
     sheet_name = _resolve_sheet_name(service, spreadsheet_id, gid)
-    result = (
-        service.spreadsheets()
+    result = _execute(
+        service.spreadsheets()  # type: ignore[union-attr]
         .values()
-        .get(  # type: ignore[union-attr]
+        .get(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_name}'!1:1",
-        )
-        .execute()
+        ),
+        VALUES,
     )
     values = result.get("values", [])
     if not values or not values[0]:
@@ -112,14 +121,14 @@ def read_all_rows_as_csv(
     """
     service = discovery_build("sheets", "v4", credentials=credentials, cache_discovery=False)
     sheet_name = _resolve_sheet_name(service, spreadsheet_id, gid)
-    result = (
-        service.spreadsheets()
+    result = _execute(
+        service.spreadsheets()  # type: ignore[union-attr]
         .values()
-        .get(  # type: ignore[union-attr]
+        .get(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_name}'",
-        )
-        .execute()
+        ),
+        VALUES,
     )
     rows = result.get("values", [])
     if not rows:

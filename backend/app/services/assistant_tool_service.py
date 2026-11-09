@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.assistant import AssistantActionPlan, AssistantConversation, AssistantToolInvocation
 from app.services import audit_service, role_service
+from app.services.assistant_history import LINK_KEY
+from app.services.assistant_history import VERSION as LINK_VERSION
 from app.services.assistant_tool_catalog import ToolDescriptor, get_tool
 
 _TYPE_MAP: dict[str, type | tuple[type, ...]] = {
@@ -120,6 +122,7 @@ class AssistantToolService:
         arguments: dict,
         message_id: int | None = None,
         plan: AssistantActionPlan | None = None,
+        call_index: int | None = None,
     ) -> ToolExecutionResult:
         tool = get_tool(tool_name)
         if tool is None:
@@ -176,6 +179,15 @@ class AssistantToolService:
             # consequence_class travels with the step so the confirm UI can warn before a spend action
             # (e.g. launch_run) without re-deriving cost from the tool name.
             step = {"tool": tool.name, "args": arguments, "consequence_class": tool.consequence_class}
+            if message_id is not None and call_index is not None:
+                # Internal link from the plan step back to the call that proposed it (see
+                # assistant_history); stripped from every public plan field.
+                step[LINK_KEY] = {
+                    "v": LINK_VERSION,
+                    "message_id": message_id,
+                    "call_index": call_index,
+                    "invocation_id": invocation.id,
+                }
             if plan is None:
                 plan = AssistantActionPlan(
                     conversation_id=conversation.id,

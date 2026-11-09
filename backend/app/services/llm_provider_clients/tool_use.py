@@ -19,6 +19,9 @@ class ToolCall:
 class ToolUseResult:
     text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
+    # Opaque provider continuation state for this turn ({"provider", "model", "items"}), persisted
+    # internally and replayed only to the same provider and model. Never shown to users.
+    provider_state: dict | None = None
 
     @property
     def is_final(self) -> bool:

@@ -20,7 +20,13 @@ from app.exceptions import DomainError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.sample_custom_field import SampleCustomField
 from app.services.csv_service import ParsedSampleRow, parse_sample_rows
-from app.services.sample_service import SampleService
+from app.services.sample_service import (
+    EXTERNAL_ID_UNIQUE,
+    SEQ_BATCH_POSITION_UNIQUE,
+    SampleService,
+    duplicate_external_id_text,
+    violated_unique_constraint,
+)
 
 CUSTOM_FIELD_NAME_LIMIT = 255
 
@@ -61,13 +67,10 @@ def _unique_conflict_text(exc: IntegrityError, row: ParsedSampleRow) -> str | No
     Anything else, including a unique violation on another table or an unnamed one (an audit-log
     key behind its rows, say), is not bad input: None, and the caller fails the import.
     """
-    orig = exc.orig
-    if getattr(orig, "sqlstate", None) != "23505" and getattr(orig, "pgcode", None) != "23505":
-        return None
-    constraint = getattr(getattr(orig, "__cause__", None), "constraint_name", None)
-    if constraint == "uq_samples_experiment_external_id":
-        return f"Sample ID \u201c{row.sample.external_id}\u201d already exists in this experiment."
-    if constraint == "uq_sample_seq_batch_position":
+    constraint = violated_unique_constraint(exc)
+    if constraint == EXTERNAL_ID_UNIQUE:
+        return duplicate_external_id_text(row.sample.external_id)
+    if constraint == SEQ_BATCH_POSITION_UNIQUE:
         batch = f"sequencing batch \u201c{row.sample.sequencing_batch_code}\u201d"
         if row.sample.sequencing_batch_position is None:
             return f"Its position in {batch} is already taken."

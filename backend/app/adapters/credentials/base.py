@@ -72,3 +72,12 @@ class CredentialsProvider(ABC):
         Lets a caller branch on permission-denied without importing the cloud
         SDK's exception type.
         """
+
+    @abstractmethod
+    def credential_failure_kind(self, exc: BaseException) -> str | None:
+        """Classify a credential-library failure without the caller importing its SDK.
+
+        Returns ``"auth"`` (credentials missing, malformed, or rejected), ``"timeout"``,
+        ``"transport"`` (could not reach the token service), or ``None`` when ``exc`` is not a
+        credential-library failure.
+        """
