@@ -30,10 +30,14 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def swap_database(new_url: str) -> None:
     """Swap the connection pool to a different database URL.
 
-    Disposes the old engine and creates a new one. All subsequent calls to
-    get_session() and background loop imports of async_session_factory will
-    use the new connection. In-flight requests on the old engine will complete
-    normally as dispose() waits for connections to be returned.
+    Creates a new engine and factory, then disposes the old engine. Code that reads
+    ``app.database.async_session_factory`` after the swap (get_session(), anything that resolves
+    the factory per call) uses the new database. Holders of the old factory (periodic jobs that
+    bound it when they started, factories injected at startup) keep the old engine.
+
+    ``dispose()`` closes only the old pool's checked-in connections. It does not wait for
+    checked-out connections, which finish on the old engine and are then pooled there again, and
+    it does not stop a holder of the old factory from opening new ones.
     """
     global engine, async_session_factory
     old_engine = engine
