@@ -348,6 +348,18 @@ async def glossary_orphans(ctx: StartupContext) -> None:
             logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
 
 
+async def interrupted_local_jobs(ctx: StartupContext) -> None:
+    """Fail local jobs (searches, URL imports, PDF extractions) a restart interrupted."""
+    from app.database import async_session_factory
+    from app.services.restart_recovery import fail_interrupted_local_jobs
+
+    async with async_session_factory() as session:
+        counts = await fail_interrupted_local_jobs(session)
+        await session.commit()
+    if any(counts.values()):
+        logger.info("Marked jobs interrupted by the restart as failed: %s", counts)
+
+
 NORMAL_STEPS = [
     Step("bootstrap_metadata", bootstrap_metadata, "optional", "Bootstrap metadata read skipped: %s", logging.INFO),
     Step("cloud_logging", cloud_logging, "optional", "Cloud Logging not configured: %s", logging.INFO),
@@ -395,6 +407,12 @@ NORMAL_STEPS = [
     Step("pending_upgrades", pending_upgrades, "optional", "Could not resolve pending upgrades: %s"),
     Step("hosted_review_orphans", hosted_review_orphans, "optional", "Could not mark orphaned LLM review jobs: %s"),
     Step("glossary_orphans", glossary_orphans, "optional", "Could not mark orphaned glossary scan jobs: %s"),
+    Step(
+        "interrupted_local_jobs",
+        interrupted_local_jobs,
+        "optional",
+        "Could not mark jobs interrupted by the restart as failed: %s",
+    ),
 ]
 
 
