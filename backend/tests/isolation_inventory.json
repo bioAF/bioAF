@@ -3795,6 +3795,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_startup_sequence.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "create_task",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_storage.py": {
    "category": "real_commit",
    "evidence": [

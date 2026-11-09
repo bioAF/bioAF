@@ -17,6 +17,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import runtime
 from app.adapters.messaging import create_messaging_provider
 from app.platform.platform_config_service import PlatformConfigService
 
@@ -252,7 +253,7 @@ class ListenerManager:
                 return
             listener = PubSubListener()
             self._listener = listener
-            self._task = asyncio.create_task(self._run(listener), name="pubsub-listener")
+            self._task = runtime.spawn(self._run(listener), role="pubsub-listener")
 
     async def stop(self) -> None:
         """Stop the listener (starting or running) and wait for its task to finish."""

@@ -81,6 +81,7 @@ class TaskOwner:
         self._admitting = True
         self._admitting_events = True
         self.stopping = asyncio.Event()
+        self.report: ShutdownReport | None = None
 
     @property
     def admitting(self) -> bool:
@@ -206,6 +207,7 @@ class TaskOwner:
         )
         for role in report.uncooperative:
             _lifecycle(logging.ERROR, role, "abandoned", outcome="uncooperative")
+        self.report = report
         return report
 
 

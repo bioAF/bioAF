@@ -24,6 +24,12 @@ class EventBus:
     def subscribe(self, event_type: str, callback: EventCallback) -> None:
         self._subscribers[event_type].append(callback)
 
+    def unsubscribe(self, event_type: str, callback: EventCallback) -> None:
+        """Remove one registration of ``callback``; a no-op if it is not subscribed."""
+        callbacks = self._subscribers.get(event_type)
+        if callbacks and callback in callbacks:
+            callbacks.remove(callback)
+
     async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         callbacks = self._subscribers.get(event_type, [])
         if not callbacks:
