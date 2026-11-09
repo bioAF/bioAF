@@ -234,6 +234,9 @@ async function send(path: string, owner: Owner, options: SendOptions = {}): Prom
 
   if (!response.ok) {
     const body = await readErrorBody(response);
+    // The session may have ended while the body was read: its status policy (maintenance,
+    // expiry) must not reach the next session.
+    assertOwned(owner);
     throw errorForResponse({
       status: response.status,
       body,
@@ -245,7 +248,7 @@ async function send(path: string, owner: Owner, options: SendOptions = {}): Prom
   return response;
 }
 
-/** The parsed error body, or undefined when it is missing or not JSON. Never throws. */
+/** The parsed error body, or undefined when it is missing or not JSON. Throws only a cancellation. */
 async function readErrorBody(response: Response): Promise<unknown> {
   try {
     // Read the text and parse it, so an HTML error page cannot fail the read itself.
@@ -253,7 +256,8 @@ async function readErrorBody(response: Response): Promise<unknown> {
       return parseJsonText(await response.text());
     }
     return await response.json();
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) throw error;
     return undefined;
   }
 }
