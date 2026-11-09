@@ -147,3 +147,21 @@ test("a failed build-status read keeps the last status and says it could not be 
   expect(screen.getByText(/Status: WORKING/)).toBeInTheDocument();
   expect(screen.getByTestId("build-status-unavailable")).toBeInTheDocument();
 });
+
+test("the build-status read carries a signal that aborts when the page closes", async () => {
+  const { unmount } = render(<InfraComponentsPage />);
+  await flush();
+  const call = mockApiGet.mock.calls.find(([url]) => String(url).includes("notebook-image/build-status"))!;
+  expect(call[1]?.signal).toBeInstanceOf(AbortSignal);
+  unmount();
+  expect(call[1].signal.aborted).toBe(true);
+});
+
+test("a component no longer building shows no build status and is not polled", async () => {
+  componentStatus = "enabled";
+  render(<InfraComponentsPage />);
+  await flush();
+  await tick(60_000);
+  expect(buildReads).toHaveLength(0);
+  expect(screen.queryByText(/Building image/)).not.toBeInTheDocument();
+});

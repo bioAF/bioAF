@@ -170,9 +170,6 @@ export default function InfraComponentsPage() {
   const [configError, setConfigError] = useState("");
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
   const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
-  const [buildStatusMap, setBuildStatusMap] = useState<
-    Record<string, { build_id: string | null; build_status: string | null; image_uri: string | null }>
-  >({});
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
@@ -310,7 +307,6 @@ export default function InfraComponentsPage() {
     {
       poll: isProvisioning ? 15000 : false,
       onSuccess: (results) => {
-        setBuildStatusMap(results);
         const anyFinished = Object.values(results).some(
           (status) => status.build_status && !["WORKING", "QUEUED"].includes(status.build_status),
         );
@@ -322,9 +318,8 @@ export default function InfraComponentsPage() {
     },
   );
 
-  useEffect(() => {
-    if (!hasBuildRelated) setBuildStatusMap({});
-  }, [hasBuildRelated]);
+  // The statuses shown are the latest answer for the current build key (none when nothing builds).
+  const buildStatusMap = buildPoll.data ?? {};
 
   const [deployLoading, setDeployLoading] = useState(false);
 
