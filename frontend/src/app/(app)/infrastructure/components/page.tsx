@@ -1191,6 +1191,12 @@ export default function InfraComponentsPage() {
                                     Requires: {comp.dependencies.join(", ")}
                                   </p>
                                 )}
+                                {/* No answer yet: the building panel below needs one, so a failed first read is said here. */}
+                                {comp.status === "provisioning" && !buildStatus && buildPoll.error !== null && (
+                                  <p data-testid="build-status-load-failed" role="status" className="text-xs text-red-600 mb-2">
+                                    The image build status could not be read. bioAF keeps checking.
+                                  </p>
+                                )}
                                 {/* Show building panel only when actually building (not when build already failed) */}
                                 {comp.status === "provisioning" && buildStatus && !["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? "") && (
                                   <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
