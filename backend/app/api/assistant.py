@@ -8,6 +8,7 @@ spend action (launch_run) launches a real PipelineRun. The plan-then-confirm gat
 boundary, and the confirm UI warns when an action will spend compute.
 """
 
+import json
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import cast
@@ -29,7 +30,7 @@ from app.models.assistant import (
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services import audit_service, llm_provider_config_service, role_service
 from app.services.assistant_availability_service import AssistantAvailabilityService
-from app.services.assistant_history import public_plan_steps, public_tool_calls
+from app.services.assistant_history import LINK_KEY, link_call, public_plan_steps, public_tool_calls
 from app.services.assistant_loop_service import AssistantLoopService
 from app.services.assistant_tool_catalog import get_tool
 from app.services.pipeline_run_service import PipelineRunService
@@ -317,6 +318,34 @@ async def send_message(
     )
 
 
+async def _record_confirmed_step(
+    session: AsyncSession, conversation_id: int, step: dict, output: dict, *, user_id: int, now: datetime
+) -> None:
+    link = step.get(LINK_KEY)
+    if not link:
+        return  # a plan proposed before call tracking has no call to attach the result to
+    invocation = await session.get(AssistantToolInvocation, link.get("invocation_id"))
+    if invocation is None or invocation.conversation_id != conversation_id:
+        return
+    invocation.status = "confirmed"
+    invocation.confirmed_by_user_id = user_id
+    invocation.confirmed_at = now
+    invocation.result_json = output
+    tool_message = AssistantMessage(
+        conversation_id=conversation_id,
+        role="tool",
+        content=json.dumps({"status": "executed", "result": output}, default=str),
+        tool_invocation_id=invocation.id,
+    )
+    session.add(tool_message)
+    await session.flush()
+    proposing = await session.get(AssistantMessage, link.get("message_id"))
+    if proposing is not None and proposing.conversation_id == conversation_id and proposing.tool_calls_json:
+        proposing.tool_calls_json = link_call(
+            proposing.tool_calls_json, link["call_index"], result_message_id=tool_message.id
+        )
+
+
 @router.post("/action-plans/{plan_id}/confirm", response_model=ConfirmResponse)
 async def confirm_action_plan(
     plan_id: int,
@@ -341,6 +370,7 @@ async def confirm_action_plan(
     # gate, so a confirmed spend action (launch_run) launches a real run rather than only building it.
     steps = plan.steps_json or []
     new_steps: list[dict] = []
+    resolved_invocations: list[tuple[dict, dict]] = []
     result: dict | None = None
     executed = False
     run_id: int | None = None
@@ -394,6 +424,7 @@ async def confirm_action_plan(
             raise HTTPException(400, f"action '{step['tool']}' failed: {exc}") from exc
         result = output
         new_steps.append({**step, "result": output})
+        resolved_invocations.append((step, output))
 
     now = datetime.now(timezone.utc)
     plan.steps_json = new_steps
@@ -401,19 +432,11 @@ async def confirm_action_plan(
     plan.approved_by_user_id = user_id
     plan.approved_at = now
 
-    # Mark the pending spend invocation(s) for this conversation confirmed.
-    pending = (
-        await session.execute(
-            select(AssistantToolInvocation).where(
-                AssistantToolInvocation.conversation_id == conversation.id,
-                AssistantToolInvocation.status == "awaiting_confirmation",
-            )
-        )
-    ).scalars()
-    for invocation in pending:
-        invocation.status = "confirmed"
-        invocation.confirmed_by_user_id = user_id
-        invocation.confirmed_at = now
+    # Resolve only this plan's own calls: mark each linked invocation confirmed with its actual output,
+    # and record that output as the call's tool result so the next provider turn reports what ran.
+    # Written in the same transaction as the steps, so a failed confirmation records nothing.
+    for step, output in resolved_invocations:
+        await _record_confirmed_step(session, conversation.id, step, output, user_id=user_id, now=now)
 
     await session.flush()
     await audit_service.log_action(
