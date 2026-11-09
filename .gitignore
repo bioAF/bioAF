@@ -31,6 +31,9 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# pytest-cov data files (.coverage, and .coverage.<host>.<pid> from parallel runs)
+.coverage
+.coverage.*
 
 # Node
 .next/
