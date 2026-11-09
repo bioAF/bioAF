@@ -3,11 +3,12 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -65,7 +66,6 @@ export default function DataReferenceDetailPage() {
 
   const [importStatus, setImportStatus] = useState<ReferenceImportStatusResponse | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const importPollHandle = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadReference();
@@ -74,47 +74,40 @@ export default function DataReferenceDetailPage() {
 
   // Poll the import-status row while the dataset is in flight so the
   // progress bar updates as the in-process background task makes its way
-  // through the source URL.
-  useEffect(() => {
-    if (!reference || reference.status !== "uploading") {
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
-      return;
-    }
-    const tick = async () => {
-      try {
-        const s = await api.get<ReferenceImportStatusResponse>(`/api/references/${id}/import-status`);
+  // through the source URL. Each read starts after the previous one settles;
+  // a 404 (no progress row) or transient failure is retried on the next tick.
+  // A terminal status stops the watch until the reloaded dataset says otherwise.
+  const [importWatchStopped, setImportWatchStopped] = useState(false);
+  const importStatusPath =
+    reference?.status === "uploading" && !importWatchStopped
+      ? `/api/references/${id}/import-status`
+      : null;
+  useResource(
+    importStatusPath,
+    useCallback(
+      (signal: AbortSignal) =>
+        api.get<ReferenceImportStatusResponse>(`/api/references/${id}/import-status`, { signal }),
+      [id],
+    ),
+    {
+      poll: IMPORT_POLL_INTERVAL_MS,
+      onSuccess: (s) => {
         setImportStatus(s);
         if (s.status === "active" || s.status === "failed") {
           // Reload the dataset so the page transitions out of the
           // in-flight banner once the task reaches a terminal state.
-          loadReference();
+          setImportWatchStopped(true);
+          void loadReference().then(() => setImportWatchStopped(false));
         }
-      } catch {
-        // 404 (no progress row) or transient: keep polling.
-      }
-    };
-    void tick();
-    importPollHandle.current = setInterval(tick, IMPORT_POLL_INTERVAL_MS);
-    return () => {
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference?.status, id]);
+      },
+    },
+  );
 
   async function handleCancelOrDelete() {
     setCancelling(true);
     try {
       await api.post(`/api/references/${id}/import-cancel`);
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
+      setImportWatchStopped(true);
       router.push("/data/references");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to cancel");
