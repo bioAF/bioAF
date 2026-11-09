@@ -13,7 +13,7 @@ be argued against it.
 """
 
 import pytest
-from fastapi import HTTPException
+from app.exceptions import DomainError
 from sqlalchemy import select
 
 from app.models.audit_log import AuditLog
@@ -128,7 +128,7 @@ class TestUsingThePipelineTheDepositNames:
         """Writing a null version would move the plan onto a pipeline the gate could not then offer
         to install, which is the dead end this whole change exists to remove."""
         study, _ = await _conflicted(session, admin_user)
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ReproductionPlanService.use_deposit_pipeline(
                 session, study.id, admin_user.organization_id, admin_user.id
             )
@@ -157,7 +157,7 @@ class TestUsingThePipelineTheDepositNames:
     @pytest.mark.asyncio
     async def test_it_refuses_when_there_is_no_conflict_to_resolve(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user, blockers=[ADVISORY])
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ReproductionPlanService.use_deposit_pipeline(
                 session, study.id, admin_user.organization_id, admin_user.id
             )
@@ -166,7 +166,7 @@ class TestUsingThePipelineTheDepositNames:
     @pytest.mark.asyncio
     async def test_it_refuses_when_the_deposit_names_no_pipeline(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user, blockers=[UNROUTED_CONFLICT], strategy="RNA-Seq")
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ReproductionPlanService.use_deposit_pipeline(
                 session, study.id, admin_user.organization_id, admin_user.id
             )
@@ -175,7 +175,7 @@ class TestUsingThePipelineTheDepositNames:
     @pytest.mark.asyncio
     async def test_it_is_not_offered_once_the_study_has_moved_on(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user, state="running")
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ReproductionPlanService.use_deposit_pipeline(
                 session, study.id, admin_user.organization_id, admin_user.id
             )
@@ -195,7 +195,7 @@ class TestRunningItAnyway:
     @pytest.mark.asyncio
     async def test_approving_is_refused_while_the_conflict_stands(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user)
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
         assert ei.value.status_code == 400
 
@@ -229,7 +229,7 @@ class TestRunningItAnyway:
     async def test_an_override_needs_a_stated_reason(self, session, admin_user):
         """A one-click override becomes the default action, and then the guard means nothing."""
         study, _ = await _conflicted(session, admin_user)
-        with pytest.raises(HTTPException) as ei:
+        with pytest.raises(DomainError) as ei:
             await ValidationStudyService.override_deposit_conflict(
                 session, study.id, admin_user.organization_id, admin_user.id, reason="   "
             )
@@ -238,7 +238,7 @@ class TestRunningItAnyway:
     @pytest.mark.asyncio
     async def test_it_refuses_when_there_is_nothing_to_override(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user, blockers=[ADVISORY])
-        with pytest.raises(HTTPException):
+        with pytest.raises(DomainError):
             await ValidationStudyService.override_deposit_conflict(
                 session, study.id, admin_user.organization_id, admin_user.id, reason="nothing to override"
             )

@@ -2,11 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
+from app.schemas.user_summary import UserSummary
 
 
 # --- Environment schemas ---

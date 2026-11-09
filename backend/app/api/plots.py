@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.api.content_access import plot_for_content
 from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session
@@ -70,8 +71,8 @@ async def search_plots(
     query: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

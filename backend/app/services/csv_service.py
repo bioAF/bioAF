@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -72,6 +73,21 @@ COLUMN_MAP = {
     "seq_batch_position": "sequencing_batch_position",
     "batch_position": "sequencing_batch_position",
 }
+
+
+@dataclass(frozen=True)
+class ParsedSampleRow:
+    """One accepted CSV record: the sample, its custom fields, and the line it came from.
+
+    Kept together so a rejected record can never shift another record's custom fields.
+    ``record_number`` is the physical line the record starts on (the header is line 1); blank
+    lines and quoted values spanning lines are counted. Error labels do not use it.
+    """
+
+    record_number: int
+    sample: SampleCreate
+    custom_fields: dict[str, Any] = field(default_factory=dict)
+
 
 NUMERIC_FIELDS = {"viability_pct", "cell_count", "sequencing_batch_position"}
 DATETIME_FIELDS = {"collection_timestamp"}
@@ -173,28 +189,55 @@ def _convert_value(field_name: str, raw_val: str) -> tuple[Any, str | None]:
     return raw_val, None
 
 
+class _LineCounter:
+    """Feeds a csv reader line by line and remembers which physical lines it consumed."""
+
+    def __init__(self, text: str) -> None:
+        self._lines = enumerate(io.StringIO(text), start=1)
+        self.consumed: list[tuple[int, str]] = []
+
+    def __iter__(self) -> "_LineCounter":
+        return self
+
+    def __next__(self) -> str:
+        number, line = next(self._lines)
+        self.consumed.append((number, line))
+        return line
+
+    def record_start(self) -> int:
+        """The first line of the record just read: csv skips completely empty lines before it."""
+        start = next(n for n, line in self.consumed if line.rstrip("\r\n"))
+        self.consumed.clear()
+        return start
+
+
 def _parse_rows(
     text: str,
     delimiter: str,
     header_map: dict[str, str],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], int]:
-    """Parse CSV rows using the header map.
+) -> tuple[list[tuple[int, dict[str, Any], dict[str, Any]]], list[str]]:
+    """Parse CSV rows using the header map, skipping records with no values.
 
-    Returns (sample_dicts, custom_field_rows, errors, total_rows).
-    Each sample_dict maps field_name -> value (for SampleCreate).
-    Each custom_field_row maps custom_field_name -> value (keyed by row index).
+    Returns (records, errors). Each record is (start_line, sample_fields, custom_fields):
+    start_line is the physical line the record begins on (header is line 1), sample_fields
+    maps field_name -> value (for SampleCreate), and custom_fields maps custom field name ->
+    value for the same record.
+
+    Error labels keep their established numbering, which is not the physical line: records
+    counted from 2, where a record of empty values counts and a blank line does not.
     """
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    sample_dicts: list[dict[str, Any]] = []
-    custom_field_rows: list[dict[str, Any]] = []
+    lines = _LineCounter(text)
+    reader = csv.DictReader(lines, delimiter=delimiter)
+    reader.fieldnames  # consume the header so it is not taken for the first record's start
+    lines.consumed.clear()
+    records: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
     errors: list[str] = []
-    total_rows = 0
 
     for row_num, row in enumerate(reader, start=2):
+        start_line = lines.record_start()
         if all(not v or not v.strip() for v in row.values()):
             continue
 
-        total_rows += 1
         sample_data: dict[str, Any] = {}
         custom_fields: dict[str, Any] = {}
 
@@ -213,10 +256,9 @@ def _parse_rows(
                 continue
             sample_data[field_name] = converted
 
-        sample_dicts.append(sample_data)
-        custom_field_rows.append(custom_fields)
+        records.append((start_line, sample_data, custom_fields))
 
-    return sample_dicts, custom_field_rows, errors, total_rows
+    return records, errors
 
 
 def generate_sample_template() -> bytes:
@@ -270,12 +312,11 @@ def preview_sample_csv(
 
     recognized_columns = [{"csv_header": raw, "mapped_to": field} for raw, field in header_map.items()]
 
-    sample_dicts, _, errors, total_rows = _parse_rows(text, delimiter, header_map)
+    records, errors = _parse_rows(text, delimiter, header_map)
+    total_rows = len(records)
 
     # Build preview rows (first 5) using mapped field names
-    preview_rows = []
-    for sample_data in sample_dicts[:5]:
-        preview_rows.append(sample_data)
+    preview_rows = [sample_data for _, sample_data, _ in records[:5]]
 
     return {
         "recognized_columns": recognized_columns,
@@ -286,59 +327,70 @@ def preview_sample_csv(
     }
 
 
-def parse_sample_csv(
+def parse_sample_rows(
     file_content: bytes,
-    experiment_id: int,
     column_mappings: dict[str, str] | None = None,
     aliases: dict[str, str] | None = None,
-) -> tuple[list[SampleCreate], list[str], list[dict[str, Any]]]:
-    """Parse a CSV file into SampleCreate objects.
+) -> tuple[list[ParsedSampleRow], list[str]]:
+    """Parse a CSV file into accepted rows and error messages.
 
     Args:
         file_content: Raw CSV bytes.
-        experiment_id: The experiment to associate samples with.
         column_mappings: Optional user-provided mappings for unknown columns.
             Keys are normalized header names, values are either a sample field
             name (e.g. "prep_notes") or "custom:field_name" for custom fields.
-        aliases: Optional experiment-persisted header→target mappings, used as
+        aliases: Optional experiment-persisted header->target mappings, used as
             a fallback when ``column_mappings`` does not cover a header.
 
-    Returns:
-        (samples, errors, custom_field_rows) where custom_field_rows is a list
-        of dicts parallel to samples, mapping custom field names to values.
+    A record that fails SampleCreate validation is reported and dropped with its
+    custom fields. A value that fails numeric or datetime conversion is reported
+    and omitted; the rest of its record is still accepted.
+
+    Error labels (established, not physical lines): conversion errors number records
+    from 2, counting a record of empty values but not a blank line; validation errors
+    number only the records with values, from 2.
     """
     encoding = _detect_encoding(file_content)
     text = file_content.decode(encoding)
 
     lines = text.strip().splitlines()
     if not lines:
-        return [], ["File is empty"], []
+        return [], ["File is empty"]
 
     delimiter = _detect_delimiter(lines[0])
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
 
     if not reader.fieldnames:
-        return [], ["No header row found"], []
+        return [], ["No header row found"]
 
     header_map, _ = _build_header_map(list(reader.fieldnames), column_mappings, aliases=aliases)
 
-    sample_dicts, custom_field_rows, errors, _ = _parse_rows(text, delimiter, header_map)
+    records, errors = _parse_rows(text, delimiter, header_map)
 
-    samples = []
-    for i, sample_data in enumerate(sample_dicts):
-        row_num = i + 2  # CSV row numbers start at 2 (after header)
+    rows: list[ParsedSampleRow] = []
+    for i, (record_number, sample_data, custom_fields) in enumerate(records):
+        label = i + 2
         try:
-            sample = SampleCreate(**sample_data)
-            samples.append(sample)
+            rows.append(ParsedSampleRow(record_number, SampleCreate(**sample_data), custom_fields))
         except ValidationError as ve:
             field_msgs = "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in ve.errors())
-            errors.append(f"Row {row_num}: {field_msgs}")
-            if i < len(custom_field_rows):
-                custom_field_rows[i] = {}
+            errors.append(f"Row {label}: {field_msgs}")
         except Exception:
-            logger.exception("Unexpected error parsing CSV row %d", row_num)
-            errors.append(f"Row {row_num}: could not be parsed")
-            if i < len(custom_field_rows):
-                custom_field_rows[i] = {}
+            logger.exception("Unexpected error parsing CSV row %d", record_number)
+            errors.append(f"Row {label}: could not be parsed")
 
-    return samples, errors, custom_field_rows
+    return rows, errors
+
+
+def parse_sample_csv(
+    file_content: bytes,
+    experiment_id: int,
+    column_mappings: dict[str, str] | None = None,
+    aliases: dict[str, str] | None = None,
+) -> tuple[list[SampleCreate], list[str], list[dict[str, Any]]]:
+    """``parse_sample_rows`` as parallel lists: (samples, errors, custom_field_rows).
+
+    ``custom_field_rows[i]`` belongs to ``samples[i]``.
+    """
+    rows, errors = parse_sample_rows(file_content, column_mappings, aliases)
+    return [r.sample for r in rows], errors, [r.custom_fields for r in rows]

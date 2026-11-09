@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.exceptions import DomainError
@@ -66,8 +67,8 @@ async def initialize_gitops(
 @router.get("/commits", response_model=GitCommitListResponse)
 async def list_commits(
     path: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 20,
     current_user: dict = require_permission("infrastructure", "view"),
     session: AsyncSession = Depends(get_session),
 ):

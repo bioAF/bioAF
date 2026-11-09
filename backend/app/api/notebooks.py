@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
-from app.services import role_service
+from app.api.notebook_access import can_manage_all_sessions, owned_session_or_404, stop_owned_session
 from app.schemas.notebook_session import (
     SessionLaunchRequest,
     SessionResponse,
@@ -58,7 +58,7 @@ async def list_sessions(
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    can_view_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
+    can_view_all = await can_manage_all_sessions(session, current_user)
     filter_user_id = None if can_view_all else user_id
 
     sessions, total = await NotebookService.list_sessions(
@@ -105,9 +105,7 @@ async def get_session_detail(
     current_user: dict = require_permission("notebooks", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    notebook_session = await NotebookService.get_session(session, session_id)
-    if not notebook_session:
-        raise HTTPException(404, "Session not found")
+    notebook_session = await owned_session_or_404(session, session_id, current_user)
     return _session_response(notebook_session)
 
 
@@ -117,17 +115,5 @@ async def stop_session(
     current_user: dict = require_permission("notebooks", "stop"),
     session: AsyncSession = Depends(get_session),
 ):
-    user_id = int(current_user["sub"])
-    notebook_session = await NotebookService.get_session(session, session_id)
-    if not notebook_session:
-        raise HTTPException(404, "Session not found")
-
-    can_manage_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
-    if not can_manage_all and notebook_session.user_id != user_id:
-        raise HTTPException(403, "Can only stop your own sessions")
-
-    notebook_session = await NotebookService.stop_session(session, session_id, user_id)
-
-    await session.commit()
-    notebook_session = await NotebookService.get_session(session, notebook_session.id)
+    notebook_session = await stop_owned_session(session, session_id, current_user)
     return _session_response(notebook_session)

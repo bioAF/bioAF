@@ -470,8 +470,11 @@ async def test_sheet_sample_preview(client, admin_token, session):
 @pytest.mark.asyncio
 async def test_sheet_sample_preview_no_reader_sa(client, admin_token, session):
     """Sheet sample preview returns 400 when reader SA not configured."""
+    exp_resp = await client.post(
+        "/api/experiments", json={"name": "No Reader"}, headers={"Authorization": f"Bearer {admin_token}"}
+    )
     response = await client.post(
-        "/api/v1/sheets/1/samples/preview",
+        f"/api/v1/sheets/{exp_resp.json()['id']}/samples/preview",
         json={"sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit"},
         headers={"Authorization": f"Bearer {admin_token}"},
     )

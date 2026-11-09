@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.pagination import PageNumber, UnboundedPageSize
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.dataset import DatasetExperimentSummary, DatasetFilterOptions, DatasetSearchResult
@@ -24,8 +25,8 @@ async def search_datasets(
     date_from: str | None = None,
     date_to: str | None = None,
     batch_id: int | None = None,
-    page: int = 1,
-    page_size: int = 25,
+    page: PageNumber = 1,
+    page_size: UnboundedPageSize = 25,
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])

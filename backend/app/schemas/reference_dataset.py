@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, computed_field, field_validator
 
 from app.models.reference_dataset import REFERENCE_CATEGORIES, REFERENCE_SCOPES
+from app.schemas.user_summary import UserSummary
 
 
 # --- Request schemas ---
@@ -181,14 +182,6 @@ class ReferenceDatasetFileResponse(BaseModel):
     def storage_uri(self) -> str:
         """Neutral alias of gcs_uri (retained legacy mirror); read storage_uri."""
         return self.gcs_uri
-
-
-class UserSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
-
-    model_config = {"from_attributes": True}
 
 
 class ReferenceDatasetResponse(BaseModel):

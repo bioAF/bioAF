@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.exceptions import DomainError
 from app.models.assistant import (
     AssistantActionPlan,
     AssistantConversation,
@@ -383,8 +384,8 @@ async def confirm_action_plan(
                 # A mutating handler applies its change (install, create_experiment/sample, import).
                 output = await tool.handler(session, org_id=org_id, user_id=user_id, arguments=step["args"])
             executed = True
-        except HTTPException:
-            raise
+        except (HTTPException, DomainError):
+            raise  # keep the failure's own status and body
         except Exception as exc:  # surface a failed action as a 400, not a 500
             raise HTTPException(400, f"action '{step['tool']}' failed: {exc}") from exc
         result = output

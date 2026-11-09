@@ -3,8 +3,8 @@ import asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException
 
+from app.exceptions import NotFoundError, ValidationError
 from app.models.audit_log import AuditLog
 from app.models.sample_batch import SampleBatch
 from app.services.snapshot_utils import serialize_entity
@@ -236,14 +236,14 @@ class ExperimentService:
         )
         experiment = result.scalar_one_or_none()
         if not experiment:
-            raise HTTPException(404, "Experiment not found")
+            raise NotFoundError("Experiment not found", plain_body=True)
 
         allowed = EXPERIMENT_STATUS_TRANSITIONS.get(experiment.status, [])
         if new_status not in allowed:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot transition from '{experiment.status}' to '{new_status}'. "
                 f"Next valid status: {', '.join(allowed) if allowed else 'none (terminal state)'}.",
+                plain_body=True,
             )
 
         old_status = experiment.status

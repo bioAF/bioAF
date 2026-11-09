@@ -1,8 +1,8 @@
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException
 
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.experiment_field_default import ExperimentFieldDefault, DEFAULTABLE_SAMPLE_FIELDS
 from app.models.experiment_template import ExperimentTemplate
@@ -25,13 +25,6 @@ SAMPLE_STATUS_TRANSITIONS = {
     "pipeline_complete": ["analysis_complete"],
     "analysis_complete": [],
 }
-
-
-def http_error_text(detail: object) -> str:
-    """An HTTPException detail as one readable line: a structured detail's nested text, else as is."""
-    if isinstance(detail, dict) and isinstance(detail.get("detail"), str):
-        return detail["detail"]
-    return str(detail)
 
 
 class SampleService:
@@ -116,18 +109,12 @@ class SampleService:
             return
         candidates = await SampleService.ambiguous_label_candidates(session, organization_id, experiment_id, label)
         if candidates:
-            raise HTTPException(
-                409,
-                {
-                    # Readable text in the nested "detail", where the app's error handling looks for it.
-                    "detail": (
-                        f"Sample ID \u201c{label}\u201d previously identified multiple samples and cannot be "
-                        f"reused. Choose a different ID. The original samples now use: {', '.join(candidates)}."
-                    ),
-                    "error": "ambiguous_external_id",
-                    "label": label,
-                    "candidates": candidates,
-                },
+            # The readable text becomes the nested "detail", where the app's error handling looks for it.
+            raise ConflictError(
+                f"Sample ID \u201c{label}\u201d previously identified multiple samples and cannot be "
+                f"reused. Choose a different ID. The original samples now use: {', '.join(candidates)}.",
+                details={"error": "ambiguous_external_id", "label": label, "candidates": candidates},
+                plain_body=True,
             )
 
     @staticmethod
@@ -203,7 +190,7 @@ class SampleService:
 
         errors = await SampleService._validate_template_fields(session, experiment_id, data)
         if errors:
-            raise HTTPException(400, detail="; ".join(errors))
+            raise ValidationError("; ".join(errors), plain_body=True)
         await SampleService.refuse_ambiguous_label(session, experiment_id, data.external_id)
 
         # Validate controlled vocabulary fields
@@ -301,7 +288,7 @@ class SampleService:
             if errors:
                 all_errors.append(f"Sample {i + 1}: {'; '.join(errors)}")
         if all_errors:
-            raise HTTPException(400, detail="; ".join(all_errors))
+            raise ValidationError("; ".join(all_errors), plain_body=True)
 
         # Validate vocabulary fields for all samples
         for i, data in enumerate(samples_data):
@@ -562,14 +549,14 @@ class SampleService:
         result = await session.execute(select(Sample).where(Sample.id == sample_id))
         sample = result.scalar_one_or_none()
         if not sample:
-            raise HTTPException(404, "Sample not found")
+            raise NotFoundError("Sample not found", plain_body=True)
 
         allowed = SAMPLE_STATUS_TRANSITIONS.get(sample.status, [])
         if new_status not in allowed:
-            raise HTTPException(
-                400,
+            raise ValidationError(
                 f"Cannot transition from '{sample.status}' to '{new_status}'. "
                 f"Next valid status: {', '.join(allowed) if allowed else 'none (terminal state)'}.",
+                plain_body=True,
             )
 
         old_status = sample.status
