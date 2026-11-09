@@ -515,7 +515,16 @@ async def confirm_action_plan(
         except (HTTPException, DomainError) as exc:
             failure = exc  # keep the failure's own status and body
         except Exception as exc:  # surface a failed action as a 400, not a 500
-            http_error = HTTPException(400, f"action '{step['tool']}' failed: {exc}")
+            # An unexpected exception can carry SQL, parameters, or other internals: the user gets a
+            # fixed message and the log gets only the exception type.
+            logger.warning(
+                "assistant plan step failed: plan_id=%s step_index=%s tool=%s exception_type=%s",
+                plan.id,
+                index,
+                step["tool"],
+                type(exc).__name__,
+            )
+            http_error = HTTPException(400, f"action '{step['tool']}' failed and did not complete.")
             http_error.__cause__ = exc
             failure = http_error
         if failure is not None:

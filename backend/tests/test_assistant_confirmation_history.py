@@ -366,3 +366,64 @@ async def test_concurrent_confirmations_run_the_plan_once(client, session, admin
 
     assert sorted([first.status_code, second.status_code]) == [200, 409]
     adapter.submit_job.assert_awaited_once()
+
+
+async def test_an_unexpected_step_failure_returns_a_fixed_message_and_logs_only_its_type(
+    client, session, admin_user, admin_token, caplog
+):
+    """A step's unexpected exception (for example a database error) can carry SQL, parameters, or
+    other internals; none of it reaches the response or the log, only the exception type."""
+    import logging
+
+    marker = "SYNTH-SECRET [SQL: INSERT INTO samples ...] [parameters: (10, 'P12-A')]"
+    exp = Experiment(organization_id=admin_user.organization_id, name="Boom", owner_user_id=admin_user.id)
+    session.add(exp)
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+    plan = await _propose(
+        session,
+        admin_user,
+        conv,
+        ToolCall(tool="create_sample", args={"experiment_id": exp.id, "external_id": "S1"}, id="call_boom"),
+    )
+
+    caplog.set_level(logging.DEBUG)
+    with patch(
+        "app.services.assistant_tool_catalog.SampleService.create_sample", AsyncMock(side_effect=RuntimeError(marker))
+    ):
+        confirm = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+
+    assert confirm.status_code == 400
+    assert confirm.json() == {"detail": "action 'create_sample' failed and did not complete."}
+    assert "SYNTH-SECRET" not in caplog.text and "INSERT" not in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    session.expunge_all()
+    assert (await session.get(AssistantActionPlan, plan.id)).status == "failed"
+
+
+async def test_a_duplicate_sample_id_is_a_clear_conflict(client, session, admin_user, admin_token):
+    exp = Experiment(organization_id=admin_user.organization_id, name="Dupes", owner_user_id=admin_user.id)
+    session.add(exp)
+    await session.flush()
+    from app.models.sample import Sample
+
+    session.add(Sample(experiment_id=exp.id, external_id="P12-A", organism="Homo sapiens"))
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+    plan = await _propose(
+        session,
+        admin_user,
+        conv,
+        ToolCall(tool="create_sample", args={"experiment_id": exp.id, "external_id": "P12-A"}, id="call_dupe"),
+    )
+
+    confirm = await client.post(f"/api/assistant/action-plans/{plan.id}/confirm", headers=_auth(admin_token))
+
+    assert confirm.status_code == 409
+    assert confirm.json()["detail"] == "Sample ID “P12-A” already exists in this experiment."
+    assert "SQL" not in confirm.text and "INSERT" not in confirm.text
+    session.expunge_all()
+    conv = await session.get(AssistantConversation, conv.id)
+    assert (await session.get(AssistantActionPlan, plan.id)).status == "failed"
+    outputs = await _next_turn_outputs(session, admin_user, conv)
+    assert '"failed"' in outputs["call_dupe"]
