@@ -9,6 +9,8 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 
 interface AuditUser {
   id: number;
@@ -48,11 +50,10 @@ export default function AuditLogPage() {
   const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The last successful total, which keeps pagination in place while the next page loads.
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [entityType, setEntityType] = useState("");
   const [action, setAction] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -69,23 +70,29 @@ export default function AuditLogPage() {
     if (!canAccess("audit_log", "view")) { router.push("/dashboard"); return; }
   }, [router, permLoading, canAccess]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = `/api/audit?page=${page}&page_size=${pageSize}${auditFilterQuery(filters)}`;
-      const data = await api.get<{ entries: AuditEntry[]; total: number }>(url);
-      setEntries(data.entries);
-      setLoadError(null);
-      setTotal(data.total);
-    } catch (e) {
-      logError("loading the audit log", e);
-      setLoadError(loadFailureMessage("The audit log"));
-    } finally {
-      setLoading(false);
-    }
-  }, [page, filters]);
-
-  useEffect(() => { load(); }, [load]);
+  // Keyed by page and filters (the same filter query the export uses): only the current key's
+  // answer is shown, so a slow answer for an earlier page or filter cannot replace it.
+  const listPath = `/api/audit?page=${page}&page_size=${pageSize}${auditFilterQuery(filters)}`;
+  const list = useResource(
+    listPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<{ entries: AuditEntry[]; total: number }>(listPath, { signal }),
+      [listPath],
+    ),
+    {
+      onSuccess: (data) => {
+        setLoadError(null);
+        setTotal(data.total);
+      },
+      onError: (e) => {
+        logError("loading the audit log", e);
+        setLoadError(loadFailureMessage("The audit log"));
+      },
+    },
+  );
+  const entries: AuditEntry[] = list.data?.entries ?? [];
+  const loading = list.loading;
+  const load = list.refresh;
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -200,6 +207,8 @@ export default function AuditLogPage() {
           )}
         </div>
 
+        {list.stale && <StaleNotice what="The audit log" onRetry={() => void load()} />}
+
         {/*
           `total` is whatever the last SUCCESSFUL load returned, so with an error
           occupying the table below it read as a live count of the current filter:
@@ -226,9 +235,9 @@ export default function AuditLogPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={5} className="px-4 py-8"><ContentLoading variant="table" /></td></tr>
-              ) : loadError ? (
+              ) : loadError && !list.stale ? (
                 <tr><td colSpan={5} className="px-4 py-8">
-                  <ErrorState message={loadError} onRetry={() => load()} />
+                  <ErrorState message={loadError} onRetry={() => void load()} />
                 </td></tr>
               ) : entries.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No audit log entries</td></tr>
