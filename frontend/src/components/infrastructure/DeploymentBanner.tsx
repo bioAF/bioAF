@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useResource } from "@/hooks/useResource";
+import { isPermissionDenied } from "@/lib/projectOptions";
 
 interface TerraformStatus {
   terraform_initialized: boolean;
@@ -34,11 +35,12 @@ const TOAST_MESSAGES: Record<string, { text: string; link: string; linkText: str
 };
 
 export function DeploymentBanner() {
-  const [deploying, setDeploying] = useState(false);
   const [toast, setToast] = useState<{ text: string; link: string; linkText: string } | null>(null);
   const previouslyDeployingRef = useRef(false);
   const lastSeenModuleRef = useRef<string | null>(null);
 
+  // A run finishing is announced once. The previous answer's state is kept only to detect that
+  // transition; whether the banner shows is derived from the current answer below.
   const onStatus = useCallback((status: TerraformStatus) => {
     const isActive = status.active_run_id !== null;
 
@@ -53,10 +55,8 @@ export function DeploymentBanner() {
         setToast(message);
         setTimeout(() => setToast(null), 10_000);
       }
-      setDeploying(false);
       previouslyDeployingRef.current = false;
     } else {
-      setDeploying(isActive);
       previouslyDeployingRef.current = isActive;
       if (isActive) {
         // Track current module so we detect the transition
@@ -66,7 +66,8 @@ export function DeploymentBanner() {
   }, []);
 
   // Each read starts after the previous one settles. A failed read is not a finished run: it
-  // changes nothing but the stale note (the user may not be an admin, or the server is down).
+  // changes nothing but the stale note. A 403 is expected (the endpoint needs
+  // infrastructure:change_status, so every non-admin gets it) and is not re-polled.
   const statusRead = useResource(
     "terraform-status",
     useCallback(
@@ -74,8 +75,10 @@ export function DeploymentBanner() {
         api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status", { signal }),
       [],
     ),
-    { poll: POLL_INTERVAL_MS, onSuccess: onStatus },
+    { poll: POLL_INTERVAL_MS, expected: isPermissionDenied, onSuccess: onStatus },
   );
+  // The last answer stays during a failed refresh, so a running deployment keeps its banner.
+  const deploying = statusRead.data ? statusRead.data.active_run_id !== null : false;
 
   return (
     <>

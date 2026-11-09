@@ -91,3 +91,32 @@ test("the completion notice is shown once, not on every later poll", async () =>
   await settle(() => pending[3].resolve(status(null, "storage")));
   expect(screen.queryByTestId("deployment-toast")).not.toBeInTheDocument();
 });
+
+test("a 403 (a role without access to deployment status) is silent and not re-polled", async () => {
+  render(<DeploymentBanner />);
+  await settle(() => pending[0].reject(Object.assign(new Error("Forbidden"), { status: 403 })));
+  expect(screen.queryByTestId("deployment-banner")).not.toBeInTheDocument();
+
+  await tick(60_000);
+  expect(mockGet).toHaveBeenCalledTimes(1);
+});
+
+test("a failed first read that is not a 403 shows nothing yet and keeps checking", async () => {
+  render(<DeploymentBanner />);
+  await settle(() => pending[0].reject(Object.assign(new Error("Bad gateway"), { status: 502 })));
+  expect(screen.queryByTestId("deployment-banner")).not.toBeInTheDocument();
+
+  await tick(10_000);
+  expect(mockGet).toHaveBeenCalledTimes(2);
+  await settle(() => pending[1].resolve(status(42)));
+  expect(screen.getByTestId("deployment-banner")).toBeInTheDocument();
+});
+
+test("the status read carries a cancellation signal that aborts on unmount", () => {
+  const { unmount } = render(<DeploymentBanner />);
+  const [path, options] = mockGet.mock.calls[0];
+  expect(path).toBe("/api/v1/infrastructure/terraform/status");
+  expect(options?.signal).toBeInstanceOf(AbortSignal);
+  unmount();
+  expect(options.signal.aborted).toBe(true);
+});
