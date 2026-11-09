@@ -322,6 +322,7 @@ export default function CellxgenePage() {
   const [knownExperimentIds, setKnownExperimentIds] = useState<number[]>([]);
   // Auto-refresh while any publication is still publishing.
   const [hasPublishing, setHasPublishing] = useState(false);
+  const [publicationsError, setPublicationsError] = useState<string | null>(null);
 
   // Keyed by the experiment filter; re-read every 5 s while any publication is still publishing.
   // A read starts only after the previous one settles, and only the current filter's answer is
@@ -338,6 +339,8 @@ export default function CellxgenePage() {
     {
       poll: hasPublishing ? 5000 : false,
       onSuccess: (data) => {
+        // A retry that succeeds must leave the failure state behind it.
+        setPublicationsError(null);
         setHasPublishing(data.some((p) => p.status === "publishing"));
         setKnownExperimentIds((known) => [
           ...new Set([
@@ -346,15 +349,14 @@ export default function CellxgenePage() {
           ]),
         ]);
       },
-      onError: (e) => logError("loading the cellxgene publications", e),
+      onError: (e) => {
+        logError("loading the cellxgene publications", e);
+        setPublicationsError(loadFailureMessage("Published cellxgene datasets"));
+      },
     },
   );
   const publications = list.data ?? [];
   const loading = list.loading;
-  // A retry that succeeds leaves the failure state behind it; a failed background read keeps the
-  // list and is labelled stale instead.
-  const publicationsError =
-    list.error && !list.stale ? loadFailureMessage("Published cellxgene datasets") : null;
   const fetchPublications = list.refresh;
 
   // Load experiment names for display
@@ -452,7 +454,7 @@ export default function CellxgenePage() {
 
       {loading ? (
         <ContentLoading />
-      ) : publicationsError ? (
+      ) : publicationsError && !list.stale ? (
         <ErrorState message={publicationsError} onRetry={fetchPublications} />
       ) : publications.length === 0 ? (
         <p className="text-gray-500 text-sm">
