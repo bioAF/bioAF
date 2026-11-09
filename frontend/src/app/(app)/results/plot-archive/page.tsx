@@ -18,7 +18,6 @@ import type {
 } from "@/lib/types";
 
 export default function PlotArchivePage() {
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [experimentId, setExperimentId] = useState("");
   const [pipelineRunId, setPipelineRunId] = useState("");
@@ -87,16 +86,10 @@ export default function PlotArchivePage() {
     listPath,
     useCallback((signal: AbortSignal) => api.get<PlotArchiveListResponse>(listPath, { signal }), [listPath]),
     {
-      // Without this, a Retry that SUCCEEDS still leaves the failure sentence on
-      // screen: the error was set on the way down and never cleared on the way back
-      // up, so the only way to lose it was a full page reload.
-      onSuccess: () => setLoadError(null),
-      onError: (e) => {
-        logError("loading the plot archive", e);
-        setLoadError(loadFailureMessage("Plots"));
-      },
+      onError: (e) => logError("loading the plot archive", e),
     },
   );
+  const loadError = list.error ? loadFailureMessage("Plots") : null;
   const plots: PlotArchiveResponse[] = list.data?.plots ?? [];
   const total = list.data?.total ?? 0;
   const loading = list.loading;

@@ -24,7 +24,6 @@ import { clickableRow } from "@/lib/a11y";
 
 export function DatasetBrowser() {
   const toast = useToast();
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -71,15 +70,10 @@ export function DatasetBrowser() {
     listPath,
     useCallback((signal: AbortSignal) => api.get<DatasetSearchResult>(listPath, { signal }), [listPath]),
     {
-      // A Retry that succeeds must clear the failure it retried. Set on the way down,
-      // never cleared on the way back up, means only a page reload lost the message.
-      onSuccess: () => setLoadError(null),
-      onError: (e) => {
-        logError("loading datasets", e);
-        setLoadError(loadFailureMessage("Datasets"));
-      },
+      onError: (e) => logError("loading datasets", e),
     },
   );
+  const loadError = list.error ? loadFailureMessage("Datasets") : null;
   const datasets: DatasetExperimentSummary[] = list.data?.experiments ?? [];
   const total = list.data?.total ?? 0;
   const loading = list.loading;
