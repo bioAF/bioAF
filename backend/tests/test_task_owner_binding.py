@@ -95,11 +95,12 @@ async def test_the_real_application_binds_its_owner(client, admin_token, monkeyp
 
     monkeypatch.setattr(RestoreService, "get_status", staticmethod(status))
     owner = TaskOwner()
+    previous = main_module.app.state.runtime
     main_module.app.state.runtime = owner
     try:
         resp = await client.get("/api/backups/restore/status", headers={"Authorization": f"Bearer {admin_token}"})
     finally:
-        del main_module.app.state.runtime
+        main_module.app.state.runtime = previous
     assert resp.status_code == 200
     assert observed == {"owner": owner}
 
@@ -137,11 +138,12 @@ async def test_a_bound_owner_receives_events_from_an_unbound_session(db_engine):
 
 async def test_an_unowned_session_keeps_the_legacy_wait(db_engine):
     seen, release = _blocking_subscriber("test.committed")
-    async with async_sessionmaker(db_engine, class_=AsyncSession)() as session:
-        post_commit_events.defer_event(session, "test.committed", {"n": 3})
-        await session.commit()
-    release.set()
-    await asyncio.wait_for(post_commit_events.wait_for_deferred_events(), 1)
+    with runtime.bound(None):  # the test's own owner is bound by the database fixture
+        async with async_sessionmaker(db_engine, class_=AsyncSession)() as session:
+            post_commit_events.defer_event(session, "test.committed", {"n": 3})
+            await session.commit()
+        release.set()
+        await asyncio.wait_for(post_commit_events.wait_for_deferred_events(), 1)
     assert seen == [{"n": 3}]
 
 

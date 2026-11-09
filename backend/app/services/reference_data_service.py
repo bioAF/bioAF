@@ -803,13 +803,18 @@ class ReferenceDataService:
             extract_mode=request.extract,
         )
 
+        owner = runtime.current_owner()
+
         def _on_progress(**payload: object) -> None:
             # Runs on the importer's worker thread. Schedule the DB write
-            # back on the main event loop and wait until it commits so
-            # progress is durable before the next chunk callback fires.
-            future = asyncio.run_coroutine_threadsafe(
+            # back on the main event loop, owned like the import, and wait
+            # until it commits so progress is durable before the next chunk
+            # callback fires. A shutting-down owner refuses the write.
+            future = runtime.spawn_threadsafe(
                 ReferenceDataService._record_progress_in_new_session(dataset_id, **payload),  # type: ignore[arg-type]
-                loop,
+                role="reference-import-progress",
+                loop=loop,
+                owner=owner,
             )
             try:
                 future.result(timeout=15)

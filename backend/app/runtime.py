@@ -25,6 +25,7 @@ exclusion between them; the image runs one process.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextvars
 import logging
 from collections.abc import Callable, Coroutine, Iterator
@@ -175,6 +176,18 @@ class TaskOwner:
                 await asyncio.wait(pending, timeout=min(remaining, 0.05) if self._reservations else remaining)
         return True
 
+    async def drain_events(self, seconds: float | None = None) -> bool:
+        """Wait for the event emissions this owner holds (and any they start) to finish."""
+        loop = asyncio.get_running_loop()
+        deadline = None if seconds is None else loop.time() + seconds
+        current = asyncio.current_task()
+        while pending := [t for t, e in self._tasks.items() if e.event and t is not current]:
+            timeout = None if deadline is None else deadline - loop.time()
+            if timeout is not None and timeout <= 0:
+                return False
+            await asyncio.wait(pending, timeout=timeout)
+        return True
+
     async def cancel_all(self, seconds: float) -> tuple[list[str], list[str]]:
         """Cancel every owned task, repeatedly, until all settle or ``seconds`` pass in total.
 
@@ -291,6 +304,39 @@ def admission(role: str) -> Iterator[Ticket]:
     finally:
         if owner is not None:
             owner.release()
+
+
+def spawn_threadsafe(
+    coro: Coroutine[Any, Any, Any], *, role: str, loop: asyncio.AbstractEventLoop, owner: TaskOwner | None
+) -> concurrent.futures.Future[Any]:
+    """From a worker thread, start ``coro`` on ``loop`` under ``owner``; a future for its result.
+
+    The thread's equivalent of ``spawn``: once the owner stops admitting work, the future fails
+    with ``OwnerClosed`` instead of the write running during shutdown.
+    """
+    result: concurrent.futures.Future[Any] = concurrent.futures.Future()
+
+    def settle(task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            result.set_exception(asyncio.CancelledError())
+        elif (exc := task.exception()) is not None:
+            result.set_exception(exc)
+        else:
+            result.set_result(task.result())
+
+    def start() -> None:
+        if not result.set_running_or_notify_cancel():
+            coro.close()
+            return
+        try:
+            task = owner.spawn(coro, role=role) if owner is not None else loop.create_task(coro, name=f"bioaf:{role}")
+        except Exception as exc:
+            result.set_exception(exc)
+            return
+        task.add_done_callback(settle)
+
+    loop.call_soon_threadsafe(start)
+    return result
 
 
 def owned_sessions(factory: Callable[..., Any], owner: TaskOwner) -> Callable[..., Any]:

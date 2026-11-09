@@ -240,5 +240,31 @@ async def test_an_owner_bound_to_a_session_is_found_by_its_commit_hook(db_engine
     async with factory() as first, factory() as second:
         assert runtime.session_owner(first.sync_session) is owner
         assert first.sync_session.info is not second.sync_session.info
-    async with async_sessionmaker(db_engine, class_=AsyncSession)() as plain:
-        assert runtime.session_owner(plain.sync_session) is None
+    with runtime.bound(None):  # the database fixture binds the test's own owner
+        async with async_sessionmaker(db_engine, class_=AsyncSession)() as plain:
+            assert runtime.session_owner(plain.sync_session) is None
+
+
+async def test_a_worker_thread_starts_owned_work_until_admission_closes():
+    owner = TaskOwner()
+    loop = asyncio.get_running_loop()
+    seen = []
+
+    async def write(n):
+        seen.append(n)
+        return n
+
+    def from_thread(n):
+        return runtime.spawn_threadsafe(write(n), role="progress", loop=loop, owner=owner).result(timeout=5)
+
+    assert await asyncio.to_thread(from_thread, 1) == 1
+    owner.close_admission()
+    owner.close_event_admission()
+    with pytest.raises(OwnerClosed):
+        await asyncio.to_thread(from_thread, 2)
+    assert seen == [1]
+
+
+async def test_the_test_fixture_binds_an_owner_that_settles_the_tests_work(db_engine):
+    owner = runtime.current_owner()
+    assert owner is not None and owner.name == "test"

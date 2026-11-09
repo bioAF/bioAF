@@ -30,7 +30,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
-from app.runtime import OwnerClosed, session_owner
+from app.runtime import OwnerClosed, current_owner, session_owner
 from app.services.event_bus import event_bus
 
 logger = logging.getLogger("bioaf.post_commit_events")
@@ -58,13 +58,17 @@ def defer_event(session: AsyncSession | Session, event_type: str, payload: dict[
 
 
 async def wait_for_deferred_events() -> None:
-    """Wait for every emission scheduled on this event loop so far to finish.
+    """Wait for every emission scheduled on this event loop so far to finish, the bound owner's too.
 
     Tasks from another loop (a closed test loop, say) are skipped: they can never finish here.
     """
     loop = asyncio.get_running_loop()
     while pending := [t for t in _in_flight if t.get_loop() is loop and not t.done()]:
         await asyncio.gather(*pending, return_exceptions=True)
+    # Emissions handed to the bound owner (sessions opened while it was current).
+    owner = current_owner()
+    if owner is not None:
+        await owner.drain_events()
 
 
 @event.listens_for(Session, "after_commit")

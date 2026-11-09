@@ -26,9 +26,10 @@ def _auth(token):
 @pytest.fixture
 def owner():
     owner = TaskOwner()
+    previous = getattr(main_module.app.state, "runtime", None)
     main_module.app.state.runtime = owner
     yield owner
-    del main_module.app.state.runtime
+    main_module.app.state.runtime = previous
 
 
 @pytest.fixture

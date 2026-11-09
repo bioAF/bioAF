@@ -4,8 +4,11 @@
   the production session factory (``from app.database import
   async_session_factory`` binds a copy at import) at the test one, and puts
   them all back afterwards, including modules first imported during the test.
+- ``settle_owner`` lets the test's task owner finish its events, then cancels
+  and awaits everything else it holds (plan 14).
 - ``drain_and_cancel`` waits for post-commit events the test scheduled, then
-  cancels and awaits application tasks the test started. Tasks that existed
+  cancels and awaits application tasks the test started (the legacy path for
+  tasks started without an owner). Tasks that existed
   before the test, and tasks that are not application code (pytest, anyio,
   httpx), are left alone.
 - ``run_all`` runs every cleanup step even if an earlier one raises.
@@ -156,6 +159,12 @@ async def drain_and_cancel(before: set[asyncio.Task], drain_timeout: float = 10.
     except TimeoutError:
         pass  # whatever is still running is cancelled below
     return await cancel_owned_tasks(before)
+
+
+async def settle_owner(owner: Any, event_seconds: float = 10.0, cancel_seconds: float = 10.0) -> None:
+    """Let the test owner's events finish, then cancel and await everything else it holds."""
+    await owner.drain_events(event_seconds)
+    await owner.shutdown(drain_seconds=0, cancel_seconds=cancel_seconds)
 
 
 async def run_all(*steps: Callable[[], Any]) -> None:
