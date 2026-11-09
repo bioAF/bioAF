@@ -34,7 +34,6 @@ export default function PipelineRunsPage() {
   const [sortField, setSortField] = useState<"id" | "status" | "pipeline_name" | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (statusFilter) params.set("status", statusFilter);
@@ -70,13 +69,10 @@ export default function PipelineRunsPage() {
       // The rows are not discarded, because a transient blip during a 10s poll should
       // not blank a table the user is reading. They are labelled instead: the banner
       // sits above the table and says what is shown may be out of date.
-      onSuccess: () => setLoadError(null),
-      onError: (e) => {
-        logError("loading the pipeline runs list", e);
-        setLoadError(loadFailureMessage("The pipeline runs list"));
-      },
+      onError: (e) => logError("loading the pipeline runs list", e),
     },
   );
+  const loadError = list.error ? loadFailureMessage("The pipeline runs list") : null;
   const runs: PipelineRun[] = list.data?.runs ?? [];
   const total = list.data?.total ?? 0;
   // A background refresh must not replace the table with a skeleton every 10s:

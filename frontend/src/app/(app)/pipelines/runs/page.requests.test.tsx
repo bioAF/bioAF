@@ -90,3 +90,30 @@ test("the status filter stays on screen while a new selection loads", async () =
   expect(screen.getByLabelText("Filter by status")).toBe(filter);
   expect(screen.queryByText("#1")).not.toBeInTheDocument();
 });
+
+test("a filter change aborts the previous selection's read", async () => {
+  render(<PipelineRunsPage />);
+  await answer("/api/pipeline-runs?", [run(1)]);
+  fireEvent.change(screen.getByLabelText("Filter by status"), { target: { value: "failed" } });
+  const failedSignal = mockGet.mock.calls.at(-1)?.[1]?.signal as AbortSignal;
+  expect(failedSignal).toBeInstanceOf(AbortSignal);
+
+  fireEvent.change(screen.getByLabelText("Filter by status"), { target: { value: "completed" } });
+  expect(failedSignal.aborted).toBe(true);
+});
+
+test("a failed read shows the error with Retry, and recovers on the next answer", async () => {
+  render(<PipelineRunsPage />);
+  await answer("/api/pipeline-runs?", [run(1)]);
+  mockGet.mockImplementationOnce(() => Promise.reject(new Error("502")));
+  await act(async () => {
+    jest.advanceTimersByTime(10_000);
+  });
+  expect(screen.getByTestId("runs-load-error")).toBeInTheDocument();
+
+  await act(async () => {
+    jest.advanceTimersByTime(10_000);
+  });
+  await answer("/api/pipeline-runs?", [run(1)]);
+  expect(screen.queryByTestId("runs-load-error")).not.toBeInTheDocument();
+});
