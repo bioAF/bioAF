@@ -14,6 +14,9 @@ import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import { SessionBucketFilter, type SessionBucket } from "@/components/shared/SessionBucketFilter";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { ContentLoading } from "@/components/shared/ContentLoading";
+import { useResource } from "@/hooks/useResource";
 import { useToast } from "@/components/shared/Toast";
 import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import { prefillFromWorkNode } from "@/lib/sessionRecreate";
@@ -62,9 +65,11 @@ export default function WorkNodesPage() {
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
 
-  const [nodes, setNodes] = useState<WorkNode[]>([]);
   const [bucket, setBucket] = useState<SessionBucket>("active");
-  const [loading, setLoading] = useState(true);
+  // The whole-page spinner covers only the first answer; a later bucket change waits
+  // inside the list so the bucket filter stays on screen.
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const loading = !loadedOnce;
   const [showLaunch, setShowLaunch] = useState(false);
   useDismissOnEscape(showLaunch, () => { setShowLaunch(false); });
   const [viewingNode, setViewingNode] = useState<WorkNode | null>(null);
@@ -109,37 +114,40 @@ export default function WorkNodesPage() {
 
   const workNodeProfiles = resolveWorkNodeProfiles(machineTypes);
 
+  const canView = !permLoading && canAccess("work_nodes", "view");
+
   useEffect(() => {
     if (permLoading) return;
     if (!canAccess("work_nodes", "view")) { router.push("/dashboard"); return; }
-    loadNodes();
     loadRepos();
   }, [router, permLoading, canAccess, bucket]);
 
-  // Auto-refresh while starting
-  useEffect(() => {
-    const hasInProgress = nodes.some((n) => n.status === "starting" || n.status === "stopping");
-    if (!hasInProgress) return;
-    const interval = setInterval(() => loadNodes(), 10000);
-    return () => clearInterval(interval);
-  }, [nodes]);
-
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const loadNodes = useCallback(async () => {
-    try {
-      const data = await api.get<WorkNodeListResponse>(`/api/v1/work-nodes/sessions?bucket=${bucket}`);
-      setNodes(data.sessions);
-      setLoadError(null);
-    } catch (e) {
-      // Never fall through to the empty state here: these nodes bill by the hour,
-      // and "you have none" is a very different claim from "we could not ask".
-      logError("loading work nodes", e);
-      setLoadError(loadFailureMessage("Work nodes"));
-    } finally {
-      setLoading(false);
-    }
-  }, [bucket]);
+  // The node list, keyed by the session bucket. Auto-refresh every 10 s while a node
+  // is starting or stopping; each read starts after the previous one settles, and a
+  // bucket's late answer cannot replace another bucket's.
+  const nodesPath = `/api/v1/work-nodes/sessions?bucket=${bucket}`;
+  const nodeList = useResource(
+    canView ? nodesPath : null,
+    useCallback(
+      (signal: AbortSignal) => api.get<WorkNodeListResponse>(nodesPath, { signal }),
+      [nodesPath],
+    ),
+    {
+      poll: ({ data }) =>
+        data?.sessions.some((n) => n.status === "starting" || n.status === "stopping") ? 10000 : false,
+      // Ends the page's first-load spinner; the list itself shows the hook's own loading state.
+      onSuccess: () => setLoadedOnce(true),
+      onError: (e) => {
+        // Never fall through to the empty state here: these nodes bill by the hour,
+        // and "you have none" is a very different claim from "we could not ask".
+        logError("loading work nodes", e);
+        setLoadedOnce(true);
+      },
+    },
+  );
+  const nodes: WorkNode[] = nodeList.data?.sessions ?? [];
+  const loadError = nodeList.error && !nodeList.stale ? loadFailureMessage("Work nodes") : null;
+  const loadNodes = nodeList.refresh;
 
   async function loadRepos() {
     try {
@@ -578,12 +586,14 @@ export default function WorkNodesPage() {
         <h2 className="text-base font-semibold text-gray-900">Work Nodes</h2>
         <SessionBucketFilter value={bucket} onChange={setBucket} />
       </div>
-      {loadError ? (
+      {nodeList.stale && <StaleNotice what="Work nodes" onRetry={() => void loadNodes()} />}
+      {nodeList.loading ? (
+        <ContentLoading />
+      ) : loadError ? (
         <ErrorState
           message={loadError}
           onRetry={() => {
-            setLoading(true);
-            loadNodes();
+            void loadNodes();
           }}
         />
       ) : nodes.length === 0 ? (

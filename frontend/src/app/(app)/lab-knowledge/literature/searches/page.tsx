@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { SearchProgress, sourceChipClass } from "@/components/literature/SearchProgress";
@@ -9,6 +9,10 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { clickableCard } from "@/lib/a11y";
 import { Button } from "@/components/ui/Button";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
+import { isAbortError } from "@/lib/abort";
+import { watchJob } from "@/lib/watchJob";
 
 import {  cleanText,
   formatAuthors,
@@ -20,92 +24,105 @@ import {  cleanText,
 
 export default function LiteratureSearchesPage() {
   const router = useRouter();
-  const [searches, setSearches] = useState<SearchSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
-  const [activeResults, setActiveResults] = useState<Paper[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [pollStatus, setPollStatus] = useState<SearchSummary | null>(null);
-  const cancelRef = useRef(false);
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const list = useResource(
+    "literature-searches",
+    useCallback((signal: AbortSignal) => literature.listSearches({ signal }), []),
+    { onError: (e) => logError("loading searches", e) },
+  );
+  const searches: SearchSummary[] = list.data?.items ?? [];
+  const loading = list.loading;
+  const error = list.error && !list.stale ? loadFailureMessage("Searches") : null;
+  const refresh = () => void list.refresh();
 
-  function refresh() {
-    setLoading(true);
-    setError(null);
-    literature
-      .listSearches()
-      .then((data) => {
-        setSearches(data.items);
-        setError(null);
-      })
-      .catch((e) => {
-        logError("loading searches", e);
-        setError(loadFailureMessage("Searches"));
-      })
-      .finally(() => setLoading(false));
-  }
+  // The results shown belong to the selected search only: a late answer for an
+  // earlier selection is dropped.
+  // A search being watched shows no results until the watch ends (as before).
+  const [watchingId, setWatchingId] = useState<number | null>(null);
+  const results = useResource(
+    activeSearchId === null || activeSearchId === watchingId ? null : `search-results:${activeSearchId}`,
+    useCallback(
+      (signal: AbortSignal) => literature.getSearchResults(activeSearchId as number, { signal }),
+      [activeSearchId],
+    ),
+    { onError: (e) => logError(`loading results for search ${activeSearchId}`, e) },
+  );
+  // A failed load is said; a failed refresh (e.g. after Add to Library) keeps the results
+  // visible but marked out of date, since their Add buttons may no longer be right.
+  const resultsError = results.error && !results.stale ? loadFailureMessage("Search results") : null;
+  const activeResults: Paper[] = results.data?.items ?? [];
+
+  // The search being watched, if any. A new submission, Stop watching, or leaving
+  // the page ends that watch (never the search itself).
+  const watchRef = useRef<AbortController | null>(null);
+  useEffect(() => () => watchRef.current?.abort(), []);
 
   async function submit() {
     if (!query.trim()) return;
-    cancelRef.current = false;
+    watchRef.current?.abort();
+    const controller = new AbortController();
+    watchRef.current = controller;
     setSubmitting(true);
     try {
       const created = await literature.submitSearch({ query: query.trim() });
+      if (controller.signal.aborted) return;
       setQuery("");
+      setWatchingId(created.id);
       setActiveSearchId(created.id);
+      setSelectedIds(new Set());
       // Show progress immediately from the created record, then keep it live.
       setPollStatus(created);
-      // Poll per-source status until every source is terminal (or the user stops
-      // watching). The count of finished sources is the honest progress signal.
-      for (let i = 0; i < 60; i++) {
-        if (cancelRef.current) break;
-        await new Promise((r) => setTimeout(r, 1000));
-        if (cancelRef.current) break;
-        const s = await literature.getSearch(created.id);
-        if (cancelRef.current) break;
-        setPollStatus(s);
-        if (
-          s.status === "complete" ||
-          s.status === "partial" ||
-          s.status === "failed"
-        ) {
-          break;
-        }
-      }
-      if (!cancelRef.current) {
-        refresh();
-        const results = await literature.getSearchResults(created.id);
-        setActiveResults(results.items);
-        setSelectedIds(new Set());
-      }
+      // Poll per-source status until every source is terminal (at most 60 reads, one
+      // second apart). The count of finished sources is the honest progress signal.
+      await watchJob(
+        created,
+        async () => {
+          const s = await literature.getSearch(created.id);
+          if (!controller.signal.aborted) setPollStatus(s);
+          return s;
+        },
+        (s) => s !== created && (s.status === "complete" || s.status === "partial" || s.status === "failed"),
+        { intervalMs: 1000, maxReads: 60, signal: controller.signal },
+      );
+      // Ending the watch lets the finished search's results load, but only if the
+      // user is still on it: a selection made meanwhile is left alone.
+      refresh();
+    } catch (e) {
+      if (!isAbortError(e) && !controller.signal.aborted) throw e;
     } finally {
-      setSubmitting(false);
-      setPollStatus(null);
+      if (watchRef.current === controller) {
+        watchRef.current = null;
+        setWatchingId(null);
+        setSubmitting(false);
+        setPollStatus(null);
+      }
     }
   }
 
   // Stop the client from waiting. The search keeps running server-side and appears
-  // in the list below when it finishes; the poll loop notices the flag and exits.
+  // in the list below when it finishes.
   function stopWatching() {
-    cancelRef.current = true;
+    watchRef.current?.abort();
+    watchRef.current = null;
+    setWatchingId(null);
     setSubmitting(false);
     setPollStatus(null);
     refresh();
   }
 
-  async function viewResults(id: number) {
-    setActiveSearchId(id);
+  function viewResults(id: number) {
     setSelectedIds(new Set());
-    const data = await literature.getSearchResults(id);
-    setActiveResults(data.items);
+    if (id === activeSearchId) {
+      void results.refresh();
+      return;
+    }
+    setActiveSearchId(id);
   }
 
   const toggleSelect = (id: number) =>
@@ -126,8 +143,7 @@ export default function LiteratureSearchesPage() {
     setAdding(true);
     try {
       await literature.addToLibrary(id);
-      const data = await literature.getSearchResults(activeSearchId!);
-      setActiveResults(data.items);
+      await results.refresh();
     } finally {
       setAdding(false);
     }
@@ -138,8 +154,7 @@ export default function LiteratureSearchesPage() {
     setAdding(true);
     try {
       await literature.bulkAddToLibrary(Array.from(selectedIds));
-      const data = await literature.getSearchResults(activeSearchId!);
-      setActiveResults(data.items);
+      await results.refresh();
       setSelectedIds(new Set());
     } finally {
       setAdding(false);
@@ -184,6 +199,7 @@ export default function LiteratureSearchesPage() {
           <SearchProgress status={pollStatus} onStop={stopWatching} />
         )}
 
+        {list.stale && <StaleNotice what="Searches" onRetry={refresh} />}
         {loading ? (
           <LoadingSpinner />
         ) : error ? (
@@ -222,6 +238,25 @@ export default function LiteratureSearchesPage() {
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {resultsError && (
+          <div
+            data-testid="search-results-error"
+            role="status"
+            className="mt-6 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-center justify-between gap-3"
+          >
+            <span>{resultsError}</span>
+            <Button variant="secondary" size="sm" onClick={() => void results.refresh()}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {results.stale && (
+          <div className="mt-6">
+            <StaleNotice what="Search results" onRetry={() => void results.refresh()} />
           </div>
         )}
 

@@ -7,6 +7,9 @@ import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResource } from "@/hooks/useResource";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
@@ -15,16 +18,12 @@ import type {
 } from "@/lib/types";
 
 export default function PlotArchivePage() {
-  const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [experimentId, setExperimentId] = useState("");
   const [pipelineRunId, setPipelineRunId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
   const [expandedPlot, setExpandedPlot] = useState<PlotArchiveResponse | null>(null);
@@ -70,38 +69,31 @@ export default function PlotArchivePage() {
     })();
   }, []);
 
-  const fetchPlots = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        page_size: String(pageSize),
-      });
-      if (query) params.set("query", query);
-      if (experimentId) params.set("experiment_id", experimentId);
-      if (pipelineRunId) params.set("pipeline_run_id", pipelineRunId);
-      if (dateFrom) params.set("date_from", dateFrom);
-      if (dateTo) params.set("date_to", dateTo);
-      const data = await api.get<PlotArchiveListResponse>(
-        `/api/plots?${params}`
-      );
-      setPlots(data.plots);
-      setTotal(data.total);
-      // Without this, a Retry that SUCCEEDS still leaves the failure sentence on
-      // screen: the error was set on the way down and never cleared on the way back
-      // up, so the only way to lose it was a full page reload.
-      setLoadError(null);
-    } catch (e) {
-      logError("loading the plot archive", e);
-      setLoadError(loadFailureMessage("Plots"));
-    } finally {
-      setLoading(false);
-    }
-  }, [page, query, experimentId, pipelineRunId, dateFrom, dateTo]);
-
-  useEffect(() => {
-    fetchPlots();
-  }, [fetchPlots]);
+  // Keyed by the settled query, page, experiment, run, and dates: typing waits for a pause, and
+  // only the current key's answer is shown.
+  const settledQuery = useDebouncedValue(query, 300);
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (settledQuery) params.set("query", settledQuery);
+  if (experimentId) params.set("experiment_id", experimentId);
+  if (pipelineRunId) params.set("pipeline_run_id", pipelineRunId);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const listPath = `/api/plots?${params}`;
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<PlotArchiveListResponse>(listPath, { signal }), [listPath]),
+    {
+      onError: (e) => logError("loading the plot archive", e),
+    },
+  );
+  const loadError = list.error ? loadFailureMessage("Plots") : null;
+  const plots: PlotArchiveResponse[] = list.data?.plots ?? [];
+  const total = list.data?.total ?? 0;
+  const loading = list.loading;
+  const fetchPlots = list.refresh;
 
   const resetPage = () => setPage(1);
 
@@ -212,10 +204,12 @@ export default function PlotArchivePage() {
           </div>
         </div>
 
+        {list.stale && <StaleNotice what="Plots" onRetry={() => void fetchPlots()} />}
+
         {loading ? (
           <ContentLoading variant="table" />
-        ) : loadError ? (
-          <ErrorState message={loadError} onRetry={() => fetchPlots()} />
+        ) : loadError && !list.stale ? (
+          <ErrorState message={loadError} onRetry={() => void fetchPlots()} />
         ) : plots.length === 0 ? (
           <p className="text-gray-500 text-sm">No plots found.</p>
         ) : (

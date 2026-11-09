@@ -2,13 +2,14 @@
 
 import { NOT_SET } from "@/lib/placeholders";
 import { NotSet } from "@/components/shared/NotSet";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { PageSizeSelect, DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { useResource } from "@/hooks/useResource";
 import { ReviewBadge } from "@/components/experiments/ReviewBadge";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
@@ -25,12 +26,8 @@ export default function PipelineRunsPage() {
   const router = useRouter();
   const { has } = useCapabilities();
   const showCost = has("cost_estimation");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [runs, setRuns] = useState<PipelineRun[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("");
-  const [loading, setLoading] = useState(true);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   // Unset until the user asks, so an untouched list keeps the server's own
   // ordering (created_at DESC) rather than being silently re-sorted by id.
@@ -38,20 +35,50 @@ export default function PipelineRunsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  useEffect(() => {
-    loadRuns();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, page, pageSize, statusFilter, sortField, sortDir]);
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (statusFilter) params.set("status", statusFilter);
+  // Sorting happens in the query, before the LIMIT. Sorting the rows this
+  // page already holds answers a different question: on the demo, "sort by
+  // ID ascending" over page 1 of 29 runs put #5 at the top when the real
+  // answer was #1, on page 2.
+  if (sortField) {
+    params.set("sort_by", sortField);
+    params.set("sort_dir", sortDir);
+  }
+  const listPath = `/api/pipeline-runs?${params}`;
 
   // This is the fleet view, and it was the only live surface in the app that never
   // refreshed itself: the run detail polls every 10s, logs every 5s, pipeline
   // templates every 5s, cellxgene every 5s. A run that finished, failed, or was
   // launched from anywhere else did not appear here until the user reloaded.
-  useEffect(() => {
-    const interval = setInterval(() => loadRuns({ silent: true }), REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, statusFilter, sortField, sortDir]);
+  // Keyed by page, size, filter, and sort; each refresh starts after the previous
+  // one settles, and only the current selection's answer is shown.
+  const list = useResource(
+    listPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<PipelineRunListResponse>(listPath, { signal }),
+      [listPath],
+    ),
+    {
+      poll: REFRESH_INTERVAL_MS,
+      // Two things were wrong here. The raw server string went onto the screen
+      // ("Could not load pipeline runs. {loadError}"), against the house rule. And
+      // `runs` was never touched, so the red error row rendered UNDERNEATH a full table
+      // of stale rows that still read as current.
+      //
+      // The rows are not discarded, because a transient blip during a 10s poll should
+      // not blank a table the user is reading. They are labelled instead: the banner
+      // sits above the table and says what is shown may be out of date.
+      onError: (e) => logError("loading the pipeline runs list", e),
+    },
+  );
+  const loadError = list.error ? loadFailureMessage("The pipeline runs list") : null;
+  const runs: PipelineRun[] = list.data?.runs ?? [];
+  const total = list.data?.total ?? 0;
+  // A background refresh must not replace the table with a skeleton every 10s:
+  // only a selection with no answer yet shows the skeleton.
+  const loading = list.loading;
+  const loadRuns = list.refresh;
 
   // `formatDuration` read Date.now() once, at render, so an in-flight 8-hour run read
   // "3m" until the page was reloaded. It is the only elapsed-time signal on this
@@ -63,38 +90,6 @@ export default function PipelineRunsPage() {
     const tick = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
     return () => clearInterval(tick);
   }, [hasInFlight]);
-
-  async function loadRuns(opts: { silent?: boolean } = {}) {
-    // A background refresh must not replace the table with a skeleton every 10s.
-    if (!opts.silent) setLoading(true);
-    try {
-      const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-      if (statusFilter) params.set("status", statusFilter);
-      // Sorting happens in the query, before the LIMIT. Sorting the rows this
-      // page already holds answers a different question: on the demo, "sort by
-      // ID ascending" over page 1 of 29 runs put #5 at the top when the real
-      // answer was #1, on page 2.
-      if (sortField) {
-        params.set("sort_by", sortField);
-        params.set("sort_dir", sortDir);
-      }
-      const data = await api.get<PipelineRunListResponse>(`/api/pipeline-runs?${params}`);
-      setRuns(data.runs);
-      setTotal(data.total);
-      setLoadError(null);
-    } catch (e) {
-      // Two things were wrong here. The raw server string went onto the screen
-      // ("Could not load pipeline runs. {loadError}"), against the house rule. And
-      // `runs` was never touched, so the red error row rendered UNDERNEATH a full table
-      // of stale rows that still read as current.
-      //
-      // The rows are not discarded, because a transient blip during a 10s poll should
-      // not blank a table the user is reading. They are labelled instead: the banner
-      // sits above the table and says what is shown may be out of date.
-      logError("loading the pipeline runs list", e);
-      setLoadError(loadFailureMessage("The pipeline runs list"));
-    } finally { if (!opts.silent) setLoading(false); }
-  }
 
   function formatDuration(startedAt: string | null, completedAt: string | null): string {
     if (!startedAt) return NOT_SET;
@@ -146,10 +141,6 @@ export default function PipelineRunsPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      {loading ? (
-        <ContentLoading variant="table" />
-      ) : (
-      <>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Pipeline Runs</h1>
@@ -166,6 +157,13 @@ export default function PipelineRunsPage() {
           <option value="cancelled">Cancelled</option>
         </select>
       </div>
+
+      {/* The heading and filter stay mounted while a new selection loads; only the
+          list area waits. */}
+      {loading ? (
+        <ContentLoading variant="table" />
+      ) : (
+      <>
 
       {loadError && (
         <div

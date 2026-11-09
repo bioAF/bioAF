@@ -1,13 +1,16 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResource } from "@/hooks/useResource";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -21,19 +24,12 @@ import { Card } from "@/components/ui/Card";
 export default function ExperimentsPage() {
   const toast = useToast();
   const router = useRouter();
-  const [experiments, setExperiments] = useState<Experiment[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [projectsDenied, setProjectsDenied] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // Bumped by Retry: the load lives in an effect keyed on the filters, so this
-  // is what re-triggers it without changing what the user asked for.
-  const [reloadKey, setReloadKey] = useState(0);
   const pageSize = 25;
 
   useEffect(() => {
@@ -44,27 +40,23 @@ export default function ExperimentsPage() {
     });
   }, [router]);
 
-  useEffect(() => {
-    if (!isAuthenticated()) return;
-    setLoading(true);
-
-    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-    if (search) params.set("search", search);
-    if (statusFilter) params.set("status", statusFilter);
-    if (projectFilter) params.set("project_id", projectFilter);
-
-    setLoadError(null);
-    api.get<ExperimentListResponse>(`/api/experiments?${params}`)
-      .then((data) => {
-        setExperiments(data.experiments);
-        setTotal(data.total);
-      })
-      .catch((e) => {
-        logError("loading experiments", e);
-        setLoadError(loadFailureMessage("Experiments"));
-      })
-      .finally(() => setLoading(false));
-  }, [page, search, statusFilter, projectFilter, reloadKey]);
+  // Keyed by the settled query, page, status, and project: typing waits for a pause, and only
+  // the current key's answer is shown.
+  const settledSearch = useDebouncedValue(search, 300);
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (settledSearch) params.set("search", settledSearch);
+  if (statusFilter) params.set("status", statusFilter);
+  if (projectFilter) params.set("project_id", projectFilter);
+  const listPath = `/api/experiments?${params}`;
+  const list = useResource(
+    isAuthenticated() ? listPath : null,
+    useCallback((signal: AbortSignal) => api.get<ExperimentListResponse>(listPath, { signal }), [listPath]),
+    { onError: (e) => logError("loading experiments", e) },
+  );
+  const experiments: Experiment[] = list.data?.experiments ?? [];
+  const total = list.data?.total ?? 0;
+  const loading = list.loading;
+  const loadError = list.error && !list.stale ? loadFailureMessage("Experiments") : null;
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -127,6 +119,8 @@ export default function ExperimentsPage() {
         </div>
       </div>
 
+      {list.stale && <StaleNotice what="Experiments" onRetry={() => void list.refresh()} />}
+
       {loading ? (
         <div className="flex justify-center py-12">
           <LoadingSpinner size="lg" />
@@ -135,7 +129,7 @@ export default function ExperimentsPage() {
         <Card padding="none">
           <ErrorState
             message={loadError}
-            onRetry={() => setReloadKey((k) => k + 1)}
+            onRetry={() => void list.refresh()}
           />
         </Card>
       ) : experiments.length === 0 ? (

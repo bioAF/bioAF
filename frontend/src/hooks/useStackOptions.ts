@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { onSessionReset, sessionGeneration } from "@/lib/session";
 
 // One selectable compute+storage stack with provider-appropriate labels. Mirrors
 // the backend StackOption (app/schemas/infrastructure.py); the backend is the
@@ -59,6 +60,10 @@ export function invalidateStackOptionsCache() {
   fetchPromise = null;
 }
 
+// The endpoint requires infrastructure:view, so the answer is the signed-in user's: it ends with
+// the session.
+onSessionReset(invalidateStackOptionsCache);
+
 /**
  * The install's stack options (GCP -> GKE+GCS, AWS -> EKS+S3, ...), read from the
  * backend /stack-options endpoint (the same cloud-provider POLICY the BAL uses).
@@ -79,17 +84,20 @@ export function useStackOptions() {
       setLoading(false);
       return;
     }
+    const generation = sessionGeneration();
+    const current = () => generation === sessionGeneration();
     if (!fetchPromise) {
       fetchPromise = api
         .get<StackOptionsResponse>("/api/v1/infrastructure/stack-options")
         .then((resp) => {
-          cached = resp;
+          if (current()) cached = resp;
         })
         .catch(() => {
-          cached = DEFAULT_STACK_OPTIONS;
+          if (current()) cached = DEFAULT_STACK_OPTIONS;
         });
     }
     fetchPromise.then(() => {
+      if (!current()) return;
       setData(cached!);
       setLoading(false);
     });

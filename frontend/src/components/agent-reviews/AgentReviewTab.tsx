@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
+import { StaleNotice } from "@/components/shared/StaleNotice";
 import {
   AgentReviewEntityType,
   AgentReviewSummary,
@@ -37,9 +39,6 @@ export function AgentReviewTab({
 }: AgentReviewTabProps) {
   const { canAccess } = usePermissions();
   const canDismiss = canAccess("llm_integration", "use");
-  const [items, setItems] = useState<AgentReviewSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("active");
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -57,32 +56,28 @@ export function AgentReviewTab({
     window.localStorage.setItem(filterKeyFor(entityType, entityId), filter);
   }, [filter, entityType, entityId]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await api.get<ListResponse>(
-        `/api/agent_reviews?entity_type=${entityType}&entity_id=${entityId}&filter=${filter}`,
-      );
-      setItems(resp.items);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [entityType, entityId, filter]);
+  // Keyed by entity and filter: only the current filter's answer is shown.
+  const path = `/api/agent_reviews?entity_type=${entityType}&entity_id=${entityId}&filter=${filter}`;
+  const list = useResource(
+    path,
+    useCallback((signal: AbortSignal) => api.get<ListResponse>(path, { signal }), [path]),
+    {
+      // Poll while any item is still pending so the card resolves without a reload.
+      poll: ({ data }) => (data?.items.some((i) => i.status === "pending") ? 3000 : false),
+    },
+  );
+  const items: AgentReviewSummary[] = list.data?.items ?? [];
+  const loading = list.loading;
+  const error = list.error && !list.stale ? (list.error as Error).message : null;
+  const refresh = list.refresh;
 
+  // The parent bumps refreshSignal after dispatching a review; the first value is the mount's.
+  const lastSignal = useRef(refreshSignal);
   useEffect(() => {
-    refresh();
-  }, [refresh, refreshSignal]);
-
-  // Poll while any item is still pending so the card resolves without a reload.
-  useEffect(() => {
-    const hasPending = items.some((i) => i.status === "pending");
-    if (!hasPending) return;
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, [items, refresh]);
+    if (lastSignal.current === refreshSignal) return;
+    lastSignal.current = refreshSignal;
+    void refresh();
+  }, [refreshSignal, refresh]);
 
   return (
     <div className="space-y-4">
@@ -102,13 +97,14 @@ export function AgentReviewTab({
         ))}
       </div>
 
+      {list.stale && <StaleNotice what="Reviews" onRetry={() => void refresh()} />}
       {loading && <div className="text-gray-500 text-sm">Loading...</div>}
       {error && (
         <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3">
           {error}
         </div>
       )}
-      {!loading && items.length === 0 && (
+      {!loading && !error && items.length === 0 && (
         <div className="text-gray-500 text-sm">No reviews match this filter.</div>
       )}
 

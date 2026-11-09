@@ -3,13 +3,14 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
+import { useResource } from "@/hooks/useResource";
 import type {
   NotebookSession,
   SessionListResponse,
@@ -38,7 +39,7 @@ import { useToast } from "@/components/shared/Toast";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
-import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
+import { isPermissionDenied, loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
@@ -52,23 +53,23 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
   "2xlarge": { label: "XX Large", description: "Very large or multi-sample integration" },
 };
 
+const BUILD_STATUS_PATH = "/api/v1/infrastructure/notebook-image/build-status";
+
+interface ImageBuildStatus {
+  build_id: string | null;
+  build_status: string | null;
+  image_uri: string | null;
+}
+
 export default function NotebooksPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<NotebookSession[]>([]);
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   useDismissOnEscape(viewingSession !== null, () => { setViewingSession(null); setProvenance(null); });
-  const [loading, setLoading] = useState(true);
-  const [imageBuildStatus, setImageBuildStatus] = useState<{
-    build_id: string | null;
-    build_status: string | null;
-    image_uri: string | null;
-  } | null>(null);
 
   // Launch modal state
   const [showLaunchModal, setShowLaunchModal] = useState(false);
@@ -101,20 +102,61 @@ export default function NotebooksPage() {
   const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
   useEffect(() => {
-    loadSessions(bucket);
     loadExperiments();
     loadProjects();
-    loadBuildStatus();
     loadEnvironments();
     loadResourceProfiles();
   }, [bucket]);
 
-  useEffect(() => {
-    const hasStarting = sessions.some((s) => s.status === "starting");
-    if (!hasStarting) return;
-    const interval = setInterval(() => loadSessions(bucket), 10000);
-    return () => clearInterval(interval);
-  }, [sessions, bucket]);
+  // Sessions, keyed by bucket: re-read every 10 s while one is starting, each read
+  // after the previous one settles. A bucket's late answer cannot replace another's.
+  const sessionsPath = `/api/v1/notebooks/sessions?bucket=${bucket}`;
+  const sessionList = useResource(
+    sessionsPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<SessionListResponse>(sessionsPath, { signal }),
+      [sessionsPath],
+    ),
+    {
+      poll: ({ data }) => (data?.sessions.some((s) => s.status === "starting") ? 10000 : false),
+      onError: (e) => {
+        // These sessions bill while they run, so "you have none" must never stand
+        // in for "we could not ask". The comment was right and the render was not: the
+        // error row and the "No active sessions" row were separate conditions, so both
+        // rendered at once and the page said both things simultaneously. See below.
+        logError("loading the notebook sessions", e);
+      },
+    },
+  );
+  const loadError = sessionList.error ? loadFailureMessage("Notebook sessions") : null;
+  const sessions: NotebookSession[] = sessionList.data?.sessions ?? [];
+  const loading = sessionList.loading;
+  const loadSessions = sessionList.refresh;
+
+  // The notebook image build: one poll for the page, every 15 s while it is working
+  // or queued, stopped when it finishes or the page closes. It used to be a recursive
+  // timeout restarted on every bucket change, so watchers stacked up and outlived the page.
+  // A failed first read is said and re-checked on the same 15 s cadence, since nothing on screen
+  // would otherwise show a build is running. A 403 is expected: bench and viewer roles can open
+  // this page without infrastructure view, so that read stays silent and is not repeated.
+  const buildStatusResource = useResource(
+    BUILD_STATUS_PATH,
+    useCallback(
+      (signal: AbortSignal) => api.get<ImageBuildStatus>(BUILD_STATUS_PATH, { signal }),
+      [],
+    ),
+    {
+      poll: ({ data, error }) =>
+        error !== null || (data?.build_status && ["WORKING", "QUEUED"].includes(data.build_status))
+          ? 15000
+          : false,
+      expected: isPermissionDenied,
+      // Polled while building, so a toast per tick would bury the page. The log is the record.
+      onError: (e) => logError("loading the notebook image build status", e),
+    },
+  );
+  const imageBuildStatus = buildStatusResource.data ?? null;
+  const buildStatusLoadFailed = buildStatusResource.error !== null && !buildStatusResource.stale;
 
   async function loadResourceProfiles() {
     try {
@@ -131,42 +173,6 @@ export default function NotebooksPage() {
     } catch (e) {
       logError("loading resource profiles", e);
       toast.error(loadFailureMessage("Resource profile availability"));
-    }
-  }
-
-  async function loadBuildStatus() {
-    try {
-      const status = await api.get<{
-        build_id: string | null;
-        build_status: string | null;
-        image_uri: string | null;
-      }>("/api/v1/infrastructure/notebook-image/build-status");
-      setImageBuildStatus(status);
-      if (status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)) {
-        setTimeout(loadBuildStatus, 15000);
-      }
-    } catch (e) {
-      // Polled every few seconds, so a toast per tick would bury the page. The log is the record.
-      logError("loading the notebook image build status", e);
-    }
-  }
-
-  async function loadSessions(currentBucket: SessionBucket = bucket) {
-    try {
-      const data = await api.get<SessionListResponse>(
-        `/api/v1/notebooks/sessions?bucket=${currentBucket}`,
-      );
-      setSessions(data.sessions);
-      setLoadError(null);
-    } catch (e) {
-      // These sessions bill while they run, so "you have none" must never stand
-      // in for "we could not ask". The comment was right and the render was not: the
-      // error row and the "No active sessions" row were separate conditions, so both
-      // rendered at once and the page said both things simultaneously. See below.
-      logError("loading the notebook sessions", e);
-      setLoadError(loadFailureMessage("Notebook sessions"));
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -347,7 +353,7 @@ export default function NotebooksPage() {
       };
       await api.post("/api/v1/notebooks/sessions", req);
       setShowLaunchModal(false);
-      loadSessions(bucket);
+      void loadSessions();
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
     } finally {
@@ -367,7 +373,7 @@ export default function NotebooksPage() {
     setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);
-      loadSessions(bucket);
+      void loadSessions();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not stop the session. It may still be running and billing.");
     } finally {
@@ -421,6 +427,21 @@ export default function NotebooksPage() {
         )}
       </div>
 
+      {buildStatusLoadFailed && (
+        <div
+          data-testid="build-status-load-failed"
+          role="status"
+          className="mb-6 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800 flex items-center justify-between gap-3"
+        >
+          <span>
+            Notebook image build status is unavailable. bioAF will keep checking.
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => void buildStatusResource.refresh()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Build Status Banner */}
       {imageBuildStatus?.build_status && ["WORKING", "QUEUED"].includes(imageBuildStatus.build_status) && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
@@ -439,6 +460,11 @@ export default function NotebooksPage() {
                 )}
                 {" -- "}this one-time setup can take up to an hour. Sessions launched now may fail until it completes.
               </p>
+              {buildStatusResource.stale && (
+                <p data-testid="build-status-unavailable" role="status" className="text-xs text-amber-800 mt-1">
+                  The build status could not be read, so what is shown may be out of date. bioAF keeps checking.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -556,7 +582,7 @@ export default function NotebooksPage() {
                     <p className="text-red-700 mb-3">{loadError}</p>
                     <button
                       type="button"
-                      onClick={() => loadSessions()}
+                      onClick={() => void loadSessions()}
                       className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
                     >
                       Retry

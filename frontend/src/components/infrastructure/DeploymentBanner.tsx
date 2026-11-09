@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useResource } from "@/hooks/useResource";
+import { isPermissionDenied } from "@/lib/projectOptions";
 
 interface TerraformStatus {
   terraform_initialized: boolean;
@@ -33,49 +35,50 @@ const TOAST_MESSAGES: Record<string, { text: string; link: string; linkText: str
 };
 
 export function DeploymentBanner() {
-  const [deploying, setDeploying] = useState(false);
-  const [previouslyDeploying, setPreviouslyDeploying] = useState(false);
   const [toast, setToast] = useState<{ text: string; link: string; linkText: string } | null>(null);
+  const previouslyDeployingRef = useRef(false);
   const lastSeenModuleRef = useRef<string | null>(null);
 
-  const checkStatus = useCallback(async () => {
-    try {
-      const status = await api.get<TerraformStatus>(
-        "/api/v1/infrastructure/terraform/status",
-      );
-      const isActive = status.active_run_id !== null;
+  // A run finishing is announced once. The previous answer's state is kept only to detect that
+  // transition; whether the banner shows is derived from the current answer below.
+  const onStatus = useCallback((status: TerraformStatus) => {
+    const isActive = status.active_run_id !== null;
 
-      if (previouslyDeploying && !isActive) {
-        // A run just finished -- show a phase-specific toast
-        const completedModule = status.last_completed_module;
-        // Only show the toast if the completed module changed (avoids
-        // re-showing the same toast on every poll after completion).
-        if (completedModule !== lastSeenModuleRef.current) {
-          lastSeenModuleRef.current = completedModule;
-          const message = TOAST_MESSAGES[completedModule ?? "default"] ?? TOAST_MESSAGES.default;
-          setToast(message);
-          setTimeout(() => setToast(null), 10_000);
-        }
-        setDeploying(false);
-        setPreviouslyDeploying(false);
-      } else {
-        setDeploying(isActive);
-        setPreviouslyDeploying(isActive);
-        if (isActive) {
-          // Track current module so we detect the transition
-          lastSeenModuleRef.current = status.last_completed_module;
-        }
+    if (previouslyDeployingRef.current && !isActive) {
+      // A run just finished -- show a phase-specific toast
+      const completedModule = status.last_completed_module;
+      // Only show the toast if the completed module changed (avoids
+      // re-showing the same toast on every poll after completion).
+      if (completedModule !== lastSeenModuleRef.current) {
+        lastSeenModuleRef.current = completedModule;
+        const message = TOAST_MESSAGES[completedModule ?? "default"] ?? TOAST_MESSAGES.default;
+        setToast(message);
+        setTimeout(() => setToast(null), 10_000);
       }
-    } catch {
-      // Silently ignore -- user may not be admin or not logged in
+      previouslyDeployingRef.current = false;
+    } else {
+      previouslyDeployingRef.current = isActive;
+      if (isActive) {
+        // Track current module so we detect the transition
+        lastSeenModuleRef.current = status.last_completed_module;
+      }
     }
-  }, [previouslyDeploying]);
+  }, []);
 
-  useEffect(() => {
-    checkStatus();
-    const interval = setInterval(checkStatus, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [checkStatus]);
+  // Each read starts after the previous one settles. A failed read is not a finished run: it
+  // changes nothing but the stale note. A 403 is expected (the endpoint needs
+  // infrastructure:change_status, so every non-admin gets it) and is not re-polled.
+  const statusRead = useResource(
+    "terraform-status",
+    useCallback(
+      (signal: AbortSignal) =>
+        api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status", { signal }),
+      [],
+    ),
+    { poll: POLL_INTERVAL_MS, expected: isPermissionDenied, onSuccess: onStatus },
+  );
+  // The last answer stays during a failed refresh, so a running deployment keeps its banner.
+  const deploying = statusRead.data ? statusRead.data.active_run_id !== null : false;
 
   return (
     <>
@@ -88,6 +91,7 @@ export function DeploymentBanner() {
             <span className="inline-block h-2 w-2 bg-amber-500 rounded-full animate-pulse" />
             <span className="text-sm text-amber-800 font-medium">
               Infrastructure is deploying. Please do not start any pipeline runs yet.
+              {statusRead.stale && " Deployment status could not be refreshed; bioAF keeps checking."}
             </span>
           </div>
           <Link

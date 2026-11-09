@@ -9,6 +9,7 @@ import {
   MINIMAL_CAPABILITIES,
   type CapabilityFlag,
 } from "./capabilitiesCache";
+import { sessionGeneration } from "@/lib/session";
 
 // Re-export the cache primitives so consumers keep a single import surface
 // ("@/hooks/useCapabilities"). The cache itself lives in a leaf module to avoid
@@ -52,18 +53,23 @@ export function useCapabilities() {
       return;
     }
 
+    // An answer that settles after the session ended (or another began) belongs to nobody.
+    const generation = sessionGeneration();
+    const current = () => generation === sessionGeneration();
+
     if (!capabilitiesCache.promise) {
       capabilitiesCache.promise = api
         .get<BootstrapStatusWithCapabilities>("/api/bootstrap/status")
         .then((status) => {
-          capabilitiesCache.value = normalizeCapabilities(status.capabilities);
+          if (current()) capabilitiesCache.value = normalizeCapabilities(status.capabilities);
         })
         .catch(() => {
-          capabilitiesCache.value = { ...MINIMAL_CAPABILITIES };
+          if (current()) capabilitiesCache.value = { ...MINIMAL_CAPABILITIES };
         });
     }
 
     capabilitiesCache.promise.then(() => {
+      if (!current()) return;
       setCapabilities(capabilitiesCache.value!);
       setLoading(false);
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -9,6 +9,8 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 
 interface AuditUser {
   id: number;
@@ -27,71 +29,73 @@ interface AuditEntry {
   previous_value: Record<string, unknown> | null;
 }
 
+interface AuditFilters {
+  entityType: string;
+  action: string;
+  startDate: string;
+  endDate: string;
+}
+
+/** The filter part of a list or export query, so both read the same entries. */
+function auditFilterQuery(filters: AuditFilters): string {
+  let query = "";
+  if (filters.entityType) query += `&entity_type=${filters.entityType}`;
+  if (filters.action) query += `&action=${filters.action}`;
+  if (filters.startDate) query += `&start_date=${filters.startDate}`;
+  if (filters.endDate) query += `&end_date=${filters.endDate}`;
+  return query;
+}
+
 export default function AuditLogPage() {
   const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // The last successful total, which keeps pagination in place while the next page loads.
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [entityType, setEntityType] = useState("");
   const [action, setAction] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [exporting, setExporting] = useState(false);
   const pageSize = 25;
+  const filters = useMemo(
+    () => ({ entityType, action, startDate, endDate }),
+    [entityType, action, startDate, endDate],
+  );
 
   useEffect(() => {
     if (permLoading) return;
     if (!canAccess("audit_log", "view")) { router.push("/dashboard"); return; }
   }, [router, permLoading, canAccess]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      let url = `/api/audit?page=${page}&page_size=${pageSize}`;
-      if (entityType) url += `&entity_type=${entityType}`;
-      if (action) url += `&action=${action}`;
-      if (startDate) url += `&start_date=${startDate}`;
-      if (endDate) url += `&end_date=${endDate}`;
-      const data = await api.get<{ entries: AuditEntry[]; total: number }>(url);
-      setEntries(data.entries);
-      setLoadError(null);
-      setTotal(data.total);
-    } catch (e) {
-      logError("loading the audit log", e);
-      setLoadError(loadFailureMessage("The audit log"));
-    } finally {
-      setLoading(false);
-    }
-  }, [page, entityType, action, startDate, endDate]);
-
-  useEffect(() => { load(); }, [load]);
+  // Keyed by page and filters (the same filter query the export uses): only the current key's
+  // answer is shown, so a slow answer for an earlier page or filter cannot replace it.
+  const listPath = `/api/audit?page=${page}&page_size=${pageSize}${auditFilterQuery(filters)}`;
+  const list = useResource(
+    listPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<{ entries: AuditEntry[]; total: number }>(listPath, { signal }),
+      [listPath],
+    ),
+    {
+      onSuccess: (data) => setTotal(data.total),
+      onError: (e) => logError("loading the audit log", e),
+    },
+  );
+  const entries: AuditEntry[] = list.data?.entries ?? [];
+  const loading = list.loading;
+  const loadError = list.error ? loadFailureMessage("The audit log") : null;
+  const load = list.refresh;
 
   const totalPages = Math.ceil(total / pageSize);
 
   async function handleExport() {
     setExporting(true);
     try {
-      let url = `/api/audit/export?format=csv`;
-      if (entityType) url += `&entity_type=${entityType}`;
-      if (action) url += `&action=${action}`;
-      if (startDate) url += `&start_date=${startDate}`;
-      if (endDate) url += `&end_date=${endDate}`;
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}${url}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("bioaf_token")}`,
-        },
+      await api.download(`/api/audit/export?format=csv${auditFilterQuery(filters)}`, "GET", undefined, {
+        filename: "audit_log.csv",
       });
-      if (!response.ok) throw new Error("Export failed");
-      const blob = await response.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "audit_log.csv";
-      a.click();
-      URL.revokeObjectURL(a.href);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not export the audit log.");
     } finally {
@@ -197,6 +201,8 @@ export default function AuditLogPage() {
           )}
         </div>
 
+        {list.stale && <StaleNotice what="The audit log" onRetry={() => void load()} />}
+
         {/*
           `total` is whatever the last SUCCESSFUL load returned, so with an error
           occupying the table below it read as a live count of the current filter:
@@ -223,9 +229,9 @@ export default function AuditLogPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={5} className="px-4 py-8"><ContentLoading variant="table" /></td></tr>
-              ) : loadError ? (
+              ) : loadError && !list.stale ? (
                 <tr><td colSpan={5} className="px-4 py-8">
-                  <ErrorState message={loadError} onRetry={() => load()} />
+                  <ErrorState message={loadError} onRetry={() => void load()} />
                 </td></tr>
               ) : entries.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No audit log entries</td></tr>

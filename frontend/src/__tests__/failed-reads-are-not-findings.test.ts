@@ -51,7 +51,7 @@ describe("an empty collection reached from a rejection is not rendered as a find
     [
       "the cellxgene publication list",
       "app/(app)/results/cellxgene/page.tsx",
-      /setPublicationsError\(/,
+      /const publicationsError =[^;]*list\.error/,
     ],
     [
       "a reference's other versions",
@@ -152,7 +152,7 @@ describe("a read that failed does not arm the write behind it", () => {
 describe("the notification bell does not report an outage as zero", () => {
   it("a failed count is distinguishable from a real zero", () => {
     const src = code("components/notifications/NotificationBell.tsx");
-    expect(src).toMatch(/setCountFailed\(true\)/);
+    expect(src).toMatch(/const countFailed = count\.error !== null/);
     expect(src).toMatch(/notification-count-unknown/);
     // The button had no accessible name at all, so the state was unreachable
     // to a screen reader even once it rendered.

@@ -410,7 +410,12 @@ describe("PipelineRunDetailPage provider details (BAL Phase 4)", () => {
     mockApiResponses("completed", { provider_metadata: null });
     render(<PipelineRunDetailPage />);
     // Wait for the run to load (the API was queried and the page settled).
-    await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/pipeline-runs/1"));
+    await waitFor(() =>
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/pipeline-runs/1",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
     await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
     expect(screen.queryByTestId("provider-details")).toBeNull();
   });

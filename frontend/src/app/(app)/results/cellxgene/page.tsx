@@ -4,6 +4,8 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
@@ -312,42 +314,42 @@ function PublicationCard({
 export default function CellxgenePage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [publications, setPublications] = useState<CellxgenePublicationResponse[]>([]);
   const [experiments, setExperiments] = useState<Map<number, string>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [publicationsError, setPublicationsError] = useState<string | null>(null);
   const [showPublishForm, setShowPublishForm] = useState(false);
   const [filterExperimentId, setFilterExperimentId] = useState<number | null>(null);
+  // The filter's options come from the publications seen so far, so the dropdown stays put while
+  // a newly filtered list loads.
+  const [knownExperimentIds, setKnownExperimentIds] = useState<number[]>([]);
 
-  const fetchPublications = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url = filterExperimentId
-        ? `/api/cellxgene?experiment_id=${filterExperimentId}`
-        : "/api/cellxgene";
-      const data = await api.get<CellxgenePublicationResponse[]>(url);
-      setPublications(data);
-      // A retry that succeeds must leave the failure state behind it.
-      setPublicationsError(null);
-    } catch (e) {
-      logError("loading the cellxgene publications", e);
-      setPublicationsError(loadFailureMessage("Published cellxgene datasets"));
-    } finally {
-      setLoading(false);
-    }
-  }, [filterExperimentId]);
-
-  useEffect(() => {
-    fetchPublications();
-  }, [fetchPublications]);
-
-  // Auto-refresh while any publication is still publishing
-  const hasPublishing = publications.some((p) => p.status === "publishing");
-  useEffect(() => {
-    if (!hasPublishing) return;
-    const interval = setInterval(fetchPublications, 5000);
-    return () => clearInterval(interval);
-  }, [hasPublishing, fetchPublications]);
+  // Keyed by the experiment filter; re-read every 5 s while any publication is still publishing.
+  // A read starts only after the previous one settles, and only the current filter's answer is
+  // shown.
+  const publicationsPath = filterExperimentId
+    ? `/api/cellxgene?experiment_id=${filterExperimentId}`
+    : "/api/cellxgene";
+  const list = useResource(
+    publicationsPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<CellxgenePublicationResponse[]>(publicationsPath, { signal }),
+      [publicationsPath],
+    ),
+    {
+      poll: ({ data }) => (data?.some((p) => p.status === "publishing") ? 5000 : false),
+      onSuccess: (data) => {
+        setKnownExperimentIds((known) => [
+          ...new Set([
+            ...known,
+            ...data.map((p) => p.experiment_id).filter((id): id is number => id != null),
+          ]),
+        ]);
+      },
+      onError: (e) => logError("loading the cellxgene publications", e),
+    },
+  );
+  const publications = list.data ?? [];
+  const publicationsError = list.error ? loadFailureMessage("Published cellxgene datasets") : null;
+  const loading = list.loading;
+  const fetchPublications = list.refresh;
 
   // Load experiment names for display
   useEffect(() => {
@@ -396,7 +398,7 @@ export default function CellxgenePage() {
   };
 
   // Unique experiment IDs from publications for filter dropdown
-  const pubExperimentIds = [...new Set(publications.map((p) => p.experiment_id).filter((id): id is number => id != null))];
+  const pubExperimentIds = knownExperimentIds;
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
@@ -438,9 +440,13 @@ export default function CellxgenePage() {
         </div>
       )}
 
+      {list.stale && (
+        <StaleNotice what="Published cellxgene datasets" onRetry={() => void fetchPublications()} />
+      )}
+
       {loading ? (
         <ContentLoading />
-      ) : publicationsError ? (
+      ) : publicationsError && !list.stale ? (
         <ErrorState message={publicationsError} onRetry={fetchPublications} />
       ) : publications.length === 0 ? (
         <p className="text-gray-500 text-sm">

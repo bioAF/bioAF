@@ -3,11 +3,12 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -25,6 +26,10 @@ import type {
 
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
+function isNotFound(error: unknown): boolean {
+  return (error as { status?: unknown } | null)?.status === 404;
+}
+
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return NOT_SET;
   if (bytes < 1024) return `${bytes} B`;
@@ -34,6 +39,10 @@ function formatBytes(bytes: number | null): string {
 }
 
 type Tab = "files" | "impact" | "details" | "versions";
+
+function isTerminalImport(status: string): boolean {
+  return status === "active" || status === "failed";
+}
 
 export default function DataReferenceDetailPage() {
   const router = useRouter();
@@ -63,9 +72,7 @@ export default function DataReferenceDetailPage() {
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionsFailed, setVersionsFailed] = useState(false);
 
-  const [importStatus, setImportStatus] = useState<ReferenceImportStatusResponse | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const importPollHandle = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadReference();
@@ -74,47 +81,43 @@ export default function DataReferenceDetailPage() {
 
   // Poll the import-status row while the dataset is in flight so the
   // progress bar updates as the in-process background task makes its way
-  // through the source URL.
-  useEffect(() => {
-    if (!reference || reference.status !== "uploading") {
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
-      return;
-    }
-    const tick = async () => {
-      try {
-        const s = await api.get<ReferenceImportStatusResponse>(`/api/references/${id}/import-status`);
-        setImportStatus(s);
-        if (s.status === "active" || s.status === "failed") {
-          // Reload the dataset so the page transitions out of the
-          // in-flight banner once the task reaches a terminal state.
-          loadReference();
-        }
-      } catch {
-        // 404 (no progress row) or transient: keep polling.
-      }
-    };
-    void tick();
-    importPollHandle.current = setInterval(tick, IMPORT_POLL_INTERVAL_MS);
-    return () => {
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference?.status, id]);
+  // through the source URL. Each read starts after the previous one settles;
+  // a 404 (no progress row) or transient failure is retried on the next tick.
+  // A terminal progress status stops the watch: the dataset is reloaded once, and a dataset still
+  // "uploading" after that is a finished download awaiting Finalize, not more progress.
+  // Cancelling is the user's decision to stop watching, before the page navigates away.
+  const [importCancelled, setImportCancelled] = useState(false);
+  const importStatusPath =
+    reference?.status === "uploading" && !importCancelled ? `/api/references/${id}/import-status` : null;
+  const importPoll = useResource(
+    importStatusPath,
+    useCallback(
+      (signal: AbortSignal) =>
+        api.get<ReferenceImportStatusResponse>(`/api/references/${id}/import-status`, { signal }),
+      [id],
+    ),
+    {
+      poll: ({ data }) => (data && isTerminalImport(data.status) ? false : IMPORT_POLL_INTERVAL_MS),
+      onSuccess: (s) => {
+        // Reload the dataset so the page transitions out of the in-flight banner once the task
+        // reaches a terminal state.
+        if (isTerminalImport(s.status)) void loadReference();
+      },
+      onError: (e) => {
+        if (!isNotFound(e)) logError(`reading import progress for reference ${id}`, e);
+      },
+    },
+  );
+  // A 404 means the progress row does not exist yet. Any other failure is said, because the
+  // progress shown is then only the last known state.
+  const importStatusUnavailable = importPoll.error !== null && !isNotFound(importPoll.error);
+  const importStatus = importPoll.data ?? null;
 
   async function handleCancelOrDelete() {
     setCancelling(true);
     try {
       await api.post(`/api/references/${id}/import-cancel`);
-      if (importPollHandle.current) {
-        clearInterval(importPollHandle.current);
-        importPollHandle.current = null;
-      }
+      setImportCancelled(true);
       router.push("/data/references");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to cancel");
@@ -345,6 +348,11 @@ export default function DataReferenceDetailPage() {
               )}
             </div>
           </div>
+          {importStatusUnavailable && (
+            <p data-testid="import-status-unavailable" role="status" className="text-sm text-amber-700">
+              Import progress could not be read. What is shown is the last known state; bioAF keeps checking.
+            </p>
+          )}
           {importStatus && (
             <>
               <div className="text-sm text-blue-900">

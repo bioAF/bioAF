@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
+import { useResource } from "@/hooks/useResource";
+
+const PROGRESS_PATH = "/api/v1/infrastructure/stack/deploy/progress";
 
 export interface DeploymentProgress {
   active: boolean;
@@ -28,52 +32,35 @@ const EMPTY: DeploymentProgress = {
 };
 
 /**
- * Poll the deploy progress endpoint at a fixed interval.
+ * Poll the deploy progress endpoint. Each read starts after the previous one settles; a
+ * refetch supersedes a read in flight; disabling drops any outstanding read.
+ *
+ * `failed` says the latest read failed. The progress shown is then the last known state, not
+ * "no deployment": a failed read is never presented as an idle or finished stack.
  *
  * @param enabled  Pass `true` to start polling. Set to `false` to pause.
- * @param intervalMs  Polling interval in milliseconds (default 4000).
+ * @param intervalMs  Milliseconds between one read settling and the next (default 4000).
  */
 export function useDeploymentProgress(
   enabled: boolean,
   intervalMs = 4000,
 ) {
-  const [progress, setProgress] = useState<DeploymentProgress>(EMPTY);
-  const [loading, setLoading] = useState(false);
-  const mountedRef = useRef(true);
+  const resource = useResource(
+    enabled ? PROGRESS_PATH : null,
+    useCallback(
+      (signal: AbortSignal) => api.get<DeploymentProgress>(PROGRESS_PATH, { signal }),
+      [],
+    ),
+    {
+      poll: intervalMs,
+      onError: (e) => logError("reading deployment progress", e),
+    },
+  );
 
-  const poll = useCallback(async () => {
-    try {
-      const data = await api.get<DeploymentProgress>(
-        "/api/v1/infrastructure/stack/deploy/progress",
-      );
-      if (mountedRef.current) {
-        setProgress(data);
-      }
-    } catch {
-      // Silently ignore -- user may not have permission or server is down
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-    setLoading(true);
-    poll();
-    const interval = setInterval(poll, intervalMs);
-    return () => clearInterval(interval);
-  }, [enabled, intervalMs, poll]);
-
-  return { ...progress, loading, refetch: poll };
+  return {
+    ...(resource.data ?? EMPTY),
+    loading: resource.loading,
+    failed: resource.error !== null,
+    refetch: resource.refresh,
+  };
 }

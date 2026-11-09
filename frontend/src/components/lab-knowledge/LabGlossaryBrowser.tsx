@@ -1,10 +1,11 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 
 import { clickableCard } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
@@ -72,22 +73,21 @@ const SOURCE_LABELS: Record<string, string> = {
   llm_scan: "AI scan",
 };
 
+function isTerminalScan(status: string): boolean {
+  return status === "complete" || status === "failed";
+}
+
 export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const { canAccess } = usePermissions();
   const canManage = canAccess("lab_glossary", "manage");
   const canDelete = canAccess("lab_glossary", "delete");
 
-  const [terms, setTerms] = useState<GlossaryTerm[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // The list refetches on this, not on every keystroke: typing "brca" used to
   // send four requests for three states nobody wanted, and a late answer for
   // "brc" could land after the one for "brca".
   const settledQuery = useDebouncedValue(query, 300);
   const [sourceFilter, setSourceFilter] = useState("");
-  const [pendingCount, setPendingCount] = useState(0);
-  const [pendingJobIds, setPendingJobIds] = useState<number[]>([]);
   const [activeScanJobId, setActiveScanJobId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
@@ -97,41 +97,43 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const [showScan, setShowScan] = useState(false);
   const [reviewJobId, setReviewJobId] = useState<number | null>(null);
 
-  const fetchTerms = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    if (settledQuery.trim()) params.set("q", settledQuery.trim());
-    if (sourceFilter) params.set("source", sourceFilter);
-    try {
-      const data = await api.get<TermListResponse>(`${API_BASE}/glossary?${params.toString()}`);
-      setTerms(data.terms);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load glossary");
-    } finally {
-      setLoading(false);
-    }
-  }, [settledQuery, sourceFilter]);
+  // Keyed by settled query and source, so a late answer for an earlier
+  // selection cannot replace the current list.
+  const params = new URLSearchParams();
+  if (settledQuery.trim()) params.set("q", settledQuery.trim());
+  if (sourceFilter) params.set("source", sourceFilter);
+  const termsPath = `${API_BASE}/glossary?${params.toString()}`;
+  const termList = useResource(
+    termsPath,
+    useCallback((signal: AbortSignal) => api.get<TermListResponse>(termsPath, { signal }), [termsPath]),
+  );
+  const terms = useMemo(() => termList.data?.terms ?? [], [termList.data]);
+  const loading = termList.loading;
+  const error = termList.error
+    ? termList.error instanceof Error
+      ? termList.error.message
+      : "Failed to load glossary"
+    : null;
+  const fetchTerms = termList.refresh;
 
-  const fetchPending = useCallback(async () => {
-    try {
-      const data = await api.get<{ pending_review_count: number; job_ids?: number[] }>(
-        `${API_BASE}/glossary/pending`,
-      );
-      setPendingCount(data.pending_review_count);
-      setPendingJobIds(data.job_ids ?? []);
-    } catch {
-      /* non-critical */
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTerms();
-  }, [fetchTerms]);
-
-  useEffect(() => {
-    fetchPending();
-  }, [fetchPending]);
+  // Refreshed after imports, scans, and reviews; a later refresh supersedes an
+  // earlier one still in flight. A failure keeps the last count and is said, so an
+  // unread count never reads as "nothing awaiting review".
+  const pending = useResource(
+    "glossary-pending",
+    useCallback(
+      (signal: AbortSignal) =>
+        api.get<{ pending_review_count: number; job_ids?: number[] }>(
+          `${API_BASE}/glossary/pending`,
+          { signal },
+        ),
+      [],
+    ),
+    { onError: (e) => logError("reading the glossary terms awaiting review", e) },
+  );
+  const pendingCount = pending.data?.pending_review_count ?? 0;
+  const pendingJobIds = pending.data?.job_ids ?? [];
+  const fetchPending = pending.refresh;
 
   useEffect(() => {
     if (focusTermId && terms.length) {
@@ -142,32 +144,28 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
 
   // Poll a dispatched AI scan until it finishes so the "scan is running" banner
   // clears and the freshly proposed terms surface in the pending-review banner.
-  useEffect(() => {
-    if (activeScanJobId === null) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const job = await api.get<ScanJob>(`${API_BASE}/glossary/scan/${activeScanJobId}`);
-        if (cancelled) return;
-        if (job.status === "complete" || job.status === "failed") {
-          setActiveScanJobId(null);
-          if (job.status === "complete") {
-            fetchPending();
-          } else {
-            setScanError("The AI glossary scan could not be completed.");
-          }
+  // A failed read is said, and the next tick reads again.
+  const scanPath = activeScanJobId === null ? null : `${API_BASE}/glossary/scan/${activeScanJobId}`;
+  const scanPoll = useResource(
+    scanPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<ScanJob>(scanPath as string, { signal }),
+      [scanPath],
+    ),
+    {
+      poll: ({ data }) => (data && isTerminalScan(data.status) ? false : 3000),
+      onSuccess: (job) => {
+        if (!isTerminalScan(job.status)) return;
+        setActiveScanJobId(null);
+        if (job.status === "complete") {
+          void fetchPending();
+        } else {
+          setScanError("The AI glossary scan could not be completed.");
         }
-      } catch {
-        /* transient; keep polling */
-      }
-    };
-    poll();
-    const t = setInterval(poll, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [activeScanJobId, fetchPending]);
+      },
+      onError: (e) => logError(`reading AI glossary scan ${activeScanJobId}`, e),
+    },
+  );
 
   // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
   // dependency of the fetch, so every keystroke sets loading=true; returning early
@@ -237,6 +235,17 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           />
           AI glossary scan is running. Proposed terms will appear here for your review when it
           finishes.
+          {scanPoll.error !== null && (
+            <span data-testid="scan-status-unavailable" role="status" className="text-amber-700">
+              Its status could not be read; bioAF keeps checking.
+            </span>
+          )}
+        </div>
+      )}
+
+      {canManage && pending.error !== null && (
+        <div data-testid="pending-count-unavailable" role="status" className="text-amber-700 text-sm mb-3">
+          Whether proposed terms are awaiting review could not be checked.
         </div>
       )}
 
@@ -261,7 +270,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
         <div data-testid="glossary-loading" className="text-gray-500 py-12 text-center">
           Loading glossary...
         </div>
-      ) : terms.length === 0 ? (
+      ) : error && !termList.data ? null : terms.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
           No terms yet. {canManage ? "Add one manually, import a CSV, or run an AI scan." : ""}
         </div>
@@ -295,7 +304,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           onClose={() => setSelected(null)}
           onChanged={() => {
             setSelected(null);
-            fetchTerms();
+            void fetchTerms();
           }}
         />
       )}
@@ -305,7 +314,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           onClose={() => setShowAdd(false)}
           onSaved={() => {
             setShowAdd(false);
-            fetchTerms();
+            void fetchTerms();
           }}
         />
       )}
@@ -315,7 +324,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           onClose={() => setShowImport(false)}
           onImported={(jobId) => {
             setShowImport(false);
-            fetchPending();
+            void fetchPending();
             setReviewJobId(jobId);
           }}
         />
@@ -338,8 +347,8 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           onClose={() => setReviewJobId(null)}
           onReviewed={() => {
             setReviewJobId(null);
-            fetchTerms();
-            fetchPending();
+            void fetchTerms();
+            void fetchPending();
           }}
         />
       )}

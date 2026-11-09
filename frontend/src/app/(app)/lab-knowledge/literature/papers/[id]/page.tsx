@@ -106,6 +106,7 @@ export default function PaperDetailPage() {
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissBusy, setDismissBusy] = useState(false);
   const [copiedCitation, setCopiedCitation] = useState<string | null>(null);
+  const [citationError, setCitationError] = useState<string | null>(null);
 
   function refresh() {
     setLoading(true);
@@ -318,9 +319,19 @@ export default function PaperDetailPage() {
     }
   }
   async function downloadCitation(format: "bibtex" | "ris") {
-    const text = await literature.citation(paperId, format);
+    const label = format === "bibtex" ? "BibTeX" : "RIS";
+    setCitationError(null);
+    setCopiedCitation(null);
+    let text: string;
+    try {
+      text = await literature.citation(paperId, format);
+    } catch (e) {
+      logError(`loading the ${label} citation for paper ${paperId}`, e);
+      setCitationError(`The ${label} citation could not be copied. The technical detail is in the application logs.`);
+      return;
+    }
     await navigator.clipboard.writeText(text);
-    setCopiedCitation(format === "bibtex" ? "BibTeX" : "RIS");
+    setCopiedCitation(label);
     window.setTimeout(() => setCopiedCitation(null), 2500);
   }
 
@@ -726,6 +737,11 @@ export default function PaperDetailPage() {
               {copiedCitation && (
                 <p className="mt-2 text-sm text-green-700" role="status">
                   {copiedCitation} citation copied to clipboard.
+                </p>
+              )}
+              {citationError && (
+                <p className="mt-2 text-sm text-red-700" role="alert">
+                  {citationError}
                 </p>
               )}
             </div>

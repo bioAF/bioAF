@@ -70,6 +70,7 @@ test("refreshes on an interval, like every other live surface", async () => {
 
   render(<PipelineRunsPage />);
   await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByText("#1")).toBeInTheDocument());
 
   await act(async () => {
     jest.advanceTimersByTime(10_000);

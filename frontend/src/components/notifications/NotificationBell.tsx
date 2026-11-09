@@ -1,36 +1,35 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
+import { useResource } from "@/hooks/useResource";
 import { logError } from "@/lib/errorReporting";
 import { NotificationDropdown } from "./NotificationDropdown";
 
 export function NotificationBell() {
-  const [unreadCount, setUnreadCount] = useState(0);
+  // Polled every 30s after the previous read settles. A count changed in the
+  // dropdown (mark read) replaces the count locally and supersedes any read
+  // already in flight, so an older answer cannot put the old count back.
+  const count = useResource(
+    "unread-count",
+    useCallback(
+      (signal: AbortSignal) => api.get<{ count: number }>("/api/notifications/unread-count", { signal }),
+      [],
+    ),
+    {
+      poll: 30000,
+      onError: (e) => logError("loading the unread notification count", e),
+    },
+  );
   // A count that could not be read is not a count of zero. Measured on the
   // demo with 241 unread: the badge read "99+" healthy and rendered nothing at
   // all once the request failed, because the initial state and the failure
   // state are the same number.
-  const [countFailed, setCountFailed] = useState(false);
+  const countFailed = count.error !== null;
+  const unreadCount = count.data?.count ?? 0;
+  const setUnreadCount = (n: number) => count.mutate({ count: n });
   const [showDropdown, setShowDropdown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  const fetchCount = async () => {
-    try {
-      const data = await api.get<{ count: number }>("/api/notifications/unread-count");
-      setUnreadCount(data.count);
-      setCountFailed(false);
-    } catch (e) {
-      logError("loading the unread notification count", e);
-      setCountFailed(true);
-    }
-  };
-
-  useEffect(() => {
-    fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
