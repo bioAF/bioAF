@@ -74,7 +74,7 @@ test("a failed first build-status read is said, with Retry that recovers", async
   await flush();
 
   const notice = screen.getByTestId("build-status-load-failed");
-  expect(notice).toHaveTextContent(/could not be read/i);
+  expect(notice).toHaveTextContent("Notebook image build status is unavailable. bioAF will keep checking.");
 
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await flush();

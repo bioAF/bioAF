@@ -444,7 +444,7 @@ export default function NotebooksPage() {
           className="mb-6 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800 flex items-center justify-between gap-3"
         >
           <span>
-            The notebook image build status could not be read, so a build in progress would not be shown here. bioAF keeps checking.
+            Notebook image build status is unavailable. bioAF will keep checking.
           </span>
           <Button variant="secondary" size="sm" onClick={() => void buildStatusResource.refresh()}>
             Retry

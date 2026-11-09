@@ -1194,7 +1194,7 @@ export default function InfraComponentsPage() {
                                 {/* No answer yet: the building panel below needs one, so a failed first read is said here. */}
                                 {comp.status === "provisioning" && !buildStatus && buildPoll.error !== null && (
                                   <p data-testid="build-status-load-failed" role="status" className="text-xs text-red-600 mb-2">
-                                    The image build status could not be read. bioAF keeps checking.
+                                    Image build status is unavailable. bioAF will keep checking.
                                   </p>
                                 )}
                                 {/* Show building panel only when actually building (not when build already failed) */}

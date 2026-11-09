@@ -115,7 +115,7 @@ test("a failed first build-status read while provisioning is said, and clears wh
   await flush();
   await settle(() => buildReads[0].reject(new Error("502")));
 
-  expect(screen.getByTestId("build-status-load-failed")).toHaveTextContent(/could not be read/i);
+  expect(screen.getByTestId("build-status-load-failed")).toHaveTextContent("Image build status is unavailable. bioAF will keep checking.");
 
   await tick(15_000);
   await settle(() => buildReads[1].resolve({ build_id: "abcdef123456", build_status: "WORKING", image_uri: null }));
