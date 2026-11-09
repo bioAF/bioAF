@@ -172,6 +172,16 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_assistant_openai_round_trip.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_assistant_tool_service.py": {
    "category": "single_connection",
    "evidence": [
@@ -2352,6 +2362,11 @@
    "route": "committed_reset_candidate"
   },
   "test_observability_provider.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_openai_responses_adapter.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"
