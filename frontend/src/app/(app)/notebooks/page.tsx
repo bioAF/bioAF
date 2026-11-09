@@ -67,7 +67,6 @@ export default function NotebooksPage() {
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [bucket, setBucket] = useState<SessionBucket>("active");
   const [viewingSession, setViewingSession] = useState<NotebookSession | null>(null);
   useDismissOnEscape(viewingSession !== null, () => { setViewingSession(null); setProvenance(null); });
@@ -111,27 +110,25 @@ export default function NotebooksPage() {
 
   // Sessions, keyed by bucket: re-read every 10 s while one is starting, each read
   // after the previous one settles. A bucket's late answer cannot replace another's.
-  const [hasStarting, setHasStarting] = useState(false);
   const sessionsPath = `/api/v1/notebooks/sessions?bucket=${bucket}`;
   const sessionList = useResource(
     sessionsPath,
-    useCallback(() => api.get<SessionListResponse>(sessionsPath), [sessionsPath]),
+    useCallback(
+      (signal: AbortSignal) => api.get<SessionListResponse>(sessionsPath, { signal }),
+      [sessionsPath],
+    ),
     {
-      poll: hasStarting ? 10000 : false,
-      onSuccess: (data) => {
-        setHasStarting(data.sessions.some((s) => s.status === "starting"));
-        setLoadError(null);
-      },
+      poll: ({ data }) => (data?.sessions.some((s) => s.status === "starting") ? 10000 : false),
       onError: (e) => {
         // These sessions bill while they run, so "you have none" must never stand
         // in for "we could not ask". The comment was right and the render was not: the
         // error row and the "No active sessions" row were separate conditions, so both
         // rendered at once and the page said both things simultaneously. See below.
         logError("loading the notebook sessions", e);
-        setLoadError(loadFailureMessage("Notebook sessions"));
       },
     },
   );
+  const loadError = sessionList.error ? loadFailureMessage("Notebook sessions") : null;
   const sessions: NotebookSession[] = sessionList.data?.sessions ?? [];
   const loading = sessionList.loading;
   const loadSessions = sessionList.refresh;
@@ -142,31 +139,24 @@ export default function NotebooksPage() {
   // A failed first read is said and re-checked on the same 15 s cadence, since nothing on screen
   // would otherwise show a build is running. A 403 is expected: bench and viewer roles can open
   // this page without infrastructure view, so that read stays silent and is not repeated.
-  const [imageBuilding, setImageBuilding] = useState(false);
-  const [buildStatusFailed, setBuildStatusFailed] = useState(false);
   const buildStatusResource = useResource(
     BUILD_STATUS_PATH,
-    useCallback(() => api.get<ImageBuildStatus>(BUILD_STATUS_PATH), []),
+    useCallback(
+      (signal: AbortSignal) => api.get<ImageBuildStatus>(BUILD_STATUS_PATH, { signal }),
+      [],
+    ),
     {
-      poll: imageBuilding || buildStatusFailed ? 15000 : false,
-      onSuccess: (status) => {
-        setBuildStatusFailed(false);
-        setImageBuilding(!!status.build_status && ["WORKING", "QUEUED"].includes(status.build_status));
-      },
+      poll: ({ data, error }) =>
+        error !== null || (data?.build_status && ["WORKING", "QUEUED"].includes(data.build_status))
+          ? 15000
+          : false,
+      expected: isPermissionDenied,
       // Polled while building, so a toast per tick would bury the page. The log is the record.
-      onError: (e) => {
-        // Expected, not transient: clear any earlier failure so the notice and re-checks stop.
-        if (isPermissionDenied(e)) {
-          setBuildStatusFailed(false);
-          return;
-        }
-        logError("loading the notebook image build status", e);
-        setBuildStatusFailed(true);
-      },
+      onError: (e) => logError("loading the notebook image build status", e),
     },
   );
   const imageBuildStatus = buildStatusResource.data ?? null;
-  const buildStatusLoadFailed = buildStatusFailed && imageBuildStatus === null;
+  const buildStatusLoadFailed = buildStatusResource.error !== null && !buildStatusResource.stale;
 
   async function loadResourceProfiles() {
     try {

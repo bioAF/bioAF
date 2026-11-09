@@ -121,3 +121,28 @@ test("a 403 after a failed first read clears the notice and stops re-checking", 
   await advance(45_000);
   expect(buildReads).toBe(2);
 });
+
+test("a finished build stops re-checking", async () => {
+  buildReplies = [() => Promise.resolve({ build_id: "abcdef123456", build_status: "SUCCESS", image_uri: "img" })];
+  render(<NotebooksPage />);
+  await flush();
+  await advance(45_000);
+  expect(buildReads).toBe(1);
+});
+
+test("the build-status and session reads carry signals that abort when the page closes", async () => {
+  const { unmount } = render(<NotebooksPage />);
+  await flush();
+  const signalFor = (fragment: string) =>
+    mockGet.mock.calls.filter(([url]) => String(url).includes(fragment)).at(-1)?.[1]?.signal as AbortSignal;
+  const build = signalFor("build-status");
+  const sessions = signalFor("/notebooks/sessions");
+  expect(build).toBeInstanceOf(AbortSignal);
+  expect(sessions).toBeInstanceOf(AbortSignal);
+  // The build is WORKING, so the next poll starts; it never answers and is in flight at unmount.
+  buildReplies = [() => new Promise(() => {})];
+  await advance(15_000);
+  const polled = signalFor("build-status");
+  unmount();
+  expect(polled.aborted).toBe(true);
+});
