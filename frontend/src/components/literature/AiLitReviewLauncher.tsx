@@ -7,6 +7,8 @@ import { useProjectOptions } from "@/hooks/useProjectOptions";
 import { PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { PickerNotice } from "@/components/shared/PickerNotice";
 import { Button } from "@/components/ui/Button";
+import { isAbortError } from "@/lib/abort";
+import { watchJob } from "@/lib/watchJob";
 
 interface ExperimentSummary {
   id: number;
@@ -34,7 +36,15 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const cancelRef = useRef(false);
+  // The run being watched, if any. Unmounting stops watching it (not the run).
+  const watchRef = useRef<{ controller: AbortController; run: LitReviewRun | null } | null>(null);
+  useEffect(
+    () => () => {
+      watchRef.current?.controller.abort();
+      watchRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     api
@@ -74,51 +84,64 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
 
   async function submit() {
     if (!experimentId) return;
-    cancelRef.current = false;
+    // Each run's watch is its own: a new run never revives a stopped one.
+    watchRef.current?.controller.abort();
+    const controller = new AbortController();
+    const owned: { controller: AbortController; run: LitReviewRun | null } = { controller, run: null };
+    watchRef.current = owned;
     setElapsed(0);
     setRunning(true);
     setMessage(null);
     setError(null);
     try {
       const run = await literature.runLitReview(Number(experimentId));
+      if (controller.signal.aborted) return;
+      owned.run = run;
+      const runId = run.id;
       setMessage(
-        `AI Lit Review run ${run.id} queued. Recommended papers will be added to the Library with an AI note as the run completes.`,
+        `AI Lit Review run ${runId} queued. Recommended papers will be added to the Library with an AI note as the run completes.`,
       );
       // The run exposes only a coarse status (no per-step signal), so we can't show
-      // a real percentage: poll until terminal and surface elapsed time instead.
-      for (let i = 0; i < 60; i++) {
-        if (cancelRef.current) break;
-        await new Promise((r) => setTimeout(r, 1000));
-        if (cancelRef.current) break;
-        setElapsed(i + 1);
-        const r2 = await literature.getRun(run.id);
-        if (
-          r2.status === "complete" ||
-          r2.status === "partial" ||
-          r2.status === "failed"
-        ) {
-          setMessage(
-            `AI Lit Review run ${run.id} ${r2.status}; ${r2.recommendation_count ?? 0} papers added to the Library.`,
-          );
-          break;
-        }
+      // a real percentage: poll until terminal (at most 60 reads, one second apart)
+      // and surface elapsed time instead.
+      let reads = 0;
+      const { value: r2, timedOut } = await watchJob(
+        run,
+        async () => {
+          reads += 1;
+          setElapsed(reads);
+          return literature.getRun(runId);
+        },
+        (r) => r !== run && (r.status === "complete" || r.status === "partial" || r.status === "failed"),
+        { intervalMs: 1000, maxReads: 60, signal: controller.signal },
+      );
+      if (!timedOut) {
+        setMessage(
+          `AI Lit Review run ${runId} ${r2.status}; ${r2.recommendation_count ?? 0} papers added to the Library.`,
+        );
       }
+      watchRef.current = null;
       onSubmitted?.(run);
     } catch (e) {
+      // A stopped watch (or a closed page) runs no completion code.
+      if (isAbortError(e) || controller.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Run failed.");
     } finally {
-      setRunning(false);
+      if (!controller.signal.aborted) setRunning(false);
     }
   }
 
   // Stop the client from waiting. The run keeps going server-side and its papers
-  // land in the Library as it completes; the poll loop notices the flag and exits.
+  // land in the Library as it completes. The stopped run notifies once, here.
   function stopWatching() {
-    cancelRef.current = true;
+    const owned = watchRef.current;
+    watchRef.current = null;
+    owned?.controller.abort();
     setRunning(false);
     setMessage(
       "The review keeps running in the background; recommended papers will appear in the Library as it completes.",
     );
+    if (owned?.run) onSubmitted?.(owned.run);
   }
 
   return (

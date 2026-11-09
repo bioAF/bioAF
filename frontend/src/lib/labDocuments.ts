@@ -1,8 +1,5 @@
-import { api } from "./api";
-import { getToken } from "./auth";
+import { api, ApiError } from "./api";
 import { uploadFileResumable } from "./resumableUpload";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const BASE = "/api/lab-knowledge";
 
 interface UploadUrlResponse {
@@ -34,17 +31,21 @@ export interface LabDocumentNote {
 }
 
 // The content endpoint requires the Authorization header, so a plain <a href>
-// would 401. Route the bytes through fetch (auth header) and hand the resulting
+// would 401. Route the bytes through the API client and hand the resulting
 // blob to the inline viewer, mirroring fetchPaperPdfBlob for literature papers.
-export async function fetchLabDocumentBlob(documentId: number, version?: number): Promise<Blob> {
+export async function fetchLabDocumentBlob(
+  documentId: number,
+  version?: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<Blob> {
   const q = version ? `?version=${version}` : "";
-  const resp = await fetch(`${API_URL}${BASE}/documents/${documentId}/content${q}`, {
-    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-  });
-  if (!resp.ok) {
-    throw new Error(resp.status === 404 ? "Document not found." : "Could not load the document.");
+  try {
+    const { blob } = await api.blob(`${BASE}/documents/${documentId}/content${q}`, options);
+    return blob;
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code === "maintenance") throw error;
+    throw new Error(error.status === 404 ? "Document not found." : "Could not load the document.");
   }
-  return resp.blob();
 }
 
 export const labDocuments = {

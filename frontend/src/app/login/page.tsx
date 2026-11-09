@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { api } from "@/lib/api";
-import { setToken, isAuthenticated } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { startSession } from "@/lib/session";
 import type { LoginResponse, BootstrapStatus } from "@/lib/types";
 
 export default function LoginPage() {
@@ -39,7 +40,7 @@ export default function LoginPage() {
         email,
         password,
       });
-      setToken(response.access_token);
+      startSession(response.access_token);
       router.push("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");

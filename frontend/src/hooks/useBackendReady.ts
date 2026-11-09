@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { logError } from "@/lib/errorReporting";
+import { apiUrl } from "@/lib/apiUrl";
 import {
   BACKEND_READY_KEY,
   clearMaintenance,
@@ -12,7 +13,6 @@ import {
   type MaintenanceInfo,
 } from "@/lib/maintenance";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const POLL_INTERVAL_MS = 2000;
 const SESSION_KEY = BACKEND_READY_KEY;
 
@@ -82,7 +82,7 @@ export function useBackendReady() {
     async function check() {
       clearTimeout(timer);
       try {
-        const res = await fetch(`${API_URL}/api/health/ready`, {
+        const res = await fetch(apiUrl("/api/health/ready"), {
           cache: "no-store",
         });
         if (!cancelled && res.status === 503) {
@@ -155,7 +155,7 @@ export function useBackendReady() {
 
     async function recheck() {
       try {
-        const res = await fetch(`${API_URL}/api/health/ready`, {
+        const res = await fetch(apiUrl("/api/health/ready"), {
           cache: "no-store",
         });
         if (!cancelled && res.ok) {

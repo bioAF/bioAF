@@ -148,6 +148,7 @@ describe("Experiment Detail - Files Tab", () => {
     await waitFor(() => {
       expect(mockGet).toHaveBeenCalledWith(
         expect.stringContaining("experiment_id=1"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 

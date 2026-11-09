@@ -35,18 +35,28 @@ function code(rel: string): string {
 }
 
 describe("a retry that succeeds clears the failure it retried", () => {
-  const SETS_AND_CLEARS = [
-    "app/(app)/results/plot-archive/page.tsx",
-    "app/(app)/results/qc-dashboards/page.tsx",
-    "components/data/DatasetBrowser.tsx",
-    "app/(app)/notebooks/page.tsx",
-    "app/(app)/pipelines/runs/page.tsx",
-  ];
+  // Pages that hold their own load error must clear it on success.
+  const SETS_AND_CLEARS = ["app/(app)/results/qc-dashboards/page.tsx"];
 
   it.each(SETS_AND_CLEARS)("%s resets its load error on success", (rel) => {
     const src = code(rel);
     expect(src).toMatch(/setLoadError\(/);
     expect(src).toMatch(/setLoadError\(null\)/);
+  });
+
+  // Pages on useResource derive the load error from the resource's error, which the hook clears
+  // on the next successful read; a mirrored copy is what used to outlive the recovery.
+  const DERIVED = [
+    "app/(app)/results/plot-archive/page.tsx",
+    "components/data/DatasetBrowser.tsx",
+    "app/(app)/notebooks/page.tsx",
+    "app/(app)/pipelines/runs/page.tsx",
+  ];
+
+  it.each(DERIVED)("%s derives its load error from the resource, with no mirrored copy", (rel) => {
+    const src = code(rel);
+    expect(src).toMatch(/const loadError =[^;]*\.error/);
+    expect(src).not.toMatch(/setLoadError\(/);
   });
 });
 

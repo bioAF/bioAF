@@ -3,7 +3,6 @@
 import { Modal } from "@/components/shared/Modal";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
-import { getToken } from "@/lib/auth";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import type {
@@ -14,8 +13,6 @@ import type {
   PipelineRun,
   PipelineRunListResponse,
 } from "@/lib/types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface GeoExportModalProps {
   experimentId: number;
@@ -136,35 +133,12 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
     setDownloading(true);
     setError(null);
     try {
-      const url = `${API_URL}/api/experiments/${experimentId}/export/geo?pipeline_run_id=${selectedRunId}${qcFilter ? `&qc_status_filter=${qcFilter}` : ""}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({ detail: "Download failed" }));
-        throw new Error(errBody.detail || "Download failed");
-      }
-
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-
-      // Try to extract filename from Content-Disposition header
-      const contentDisposition = response.headers.get("Content-Disposition");
-      let filename = `geo_export_experiment_${experimentId}.zip`;
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
-        if (match) {
-          filename = match[1];
-        }
-      }
-
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(blobUrl);
+      await api.download(
+        `/api/experiments/${experimentId}/export/geo?pipeline_run_id=${selectedRunId}${qcFilter ? `&qc_status_filter=${qcFilter}` : ""}`,
+        "POST",
+        undefined,
+        { filename: `geo_export_experiment_${experimentId}.zip` },
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
     } finally {

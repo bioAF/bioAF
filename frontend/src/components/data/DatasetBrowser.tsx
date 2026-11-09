@@ -16,18 +16,17 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResource } from "@/hooks/useResource";
 
 import { clickableRow } from "@/lib/a11y";
 
 export function DatasetBrowser() {
   const toast = useToast();
-  const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [organismFilter, setOrganismFilter] = useState("");
   const [moleculeTypeFilter, setMoleculeTypeFilter] = useState("");
@@ -52,38 +51,33 @@ export function DatasetBrowser() {
   const canAddToProject = canAccess("projects", "create");
   const creatingProject = selectedProjectId === "new" || projectsDenied;
 
-  const fetchDatasets = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        page_size: String(pageSize),
-      });
-      if (query) params.set("query", query);
-      if (statusFilter) params.set("status", statusFilter);
-      if (organismFilter) params.set("organism", organismFilter);
-      if (moleculeTypeFilter) params.set("molecule_type", moleculeTypeFilter);
-      if (instrumentModelFilter) params.set("instrument_model", instrumentModelFilter);
-      if (reviewStatusFilter) params.set("review_status", reviewStatusFilter);
-      const data = await api.get<DatasetSearchResult>(
-        `/api/datasets?${params}`
-      );
-      setDatasets(data.experiments);
-      setTotal(data.total);
-      // A Retry that succeeds must clear the failure it retried. Set on the way down,
-      // never cleared on the way back up, means only a page reload lost the message.
-      setLoadError(null);
-    } catch (e) {
-      logError("loading datasets", e);
-      setLoadError(loadFailureMessage("Datasets"));
-    } finally {
-      setLoading(false);
-    }
-  }, [page, query, statusFilter, organismFilter, moleculeTypeFilter, instrumentModelFilter, reviewStatusFilter]);
-
-  useEffect(() => {
-    fetchDatasets();
-  }, [fetchDatasets]);
+  // Keyed by the settled query, the page, and every server-side filter: typing waits for a
+  // pause, and only the current key's answer is shown. Selection is by experiment ID, so it
+  // survives a new search.
+  const settledQuery = useDebouncedValue(query, 300);
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (settledQuery) params.set("query", settledQuery);
+  if (statusFilter) params.set("status", statusFilter);
+  if (organismFilter) params.set("organism", organismFilter);
+  if (moleculeTypeFilter) params.set("molecule_type", moleculeTypeFilter);
+  if (instrumentModelFilter) params.set("instrument_model", instrumentModelFilter);
+  if (reviewStatusFilter) params.set("review_status", reviewStatusFilter);
+  const listPath = `/api/datasets?${params}`;
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<DatasetSearchResult>(listPath, { signal }), [listPath]),
+    {
+      onError: (e) => logError("loading datasets", e),
+    },
+  );
+  const loadError = list.error ? loadFailureMessage("Datasets") : null;
+  const datasets: DatasetExperimentSummary[] = list.data?.experiments ?? [];
+  const total = list.data?.total ?? 0;
+  const loading = list.loading;
+  const fetchDatasets = list.refresh;
 
   useEffect(() => {
     api.get<{ organisms: string[] }>("/api/datasets/filter-options")
@@ -254,10 +248,12 @@ export function DatasetBrowser() {
         )}
       </div>
 
+      {list.stale && <StaleNotice what="Datasets" onRetry={() => void fetchDatasets()} />}
+
       {loading ? (
         <p className="text-ink-subtle text-sm">Loading...</p>
-      ) : loadError ? (
-        <ErrorState message={loadError} onRetry={() => fetchDatasets()} />
+      ) : loadError && !list.stale ? (
+        <ErrorState message={loadError} onRetry={() => void fetchDatasets()} />
       ) : datasets.length === 0 ? (
         <p className="text-ink-subtle text-sm">No datasets found.</p>
       ) : (

@@ -113,6 +113,8 @@ interface DeployProgressModalProps {
   onAbort: () => void;
   onDone: () => void;
   mode?: "deploy" | "teardown";
+  /** The latest progress read failed: what is shown is the last known state. */
+  progressUnavailable?: boolean;
 }
 
 type ResourceStatus = "pending" | "in_progress" | "complete";
@@ -242,6 +244,7 @@ export function DeployProgressModal({
   onAbort,
   onDone,
   mode = "deploy",
+  progressUnavailable = false,
 }: DeployProgressModalProps) {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [patienceIndex, setPatienceIndex] = useState(0);
@@ -307,6 +310,15 @@ export function DeployProgressModal({
         </h2>
 
         <div data-testid="deploy-modal-status" className="mb-4">
+          {progressUnavailable && (
+            <p
+              data-testid="deploy-modal-progress-unavailable"
+              role="status"
+              className="mb-2 text-sm text-amber-700"
+            >
+              Progress could not be read. What is shown is the last known state; bioAF keeps checking.
+            </p>
+          )}
           {isIdle && (
             <p className="text-sm text-gray-500 flex items-center gap-2">
               <span className="inline-block h-3 w-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />

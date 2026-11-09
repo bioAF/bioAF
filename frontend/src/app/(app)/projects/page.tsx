@@ -1,12 +1,15 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResource } from "@/hooks/useResource";
+import { StaleNotice } from "@/components/shared/StaleNotice";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
@@ -29,9 +32,6 @@ function ProjectsPageInner() {
   const toast = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -42,9 +42,26 @@ function ProjectsPageInner() {
   const { canAccess } = usePermissions();
   const canCreate = canAccess("projects", "create");
 
-  useEffect(() => {
-    loadProjects();
-  }, [router, search, statusFilter]);
+  // The list is keyed by the settled query and status: typing waits for a pause, and only the
+  // current key's answer is shown.
+  const settledSearch = useDebouncedValue(search, 300);
+  const params = new URLSearchParams();
+  if (settledSearch) params.set("search", settledSearch);
+  if (statusFilter) params.set("status", statusFilter);
+  const listPath = `/api/projects?${params}`;
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<ProjectListResponse>(listPath, { signal }), [listPath]),
+    {
+      // The old comment here claimed the api client handled this. It does not:
+      // lib/api.ts only throws, and there was no notification layer to catch it.
+      onError: (e) => logError("loading projects", e),
+    },
+  );
+  const projects: Project[] = list.data?.projects ?? [];
+  const loading = list.loading;
+  const loadError = list.error && !list.stale ? loadFailureMessage("Projects") : null;
+  const loadProjects = list.refresh;
 
   // The header "+ New > New Project" lands here with ?new=1 to open the create
   // form immediately (only for users who can create projects).
@@ -53,25 +70,6 @@ function ProjectsPageInner() {
       setShowCreateModal(true);
     }
   }, [searchParams, canCreate]);
-
-  const loadProjects = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (search) params.set("search", search);
-      if (statusFilter) params.set("status", statusFilter);
-      const data = await api.get<ProjectListResponse>(`/api/projects?${params}`);
-      setProjects(data.projects);
-      setLoadError(null);
-    } catch (e) {
-      // The old comment here claimed the api client handled this. It does not:
-      // lib/api.ts only throws, and there was no notification layer to catch it.
-      logError("loading projects", e);
-      setLoadError(loadFailureMessage("Projects"));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -84,7 +82,7 @@ function ProjectsPageInner() {
       setShowCreateModal(false);
       setNewName("");
       setNewHypothesis("");
-      loadProjects();
+      void loadProjects();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create the project.");
     } finally {
@@ -132,6 +130,8 @@ function ProjectsPageInner() {
           </div>
         </div>
 
+        {list.stale && <StaleNotice what="Projects" onRetry={() => void loadProjects()} />}
+
         {loading ? (
           <div className="flex justify-center py-12">
             <LoadingSpinner size="lg" />
@@ -140,8 +140,7 @@ function ProjectsPageInner() {
           <ErrorState
             message={loadError}
             onRetry={() => {
-              setLoading(true);
-              loadProjects();
+              void loadProjects();
             }}
           />
         ) : projects.length === 0 ? (

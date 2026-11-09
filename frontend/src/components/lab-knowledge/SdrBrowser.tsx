@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
@@ -94,10 +95,7 @@ export function SdrBrowser() {
   const canAuthor = canAccess("sdr", "author");
   const canManage = canAccess("sdr", "manage");
 
-  const [sdrs, setSdrs] = useState<SdrSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // The list refetches on this, not on every keystroke: typing "brca" used to
   // send four requests for three states nobody wanted, and a late answer for
@@ -111,24 +109,27 @@ export function SdrBrowser() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
 
-  const fetchSdrs = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    if (settledQuery.trim()) params.set("q", settledQuery.trim());
-    if (statusFilter) params.set("status", statusFilter);
-    if (categoryFilter) params.set("category_id", categoryFilter);
-    if (sort) params.set("sort", sort);
-    if (showHistorical) params.set("include_historical", "true");
-    try {
-      const data = await api.get<SdrListResponse>(`${API_BASE}/sdrs?${params.toString()}`);
-      setSdrs(data.sdrs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load decision records");
-    } finally {
-      setLoading(false);
-    }
-  }, [settledQuery, statusFilter, categoryFilter, sort, showHistorical]);
+  // Keyed by every input that selects the list, so a late answer for an
+  // earlier query, filter, or sort cannot replace the current one.
+  const params = new URLSearchParams();
+  if (settledQuery.trim()) params.set("q", settledQuery.trim());
+  if (statusFilter) params.set("status", statusFilter);
+  if (categoryFilter) params.set("category_id", categoryFilter);
+  if (sort) params.set("sort", sort);
+  if (showHistorical) params.set("include_historical", "true");
+  const listPath = `${API_BASE}/sdrs?${params.toString()}`;
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<SdrListResponse>(listPath, { signal }), [listPath]),
+  );
+  const sdrs = list.data?.sdrs ?? [];
+  const loading = list.loading;
+  const error = list.error
+    ? list.error instanceof Error
+      ? list.error.message
+      : "Failed to load decision records"
+    : null;
+  const fetchSdrs = list.refresh;
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -137,10 +138,6 @@ export function SdrBrowser() {
       /* non-critical */
     }
   }, []);
-
-  useEffect(() => {
-    fetchSdrs();
-  }, [fetchSdrs]);
 
   useEffect(() => {
     fetchCategories();
@@ -238,7 +235,7 @@ export function SdrBrowser() {
         <div data-testid="sdr-loading" className="text-gray-500 py-12 text-center">
           Loading decision records...
         </div>
-      ) : sdrs.length === 0 ? (
+      ) : error && !list.data ? null : sdrs.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
           No decision records yet. {canAuthor ? "Create one to capture a scientific decision." : ""}
         </div>
@@ -281,7 +278,7 @@ export function SdrBrowser() {
           onClose={() => setShowCreate(false)}
           onSaved={() => {
             setShowCreate(false);
-            fetchSdrs();
+            void fetchSdrs();
           }}
         />
       )}

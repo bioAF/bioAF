@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useResource } from "@/hooks/useResource";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusDotClass } from "@/lib/statusStyles";
 
@@ -26,33 +27,27 @@ const SERVICE_LABELS: Record<string, string> = {
 };
 
 export function InfrastructureHealthWidget() {
-  const [services, setServices] = useState<ServiceHealth[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadHealth = () => {
-    api
-      .get<{ services: ServiceHealth[] }>("/api/health/services")
-      .then((data) => {
-        setServices(data.services);
-        setError(null);
-      })
+  // This widget keeps its own loader rather than moving to `useWidgetData` because it also
+  // polls on a 60s interval. Each read starts after the previous one settles.
+  const health = useResource(
+    "service-health",
+    useCallback(
+      (signal: AbortSignal) => api.get<{ services: ServiceHealth[] }>("/api/health/services", { signal }),
+      [],
+    ),
+    {
+      poll: 60000,
       // Was `setError("Failed to load service health")`: a hand-written sentence
       // where thirteen sibling widgets share one, and it discarded the error
-      // instead of logging it. This widget keeps its own loader rather than
-      // moving to `useWidgetData` because it also polls on a 60s interval.
-      .catch((err) => {
-        logError("loading service health on the dashboard", err);
-        setError(loadFailureMessage("Service health"));
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    loadHealth();
-    const interval = setInterval(loadHealth, 60000);
-    return () => clearInterval(interval);
-  }, []);
+      // instead of logging it.
+      onError: (err) => logError("loading service health on the dashboard", err),
+    },
+  );
+  const services = health.data?.services ?? [];
+  const loading = health.loading;
+  // An initial failure replaces the content; a failed refresh keeps the last health, marked stale.
+  const error = health.error !== null && !health.stale ? loadFailureMessage("Service health") : null;
+  const loadHealth = health.refresh;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-infrastructure-health">
@@ -67,6 +62,17 @@ export function InfrastructureHealthWidget() {
       {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
+          <button
+            onClick={loadHealth}
+            className="ml-2 text-bioaf-600 hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {health.stale && (
+        <div className="text-sm text-red-600 mb-2" data-testid="widget-stale">
+          Service health could not be refreshed. What is shown may be out of date.
           <button
             onClick={loadHealth}
             className="ml-2 text-bioaf-600 hover:underline"

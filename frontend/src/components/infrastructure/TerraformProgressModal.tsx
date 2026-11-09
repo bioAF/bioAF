@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { api, ApiError, isAbortError } from "@/lib/api";
 
 interface TerraformEvent {
   event_type: string;
@@ -22,8 +22,6 @@ interface TerraformProgressModalProps {
 }
 
 type ModalStatus = "connecting" | "running" | "complete" | "error";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
 // Friendly names for Terraform resource types. Biologists don't need to
@@ -197,40 +195,21 @@ export function TerraformProgressModal({
     abortRef.current = controller;
 
     async function streamEvents() {
-      const token = getToken();
-      const headers: Record<string, string> = {
-        Accept: "text/event-stream",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-
       let response: Response;
       try {
-        response = await fetch(`${API_URL}${sseUrl}`, {
+        // A consequential POST: it is sent once and never retried. Status policy (session
+        // expiry, maintenance, the backend's refusal) applies before the stream opens.
+        response = await api.stream(sseUrl, {
           method: "POST",
-          headers,
+          accept: "text/event-stream",
           signal: controller.signal,
         });
-      } catch {
-        if (!controller.signal.aborted) {
-          setStatus("error");
-          setErrorMessage("Connection to server lost");
-        }
-        return;
-      }
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        let detail = `Server error (${response.status})`;
-        try {
-          const parsed = JSON.parse(body);
-          if (parsed.detail) detail = parsed.detail;
-        } catch {
-          // use default detail
-        }
+      } catch (e) {
+        if (controller.signal.aborted || isAbortError(e)) return;
         setStatus("error");
-        setErrorMessage(detail);
+        setErrorMessage(
+          e instanceof ApiError ? e.message : "Connection to server lost",
+        );
         return;
       }
 
@@ -386,9 +365,15 @@ export function TerraformProgressModal({
       }
     }
 
-    streamEvents();
+    // Start after the commit settles: React's development remount runs setup, cleanup, and
+    // setup again synchronously, and the POST must go out once, not once per setup.
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!cancelled) streamEvents();
+    });
 
     return () => {
+      cancelled = true;
       controller.abort();
     };
   }, [sseUrl]);

@@ -1,11 +1,14 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useResource } from "@/hooks/useResource";
 import { isAuthenticated } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -29,13 +32,6 @@ export default function DataReferencesPage() {
   const { canAccess } = usePermissions();
   const canAdd = canAccess("references", "upload");
 
-  const [references, setReferences] = useState<ReferenceDataset[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // Bumped by Retry: the load lives in an effect keyed on the filters, so this
-  // is what re-triggers it without changing what the user asked for.
-  const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
@@ -63,30 +59,28 @@ export default function DataReferencesPage() {
       });
   }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated()) return;
-    setLoading(true);
-
-    const params = new URLSearchParams();
-    if (search) params.set("name_search", search);
-    if (categoryFilter) params.set("category", categoryFilter);
-    if (scopeFilter) params.set("scope", scopeFilter);
-    if (statusFilter) params.set("status", statusFilter);
-
-    const query = params.toString();
-    setLoadError(null);
-    api
-      .get<ReferenceDatasetListResponse>(`/api/references${query ? `?${query}` : ""}`)
-      .then((data) => {
-        setReferences(data.references);
-        setTotal(data.total);
-      })
-      .catch((e) => {
-        logError("loading reference data", e);
-        setLoadError(loadFailureMessage("Reference data"));
-      })
-      .finally(() => setLoading(false));
-  }, [search, categoryFilter, scopeFilter, statusFilter, reloadKey]);
+  // Keyed by the settled name search, category, scope, and status: typing waits for a pause, and
+  // only the current key's answer is shown.
+  const settledSearch = useDebouncedValue(search, 300);
+  const params = new URLSearchParams();
+  if (settledSearch) params.set("name_search", settledSearch);
+  if (categoryFilter) params.set("category", categoryFilter);
+  if (scopeFilter) params.set("scope", scopeFilter);
+  if (statusFilter) params.set("status", statusFilter);
+  const query = params.toString();
+  const listPath = `/api/references${query ? `?${query}` : ""}`;
+  const list = useResource(
+    isAuthenticated() ? listPath : null,
+    useCallback(
+      (signal: AbortSignal) => api.get<ReferenceDatasetListResponse>(listPath, { signal }),
+      [listPath],
+    ),
+    { onError: (e) => logError("loading reference data", e) },
+  );
+  const references: ReferenceDataset[] = list.data?.references ?? [];
+  const total = list.data?.total ?? 0;
+  const loading = list.loading;
+  const loadError = list.error && !list.stale ? loadFailureMessage("Reference data") : null;
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
@@ -153,6 +147,8 @@ export default function DataReferencesPage() {
         </div>
       </div>
 
+      {list.stale && <StaleNotice what="Reference data" onRetry={() => void list.refresh()} />}
+
       {loading ? (
         <div className="flex justify-center py-12">
           <LoadingSpinner size="lg" />
@@ -161,7 +157,7 @@ export default function DataReferencesPage() {
         <Card padding="none">
           <ErrorState
             message={loadError}
-            onRetry={() => setReloadKey((k) => k + 1)}
+            onRetry={() => void list.refresh()}
           />
         </Card>
       ) : references.length === 0 ? (

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
+import { onSessionReset, sessionGeneration } from "@/lib/session";
 import type { ComponentState } from "@/lib/types";
 
 interface StackComponentsResponse {
@@ -56,6 +57,10 @@ export function invalidateComponentCache() {
   lastFetchFailed = false;
 }
 
+// The endpoint requires infrastructure:view, so the answer is the signed-in user's: it ends with
+// the session.
+onSessionReset(invalidateComponentCache);
+
 /**
  * The installed stack components.
  *
@@ -81,16 +86,21 @@ export function useComponents() {
       return;
     }
 
+    const generation = sessionGeneration();
+    const current = () => generation === sessionGeneration();
+
     if (!fetchPromise) {
       fetchPromise = api
         .get<StackComponentsResponse>(
           "/api/v1/infrastructure/stack/components",
         )
         .then((data) => {
+          if (!current()) return;
           cachedComponents = mapComponents(data);
           lastFetchFailed = false;
         })
         .catch((err) => {
+          if (!current()) return;
           logError("loading the installed stack components", err);
           lastFetchFailed = true;
           // Leave the cache null and drop the shared promise so the next mount
@@ -100,6 +110,7 @@ export function useComponents() {
     }
 
     fetchPromise.then(() => {
+      if (!current()) return;
       setComponents(cachedComponents ?? []);
       setFailed(lastFetchFailed);
       setLoading(false);
@@ -107,10 +118,12 @@ export function useComponents() {
   }, []);
 
   const refetch = useCallback(async () => {
+    const generation = sessionGeneration();
     try {
       const data = await api.get<StackComponentsResponse>(
         "/api/v1/infrastructure/stack/components",
       );
+      if (generation !== sessionGeneration()) return;
       cachedComponents = mapComponents(data);
       lastFetchFailed = false;
       setComponents(cachedComponents);
@@ -118,6 +131,7 @@ export function useComponents() {
     } catch (err) {
       // The old comment here claimed the api client handled this. It does not:
       // lib/api.ts only throws.
+      if (generation !== sessionGeneration()) return;
       logError("refreshing the installed stack components", err);
       lastFetchFailed = true;
       setFailed(true);

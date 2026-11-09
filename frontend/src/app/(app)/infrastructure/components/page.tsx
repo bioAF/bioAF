@@ -2,7 +2,7 @@
 
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
@@ -19,6 +19,7 @@ import { storageDisplay } from "@/lib/storageDisplay";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
+import { useResource } from "@/hooks/useResource";
 import { invalidateComponentCache } from "@/hooks/useComponents";
 import { useConfirm } from "@/hooks/useConfirm";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
@@ -169,9 +170,6 @@ export default function InfraComponentsPage() {
   const [configError, setConfigError] = useState("");
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
   const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
-  const [buildStatusMap, setBuildStatusMap] = useState<
-    Record<string, { build_id: string | null; build_status: string | null; image_uri: string | null }>
-  >({});
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
@@ -269,60 +267,59 @@ export default function InfraComponentsPage() {
   const notebookKeys = new Set(["rstudio", "jupyterhub"]);
   const cellxgeneKeys = new Set(["cellxgene"]);
 
-  useEffect(() => {
-    if (!hasBuildRelated) {
-      setBuildStatusMap({});
-      return;
-    }
-    let cancelled = false;
+  // Which build-status endpoints apply; the read is keyed by them, so a page-data reload that
+  // leaves them (and the components' statuses) unchanged does not start a new read. That matters: a finished build asks for a
+  // page-data reload, and when the reload re-triggered this read, a build that had already
+  // finished (or failed) reloaded the page in a tight loop.
+  const buildEndpoints: { type: string; url: string }[] = [];
+  if (buildRelatedComponents.some((c) => notebookKeys.has(c.key))) {
+    buildEndpoints.push({ type: "notebook", url: "/api/v1/infrastructure/notebook-image/build-status" });
+  }
+  if (buildRelatedComponents.some((c) => cellxgeneKeys.has(c.key))) {
+    buildEndpoints.push({ type: "cellxgene", url: "/api/v1/infrastructure/cellxgene-image/build-status" });
+  }
+  // The related components' statuses are part of the key, so a Retry Build (failed ->
+  // provisioning) reads at once, while a reload that changes nothing does not.
+  const buildKey = hasBuildRelated
+    ? `build-status:${buildEndpoints.map((ep) => ep.type).join(",")}:${buildRelatedComponents
+        .map((c) => `${c.key}=${c.status}`)
+        .join(",")}`
+    : null;
+  const buildEndpointsRef = useRef(buildEndpoints);
+  buildEndpointsRef.current = buildEndpoints;
+  const isProvisioning = componentsData?.components.some((c) => c.status === "provisioning") ?? false;
 
-    async function pollBuild() {
-      const endpoints: { type: string; url: string }[] = [];
-      if (buildRelatedComponents.some((c) => notebookKeys.has(c.key))) {
-        endpoints.push({ type: "notebook", url: "/api/v1/infrastructure/notebook-image/build-status" });
-      }
-      if (buildRelatedComponents.some((c) => cellxgeneKeys.has(c.key))) {
-        endpoints.push({ type: "cellxgene", url: "/api/v1/infrastructure/cellxgene-image/build-status" });
-      }
-
+  // Polls every 15 s, after the previous read settles, while a component is provisioning; a
+  // build_failed component alone is read once. A failed read keeps the last statuses.
+  const buildPoll = useResource(
+    buildKey,
+    useCallback(async (signal: AbortSignal) => {
       const results: Record<string, { build_id: string | null; build_status: string | null; image_uri: string | null }> = {};
-      let anyFinished = false;
-      for (const ep of endpoints) {
-        try {
-          const status = await api.get<{
-            build_id: string | null;
-            build_status: string | null;
-            image_uri: string | null;
-          }>(ep.url);
-          results[ep.type] = status;
-          if (status.build_status && !["WORKING", "QUEUED"].includes(status.build_status)) {
-            anyFinished = true;
-          }
-        } catch {
-          // ignore
-        }
+      for (const ep of buildEndpointsRef.current) {
+        results[ep.type] = await api.get<{
+          build_id: string | null;
+          build_status: string | null;
+          image_uri: string | null;
+        }>(ep.url, { signal });
       }
-      if (!cancelled) {
-        setBuildStatusMap(results);
+      return results;
+    }, []),
+    {
+      poll: isProvisioning ? 15000 : false,
+      onSuccess: (results) => {
+        const anyFinished = Object.values(results).some(
+          (status) => status.build_status && !["WORKING", "QUEUED"].includes(status.build_status),
+        );
         if (anyFinished) {
           setRefreshKey((k) => k + 1);
         }
-      }
-    }
+      },
+      onError: (e) => logError("reading image build status", e),
+    },
+  );
 
-    pollBuild();
-    const isActive = componentsData?.components.some((c) => c.status === "provisioning");
-    if (isActive) {
-      const interval = setInterval(pollBuild, 15000);
-      return () => {
-        cancelled = true;
-        clearInterval(interval);
-      };
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [hasBuildRelated, componentsData]);
+  // The statuses shown are the latest answer for the current build key (none when nothing builds).
+  const buildStatusMap = buildPoll.data ?? {};
 
   const [deployLoading, setDeployLoading] = useState(false);
 
@@ -770,11 +767,18 @@ export default function InfraComponentsPage() {
                         </div>
                       </div>
                     ) : (
-                      <Button
-                        onClick={handleStartDeploy}
-                        disabled={deployLoading}>
-                        {deployLoading ? "Starting..." : "Deploy"}
-                      </Button>
+                      <>
+                        {deployProgress.failed && (
+                          <p data-testid="deploy-progress-unavailable" role="status" className="text-xs text-amber-700 mb-2">
+                            Deployment status could not be read. bioAF keeps checking.
+                          </p>
+                        )}
+                        <Button
+                          onClick={handleStartDeploy}
+                          disabled={deployLoading}>
+                          {deployLoading ? "Starting..." : "Deploy"}
+                        </Button>
+                      </>
                     )}
                   </div>
 
@@ -1182,6 +1186,12 @@ export default function InfraComponentsPage() {
                                     Requires: {comp.dependencies.join(", ")}
                                   </p>
                                 )}
+                                {/* No answer yet: the building panel below needs one, so a failed first read is said here. */}
+                                {comp.status === "provisioning" && !buildStatus && buildPoll.error !== null && (
+                                  <p data-testid="build-status-load-failed" role="status" className="text-xs text-red-600 mb-2">
+                                    Image build status is unavailable. bioAF will keep checking.
+                                  </p>
+                                )}
                                 {/* Show building panel only when actually building (not when build already failed) */}
                                 {comp.status === "provisioning" && buildStatus && !["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? "") && (
                                   <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
@@ -1199,6 +1209,11 @@ export default function InfraComponentsPage() {
                                     <p className="text-xs text-amber-500 mt-0.5">
                                       This one-time setup can take up to an hour. You can leave this page.
                                     </p>
+                                    {buildPoll.error !== null && (
+                                      <p data-testid="build-status-unavailable" role="status" className="text-xs text-red-600 mt-0.5">
+                                        Build status could not be refreshed. bioAF keeps checking.
+                                      </p>
+                                    )}
                                     <button
                                       onClick={handleCancelBuild}
                                       disabled={cancellingBuild}
@@ -1326,6 +1341,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowDeployModal(false)}
           onAbort={() => {
             setShowDeployModal(false);
@@ -1503,6 +1519,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowTeardownProgress(false)}
           onAbort={() => {
             setShowTeardownProgress(false);
@@ -1594,6 +1611,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowDestroyStorageProgress(false)}
           onAbort={() => {
             setShowDestroyStorageProgress(false);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
@@ -8,6 +8,8 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { useResource } from "@/hooks/useResource";
 import { statusBadgeClass } from "@/lib/statusStyles";
 
 interface ActivityEvent {
@@ -33,49 +35,41 @@ const entityLinks: Record<string, (id: number) => string> = {
 };
 
 export default function ActivityFeedPage() {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // Bumped by the error state's Retry: the load lives inside an effect, so this
-  // is what re-triggers it.
-  const [reloadKey, setReloadKey] = useState(0);
+  // The last successful total, which keeps pagination in place while the next page loads.
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [eventTypeFilter, setEventTypeFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ page: String(page), page_size: "50" });
-        if (eventTypeFilter) params.set("event_type", eventTypeFilter);
-        if (userFilter) params.set("user_email", userFilter);
-        if (dateFrom) params.set("date_from", dateFrom);
-        if (dateTo) params.set("date_to", dateTo);
-        if (severityFilter.length > 0) params.set("severity", severityFilter.join(","));
-
-        const data = await api.get<{ events: ActivityEvent[]; total: number }>(
-          `/api/activity-feed?${params.toString()}`,
-        );
-        setEvents(data.events);
-        setTotal(data.total);
-        setLoadError(null);
-      } catch (e) {
-        // The old comment claimed the api client handled this. It does not:
-        // lib/api.ts only throws. Falling through left the page saying there was
-        // no activity, which is a different claim from "we could not load it".
-        logError("loading the activity feed", e);
-        setLoadError(loadFailureMessage("Activity"));
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [page, eventTypeFilter, userFilter, dateFrom, dateTo, severityFilter, reloadKey]);
+  // Keyed by page and every filter: only the current key's answer is shown, so a slow answer
+  // for an earlier filter or page cannot replace it.
+  const params = new URLSearchParams({ page: String(page), page_size: "50" });
+  if (eventTypeFilter) params.set("event_type", eventTypeFilter);
+  if (userFilter) params.set("user_email", userFilter);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  if (severityFilter.length > 0) params.set("severity", severityFilter.join(","));
+  const feedPath = `/api/activity-feed?${params.toString()}`;
+  const feed = useResource(
+    feedPath,
+    useCallback(
+      (signal: AbortSignal) => api.get<{ events: ActivityEvent[]; total: number }>(feedPath, { signal }),
+      [feedPath],
+    ),
+    {
+      onSuccess: (data) => setTotal(data.total),
+      // The old comment claimed the api client handled this. It does not:
+      // lib/api.ts only throws. Falling through left the page saying there was
+      // no activity, which is a different claim from "we could not load it".
+      onError: (e) => logError("loading the activity feed", e),
+    },
+  );
+  const events: ActivityEvent[] = feed.data?.events ?? [];
+  const loading = feed.loading;
+  const loadError = feed.error && !feed.stale ? loadFailureMessage("Activity") : null;
 
   const totalPages = Math.ceil(total / 50);
 
@@ -181,12 +175,14 @@ export default function ActivityFeedPage() {
           )}
         </div>
 
+        {feed.stale && <StaleNotice what="Activity" onRetry={() => void feed.refresh()} />}
+
         {/* Events List */}
         <div className="bg-surface rounded-lg border border-hairline">
           {loading ? (
             <ContentLoading variant="table" />
           ) : loadError ? (
-            <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
+            <ErrorState message={loadError} onRetry={() => void feed.refresh()} />
           ) : events.length === 0 ? (
             <div className="p-8 text-center text-ink-subtle" data-testid="activity-empty">
               No activity matches your filters.

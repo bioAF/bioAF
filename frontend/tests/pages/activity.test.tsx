@@ -70,6 +70,7 @@ describe("Activity Feed Page", () => {
     // The API is called again with the filter
     expect(mockApiGet).toHaveBeenCalledWith(
       expect.stringContaining("event_type=pipeline.completed"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -82,6 +83,7 @@ describe("Activity Feed Page", () => {
     fireEvent.change(input, { target: { value: "maria@bioaf.org" } });
     expect(mockApiGet).toHaveBeenCalledWith(
       expect.stringContaining("user_email=maria"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -107,6 +109,7 @@ describe("Activity Feed Page", () => {
     fireEvent.click(nextBtn);
     expect(mockApiGet).toHaveBeenCalledWith(
       expect.stringContaining("page=2"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 });

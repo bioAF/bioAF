@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import Link from "next/link";
@@ -23,6 +23,9 @@ import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
+import { useResource } from "@/hooks/useResource";
+import { StaleNotice } from "@/components/shared/StaleNotice";
+import { logError } from "@/lib/errorReporting";
 import { api } from "@/lib/api";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
@@ -84,42 +87,26 @@ export default function ValidationStudyPage() {
   const params = useParams();
   const id = params.id as string;
 
-  const [study, setStudy] = useState<ValidationStudy | null>(null);
-  const [loading, setLoading] = useState(true);
   const { flags, loading: betaLoading } = useBetaFeatures();
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.get<ValidationStudy>(`/api/validation-studies/${id}`);
-      setStudy(data);
-    } catch {
-      setStudy((prev) => prev ?? null);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await refresh();
-      if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh, router]);
-
   // While the driver is advancing the study on its own, poll so the stage/evidence stay current.
-  useEffect(() => {
-    if (!study || !ADVANCING_STATES.has(study.state)) return;
-    const t = setInterval(refresh, 5000);
-    return () => clearInterval(t);
-  }, [study, refresh]);
-
-  const retry = useCallback(async () => {
-    setLoading(true);
-    await refresh();
-    setLoading(false);
-  }, [refresh]);
+  // A gate action's answer replaces the study locally and supersedes a poll read in flight.
+  const resource = useResource(
+    `/api/validation-studies/${id}`,
+    useCallback(
+      (signal: AbortSignal) => api.get<ValidationStudy>(`/api/validation-studies/${id}`, { signal }),
+      [id],
+    ),
+    {
+      poll: ({ data }) => (data && ADVANCING_STATES.has(data.state) ? 5000 : false),
+      onError: (e) => logError(`loading validation study ${id}`, e),
+    },
+  );
+  const study = resource.data ?? null;
+  const loading = resource.loading;
+  const setStudy = resource.mutate;
+  const refresh = resource.refresh;
+  const retry = resource.refresh;
 
   if (loading || betaLoading) {
     return (
@@ -158,6 +145,7 @@ export default function ValidationStudyPage() {
     <>
       <Breadcrumb entityName={displayTitle} />
       <main className="flex-1 overflow-y-auto p-6">
+        {resource.stale && <StaleNotice what="This study" onRetry={() => void refresh()} />}
         <div className="mb-6 flex flex-wrap items-center gap-4">
           <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
             ← Back

@@ -6,6 +6,9 @@ import { api } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useResource } from "@/hooks/useResource";
+import { isAbortError } from "@/lib/abort";
+import { watchJob } from "@/lib/watchJob";
 
 import { clickableRow } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
@@ -65,10 +68,7 @@ export function LabDocumentBrowser() {
   const canManage = canAccess("lab_documents", "manage");
   const canManageTags = canAccess("lab_document_tags", "manage");
 
-  const [documents, setDocuments] = useState<LabDocument[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -89,30 +89,29 @@ export function LabDocumentBrowser() {
     }
   }, []);
 
-  const fetchDocuments = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    for (const id of selectedTagIds) params.append("tag_ids", String(id));
-    if (includeArchived) params.set("include_archived", "true");
-    if (settledQuery.trim()) params.set("q", settledQuery.trim());
-    try {
-      const data = await api.get<ListResponse>(`${API_BASE}/documents?${params.toString()}`);
-      setDocuments(data.documents);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedTagIds, includeArchived, settledQuery]);
+  // Keyed by tags, archive, and settled query, so a late answer for an earlier
+  // selection cannot replace the current list.
+  const params = new URLSearchParams();
+  for (const id of selectedTagIds) params.append("tag_ids", String(id));
+  if (includeArchived) params.set("include_archived", "true");
+  if (settledQuery.trim()) params.set("q", settledQuery.trim());
+  const listPath = `${API_BASE}/documents?${params.toString()}`;
+  const list = useResource(
+    listPath,
+    useCallback((signal: AbortSignal) => api.get<ListResponse>(listPath, { signal }), [listPath]),
+  );
+  const documents = list.data?.documents ?? [];
+  const loading = list.loading;
+  const error = list.error
+    ? list.error instanceof Error
+      ? list.error.message
+      : "Failed to load documents"
+    : null;
+  const fetchDocuments = list.refresh;
 
   useEffect(() => {
     fetchTags();
   }, [fetchTags]);
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
 
   const toggleTag = (id: number) => {
     setSelectedTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -180,7 +179,7 @@ export function LabDocumentBrowser() {
         <div data-testid="lab-docs-loading" className="text-gray-500 py-12 text-center">
           Loading documents...
         </div>
-      ) : documents.length === 0 ? (
+      ) : error && !list.data ? null : documents.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">No documents found.</div>
       ) : (
         <table className="w-full text-sm">
@@ -222,7 +221,7 @@ export function LabDocumentBrowser() {
           onUploaded={() => {
             setShowUpload(false);
             fetchTags();
-            fetchDocuments();
+            void fetchDocuments();
           }}
         />
       )}
@@ -249,6 +248,12 @@ function UploadDocumentModal({
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const watchRef = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    watchRef.current = controller;
+    return () => controller.abort();
+  }, []);
 
   const toggle = (id: number) =>
     setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -271,16 +276,18 @@ function UploadDocumentModal({
           description: description || null,
           tag_ids: tagIds,
         });
-        const deadline = Date.now() + 90_000;
-        let current = job;
-        while (current.status === "pending" || current.status === "running") {
-          if (Date.now() > deadline) {
-            setErr("Import is taking longer than expected; it will appear once it finishes.");
-            setBusy(false);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 800));
-          current = await api.get<UrlImport>(`${API_BASE}/documents/url-imports/${job.id}`);
+        // The watch belongs to this dialog: closing it stops the watch (not the
+        // import), and nothing below runs for a dialog that is gone.
+        const { value: current, timedOut } = await watchJob(
+          job,
+          (signal) => api.get<UrlImport>(`${API_BASE}/documents/url-imports/${job.id}`, { signal }),
+          (j) => j.status !== "pending" && j.status !== "running",
+          { intervalMs: 800, deadlineMs: 90_000, signal: watchRef.current.signal },
+        );
+        if (timedOut) {
+          setErr("Import is taking longer than expected; it will appear once it finishes.");
+          setBusy(false);
+          return;
         }
         if (current.status === "failed") {
           setErr(current.error_message || "Import failed.");
@@ -305,6 +312,7 @@ function UploadDocumentModal({
       });
       onUploaded();
     } catch (e) {
+      if (isAbortError(e)) return;
       setErr(e instanceof Error ? e.message : "Upload failed");
       setBusy(false);
     }
