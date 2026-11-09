@@ -252,12 +252,21 @@ class TaskOwner:
     def close_event_admission(self) -> None:
         self._admitting_events = False
 
+    def _fence(self) -> dict[asyncio.Task[Any], str]:
+        """Everything shutdown must see finish: owned tasks and admitted request operations."""
+        current = asyncio.current_task()
+        fence = {t: e.role for t, e in self._tasks.items() if t is not current}
+        fence.update(
+            {t: f"operation:{kind}" for t, kind in self._operations.items() if t is not current and not t.done()}
+        )
+        return fence
+
     async def drain(self, seconds: float) -> bool:
-        """Wait, up to ``seconds`` in total, for every owned task (children included) to finish."""
+        """Wait, up to ``seconds`` in total, for owned tasks (children included), admitted request
+        operations, and open admission reservations to finish."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + seconds
-        current = asyncio.current_task()
-        while (pending := [t for t in self._tasks if t is not current]) or self._reservations:
+        while (pending := list(self._fence())) or self._reservations:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 return False
@@ -291,22 +300,28 @@ class TaskOwner:
 
     async def _cancel_until(self, deadline: float) -> tuple[list[str], list[str]]:
         loop = asyncio.get_running_loop()
-        current = asyncio.current_task()
         cancelled: list[str] = []
         seen: set[asyncio.Task[Any]] = set()
-        while pending := [t for t in self._tasks if t is not current]:
-            for task in pending:
+        while (fence := self._fence()) or self._reservations:
+            for task, role in fence.items():
                 entry = self._tasks.get(task)
+                # A request operation belongs to the server, which cancels it; the owner only waits
+                # for its cleanup. A shielded cleanup is waited for, never cancelled.
                 if entry is None or not entry.cancellable:
                     continue
                 if task not in seen:
                     seen.add(task)
-                    cancelled.append(entry.role)
+                    cancelled.append(role)
                 task.cancel()
             remaining = deadline - loop.time()
             if remaining <= 0:
-                return sorted(cancelled), sorted(self._tasks[t].role for t in pending if t in self._tasks)
-            await asyncio.wait(pending, timeout=min(remaining, 0.05))
+                still = [role for t, role in fence.items() if not t.done()]
+                still += [f"reservation:{role}" for role in self._reservations]
+                return sorted(cancelled), sorted(still)
+            if fence:
+                await asyncio.wait(list(fence), timeout=min(remaining, 0.05))
+            else:
+                await asyncio.sleep(min(remaining, 0.01))
         return sorted(cancelled), []
 
     async def shutdown(self, *, drain_seconds: float, cancel_seconds: float) -> ShutdownReport:
@@ -325,7 +340,7 @@ class TaskOwner:
         if not drained:
             report.cancelled, report.uncooperative = await self._cancel_until(cancel_deadline)
         self.close_event_admission()
-        if self._tasks and not report.uncooperative:
+        if (self._fence() or self._reservations) and not report.uncooperative:
             more_cancelled, report.uncooperative = await self._cancel_until(cancel_deadline)
             report.cancelled = sorted(set(report.cancelled) | set(more_cancelled))
         level = logging.INFO if report.clean else logging.ERROR

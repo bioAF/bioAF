@@ -104,3 +104,57 @@ def test_request_grace_and_lifespan_phases_fit_the_container_stop_grace():
     stop_grace = int(backend["stop_grace_period"].rstrip("s"))
     total = request_grace + startup.DRAIN_SECONDS + startup.CANCEL_SECONDS + startup.RESOURCE_SECONDS
     assert total <= stop_grace - 10, f"{total}s of shutdown leaves under 10s margin in {stop_grace}s"
+
+
+# --- admitted request work is inside the shutdown fence (review 2, finding 1) ----------------------
+
+
+async def test_shutdown_waits_for_a_cancelled_requests_cleanup_before_reporting_clean():
+    owner = TaskOwner()
+    admitted, cleaned = asyncio.Event(), []
+
+    async def deployment_request():
+        runtime.require_admission("deployment")
+        admitted.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.2)  # Terraform TERM, then the run's interruption commit
+            cleaned.append(True)
+            raise
+
+    with runtime.bound(owner):
+        request = asyncio.create_task(deployment_request())
+    await admitted.wait()
+    request.cancel()  # uvicorn cancels requests that outlive its grace, then runs the lifespan
+    report = await owner.shutdown(drain_seconds=0.05, cancel_seconds=2)
+
+    assert cleaned == [True]
+    assert report.clean
+
+
+async def test_request_cleanup_that_overruns_the_budget_makes_shutdown_unclean():
+    owner = TaskOwner()
+    admitted = asyncio.Event()
+
+    async def deployment_request():
+        runtime.require_admission("deployment")
+        admitted.set()
+        await _stubborn()
+
+    with runtime.bound(owner):
+        request = asyncio.create_task(deployment_request())
+    await admitted.wait()
+    report = await owner.shutdown(drain_seconds=0.05, cancel_seconds=0.2)
+    assert not report.clean
+    assert report.uncooperative == ["operation:deployment"]
+    _release.set()
+    await asyncio.gather(request, return_exceptions=True)
+
+
+async def test_an_unfinished_reservation_makes_shutdown_unclean():
+    owner = TaskOwner()
+    owner.reserve("hosted-review")
+    report = await owner.shutdown(drain_seconds=0.05, cancel_seconds=0.1)
+    assert not report.clean
+    assert report.uncooperative == ["reservation:hosted-review"]

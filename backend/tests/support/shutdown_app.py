@@ -68,3 +68,15 @@ JOBS = {"finishing": _finishing, "cooperative": _cooperative, "stubborn": _stubb
 async def start(kind: str):
     runtime.spawn(JOBS[kind](), role=kind)
     return {"started": kind}
+
+
+@app.post("/deploy")
+async def deploy():
+    """A request-owned external operation: admitted, long-running, with cleanup on cancellation."""
+    runtime.require_admission("deployment")
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        await asyncio.sleep(0.5)  # Terraform TERM and the run's interruption commit
+        (MARKERS / "deploy-cleaned").write_text("cleaned")
+        raise

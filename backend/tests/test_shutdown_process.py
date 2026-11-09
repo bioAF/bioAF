@@ -105,3 +105,19 @@ def test_uncooperative_work_is_reported_and_the_process_still_exits_within_budge
     assert (tmp_path / "lifespan-finished").read_text() == "unclean"
     assert "role=stubborn transition=abandoned outcome=uncooperative" in output
     assert elapsed < 0.5 + 0.5 + 3.0, output
+
+
+def test_a_cancelled_request_operation_finishes_its_cleanup_before_the_lifespan_reports(server, tmp_path):
+    import threading
+
+    proc, url = server(drain=1.0, cancel=2.0)
+    threading.Thread(target=lambda: httpx.post(f"{url}/deploy", timeout=30), daemon=True).start()
+    time.sleep(0.5)
+
+    _, output = _terminate(proc)
+
+    cleaned = tmp_path / "deploy-cleaned"
+    finished = tmp_path / "lifespan-finished"
+    assert cleaned.exists(), output
+    assert finished.read_text() == "clean", output
+    assert cleaned.stat().st_mtime_ns <= finished.stat().st_mtime_ns
