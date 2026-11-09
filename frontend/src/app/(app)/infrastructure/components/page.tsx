@@ -770,11 +770,18 @@ export default function InfraComponentsPage() {
                         </div>
                       </div>
                     ) : (
-                      <Button
-                        onClick={handleStartDeploy}
-                        disabled={deployLoading}>
-                        {deployLoading ? "Starting..." : "Deploy"}
-                      </Button>
+                      <>
+                        {deployProgress.failed && (
+                          <p data-testid="deploy-progress-unavailable" role="status" className="text-xs text-amber-700 mb-2">
+                            Deployment status could not be read. bioAF keeps checking.
+                          </p>
+                        )}
+                        <Button
+                          onClick={handleStartDeploy}
+                          disabled={deployLoading}>
+                          {deployLoading ? "Starting..." : "Deploy"}
+                        </Button>
+                      </>
                     )}
                   </div>
 
@@ -1326,6 +1333,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowDeployModal(false)}
           onAbort={() => {
             setShowDeployModal(false);
@@ -1503,6 +1511,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowTeardownProgress(false)}
           onAbort={() => {
             setShowTeardownProgress(false);
@@ -1594,6 +1603,7 @@ export default function InfraComponentsPage() {
           completedResources={deployProgress.completed_resources}
           plannedResources={deployProgress.planned_resources}
           errorMessage={deployProgress.error_message}
+          progressUnavailable={deployProgress.failed}
           onDismiss={() => setShowDestroyStorageProgress(false)}
           onAbort={() => {
             setShowDestroyStorageProgress(false);

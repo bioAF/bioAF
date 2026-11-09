@@ -1,6 +1,7 @@
 import { getToken } from "./auth";
 import { expireSession } from "./session";
 import { apiUrl } from "./apiUrl";
+import { abortError, isAbortError } from "./abort";
 import {
   isMaintenanceBody,
   reportMaintenance,
@@ -23,6 +24,7 @@ function maintenanceMessage(body: MaintenanceInfo): string {
 }
 
 export { apiBaseUrl, apiUrl } from "./apiUrl";
+export { isAbortError } from "./abort";
 
 export interface ApiErrorExtras {
   /** The parsed error body, for feature wrappers that read nested conflict payloads. */
@@ -50,19 +52,6 @@ export class ApiError extends Error {
     this.body = extras.body;
     this.retryAfter = extras.retryAfter ?? null;
   }
-}
-
-/** Whether `error` is a deliberate cancellation rather than a failure. */
-export function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { name?: unknown }).name === "AbortError"
-  );
-}
-
-function abortError(): DOMException {
-  return new DOMException("The operation was aborted.", "AbortError");
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

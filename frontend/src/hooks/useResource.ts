@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError } from "@/lib/api";
+import { isAbortError } from "@/lib/abort";
 import { onSessionReset } from "@/lib/session";
 
 /**
