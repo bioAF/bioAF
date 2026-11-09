@@ -24,14 +24,32 @@ import { onSessionReset } from "@/lib/session";
  * overlap. A manual refresh supersedes a poll read in flight, and the timer resumes after it.
  * Retries are left to the next tick; the hook adds none.
  *
+ * The feature declares the policy, the hook applies it: `poll` may be a function of this key's
+ * current data and error (active vs. terminal, re-check after a failure), and `expected` names
+ * failures that are not errors (a 403 for a role without access). An expected failure is reported
+ * as `denied`, clears any earlier error, and stops polling until a refresh or a new key.
+ *
  * No response is cached or shared between consumers: state lives in the component.
  */
 
 export type ResourceLoader<T> = (signal: AbortSignal) => Promise<T>;
 
+/** What a polling policy sees: this key's current answer and failure. */
+export interface ResourceView<T> {
+  data: T | undefined;
+  error: unknown;
+}
+
+export type PollPolicy<T> = number | false | ((current: ResourceView<T>) => number | false);
+
 export interface ResourceOptions<T> {
-  /** Milliseconds between the end of one read and the start of the next, or false for none. */
-  poll?: number | false;
+  /**
+   * Milliseconds between the end of one read and the start of the next, or false for none; or a
+   * function of the current data and error that returns either.
+   */
+  poll?: PollPolicy<T>;
+  /** Failures that are expected (e.g. permission denied): reported as `denied`, never polled. */
+  expected?: (error: unknown) => boolean;
   /** Called with each answer the consumer is shown. */
   onSuccess?: (data: T) => void;
   /** Called with each failure of a current read (cancellation is not a failure). */
@@ -42,6 +60,7 @@ interface ResourceState<T> {
   key: string | null;
   data: T | undefined;
   error: unknown;
+  denied: boolean;
   inFlight: boolean;
   /** Increments whenever a read settles or the data is replaced; schedules the next poll. */
   settled: number;
@@ -53,6 +72,8 @@ export interface Resource<T> {
   loading: boolean;
   refreshing: boolean;
   stale: boolean;
+  /** The latest read failed in a way the feature declared expected (see `expected`). */
+  denied: boolean;
   /** Read again now, superseding any read in flight. Resolves when that read settles. */
   refresh: () => Promise<void>;
   /** Replace the data locally (e.g. after a mutation), superseding any read in flight. */
@@ -68,6 +89,7 @@ export function useResource<T>(
     key: null,
     data: undefined,
     error: null,
+    denied: false,
     inFlight: false,
     settled: 0,
   });
@@ -116,14 +138,14 @@ export function useResource<T>(
     setState((s) =>
       s.key === k
         ? { ...s, inFlight: true }
-        : { key: k, data: undefined, error: null, inFlight: true, settled: s.settled },
+        : { key: k, data: undefined, error: null, denied: false, inFlight: true, settled: s.settled },
     );
 
     try {
       const data = await loadRef.current(controller.signal);
       if (generation !== generationRef.current) return;
       controllerRef.current = null;
-      setState((s) => ({ key: k, data, error: null, inFlight: false, settled: s.settled + 1 }));
+      setState((s) => ({ key: k, data, error: null, denied: false, inFlight: false, settled: s.settled + 1 }));
       optionsRef.current.onSuccess?.(data);
     } catch (error) {
       if (generation !== generationRef.current) return;
@@ -132,7 +154,11 @@ export function useResource<T>(
         setState((s) => ({ ...s, inFlight: false, settled: s.settled + 1 }));
         return;
       }
-      setState((s) => ({ ...s, key: k, error, inFlight: false, settled: s.settled + 1 }));
+      if (optionsRef.current.expected?.(error)) {
+        setState((s) => ({ key: k, data: undefined, error: null, denied: true, inFlight: false, settled: s.settled + 1 }));
+        return;
+      }
+      setState((s) => ({ ...s, key: k, error, denied: false, inFlight: false, settled: s.settled + 1 }));
       optionsRef.current.onError?.(error);
     }
   }, [invalidate]);
@@ -152,7 +178,7 @@ export function useResource<T>(
   useEffect(() => {
     const unsubscribe = onSessionReset(() => {
       invalidate();
-      setState((s) => ({ key: null, data: undefined, error: null, inFlight: false, settled: s.settled }));
+      setState((s) => ({ key: null, data: undefined, error: null, denied: false, inFlight: false, settled: s.settled }));
       setSessionEpoch((n) => n + 1);
     });
     return () => {
@@ -160,7 +186,15 @@ export function useResource<T>(
     };
   }, [invalidate]);
 
-  const poll = options.poll ?? false;
+  // The policy sees only this key's settled answer; a denial is never polled.
+  const current = key !== null && state.key === key;
+  const policy = options.poll ?? false;
+  const poll =
+    !current || state.denied
+      ? false
+      : typeof policy === "function"
+        ? policy({ data: state.data, error: state.error })
+        : policy;
   useEffect(() => {
     if (key === null || poll === false || state.key !== key || state.inFlight) return;
     timerRef.current = setTimeout(() => {
@@ -187,6 +221,7 @@ export function useResource<T>(
             ? (next as (previous: T | undefined) => T)(s.key === k ? s.data : undefined)
             : next,
         error: null,
+        denied: false,
         inFlight: false,
         settled: s.settled + 1,
       }));
@@ -194,15 +229,17 @@ export function useResource<T>(
     [invalidate],
   );
 
-  const current = key !== null && state.key === key;
   const data = current ? state.data : undefined;
   const error = current ? state.error : null;
+  const denied = current && state.denied;
   return {
     data,
     error,
-    loading: key !== null && (!current || (data === undefined && (state.inFlight || error === null))),
+    loading:
+      key !== null && (!current || (data === undefined && !denied && (state.inFlight || error === null))),
     refreshing: current && state.inFlight && data !== undefined,
     stale: current && data !== undefined && error !== null,
+    denied,
     refresh: run,
     mutate,
   };
