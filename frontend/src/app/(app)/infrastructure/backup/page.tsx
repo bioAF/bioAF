@@ -297,8 +297,18 @@ export default function InfraBackupPage() {
     });
   };
 
-  const handleDownloadTfstate = (filename: string) => {
-    window.open(`/api/backups/tfstate-download/${encodeURIComponent(filename)}`, "_blank");
+  // An authenticated blob download: a plain navigation sends no session credential, and the
+  // endpoint requires backups:view.
+  const handleDownloadTfstate = async (filename: string) => {
+    setActionMessage("");
+    try {
+      await api.download(`/api/backups/tfstate-download/${encodeURIComponent(filename)}`, "GET", undefined, {
+        filename: filename.split("/").pop() || filename,
+      });
+    } catch (e) {
+      logError("downloading a Terraform state file", e);
+      setActionMessage(e instanceof Error ? e.message : "Download failed");
+    }
   };
 
   const handleSaveSettings = async () => {
