@@ -6,7 +6,7 @@ returned token, at which point the server reads the GCS checksum, moves the obje
 into its versioned path, and creates the record.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,7 @@ from app.services.lab_document_upload_service import (
     LabDocumentUploadService,
     _assert_public_url,
 )
+from app import runtime
 
 router = APIRouter(prefix="/api/lab-knowledge", tags=["lab-knowledge"])
 
@@ -200,7 +201,6 @@ def _url_import_response(row) -> LabDocumentUrlImportResponse:
 @router.post("/documents/import-url", response_model=LabDocumentUrlImportResponse, status_code=202)
 async def import_document_from_url(
     body: LabDocumentUrlImportRequest,
-    background_tasks: BackgroundTasks,
     current_user: dict = require_permission("lab_documents", "manage"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -209,6 +209,7 @@ async def import_document_from_url(
     actual fetch runs as a background task that reads the URL back from the stored
     job (mirroring the Reference Data importer), so the user-supplied URL is never
     fetched directly in the request handler. Returns the import job to poll."""
+    runtime.require_admission("URL import")
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 
@@ -216,17 +217,20 @@ async def import_document_from_url(
     # so the caller gets immediate feedback. This performs no outbound request.
     _assert_public_url(body.url)
 
-    row = await LabDocumentUploadService.create_url_import(
-        session,
-        org_id=org_id,
-        user_id=user_id,
-        url=body.url,
-        title=body.title,
-        description=body.description,
-        tag_ids=body.tag_ids,
-    )
-    await session.commit()
-    background_tasks.add_task(LabDocumentUploadService.run_url_import, async_session_factory, import_id=row.id)
+    # Admission is reserved before the job is committed and the import starts on the application's
+    # owner after the commit, so the response does not wait for it.
+    with runtime.admission(role="lab-document-url-import") as ticket:
+        row = await LabDocumentUploadService.create_url_import(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            url=body.url,
+            title=body.title,
+            description=body.description,
+            tag_ids=body.tag_ids,
+        )
+        await session.commit()
+        ticket.start(LabDocumentUploadService.run_url_import(async_session_factory, import_id=row.id))
     return _url_import_response(row)
 
 

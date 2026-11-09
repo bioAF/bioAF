@@ -5,6 +5,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
+from app.runtime import spawn_event
+from app import runtime
 
 if TYPE_CHECKING:
     from app.workers.reference_importer import ImportResult
@@ -233,7 +235,7 @@ class ReferenceDataService:
             )
 
             # Fire-and-forget notification
-            asyncio.create_task(
+            spawn_event(
                 event_bus.emit(
                     REFERENCE_DEPRECATED,
                     {
@@ -251,7 +253,8 @@ class ReferenceDataService:
                             "scope": dataset.scope,
                         },
                     },
-                )
+                ),
+                event_type=REFERENCE_DEPRECATED,
             )
         else:
             # Public: requires admin approval
@@ -304,7 +307,7 @@ class ReferenceDataService:
             previous_value=previous,
         )
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 REFERENCE_DEPRECATED,
                 {
@@ -322,7 +325,8 @@ class ReferenceDataService:
                         "scope": dataset.scope,
                     },
                 },
-            )
+            ),
+            event_type=REFERENCE_DEPRECATED,
         )
 
         return dataset
@@ -745,8 +749,7 @@ class ReferenceDataService:
         monkey-patch this to avoid running the real importer.
         """
         job_id = f"refimport-{dataset_id}-inproc"
-        loop = asyncio.get_running_loop()
-        loop.create_task(ReferenceDataService._run_import_inproc(dataset_id, request))
+        runtime.spawn(ReferenceDataService._run_import_inproc(dataset_id, request), role="reference-import")
         return job_id
 
     @staticmethod
@@ -800,13 +803,18 @@ class ReferenceDataService:
             extract_mode=request.extract,
         )
 
+        owner = runtime.current_owner()
+
         def _on_progress(**payload: object) -> None:
             # Runs on the importer's worker thread. Schedule the DB write
-            # back on the main event loop and wait until it commits so
-            # progress is durable before the next chunk callback fires.
-            future = asyncio.run_coroutine_threadsafe(
+            # back on the main event loop, owned like the import, and wait
+            # until it commits so progress is durable before the next chunk
+            # callback fires. A shutting-down owner refuses the write.
+            future = runtime.spawn_threadsafe(
                 ReferenceDataService._record_progress_in_new_session(dataset_id, **payload),  # type: ignore[arg-type]
-                loop,
+                role="reference-import-progress",
+                loop=loop,
+                owner=owner,
             )
             try:
                 future.result(timeout=15)
@@ -907,6 +915,7 @@ class ReferenceDataService:
     ) -> tuple[ReferenceDataset, str]:
         """Create the dataset, progress row, and launch the importer GKE Job."""
         # Up-front uniqueness check
+        runtime.require_admission("reference import")
         existing = await session.execute(
             select(ReferenceDataset.id).where(
                 ReferenceDataset.organization_id == org_id,

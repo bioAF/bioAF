@@ -143,16 +143,24 @@ async def db_engine(worker_id, request):
     import app.database as database_module
 
     restore_factories = lifecycle.redirect_session_factories(test_factory, database_module.async_session_factory)
+    # The test's task owner: work the test starts through the application's spawn points,
+    # requests through `client`, and committed events all belong to it.
+    from app import runtime
+
+    owner = runtime.TaskOwner(name="test")
     tasks_before = lifecycle.snapshot_tasks()
 
     try:
-        yield engine
+        with runtime.bound(owner):
+            yield engine
     finally:
-        # While the test factory and schema still exist: let scheduled post-commit events finish,
-        # then cancel tasks the test started, so none keeps a transaction open (deadlocking the
-        # drop) or falls back to the production factory. Every step runs even if one fails.
+        # While the test factory and schema still exist: let the test's events finish, then stop
+        # the work it started through its owner (then, as a backstop, any application task that
+        # escaped it), so none keeps a transaction open (deadlocking the drop) or falls back to the
+        # production factory. Every step runs even if one fails.
         await lifecycle.run_all(
-            lambda: lifecycle.drain_and_cancel(tasks_before),
+            lambda: lifecycle.settle_owner(owner),
+            lambda: lifecycle.cancel_escaped_tasks(tasks_before),
             restore_factories,
             *cleanup,
             engine.dispose,
@@ -187,6 +195,11 @@ async def client(db_engine):
     original_lifespan = main_module.app.router.lifespan_context
     main_module.app.router.lifespan_context = _test_lifespan
     rate_limit_requests.clear()
+    # Requests bind the test's task owner, as they bind the lifespan's in production.
+    from app import runtime
+
+    previous_owner = getattr(main_module.app.state, "runtime", None)
+    main_module.app.state.runtime = runtime.current_owner()
 
     async def override_get_session():
         async with factory() as session:
@@ -201,6 +214,7 @@ async def client(db_engine):
         # which runs after this and before the schema is dropped.
         main_module.app.dependency_overrides.clear()
         main_module.app.router.lifespan_context = original_lifespan
+        main_module.app.state.runtime = previous_owner
 
 
 @pytest_asyncio.fixture

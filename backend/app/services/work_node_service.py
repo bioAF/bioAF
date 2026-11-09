@@ -4,7 +4,6 @@ Manages the lifecycle of SSH-accessible work nodes running as GCE VMs
 with Packer-built images and conda environments.
 """
 
-import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -27,6 +26,8 @@ from app.services.session_bucket import _bucket_filter
 from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
 from app.exceptions import ConflictError, NotFoundError, ValidationError
+from app.runtime import spawn_event
+from app import runtime
 
 logger = logging.getLogger("bioaf.work_nodes")
 
@@ -50,6 +51,7 @@ class WorkNodeService:
         experiment_id: int | None = None,
     ) -> ComputeSession:
         # Validate machine type
+        runtime.require_admission("work node launch")
         mt = get_machine_type(machine_type)
         if not mt:
             valid_names = sorted(m["name"] for m in MACHINE_TYPES)
@@ -304,7 +306,7 @@ class WorkNodeService:
             },
         )
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 WORK_NODE_LAUNCHED,
                 {
@@ -318,7 +320,8 @@ class WorkNodeService:
                     "message": f"Work node launched with {machine_type}",
                     "summary": f"Work node {compute_session.id} launched",
                 },
-            )
+            ),
+            event_type=WORK_NODE_LAUNCHED,
         )
 
         return compute_session
@@ -421,7 +424,7 @@ class WorkNodeService:
             previous_value={"status": old_status},
         )
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 WORK_NODE_STOPPED,
                 {
@@ -435,7 +438,8 @@ class WorkNodeService:
                     "message": f"Work node {compute_session.id} stopped",
                     "summary": f"Work node {compute_session.id} stopped",
                 },
-            )
+            ),
+            event_type=WORK_NODE_STOPPED,
         )
 
         return compute_session
@@ -573,7 +577,7 @@ class WorkNodeService:
                     node.status = "stopped"
                     node.stopped_at = now
 
-                    asyncio.create_task(
+                    spawn_event(
                         event_bus.emit(
                             WORK_NODE_HEARTBEAT_TIMEOUT,
                             {
@@ -589,7 +593,8 @@ class WorkNodeService:
                                 ),
                                 "summary": f"Work node {node.id} heartbeat timeout",
                             },
-                        )
+                        ),
+                        event_type=WORK_NODE_HEARTBEAT_TIMEOUT,
                     )
 
             await session.flush()

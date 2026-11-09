@@ -109,8 +109,8 @@ async def test_a_closed_gate_skips_startup_writes_and_background_work(db_engine,
     monkeypatch.setattr("app.services.bootstrap_metadata.persist_cloud_provider", _must_not_run)
     monkeypatch.setattr("app.adapters.registry.initialize_adapters", _must_not_run)
     monkeypatch.setattr("app.services.upgrade_service.UpgradeService.resolve_pending_upgrades", _must_not_run)
-    monkeypatch.setattr(main_module, "_pipeline_monitor_loop", _must_not_run)
-    monkeypatch.setattr(main_module, "_postgres_backup_loop", _must_not_run)
+    monkeypatch.setattr("app.tasks.jobs._pipeline_monitor", _must_not_run)
+    monkeypatch.setattr("app.tasks.jobs._scheduled_backup", _must_not_run)
 
     application = FastAPI()
     before = set(asyncio.all_tasks())

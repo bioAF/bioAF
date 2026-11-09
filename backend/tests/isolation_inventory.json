@@ -937,6 +937,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_detached_work.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_disposable_pg.py": {
    "category": "no_database",
    "evidence": [],
@@ -2421,6 +2430,14 @@
    "evidence": [],
    "route": "none"
   },
+  "test_owner_children.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_packages_removed.py": {
    "category": "real_commit",
    "evidence": [
@@ -2445,6 +2462,23 @@
     "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
+  },
+  "test_periodic.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_periodic_transactions.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
   },
   "test_permissions_and_ownership.py": {
    "category": "real_commit",
@@ -2877,6 +2911,17 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_pubsub_listener_lifetime.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_pubsub_manifest_routing.py": {
    "category": "single_connection",
    "evidence": [
@@ -3220,6 +3265,45 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_response_jobs.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_restart_recovery.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_restore_expiry.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
+  },
+  "test_restore_pause.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_result_set_normalizer.py": {
    "category": "no_database",
    "evidence": [],
@@ -3276,6 +3360,15 @@
     "fixture:db_engine",
     "fixture:session",
     "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_runtime.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "async_sessionmaker",
+    "uses db_engine directly"
    ],
    "route": "committed_reset_candidate"
   },
@@ -3670,6 +3763,18 @@
    "evidence": [],
    "route": "none"
   },
+  "test_shutdown_budget.py": {
+   "category": "real_commit",
+   "evidence": [
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_shutdown_process.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_slack_oauth.py": {
    "category": "real_commit",
    "evidence": [
@@ -3768,6 +3873,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_startup_sequence.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "create_task",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_storage.py": {
    "category": "real_commit",
    "evidence": [
@@ -3848,6 +3962,20 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_task_owner_binding.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_sessionmaker",
+    "defer_event",
+    "wait_for_deferred_events",
+    "http requests use their own sessions",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_template_notebooks.py": {
    "category": "real_commit",

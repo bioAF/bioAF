@@ -11,6 +11,7 @@ from app.exceptions import NotFoundError
 from app.models.slurm_job import SlurmJob
 from app.services.audit_service import log_action
 from app.services.compute_cost_service import ComputeCostService
+from app import runtime
 
 logger = logging.getLogger("bioaf.slurm")
 
@@ -184,6 +185,7 @@ class SlurmService:
         notebook_session_id: int | None = None,
     ) -> SlurmJob:
         """Submit a job to SLURM via SSH."""
+        runtime.require_admission("pipeline launch")
         output = await SlurmService._run_ssh_command(
             f"sbatch --parsable --partition={partition} --cpus-per-task={cpu} "
             f'--mem={memory_gb}G --job-name="{job_name or "bioaf-job"}" '

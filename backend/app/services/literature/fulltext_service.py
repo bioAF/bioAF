@@ -24,6 +24,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import httpx
+from app import runtime
 
 logger = logging.getLogger("bioaf.literature.fulltext")
 
@@ -164,7 +165,7 @@ async def parse_pdf(pdf_bytes: bytes) -> dict:
         finally:
             if proc.returncode is None:
                 proc.kill()
-                await asyncio.shield(proc.wait())
+                await runtime.shielded(proc.wait(), role="pdf-parse-reap")
     finally:
         _parses_running -= 1
     if proc.returncode != 0:

@@ -28,6 +28,7 @@ from app.adapters.models import (
     TerminationResult,
     to_service_state,
 )
+from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -840,7 +841,10 @@ class KubernetesNotebookProvider(NotebookProvider):
 
             # Launch background task to poll for pod readiness and LB IP,
             # then update the DB session record once both are available.
-            asyncio.create_task(self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port))
+            runtime.spawn(
+                self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port),
+                role="notebook-readiness",
+            )
 
         return {
             "session_id": session_id,

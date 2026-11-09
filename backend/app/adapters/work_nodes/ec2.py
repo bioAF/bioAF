@@ -35,6 +35,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.exceptions import ValidationError
+from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.ec2")
 
@@ -460,7 +461,7 @@ class Ec2VmInstance(VmInstance):
         # Background readiness poll
         creds = vm_spec.get("session_credentials", {})
         ssh_username = creds.get("username", "")
-        asyncio.create_task(self._poll_vm_ready(session_id, instance_id, ssh_username))
+        runtime.spawn(self._poll_vm_ready(session_id, instance_id, ssh_username), role="work-node-readiness")
 
         return VmInfo(
             instance_name=instance_id,

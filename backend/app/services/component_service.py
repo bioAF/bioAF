@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -12,6 +11,7 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import COMPONENT_HEALTH_DEGRADED, COMPONENT_HEALTH_DOWN
 from app.services.notebook_image_service import build_notebook_image
+from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.component_service")
 
@@ -420,7 +420,7 @@ class ComponentService:
             event_type = COMPONENT_HEALTH_DOWN
             severity = "critical"
 
-        asyncio.create_task(
+        spawn_event(
             event_bus.emit(
                 event_type,
                 {
@@ -432,5 +432,6 @@ class ComponentService:
                     "severity": severity,
                     "summary": f"Component '{component_name}' is {status}: {message}",
                 },
-            )
+            ),
+            event_type=event_type,
         )
