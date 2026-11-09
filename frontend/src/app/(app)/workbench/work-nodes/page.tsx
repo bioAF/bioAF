@@ -125,17 +125,18 @@ export default function WorkNodesPage() {
   // The node list, keyed by the session bucket. Auto-refresh every 10 s while a node
   // is starting or stopping; each read starts after the previous one settles, and a
   // bucket's late answer cannot replace another bucket's.
-  const [hasInProgress, setHasInProgress] = useState(false);
   const nodesPath = `/api/v1/work-nodes/sessions?bucket=${bucket}`;
   const nodeList = useResource(
     canView ? nodesPath : null,
-    useCallback(() => api.get<WorkNodeListResponse>(nodesPath), [nodesPath]),
+    useCallback(
+      (signal: AbortSignal) => api.get<WorkNodeListResponse>(nodesPath, { signal }),
+      [nodesPath],
+    ),
     {
-      poll: hasInProgress ? 10000 : false,
-      onSuccess: (data) => {
-        setHasInProgress(data.sessions.some((n) => n.status === "starting" || n.status === "stopping"));
-        setLoadedOnce(true);
-      },
+      poll: ({ data }) =>
+        data?.sessions.some((n) => n.status === "starting" || n.status === "stopping") ? 10000 : false,
+      // Ends the page's first-load spinner; the list itself shows the hook's own loading state.
+      onSuccess: () => setLoadedOnce(true),
       onError: (e) => {
         // Never fall through to the empty state here: these nodes bill by the hour,
         // and "you have none" is a very different claim from "we could not ask".

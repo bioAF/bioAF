@@ -103,3 +103,25 @@ test("a new bucket hides the previous bucket's nodes and ignores its late answer
   expect(screen.getByText("machine-3")).toBeInTheDocument();
   expect(screen.queryByText("machine-2")).not.toBeInTheDocument();
 });
+
+test("a bucket change aborts the previous bucket's read", async () => {
+  render(<WorkNodesPage />);
+  await answer("bucket=active", [node(1, "running")]);
+  fireEvent.click(screen.getByRole("button", { name: "Recent" }));
+  const recent = mockGet.mock.calls.filter(([url]) => String(url).includes("bucket=recent")).at(-1);
+  const signal = recent?.[1]?.signal;
+  expect(signal).toBeInstanceOf(AbortSignal);
+
+  fireEvent.click(screen.getByRole("button", { name: "All" }));
+  expect((signal as AbortSignal).aborted).toBe(true);
+});
+
+test("polling stops when no node is starting or stopping", async () => {
+  render(<WorkNodesPage />);
+  await answer("bucket=active", [node(1, "starting")]);
+  await tick(10_000);
+  await answer("bucket=active", [node(1, "running")]);
+
+  await tick(60_000);
+  expect(sessionReads()).toHaveLength(0);
+});
