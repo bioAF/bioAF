@@ -2446,6 +2446,15 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_periodic.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_permissions_and_ownership.py": {
    "category": "real_commit",
    "evidence": [

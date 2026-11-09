@@ -34,7 +34,7 @@ def test_compute_mode_reads_from_env():
 
 @pytest.mark.asyncio
 async def test_job_status_sync_skipped_when_not_slurm(monkeypatch):
-    """_job_status_sync_loop exits immediately when compute_mode != 'slurm'."""
+    """The SLURM job status sync job exits immediately when compute_mode != 'slurm'."""
     import asyncio
 
     synced = []
@@ -56,16 +56,19 @@ async def test_job_status_sync_skipped_when_not_slurm(monkeypatch):
 
     importlib.reload(cfg_mod)
 
-    import app.main as main_mod
-
-    importlib.reload(main_mod)
-
     from app.services import slurm_service
+    from app.tasks.jobs import PERIODIC_JOBS
+    from app.tasks.periodic import run_periodic
 
     monkeypatch.setattr(slurm_service.SlurmService, "sync_job_statuses", fake_sync)
 
-    # Run the loop -- it should return without calling sync
-    task = asyncio.create_task(main_mod._job_status_sync_loop())
+    async def no_wait(delay, stopping):
+        await asyncio.sleep(0)
+        return False
+
+    # Run the job -- it should return without calling sync
+    job = next(j for j in PERIODIC_JOBS if j.role == "job-status-sync")
+    task = asyncio.create_task(run_periodic(job, wait=no_wait))
     await asyncio.sleep(0.05)
     task.cancel()
     try:

@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app.services import webhook_service
+from app.tasks.periodic import wait_or_stop
 
 logger = logging.getLogger("bioaf.webhook_worker")
 
@@ -124,5 +125,6 @@ async def run_worker_loop(stop_event: asyncio.Event | None = None) -> None:
             await _drain_once()
         except Exception:
             logger.exception("webhook worker iteration failed")
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        if await wait_or_stop(POLL_INTERVAL_SECONDS, stop_event):
+            break
     logger.info("webhook worker stopped")
