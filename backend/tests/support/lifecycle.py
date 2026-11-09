@@ -5,8 +5,10 @@
   async_session_factory`` binds a copy at import) at the test one, and puts
   them all back afterwards, including modules first imported during the test.
 - ``settle_owner`` lets the test's events finish, then cancels and awaits
-  everything the test's task owner holds (plan 14). Tasks the test did not
-  start through the owner are left alone. Tasks that existed
+  everything the test's task owner holds (plan 14).
+- ``cancel_escaped_tasks`` is the backstop after that: application tasks the
+  test started that the owner did not hold are cancelled, awaited, and logged.
+  Pre-existing and non-application tasks are left alone. Tasks that existed
   before the test, and tasks that are not application code (pytest, anyio,
   httpx), are left alone.
 - ``run_all`` runs every cleanup step even if an earlier one raises.
@@ -20,9 +22,15 @@ import asyncio
 import importlib
 import inspect
 import sys
+import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
+
+import app as _app_package
+
+_APP_DIR = str(Path(_app_package.__file__).resolve().parent)
 
 
 # Module state that persists between tests unless reset: (module, attribute).
@@ -115,6 +123,40 @@ def redirect_session_factories(test_factory: object, production_factory: object)
 
 
 # --- tasks ---------------------------------------------------------------------------
+
+
+def snapshot_tasks() -> set[asyncio.Task]:
+    try:
+        return set(asyncio.all_tasks())
+    except RuntimeError:  # no running loop
+        return set()
+
+
+def _is_app_task(task: asyncio.Task) -> bool:
+    coro = task.get_coro()
+    code = getattr(coro, "cr_code", None) or getattr(coro, "gi_code", None)
+    filename = getattr(code, "co_filename", "") or ""
+    return filename.startswith(_APP_DIR)
+
+
+async def cancel_escaped_tasks(before: set[asyncio.Task]) -> list[str]:
+    """Backstop after the owner settles: cancel and await application tasks the test started that
+    the owner did not hold (pre-existing and non-application tasks are left alone).
+
+    Anything caught here escaped ownership; it is logged so the escape can be fixed at its source.
+    """
+    current = asyncio.current_task()
+    escaped = [
+        t for t in asyncio.all_tasks() if t is not current and t not in before and not t.done() and _is_app_task(t)
+    ]
+    for task in escaped:
+        task.cancel()
+    if escaped:
+        await asyncio.gather(*escaped, return_exceptions=True)
+    names = [getattr(t.get_coro(), "__qualname__", "?") for t in escaped]
+    if names:
+        logging.getLogger("tests.lifecycle").warning("app tasks escaped the test's owner: %s", names)
+    return names
 
 
 async def settle_owner(owner: Any, event_seconds: float = 10.0, cancel_seconds: float = 10.0) -> None:

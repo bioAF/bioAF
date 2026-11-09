@@ -73,6 +73,7 @@ class _Entry:
     started: float
     event: bool
     worker: bool = False
+    cancellable: bool = True
 
 
 def _lifecycle(level: int, role: str, transition: str, **fields: Any) -> None:
@@ -115,16 +116,18 @@ class TaskOwner:
         event: bool = False,
         reserved: bool = False,
         worker: bool = False,
+        cancellable: bool = True,
     ) -> asyncio.Task[Any]:
         """Start ``coro`` as an owned task.
 
-        Closed admission refuses new work, but not a descendant of work already owned: a task
-        settling during the drain may still start the children it needs. Events are admitted until
-        event admission closes.
+        Closed admission refuses new work, but never a child of work already owned: a task
+        settling or being cancelled may still start the children it needs (a cleanup, a fan-out),
+        and those stay tracked. Events are admitted until event admission closes. A task that is
+        not ``cancellable`` (a shielded cleanup) is waited for by shutdown but never cancelled.
         """
         admitted = self._admitting_events if event else self._admitting
-        descendant = asyncio.current_task() in self._tasks and self._admitting_events
-        if not admitted and not descendant and not (reserved and self._admitting_events):
+        child = asyncio.current_task() in self._tasks
+        if not admitted and not child and not (reserved and self._admitting_events):
             coro.close()
             _lifecycle(logging.WARNING, role, "refused", reason="shutting_down")
             raise OwnerClosed(f"{self.name} is shutting down")
@@ -132,7 +135,7 @@ class TaskOwner:
         context = contextvars.copy_context()
         context.run(_current.set, self)
         task = loop.create_task(coro, name=f"bioaf:{role}", context=context)
-        self._tasks[task] = _Entry(role, loop.time(), event, worker)
+        self._tasks[task] = _Entry(role, loop.time(), event, worker, cancellable)
         task.add_done_callback(self._settled)
         _lifecycle(logging.DEBUG, role, "started")
         return task
@@ -251,22 +254,29 @@ class TaskOwner:
     async def cancel_all(self, seconds: float) -> tuple[list[str], list[str]]:
         """Cancel every owned task, repeatedly, until all settle or ``seconds`` pass in total.
 
-        Returns the roles cancelled and the roles still running at the deadline.
+        Children started while cancelling are cancelled too; a shielded cleanup is waited for, not
+        cancelled. Returns the roles cancelled and the roles still running at the deadline.
         """
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + seconds
+        return await self._cancel_until(loop.time() + seconds)
+
+    async def _cancel_until(self, deadline: float) -> tuple[list[str], list[str]]:
+        loop = asyncio.get_running_loop()
         current = asyncio.current_task()
         cancelled: list[str] = []
         seen: set[asyncio.Task[Any]] = set()
         while pending := [t for t in self._tasks if t is not current]:
             for task in pending:
+                entry = self._tasks.get(task)
+                if entry is None or not entry.cancellable:
+                    continue
                 if task not in seen:
                     seen.add(task)
-                    cancelled.append(self._tasks[task].role)
+                    cancelled.append(entry.role)
                 task.cancel()
             remaining = deadline - loop.time()
             if remaining <= 0:
-                return sorted(cancelled), sorted(self._tasks[t].role for t in pending if not t.done())
+                return sorted(cancelled), sorted(self._tasks[t].role for t in pending if t in self._tasks)
             await asyncio.wait(pending, timeout=min(remaining, 0.05))
         return sorted(cancelled), []
 
@@ -279,13 +289,15 @@ class TaskOwner:
         """
         self.close_admission()
         report = ShutdownReport()
+        loop = asyncio.get_running_loop()
         drained = await self.drain(drain_seconds)
+        # One deadline for the whole cancel phase, including events admitted while cancelling.
+        cancel_deadline = loop.time() + cancel_seconds
         if not drained:
-            report.cancelled, report.uncooperative = await self.cancel_all(cancel_seconds)
+            report.cancelled, report.uncooperative = await self._cancel_until(cancel_deadline)
         self.close_event_admission()
         if self._tasks and not report.uncooperative:
-            # Events admitted while cancelling.
-            more_cancelled, report.uncooperative = await self.cancel_all(cancel_seconds)
+            more_cancelled, report.uncooperative = await self._cancel_until(cancel_deadline)
             report.cancelled = sorted(set(report.cancelled) | set(more_cancelled))
         level = logging.INFO if report.clean else logging.ERROR
         _lifecycle(
@@ -334,6 +346,18 @@ def spawn(coro: Coroutine[Any, Any, Any], *, role: str, event: bool = False) -> 
     if owner is not None:
         return owner.spawn(coro, role=role, event=event)
     return asyncio.create_task(coro, name=f"bioaf:{role}")
+
+
+async def shielded(coro: Coroutine[Any, Any, Any], *, role: str) -> Any:
+    """Run a cleanup that cancelling its caller must not interrupt, as owned work.
+
+    Unlike a bare ``asyncio.shield``, the cleanup is a tracked task: shutdown waits for it (within
+    its budget, without cancelling it) instead of reporting a clean stop while it still runs.
+    """
+    owner = _current.get()
+    if owner is None:
+        return await asyncio.shield(coro)
+    return await asyncio.shield(owner.spawn(coro, role=role, cancellable=False))
 
 
 def spawn_event(coro: Coroutine[Any, Any, Any], *, event_type: str) -> asyncio.Task[Any] | None:

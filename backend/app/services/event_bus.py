@@ -5,6 +5,8 @@ import logging
 from collections import defaultdict
 from typing import Any, Callable, Coroutine
 
+from app import runtime
+
 logger = logging.getLogger("bioaf.event_bus")
 
 EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
@@ -37,7 +39,12 @@ class EventBus:
             return
 
         logger.info("Emitting event %s to %d subscriber(s)", event_type, len(callbacks))
-        tasks = [self._safe_invoke(cb, event_type, payload) for cb in callbacks]
+        # Each subscriber call is a child of the emission: owned (and awaited by shutdown) when an
+        # owner is bound, so a cancelled emission cannot leave a subscriber running unseen.
+        tasks = [
+            runtime.spawn(self._safe_invoke(cb, event_type, payload), role=f"event:{event_type}:subscriber", event=True)
+            for cb in callbacks
+        ]
         await asyncio.gather(*tasks)
 
     async def _safe_invoke(self, callback: EventCallback, event_type: str, payload: dict[str, Any]) -> None:

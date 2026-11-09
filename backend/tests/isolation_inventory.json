@@ -2430,6 +2430,14 @@
    "evidence": [],
    "route": "none"
   },
+  "test_owner_children.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_packages_removed.py": {
    "category": "real_commit",
    "evidence": [

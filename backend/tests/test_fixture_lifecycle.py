@@ -130,6 +130,44 @@ async def test_owned_app_tasks_are_cancelled_and_awaited_others_are_left():
 
 
 @pytest.mark.asyncio
+async def test_escaped_app_tasks_are_cancelled_by_the_backstop_and_others_are_left():
+    from app.services.event_bus import EventBus
+
+    bus = EventBus()
+    calls: list[asyncio.Event] = []
+
+    async def _forever(_payload):
+        calls[-1].set()
+        await asyncio.sleep(3600)
+
+    async def _emit_and_wait_until_running() -> asyncio.Task:
+        calls.append(asyncio.Event())
+        task = asyncio.create_task(bus.emit("probe", {}))
+        await calls[-1].wait()
+        return task
+
+    bus.subscribe("probe", _forever)
+    from app import runtime
+
+    with runtime.bound(None):
+        existing = await _emit_and_wait_until_running()  # app code, running before the snapshot
+        before = lifecycle.snapshot_tasks()
+        escaped = await _emit_and_wait_until_running()  # app code the owner never held
+    foreign = asyncio.create_task(asyncio.sleep(3600))  # not app code
+    await asyncio.sleep(0)
+
+    names = await lifecycle.cancel_escaped_tasks(before)
+
+    assert names
+    assert escaped.cancelled()
+    assert not existing.done()
+    assert not foreign.done()
+    for task in (existing, foreign):
+        task.cancel()
+    await asyncio.gather(existing, foreign, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_deferred_events_are_drained_before_tasks_are_cancelled(session):
     from app import runtime
     from app.services.event_bus import event_bus

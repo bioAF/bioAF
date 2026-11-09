@@ -115,7 +115,7 @@ async def test_a_post_commit_event_goes_to_its_sessions_owner(db_engine):
         await session.commit()
 
     await asyncio.sleep(0)
-    assert owner.roles() == ["event:test.committed"]
+    assert "event:test.committed" in owner.roles()
     assert seen == [{"n": 1}]
     release.set()
     assert await owner.drain(1)
@@ -131,7 +131,7 @@ async def test_a_bound_owner_receives_events_from_an_unbound_session(db_engine):
             await session.commit()
 
     await asyncio.sleep(0)
-    assert owner.roles() == ["event:test.committed"]
+    assert "event:test.committed" in owner.roles()
     release.set()
     await owner.drain(1)
 
@@ -172,7 +172,7 @@ async def test_a_direct_emission_is_owned_by_the_bound_owner(session):
     with runtime.bound(owner):
         runtime.spawn_event(event_bus.emit(QUOTA_WARNING, {"k": "v"}), event_type=QUOTA_WARNING)
     await asyncio.sleep(0)
-    assert owner.roles() == [f"event:{QUOTA_WARNING}"]
+    assert f"event:{QUOTA_WARNING}" in owner.roles()
     release.set()
     await owner.drain(1)
 

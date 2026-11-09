@@ -148,16 +148,19 @@ async def db_engine(worker_id, request):
     from app import runtime
 
     owner = runtime.TaskOwner(name="test")
+    tasks_before = lifecycle.snapshot_tasks()
 
     try:
         with runtime.bound(owner):
             yield engine
     finally:
         # While the test factory and schema still exist: let the test's events finish, then stop
-        # the work it started through its owner, so none keeps a transaction open (deadlocking the
-        # drop) or falls back to the production factory. Every step runs even if one fails.
+        # the work it started through its owner (then, as a backstop, any application task that
+        # escaped it), so none keeps a transaction open (deadlocking the drop) or falls back to the
+        # production factory. Every step runs even if one fails.
         await lifecycle.run_all(
             lambda: lifecycle.settle_owner(owner),
+            lambda: lifecycle.cancel_escaped_tasks(tasks_before),
             restore_factories,
             *cleanup,
             engine.dispose,

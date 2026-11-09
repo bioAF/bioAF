@@ -113,7 +113,10 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
     # Run all source coroutines in their own fresh session to avoid contention.
     results: dict[str, list[PaperRecord] | Exception] = {}
     tasks = {
-        src: asyncio.create_task(_run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source))
+        src: runtime.spawn(
+            _run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source),
+            role="literature-search-source",
+        )
         for src in sources
     }
     try:

@@ -82,8 +82,6 @@ UNOWNED = {
     ("runtime.py", "Ticket.start"): "response job started while no owner is bound",
     ("runtime.py", "spawn_threadsafe.start"): "thread callback while no owner is bound",
     ("services/post_commit_events.py", "_publish_after_commit"): "legacy path for unbound sessions",
-    ("services/literature/search_service.py", "_run_search"): "parent-owned fan-out, cancelled and awaited",
-    ("services/literature/lit_review_run_service.py", "_collect_candidates"): "parent-owned fan-out",
     ("main.py", "lifespan"): "maintenance watcher, released by the lifespan's exit stack",
 }
 
