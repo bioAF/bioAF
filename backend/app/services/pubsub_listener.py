@@ -247,13 +247,21 @@ class ListenerManager:
         return self._listener
 
     async def start(self) -> None:
-        """Start a listener unless one is already starting or running."""
+        """Start a listener unless one is already starting or running, or work is paused.
+
+        Every start (startup, the auto-ingest settings, resuming after a restore review) comes
+        through here, so a paused owner (a restore review) never gets a listener pulling messages
+        into whatever database the pool points at. Resuming the owner starts it again.
+        """
         async with self._lock:
             if self._task is not None and not self._task.done():
                 return
+            owner = runtime.current_owner()
+            if owner is not None and owner.paused is not None:
+                logger.info("Pub/Sub listener not started: work is paused (%s)", owner.paused)
+                return
             listener = PubSubListener()
             self._listener = listener
-            owner = runtime.current_owner()
             if owner is not None:
                 self._task = owner.spawn(self._run(listener), role="pubsub-listener", worker=True)
             else:

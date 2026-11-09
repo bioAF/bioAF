@@ -289,3 +289,55 @@ async def test_response_job_routes_refuse_during_a_review_before_writing(client,
     model = LabGlossaryScanJob if route == "glossary-scan" else AgentReviewJob
     async with database_module.async_session_factory() as s:
         assert (await s.execute(select(func.count(model.id)))).scalar() == 0
+
+
+# --- listener starts respect the pause (review 2, finding 3) ---------------------------------------
+
+
+async def test_a_listener_start_during_a_review_does_not_start_one_until_work_resumes(session):
+    from unittest.mock import patch
+
+    from app.services import pubsub_listener
+    from tests.test_pubsub_listener import _seed_config
+    from tests.test_pubsub_listener_lifetime import SUBSCRIPTION, _provider
+
+    await _seed_config(session, {"auto_ingest_enabled": "true", "pubsub_subscription_name": SUBSCRIPTION})
+    owner = runtime.current_owner()
+    provider = _provider([], lambda: None)
+    with patch("app.services.pubsub_listener.create_messaging_provider", return_value=provider) as create:
+        await owner.pause("restore_review", settle_seconds=0)
+        try:
+            await pubsub_listener.restart_listener_if_needed()
+            await asyncio.sleep(0.05)
+            assert create.call_count == 0
+            listener = pubsub_listener.get_listener()
+            assert listener is None or not listener.running
+        finally:
+            owner.resume()
+        await pubsub_listener.restart_listener_if_needed()
+        await _until(lambda: provider.pull.await_count >= 1)
+        await pubsub_listener.stop_listener()
+
+
+async def test_enabling_auto_ingest_during_a_review_starts_no_listener(client, admin_token, session):
+    from unittest.mock import patch
+
+    from tests.test_pubsub_listener import _seed_config
+    from tests.test_pubsub_listener_lifetime import SUBSCRIPTION, _provider
+
+    await _seed_config(session, {"auto_ingest_enabled": "false", "pubsub_subscription_name": SUBSCRIPTION})
+    owner = runtime.current_owner()
+    provider = _provider([], lambda: None)
+    with patch("app.services.pubsub_listener.create_messaging_provider", return_value=provider) as create:
+        await owner.pause("restore_review", settle_seconds=0)
+        try:
+            resp = await client.post(
+                "/api/v1/settings/auto-ingest",
+                json={"enabled": True, "cleanup_policy": "delete_after_copy"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            await asyncio.sleep(0.05)
+        finally:
+            owner.resume()
+    assert resp.status_code == 200
+    assert create.call_count == 0 and provider.pull.await_count == 0
