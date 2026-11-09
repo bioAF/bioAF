@@ -351,6 +351,10 @@ async def lifespan(app: FastAPI):
     for task in background_tasks:
         task.cancel()
     await asyncio.gather(*background_tasks, return_exceptions=True)
+    # A listener the auto-ingest settings started after startup is not one of the tasks above.
+    from app.services.pubsub_listener import stop_listener
+
+    await stop_listener()
 
     # Shutdown
     await engine.dispose()
@@ -850,21 +854,15 @@ async def _validation_driver_loop():
 
 
 async def _pubsub_listener_loop():
-    """Run the Pub/Sub listener for auto-ingest if enabled."""
-    from app.database import async_session_factory
-    from app.services.pubsub_listener import start_pubsub_listener_task
+    """Run the Pub/Sub listener for auto-ingest if enabled, through the listener's manager."""
+    from app.services.pubsub_listener import listener_manager
 
+    manager = listener_manager()
     try:
-        async with async_session_factory() as session:
-            await start_pubsub_listener_task(session)
+        await manager.start()
+        await manager.wait()
     except asyncio.CancelledError:
-        from app.services.pubsub_listener import get_listener
-
-        listener = get_listener()
-        if listener:
-            listener.stop()
-    except Exception as e:
-        logger.error("Pub/Sub listener error: %s", e)
+        await manager.stop()
 
 
 async def _session_monitor_loop():

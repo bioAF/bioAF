@@ -119,6 +119,10 @@ async def configure_auto_ingest(
         from app.services.pubsub_listener import restart_listener_if_needed
 
         await restart_listener_if_needed()
+    elif was_enabled and not body.enabled:
+        from app.services.pubsub_listener import stop_listener
+
+        await stop_listener()
 
     return {"status": "ok", "enabled": body.enabled, "cleanup_policy": body.cleanup_policy}
 

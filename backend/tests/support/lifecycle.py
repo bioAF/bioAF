@@ -46,7 +46,7 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.literature.fulltext_service", "_parses_running"),
     ("app.services.backup_service", "_restore_state"),
     ("app.services.networking_applier", "_mock_singleton"),
-    ("app.services.pubsub_listener", "_listener"),
+    ("app.services.pubsub_listener", "_manager"),
     ("app.platform.cloud_provider", "_resolved_backends"),
     ("app.adapters.work_nodes.ec2", "_local_vms"),
     ("app.adapters.work_nodes.gce", "_local_vms"),

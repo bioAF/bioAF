@@ -2877,6 +2877,17 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_pubsub_listener_lifetime.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_pubsub_manifest_routing.py": {
    "category": "single_connection",
    "evidence": [
