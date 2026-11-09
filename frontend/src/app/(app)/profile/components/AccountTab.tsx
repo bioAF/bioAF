@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getCurrentUser } from "@/lib/auth";
-import { replaceSessionToken } from "@/lib/session";
+import { replaceSessionToken, sessionGeneration } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 
@@ -41,12 +41,14 @@ export function AccountTab() {
       return;
     }
     setNameSaving(true);
+    // The re-issued token belongs to the session that asked for it.
+    const generation = sessionGeneration();
     try {
       await api.patch("/api/auth/me", { name: name.trim() });
       // Re-issue the token so the new name is reflected in the header and
       // anywhere else that reads it from the JWT.
       const res = await api.post<{ access_token: string }>("/api/auth/refresh");
-      replaceSessionToken(res.access_token);
+      replaceSessionToken(res.access_token, generation);
       window.dispatchEvent(new Event("profile-updated"));
       setNameMessage("Name updated");
     } catch (e) {

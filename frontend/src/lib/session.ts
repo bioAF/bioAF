@@ -51,9 +51,15 @@ export function startSession(token: string): void {
   setToken(token);
 }
 
-/** The same session, re-issued credential (e.g. after a profile change). Holders survive. */
-export function replaceSessionToken(token: string): void {
+/**
+ * The same session, re-issued credential (e.g. after a profile change). Holders survive.
+ * `fromGeneration` is the session generation captured when the re-issue was requested: a token
+ * that arrives after that session ended belongs to nobody and is refused.
+ */
+export function replaceSessionToken(token: string, fromGeneration: number): boolean {
+  if (fromGeneration !== generation) return false;
   setToken(token);
+  return true;
 }
 
 /** End the session: logout and expiry both come here. Safe to call more than once. */

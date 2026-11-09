@@ -1,7 +1,7 @@
 import { getToken } from "./auth";
-import { expireSession } from "./session";
+import { expireSession, sessionGeneration, sessionSignal } from "./session";
 import { apiUrl } from "./apiUrl";
-import { abortError, isAbortError } from "./abort";
+import { abortError, isAbortError, linkSignals } from "./abort";
 import {
   isMaintenanceBody,
   reportMaintenance,
@@ -56,6 +56,39 @@ export class ApiError extends Error {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
+}
+
+/**
+ * The session a request belongs to. Its signal aborts when the caller cancels or the session ends;
+ * anything that settles after the session changed (an answer, a body, a retry, a re-issued
+ * credential) is treated as cancelled and never reaches the next session.
+ */
+interface Owner {
+  generation: number;
+  signal: AbortSignal;
+  release: () => void;
+}
+
+function own(callerSignal?: AbortSignal): Owner {
+  const generation = sessionGeneration();
+  const { signal, release } = linkSignals(callerSignal, sessionSignal());
+  return { generation, signal, release };
+}
+
+function assertOwned(owner: Owner): void {
+  if (owner.signal.aborted || owner.generation !== sessionGeneration()) throw abortError();
+}
+
+/** Run `work` owned by the current session; its result is discarded if the session changed. */
+async function owned<T>(callerSignal: AbortSignal | undefined, work: (owner: Owner) => Promise<T>): Promise<T> {
+  const owner = own(callerSignal);
+  try {
+    const result = await work(owner);
+    assertOwned(owner);
+    return result;
+  } finally {
+    owner.release();
+  }
 }
 
 // Map known structured error codes to a readable sentence.
@@ -176,9 +209,9 @@ interface SendOptions extends RequestControls {
 }
 
 /** Send an application request and apply the status policy. The body is left unread. */
-async function send(path: string, options: SendOptions = {}): Promise<Response> {
+async function send(path: string, owner: Owner, options: SendOptions = {}): Promise<Response> {
   const url = apiUrl(path);
-  throwIfAborted(options.signal);
+  assertOwned(owner);
   const sentToken = getToken();
   const headers: Record<string, string> = {};
   if (options.jsonContentType || options.json) {
@@ -195,8 +228,9 @@ async function send(path: string, options: SendOptions = {}): Promise<Response> 
     method: options.method ?? "GET",
     headers,
     body: options.form ?? (options.json ? JSON.stringify(options.json) : undefined),
-    signal: options.signal,
+    signal: owner.signal,
   });
+  assertOwned(owner);
 
   if (!response.ok) {
     const body = await readErrorBody(response);
@@ -236,9 +270,10 @@ async function readJson<T>(response: Response): Promise<T> {
   }
 }
 
-async function fetchJson<T>(path: string, options: SendOptions = {}): Promise<T> {
-  const response = await send(path, { ...options, jsonContentType: true });
-  return readJson<T>(response);
+function fetchJson<T>(path: string, options: SendOptions = {}): Promise<T> {
+  return owned(options.signal, async (owner) =>
+    readJson<T>(await send(path, owner, { ...options, jsonContentType: true })),
+  );
 }
 
 async function uploadFile<T>(
@@ -254,13 +289,11 @@ async function uploadFile<T>(
       formData.append(key, value);
     }
   }
-  const response = await send(path, {
-    method: "POST",
-    form: formData,
-    signal: controls.signal,
-    fallback: "Upload failed",
-  });
-  return readJson<T>(response);
+  return owned(controls.signal, async (owner) =>
+    readJson<T>(
+      await send(path, owner, { method: "POST", form: formData, fallback: "Upload failed" }),
+    ),
+  );
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -300,16 +333,21 @@ async function fetchWithRetry<T>(
   delayMs = 2000,
   controls: RequestControls = {},
 ): Promise<T> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fetchJson<T>(path, { signal: controls.signal });
-    } catch (err) {
-      const isLastAttempt = attempt === retries;
-      if (isLastAttempt || !isTransientFailure(err)) throw err;
-      await sleep(delayMs, controls.signal);
+  // The whole retry sequence belongs to one session: a later attempt never sends a credential
+  // from a session that started after the first.
+  return owned(controls.signal, async (owner) => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        assertOwned(owner);
+        return await fetchJson<T>(path, { signal: owner.signal });
+      } catch (err) {
+        const isLastAttempt = attempt === retries;
+        if (isLastAttempt || !isTransientFailure(err)) throw err;
+        await sleep(delayMs, owner.signal);
+      }
     }
-  }
-  throw new Error("Unreachable");
+    throw new Error("Unreachable");
+  });
 }
 
 /** A filename from Content-Disposition, preferring the RFC 5987 `filename*` form. */
@@ -339,15 +377,18 @@ export interface BlobResult {
   filename: string;
 }
 
-async function fetchBlob(path: string, options: BlobRequest = {}): Promise<BlobResult> {
-  const response = await send(path, {
+function fetchBlob(path: string, options: BlobRequest = {}): Promise<BlobResult> {
+  return owned(options.signal, (owner) => readBlob(path, owner, options));
+}
+
+async function readBlob(path: string, owner: Owner, options: BlobRequest): Promise<BlobResult> {
+  const response = await send(path, owner, {
     method: options.method ?? "GET",
     json: options.body,
-    signal: options.signal,
     fallback: "Download failed",
   });
   const blob = await response.blob();
-  throwIfAborted(options.signal);
+  assertOwned(owner);
   const filename =
     filenameFromDisposition(response.headers?.get?.("Content-Disposition")) ??
     options.filename ??
@@ -371,9 +412,12 @@ async function downloadFile(
   body?: unknown,
   options: Omit<BlobRequest, "method" | "body"> = {},
 ): Promise<void> {
-  const { blob, filename } = await fetchBlob(path, { ...options, method, body });
-  throwIfAborted(options.signal);
-  saveBlob(blob, filename);
+  await owned(options.signal, async (owner) => {
+    const { blob, filename } = await readBlob(path, owner, { ...options, method, body });
+    // Nothing is saved for a cancelled download or one whose session has ended.
+    assertOwned(owner);
+    saveBlob(blob, filename);
+  });
 }
 
 export interface TextRequest extends RequestControls {
@@ -381,13 +425,14 @@ export interface TextRequest extends RequestControls {
   body?: unknown;
 }
 
-export async function fetchText(path: string, options: TextRequest = {}): Promise<string> {
-  const response = await send(path, {
-    method: options.method ?? "GET",
-    json: options.body,
-    signal: options.signal,
+export function fetchText(path: string, options: TextRequest = {}): Promise<string> {
+  return owned(options.signal, async (owner) => {
+    const response = await send(path, owner, {
+      method: options.method ?? "GET",
+      json: options.body,
+    });
+    return response.text();
   });
-  return response.text();
 }
 
 export interface StreamRequest extends RequestControls {
@@ -400,14 +445,21 @@ export interface StreamRequest extends RequestControls {
  * An application request whose response is read as a stream (SSE). The status policy applies
  * before the stream opens; the body is returned unread.
  */
-function openStream(path: string, options: StreamRequest = {}): Promise<Response> {
-  return send(path, {
-    method: options.method ?? "GET",
-    json: options.body,
-    jsonContentType: options.body !== undefined,
-    accept: options.accept,
-    signal: options.signal,
-  });
+async function openStream(path: string, options: StreamRequest = {}): Promise<Response> {
+  // Not released: the stream is read after this returns, and ending the session (or the caller
+  // cancelling) must still abort it. The listeners go with the session's signal when it ends.
+  const owner = own(options.signal);
+  try {
+    return await send(path, owner, {
+      method: options.method ?? "GET",
+      json: options.body,
+      jsonContentType: options.body !== undefined,
+      accept: options.accept,
+    });
+  } catch (error) {
+    owner.release();
+    throw error;
+  }
 }
 
 // --- XHR adapter (upload progress) ---------------------------------------------------------
@@ -504,6 +556,10 @@ async function uploadFileSigned<T>(
   file: File,
   options: SignedUploadOptions = {},
 ): Promise<T> {
+  return owned(options.signal, (owner) => signedUpload<T>(file, options, owner));
+}
+
+async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: Owner): Promise<T> {
   // Step 1: get a signed URL and upload_id from the backend
   const initiateBody: Record<string, unknown> = {
     filename: options.filename ?? file.name,
@@ -529,7 +585,7 @@ async function uploadFileSigned<T>(
   }>("/api/files/upload/initiate", {
     method: "POST",
     json: initiateBody,
-    signal: options.signal,
+    signal: owner.signal,
   });
 
   // Step 2: PUT directly to storage. The signed URL is the credential: no bioAF session token is
@@ -540,8 +596,9 @@ async function uploadFileSigned<T>(
     headers: { "Content-Type": "application/octet-stream" },
     body: file,
     onProgress: options.onProgress,
-    signal: options.signal,
+    signal: owner.signal,
   });
+  assertOwned(owner);
   if (put.status < 200 || put.status >= 300) {
     throw new ApiError(put.status, `GCS upload failed: ${put.status}`);
   }
@@ -550,7 +607,7 @@ async function uploadFileSigned<T>(
   return fetchJson<T>("/api/files/upload/complete", {
     method: "POST",
     json: { upload_id },
-    signal: options.signal,
+    signal: owner.signal,
   });
 }
 
@@ -573,6 +630,15 @@ async function uploadFileProxied<T>(
   const qs = params.toString();
   const url = apiUrl(`/api/files/upload/simple${qs ? `?${qs}` : ""}`);
 
+  return owned(options.signal, (owner) => proxiedUpload<T>(url, file, options, owner));
+}
+
+async function proxiedUpload<T>(
+  url: string,
+  file: File,
+  options: SignedUploadOptions,
+  owner: Owner,
+): Promise<T> {
   const sentToken = getToken();
   const upload = options.filename
     ? new File([file], options.filename, { type: file.type })
@@ -586,8 +652,9 @@ async function uploadFileProxied<T>(
     headers: sentToken ? { Authorization: `Bearer ${sentToken}` } : {},
     body: formData,
     onProgress: options.onProgress,
-    signal: options.signal,
+    signal: owner.signal,
   });
+  assertOwned(owner);
 
   if (result.status >= 200 && result.status < 300) {
     if (result.status === 204) return undefined as T;

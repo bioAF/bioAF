@@ -81,6 +81,16 @@ export function useResource<T>(
     optionsRef.current = options;
   });
 
+  // Work is only started while mounted: a refresh or mutate kept past unmount (an awaited
+  // mutation finishing after navigation) must not start a read or run a callback.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const keyRef = useRef(key);
   const generationRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
@@ -98,7 +108,7 @@ export function useResource<T>(
 
   const run = useCallback(async (): Promise<void> => {
     const k = keyRef.current;
-    if (k === null) return;
+    if (k === null || !mountedRef.current) return;
     invalidate();
     const generation = generationRef.current;
     const controller = new AbortController();
@@ -168,7 +178,7 @@ export function useResource<T>(
   const mutate = useCallback(
     (next: T | ((previous: T | undefined) => T)) => {
       const k = keyRef.current;
-      if (k === null) return;
+      if (k === null || !mountedRef.current) return;
       invalidate();
       setState((s) => ({
         key: k,

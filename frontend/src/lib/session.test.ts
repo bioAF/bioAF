@@ -9,11 +9,12 @@ jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }))
 const mockNavigateToLogin = jest.fn();
 jest.mock("@/lib/navigation", () => ({ navigateToLogin: () => mockNavigateToLogin() }));
 
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, isAbortError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import {
   endSession,
   replaceSessionToken,
+  sessionGeneration,
   sessionSignal,
   startSession,
 } from "@/lib/session";
@@ -248,7 +249,8 @@ describe("which 401s end the session", () => {
     permissionsCache.roleName = "Viewer";
     old.resolve({ status: 401, body: { detail: "Unauthorized" } });
 
-    expect(await call).toBeInstanceOf(ApiError);
+    // Ending session A cancelled its request, so the late 401 never reaches the policy.
+    expect(isAbortError(await call)).toBe(true);
     expect(getToken()).toBe("b.jwt");
     expect(permissionsCache.roleName).toBe("Viewer");
     expect(mockNavigateToLogin).not.toHaveBeenCalled();
@@ -261,7 +263,7 @@ describe("which 401s end the session", () => {
     const old = take("/api/experiments");
 
     // Profile changes re-issue the token inside the same session.
-    replaceSessionToken("a2.jwt");
+    replaceSessionToken("a2.jwt", sessionGeneration());
     old.resolve({ status: 401, body: { detail: "Unauthorized" } });
 
     expect(await call).toBeInstanceOf(ApiError);
@@ -275,7 +277,7 @@ describe("which 401s end the session", () => {
     permissionsCache.roleName = "Admin";
     const signal = sessionSignal();
 
-    replaceSessionToken("a2.jwt");
+    replaceSessionToken("a2.jwt", sessionGeneration());
 
     expect(permissionsCache.roleName).toBe("Admin");
     expect(signal.aborted).toBe(false);
