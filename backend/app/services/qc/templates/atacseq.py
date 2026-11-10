@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.template_helpers import first_number, mean, number, numbers, pick_raw_fastqc
 from app.services.qc.multiqc_registry import Roster, read_depth_and_samples
 from app.services.qc.roster import roster_for_run
 
@@ -171,56 +172,6 @@ def compute_quality(metrics: dict[str, Any]) -> str:
 # ---- MultiQC parsing (pure; mirrors the sibling chipseq/bulk_rnaseq templates) ----
 
 
-def _num(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _field(sample: dict, *keys: str) -> float | None:
-    for k in keys:
-        if k in sample:
-            n = _num(sample[k])
-            if n is not None:
-                return n
-    return None
-
-
-def _numbers(section: dict, *keys: str) -> list[float]:
-    out: list[float] = []
-    for v in section.values():
-        if isinstance(v, dict):
-            n = _field(v, *keys)
-            if n is not None:
-                out.append(n)
-    return out
-
-
-def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs)
-
-
-def _pick_raw_fastqc(raw: dict) -> dict:
-    """Pick the RAW FastQC section by the physical invariant "raw has >= reads than
-    trimmed" (max total across multiqc_fastqc*), not by the section suffix."""
-    sections = [v for k, v in raw.items() if isinstance(v, dict) and k.startswith("multiqc_fastqc")]
-    best: dict = {}
-    best_total = -1.0
-    for sec in sections:
-        total = sum(_numbers(sec, "Total Sequences", "total_sequences"))
-        if total > best_total:
-            best_total = total
-            best = sec
-    return best
-
-
 def _find_section(raw: dict, *names: str) -> dict:
     """First raw-data section matching one of ``names``, tolerating MultiQC numeric suffixes."""
     for name in names:
@@ -243,11 +194,11 @@ def _plot_values(section: dict) -> list[float]:
     for v in (section or {}).values():
         if isinstance(v, dict):
             for iv in v.values():
-                n = _num(iv)
+                n = number(iv)
                 if n is not None:
                     out.append(n)
         else:
-            n = _num(v)
+            n = number(v)
             if n is not None:
                 out.append(n)
     return out
@@ -269,7 +220,7 @@ def _scan_general_stats(gstats: Any, *keys: str) -> list[float]:
             for col, val in sample_vals.items():
                 cl = str(col).lower()
                 if any(w in cl for w in wanted):
-                    n = _num(val)
+                    n = number(val)
                     if n is not None:
                         out.append(n)
     return out
@@ -288,12 +239,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     raw = data.get("report_saved_raw_data") or {}
     gstats = data.get("report_general_stats_data")
 
-    fastqc = _pick_raw_fastqc(raw)
+    fastqc = pick_raw_fastqc(raw)
     if fastqc:
-        total_seqs = _numbers(fastqc, "Total Sequences", "total_sequences")
-        gc = _numbers(fastqc, "%GC", "percent_gc")
-        dedup = _numbers(fastqc, "total_deduplicated_percentage")
-        lengths = _numbers(fastqc, "avg_sequence_length")
+        total_seqs = numbers(fastqc, "Total Sequences", "total_sequences")
+        gc = numbers(fastqc, "%GC", "percent_gc")
+        dedup = numbers(fastqc, "total_deduplicated_percentage")
+        lengths = numbers(fastqc, "avg_sequence_length")
         if total_seqs:
             # Per-SAMPLE derivation (aligner roster, raw FastQC counts, lanes
             # added and mates collapsed). ATAC runs are paired-end, so counting
@@ -304,11 +255,11 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             if total_samples is not None:
                 metrics["total_samples"] = total_samples
         if gc:
-            metrics["percent_gc"] = round(_mean(gc), 1)
+            metrics["percent_gc"] = round(mean(gc), 1)
         if dedup:
-            metrics["percent_duplicates"] = round(_mean([100.0 - d for d in dedup]), 1)
+            metrics["percent_duplicates"] = round(mean([100.0 - d for d in dedup]), 1)
         if lengths:
-            metrics["avg_sequence_length"] = round(_mean(lengths), 1)
+            metrics["avg_sequence_length"] = round(mean(lengths), 1)
 
     flagstat = _find_section(raw, "multiqc_samtools_flagstat", "samtools_flagstat")
     if flagstat:
@@ -316,22 +267,22 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
         for v in flagstat.values():
             if not isinstance(v, dict):
                 continue
-            pct = _field(v, "mapped_passed_pct")
+            pct = first_number(v, "mapped_passed_pct")
             if pct is not None:
                 fracs.append(pct / 100.0)
                 continue
-            mapped = _field(v, "mapped_passed", "mapped")
-            total = _field(v, "total_passed", "total")
+            mapped = first_number(v, "mapped_passed", "mapped")
+            total = first_number(v, "total_passed", "total")
             if mapped is not None and total:
                 fracs.append(mapped / total)
         if fracs:
-            metrics["reads_mapped_genome"] = round(_mean(fracs), 4)
+            metrics["reads_mapped_genome"] = round(mean(fracs), 4)
 
     picard = _find_section(raw, "multiqc_picard_dups", "picard_dups", "multiqc_picard_deduplication")
     if picard:
-        dups = _numbers(picard, "PERCENT_DUPLICATION", "percent_duplication")
+        dups = numbers(picard, "PERCENT_DUPLICATION", "percent_duplication")
         if dups:
-            metrics["percent_duplicates"] = round(_mean([d * 100.0 for d in dups]), 1)
+            metrics["percent_duplicates"] = round(mean([d * 100.0 for d in dups]), 1)
 
     # MACS2 peak count + FRiP: MultiQC bar-plot data under `multiqc_peak_count-plot` /
     # `multiqc_frip_score-plot` ({sample: {series: value}}), like chipseq; fall back to older names + stats.
@@ -349,7 +300,7 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     if not peaks:
         peaks = _scan_general_stats(gstats, "peak_count", "num_peaks", "n_peaks")
     if peaks:
-        metrics["peak_count"] = int(round(_mean(peaks)))
+        metrics["peak_count"] = int(round(mean(peaks)))
 
     frip = _plot_values(
         _find_section(
@@ -360,15 +311,15 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
         frip = _scan_general_stats(gstats, "frip")
     if frip:
         vals = [f / 100.0 if f > 1.0 else f for f in frip]
-        metrics["frip"] = round(_mean(vals), 4)
+        metrics["frip"] = round(mean(vals), 4)
 
     # TSS enrichment (ATAC-distinctive; sparsely present, so best-effort over named sections + stats).
     tss_section = _find_section(raw, "multiqc_tss_enrichment", "tss_enrichment", "multiqc_ataqv")
-    tss = _numbers(tss_section, "tss_enrichment", "tss_score", "tsse") if tss_section else []
+    tss = numbers(tss_section, "tss_enrichment", "tss_score", "tsse") if tss_section else []
     if not tss:
         tss = _scan_general_stats(gstats, "tss_enrichment", "tss_score", "tsse")
     if tss:
-        metrics["tss_enrichment"] = round(_mean(tss), 2)
+        metrics["tss_enrichment"] = round(mean(tss), 2)
 
     return metrics
 

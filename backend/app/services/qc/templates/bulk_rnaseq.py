@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.template_helpers import first_number, mean, numbers, pick_raw_fastqc
 from app.services.qc.multiqc_registry import Roster, read_depth_and_samples
 from app.services.qc.roster import roster_for_run
 
@@ -169,60 +170,6 @@ def compute_quality(metrics: dict[str, Any]) -> str:
 # ---- MultiQC parsing (pure) ----
 
 
-def _num(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _field(sample: dict, *keys: str) -> float | None:
-    """First numeric value among the given keys for one sample record."""
-    for k in keys:
-        if k in sample:
-            n = _num(sample[k])
-            if n is not None:
-                return n
-    return None
-
-
-def _numbers(section: dict, *keys: str) -> list[float]:
-    out: list[float] = []
-    for v in section.values():
-        if isinstance(v, dict):
-            n = _field(v, *keys)
-            if n is not None:
-                out.append(n)
-    return out
-
-
-def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs)
-
-
-def _pick_raw_fastqc(raw: dict) -> dict:
-    """nf-core/rnaseq runs FastQC on raw + trimmed reads; MultiQC stores them as
-    multiqc_fastqc / multiqc_fastqc_1. Trimming only removes reads, so the RAW
-    section is the one with the higher total read count -- identify it by that
-    physical invariant, not by the section suffix (whose ordering is not
-    guaranteed). Read depth is a pre-trim (raw) quantity."""
-    sections = [v for k, v in raw.items() if isinstance(v, dict) and k.startswith("multiqc_fastqc")]
-    best: dict = {}
-    best_total = -1.0
-    for sec in sections:
-        total = sum(_numbers(sec, "Total Sequences", "total_sequences"))
-        if total > best_total:
-            best_total = total
-            best = sec
-    return best
-
-
 def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = None) -> dict[str, Any]:
     """Parse per-sample FastQC (raw) + STAR from a bulk-RNA-seq multiqc_data.json,
     aggregating per-sample by mean. STAR percentages are converted to the 0-1
@@ -236,12 +183,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     metrics = dict(EMPTY_METRICS)
     raw = data.get("report_saved_raw_data") or {}
 
-    fastqc = _pick_raw_fastqc(raw)
+    fastqc = pick_raw_fastqc(raw)
     if fastqc:
-        total_seqs = _numbers(fastqc, "Total Sequences", "total_sequences")
-        gc = _numbers(fastqc, "%GC", "percent_gc")
-        dedup = _numbers(fastqc, "total_deduplicated_percentage")
-        lengths = _numbers(fastqc, "avg_sequence_length")
+        total_seqs = numbers(fastqc, "Total Sequences", "total_sequences")
+        gc = numbers(fastqc, "%GC", "percent_gc")
+        dedup = numbers(fastqc, "total_deduplicated_percentage")
+        lengths = numbers(fastqc, "avg_sequence_length")
         if total_seqs:
             # Depth and sample count are derived per SAMPLE by the shared helper
             # (aligner roster, raw FastQC counts, lanes added and mates collapsed)
@@ -252,12 +199,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             if total_samples is not None:
                 metrics["total_samples"] = total_samples
         if gc:
-            metrics["percent_gc"] = round(_mean(gc), 1)
+            metrics["percent_gc"] = round(mean(gc), 1)
         if dedup:
             # FastQC reports the % remaining after dedup; duplication is the complement.
-            metrics["percent_duplicates"] = round(_mean([100.0 - d for d in dedup]), 1)
+            metrics["percent_duplicates"] = round(mean([100.0 - d for d in dedup]), 1)
         if lengths:
-            metrics["avg_sequence_length"] = round(_mean(lengths), 1)
+            metrics["avg_sequence_length"] = round(mean(lengths), 1)
 
     star = raw.get("multiqc_star") or {}
     uniq_fracs: list[float] = []
@@ -265,16 +212,16 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     for v in star.values():
         if not isinstance(v, dict):
             continue
-        up = _field(v, "uniquely_mapped_percent")
+        up = first_number(v, "uniquely_mapped_percent")
         if up is None:
             continue
-        mp = _field(v, "multimapped_percent") or 0.0
+        mp = first_number(v, "multimapped_percent") or 0.0
         uniq_fracs.append(up / 100.0)
         # "Mapped to genome" = uniquely + multi-mapped (excludes too-many + unmapped).
         mapped_fracs.append((up + mp) / 100.0)
     if uniq_fracs:
-        metrics["reads_mapped_genome_unique"] = round(_mean(uniq_fracs), 4)
-        metrics["reads_mapped_genome"] = round(_mean(mapped_fracs), 4)
+        metrics["reads_mapped_genome_unique"] = round(mean(uniq_fracs), 4)
+        metrics["reads_mapped_genome"] = round(mean(mapped_fracs), 4)
 
     return metrics
 
