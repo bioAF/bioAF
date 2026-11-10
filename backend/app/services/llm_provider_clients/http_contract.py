@@ -15,14 +15,39 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Iterable
 
+from typing import Any
+
 import httpx
 
+from app.services import http_policy, request_pacing
 from app.services.llm_provider_clients import ProviderError
 
 logger = logging.getLogger("bioaf.llm.http")
 
 # Upstream statuses that mean the provider gave up waiting.
 _TIMEOUT_STATUSES = (408, 504)
+
+
+async def send(
+    client: httpx.AsyncClient, method: str, url: str, *, provider: str, operation: str, **kwargs: Any
+) -> httpx.Response:
+    """Model listing is a read and retries transient failures; every other
+    provider request (paid completions, tool turns) is sent exactly once."""
+    policy = http_policy.MODEL_LIST_READ if operation == "list_models" else http_policy.SINGLE_ATTEMPT
+    try:
+        return await http_policy.send(
+            client,
+            method,
+            url,
+            policy=policy,
+            label=f"{provider}.{operation}",
+            clock=request_pacing.registry().clock,
+            **kwargs,
+        )
+    except http_policy.BudgetExhausted as exc:
+        raise ProviderError(
+            f"{provider} request budget ran out", error_class="transport", timeout=True, provider=provider
+        ) from exc
 
 
 def status_error_class(status: int) -> str:

@@ -14,6 +14,7 @@ from app.services.llm_provider_clients.http_contract import (
     object_list,
     parse_error,
     raise_for_status,
+    send,
     transport_error,
 )
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
@@ -72,7 +73,14 @@ async def list_models(api_key: str | None) -> list[str]:
     key = _require_key(api_key)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(f"{_BASE_URL}/models", headers=_headers(key))
+            resp = await send(
+                client,
+                "GET",
+                provider=_PROVIDER,
+                operation="list_models",
+                url=f"{_BASE_URL}/models",
+                headers=_headers(key),
+            )
     except httpx.HTTPError as exc:
         raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="list_models") from exc
     _raise_for_status(resp, "list_models")
@@ -106,8 +114,12 @@ async def submit(
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/messages",
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit",
+                url=f"{_BASE_URL}/messages",
                 headers=_headers(key),
                 json=body,
             )
@@ -240,7 +252,15 @@ async def submit_with_tools(
         body["system"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{_BASE_URL}/messages", headers=_headers(key), json=body)
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit_with_tools",
+                url=f"{_BASE_URL}/messages",
+                headers=_headers(key),
+                json=body,
+            )
     except httpx.HTTPError as exc:
         raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit_with_tools") from exc
     _raise_for_status(resp, "submit_with_tools")

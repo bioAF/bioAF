@@ -26,6 +26,7 @@ from app.services.llm_provider_clients.http_contract import (
     object_list,
     parse_error,
     raise_for_status,
+    send,
     transport_error,
 )
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
@@ -50,8 +51,12 @@ async def list_models(api_key: str | None) -> list[str]:
         raise ProviderError("OpenAI requires an API key", error_class="auth", provider=_PROVIDER)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(
-                f"{_BASE_URL}/models",
+            resp = await send(
+                client,
+                "GET",
+                provider=_PROVIDER,
+                operation="list_models",
+                url=f"{_BASE_URL}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as exc:
@@ -89,8 +94,12 @@ async def submit(
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/chat/completions",
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit",
+                url=f"{_BASE_URL}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -294,8 +303,12 @@ async def submit_with_tools(
         body["instructions"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/responses",
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit_with_tools",
+                url=f"{_BASE_URL}/responses",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=body,
             )
