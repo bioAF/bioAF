@@ -81,3 +81,15 @@ class AutoClock(ManualClock):
         if seconds > 0:
             self.now += seconds
         await asyncio.sleep(0)
+
+
+async def drive(clock: ManualClock, coro, step: float = 0.05, limit: float = 600.0):
+    """Run ``coro`` to completion, advancing ``clock`` in ``step`` increments."""
+    task = asyncio.ensure_future(coro)
+    for _ in range(int(limit / step)):
+        await clock.settle()
+        if task.done():
+            return await task
+        await clock.advance(step)
+    task.cancel()
+    raise AssertionError("operation did not finish within the virtual time limit")

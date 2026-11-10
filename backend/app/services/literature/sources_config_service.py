@@ -166,17 +166,25 @@ def _safe_failure_message(exc: Exception) -> str:
     return f"Source test failed ({type(exc).__name__})"
 
 
-async def test_connection(source: str, api_key: str | None) -> dict:
-    """Run a trivial query against the source to confirm reachability. Returns
-    {success, message, latency_ms}."""
+# A connection test is one ordinary search: same quota, same retries, its own budget.
+_TEST_BUDGET_SECONDS = 60
+
+
+async def test_connection(execution: SourceExecution) -> dict:
+    """Run a trivial query against the source to confirm reachability, under
+    the organization's configuration and shared quota. An explicit test may
+    probe a disabled source. Returns {success, message, latency_ms}."""
+    from app.services.literature import source_policy
     from app.services.literature.sources import get_adapter
 
+    source = execution.source
     if source not in EXTERNAL_SOURCES:
         raise UnknownSource(f"unknown source: {source}")
     adapter = get_adapter(source)
     started = time.monotonic()
     try:
-        results = await adapter.search("test", 1, api_key)
+        with source_policy.bound(execution, budget_seconds=_TEST_BUDGET_SECONDS):
+            results = await adapter.search("test", 1, execution.api_key)
         latency_ms = int((time.monotonic() - started) * 1000)
         return {
             "success": True,

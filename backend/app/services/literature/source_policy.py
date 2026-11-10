@@ -31,6 +31,10 @@ from app.services import http_policy, request_pacing
 logger = logging.getLogger("bioaf.literature.source_policy")
 
 
+class SourceDisabled(Exception):
+    """The source was turned off in Literature Sources settings."""
+
+
 @dataclass(frozen=True)
 class SourceExecution:
     source: str

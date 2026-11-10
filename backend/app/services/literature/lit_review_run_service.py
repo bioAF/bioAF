@@ -63,7 +63,8 @@ from app.services.event_types import (
     LITERATURE_REVIEW_RUN_COMPLETED,
     LITERATURE_REVIEW_RUN_FAILED,
 )
-from app.services.literature import association_service, paper_service, sources_config_service
+from app.services.literature import association_service, paper_service, source_policy, sources_config_service
+from app.services.literature.source_policy import SourceExecution
 from app.services.literature.sources import PaperRecord, get_adapter
 from app.services.llm_provider_clients import ProviderError, get_client
 from app import runtime
@@ -312,7 +313,8 @@ class _RunContext:
     model: str
     api_key: str | None
     context_block: str
-    source_api_keys: dict[str, str | None]
+    # Enabled sources' configuration snapshot (credential and effective rate).
+    sources: dict[str, SourceExecution]
     score_threshold: float
     max_recommendations: int
 
@@ -363,9 +365,10 @@ async def _prepare(run_id: int) -> _RunContext | None:
         provider_cfg = await llm_provider_config_service.get_for_provider(s, run.organization_id, run.llm_provider)
         if provider_cfg is None:
             raise _RunFailure("llm provider configuration disappeared")
-        sources = await sources_config_service.list_enabled(s, run.organization_id)
-        if not sources:
+        enabled = await sources_config_service.list_enabled(s, run.organization_id)
+        if not enabled:
             raise _RunFailure(NO_SOURCES_ENABLED)
+        sources = await sources_config_service.resolve(s, run.organization_id, [row.source for row in enabled])
         return _RunContext(
             run_id=run.id,
             org_id=run.organization_id,
@@ -377,7 +380,7 @@ async def _prepare(run_id: int) -> _RunContext | None:
             model=run.llm_model,
             api_key=provider_cfg.api_key,
             context_block=await _build_experiment_context(s, run, experiment),
-            source_api_keys={row.source: row.api_key for row in sources},
+            sources=sources,
             score_threshold=run.score_threshold,
             max_recommendations=run.max_recommendations,
         )
@@ -408,8 +411,8 @@ async def _collect_candidates(ctx: _RunContext, queries: list[str], outcome: Sou
     seen_keys: set[str] = set()
     for q in queries:
         tasks = {
-            src: runtime.spawn(_safe_source_search(src, q, api_key), role="lit-review-source")
-            for src, api_key in ctx.source_api_keys.items()
+            src: runtime.spawn(_safe_source_search(src, q, execution), role="lit-review-source")
+            for src, execution in ctx.sources.items()
         }
         try:
             for src, t in tasks.items():
@@ -632,12 +635,15 @@ async def _fail(execution: _Execution, error: str, *, audit_error: str | None = 
     await _emit_terminal(execution, SEARCH_FAILED)
 
 
-async def _safe_source_search(src: str, query: str, api_key: str | None) -> list[PaperRecord]:
+async def _safe_source_search(src: str, query: str, execution: SourceExecution) -> list[PaperRecord]:
+    """One source/query attempt. Its pacing waits, requests, and retries share
+    the attempt's budget; the attempt is classified once by the caller."""
     adapter = get_adapter(src)
-    return await asyncio.wait_for(
-        adapter.search(query=query, max_results=20, api_key=api_key),
-        timeout=_PER_SOURCE_TIMEOUT_SECONDS,
-    )
+    with source_policy.bound(execution, budget_seconds=_PER_SOURCE_TIMEOUT_SECONDS):
+        return await asyncio.wait_for(
+            adapter.search(query=query, max_results=20, api_key=execution.api_key),
+            timeout=_PER_SOURCE_TIMEOUT_SECONDS,
+        )
 
 
 async def _build_experiment_context(session: AsyncSession, run: LiteratureReviewRun, experiment: Experiment) -> str:

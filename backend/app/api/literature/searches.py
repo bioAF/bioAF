@@ -47,14 +47,17 @@ async def submit_search_endpoint(
 ):
     if not body.query or not body.query.strip():
         raise HTTPException(400, "query must not be empty")
-    row = await search_service.create_search(
-        session,
-        org_id=int(current_user["org_id"]),
-        user_id=int(current_user["sub"]),
-        query=body.query.strip(),
-        sources=body.sources,
-        max_per_source=body.max_per_source,
-    )
+    try:
+        row = await search_service.create_search(
+            session,
+            org_id=int(current_user["org_id"]),
+            user_id=int(current_user["sub"]),
+            query=body.query.strip(),
+            sources=body.sources,
+            max_per_source=body.max_per_source,
+        )
+    except search_service.SourcesUnavailable as exc:
+        raise HTTPException(409, str(exc))
     await session.commit()
     await search_service.schedule_search_run(
         search_id=row.id, user_id=int(current_user["sub"]), max_per_source=body.max_per_source

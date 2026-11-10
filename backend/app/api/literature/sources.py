@@ -82,6 +82,8 @@ async def test_source_endpoint(
 ):
     if source not in EXTERNAL_SOURCES:
         raise HTTPException(404, "unknown source")
-    row = await sources_config_service.get_or_create(session, int(current_user["org_id"]), source)
-    result = await sources_config_service.test_connection(source, row.api_key)
+    resolved = await sources_config_service.resolve(session, int(current_user["org_id"]), [source])
+    # The snapshot is taken; end the read transaction before any network wait.
+    await session.commit()
+    result = await sources_config_service.test_connection(resolved[source])
     return SourceTestResponse(**result)
