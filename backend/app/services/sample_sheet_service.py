@@ -58,78 +58,12 @@ def _safe_sample_name(sample) -> str:
     return name
 
 
-_READ_TYPES = ("R1", "R2", "I1", "I2")
-
-
-def _typed(f, column: str, kind: type):
-    """A typed sequencing-identity column, or None when it says nothing.
-
-    The isinstance check is load-bearing rather than defensive. Much of this
-    suite builds files out of MagicMock, which auto-vivifies any attribute into a
-    truthy object; reading one of those as a lane would scatter a sample's files
-    across as many units as it has files. The same guard covers a real row whose
-    column is NULL.
-    """
-    value = getattr(f, column, None)
-    return value if isinstance(value, kind) and not isinstance(value, bool) else None
-
-
-def _get_read_type(f) -> str | None:
-    """Return read type (R1, R2, I1, I2).
-
-    The typed column first, then the legacy ``read:`` tag, then the filename.
-    The tag reader stays for one release so files written before the sequencing
-    identity migration keep pairing exactly as they do today.
-    """
-    typed = _typed(f, "read_type", str)
-    if typed in _READ_TYPES:
-        return typed
-    tags = getattr(f, "tags_json", None) or []
-    for tag in tags:
-        if isinstance(tag, str) and tag.startswith("read:"):
-            return tag.split(":", 1)[1]
-    return sequencing_identity.read_type_from_filename(getattr(f, "filename", "") or "")
-
-
-def _get_lane(f) -> int | None:
-    """Return the physical lane number, or None when it is not known.
-
-    None rather than a sentinel. ``"000"`` used to stand in for "I do not know",
-    and it is a fabricated value that would be emitted as a real lane the moment
-    a pipeline's own ``lane`` column gets filled. A lane is 1-based, so a parsed
-    zero is not a lane either.
-    """
-    typed = _typed(f, "lane", int)
-    if typed is not None:
-        return typed if typed > 0 else None
-    tags = getattr(f, "tags_json", None) or []
-    for tag in tags:
-        if isinstance(tag, str) and tag.startswith("lane:"):
-            # Both spellings the two legacy writers produced ("1" and "001") are
-            # one lane. Read as strings they were two dict keys, which is how one
-            # physical lane became two units and a sample's mates stopped
-            # pairing.
-            digits = tag.split(":", 1)[1].strip()
-            return int(digits) if digits.isdigit() and int(digits) > 0 else None
-    return sequencing_identity.lane_from_filename(getattr(f, "filename", "") or "")
-
-
-def _sequencing_unit(f) -> tuple:
-    """What tells two sequencing units of one sample apart, as a sort key.
-
-    The read-group axis is (flow cell, lane): ``L001`` on two flow cells is two
-    different lanes, so a lane number alone collides. A fetched FASTQ has neither
-    and carries its archive run accession instead, which distinguishes sibling
-    runs of one sample without pretending to be a lane.
-
-    Everything unknown collapses to one implicit unit, which is the case that
-    must stay untouched: a CRO's pre-merged FASTQs have no lane at all.
-    """
-    return (
-        _typed(f, "flowcell_id", str) or "",
-        _get_lane(f) or 0,
-        _typed(f, "source_run_accession", str) or "",
-    )
+# A file's lane, read and unit come from the sequencing domain's one rule. The
+# underscored names are this module's own vocabulary for them, also read by
+# test_illumina_filename_parsing.
+_get_read_type = sequencing_identity.read_type
+_get_lane = sequencing_identity.lane
+_sequencing_unit = sequencing_identity.sequencing_unit
 
 
 # The facts ``_sequencing_unit`` packs into its key, in that order, so a unit can
@@ -138,7 +72,7 @@ _UNIT_FIELDS = ("flowcell_id", "lane", "source_run_accession")
 
 # A unit about which nothing is known: a pre-merged FASTQ from a CRO, or a path
 # the caller named directly. Every fact is absent, so no column is filled from it.
-_UNKNOWN_UNIT = ("", 0, "")
+_UNKNOWN_UNIT = sequencing_identity.UNKNOWN_UNIT
 
 # Samplesheet columns bioAF fills from the sequencing unit the row came from,
 # keyed on the column name the pipeline's own schema uses. Each names the facts
