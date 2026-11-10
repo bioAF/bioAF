@@ -415,6 +415,24 @@ def _no_accession_manifest_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def request_clock():
+    """Source pacing, cooldowns, and retry backoff run on virtual time.
+
+    Every test starts from empty pacing state on an AutoClock
+    (tests/support/request_clock.py): a wait advances virtual time by exactly
+    its length and returns at once, so retries never sleep for real. A test
+    that measures timing installs its own clock with request_pacing.reset().
+    """
+    from app.services import request_pacing
+    from tests.support.request_clock import AutoClock
+
+    clock = AutoClock()
+    request_pacing.reset(clock)
+    yield clock
+    request_pacing.reset()
+
+
+@pytest.fixture(autouse=True)
 def url_network(monkeypatch):
     """No test resolves or fetches a real URL through the URL-import guard.
 

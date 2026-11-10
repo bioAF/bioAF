@@ -8,6 +8,7 @@ from datetime import date
 
 import httpx
 
+from app.services.literature import source_policy
 from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.pubmed")
@@ -16,9 +17,13 @@ name = "pubmed"
 
 _BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 _TIMEOUT = 30.0
+# The key identifies this deployment's quota with NCBI.
+CREDENTIAL_SCOPED_QUOTA = True
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
+    # Checked 2026-11-09 (NCBI E-utilities, NBK25497): 3 requests/second per
+    # site without a key, 10 with one, summed across everything using the key.
     return RateLimit(requests_per_second=10.0 if has_api_key else 3.0)
 
 
@@ -27,7 +32,7 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
     if api_key:
         params["api_key"] = api_key
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/esearch.fcgi", params=params)
+        r = await _get(client, "esearch", params, api_key)
         r.raise_for_status()
         data = r.json()
         ids = data.get("esearchresult", {}).get("idlist", [])
@@ -37,7 +42,7 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
         fetch_params = {"db": "pubmed", "id": ",".join(ids), "retmode": "xml"}
         if api_key:
             fetch_params["api_key"] = api_key
-        fr = await client.get(f"{_BASE}/efetch.fcgi", params=fetch_params)
+        fr = await _get(client, "efetch", fetch_params, api_key)
         fr.raise_for_status()
         return _parse_efetch_xml(fr.text)
 
@@ -47,7 +52,7 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     if api_key:
         params["api_key"] = api_key
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/esearch.fcgi", params=params)
+        r = await _get(client, "esearch", params, api_key)
         r.raise_for_status()
         ids = r.json().get("esearchresult", {}).get("idlist", [])
         if not ids:
@@ -55,7 +60,7 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
         fetch_params = {"db": "pubmed", "id": ids[0], "retmode": "xml"}
         if api_key:
             fetch_params["api_key"] = api_key
-        fr = await client.get(f"{_BASE}/efetch.fcgi", params=fetch_params)
+        fr = await _get(client, "efetch", fetch_params, api_key)
         fr.raise_for_status()
         try:
             results = _parse_efetch_xml(fr.text)
@@ -63,6 +68,13 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
             logger.warning("PubMed efetch parse error: %s", e)
             return None
         return results[0] if results else None
+
+
+async def _get(client: httpx.AsyncClient, utility: str, params: dict, api_key: str | None) -> httpx.Response:
+    """Every E-utilities request is its own paced dispatch: one search is two."""
+    return await source_policy.get(
+        client, f"{_BASE}/{utility}.fcgi", source=name, api_key=api_key, label=f"pubmed.{utility}", params=params
+    )
 
 
 def _text(el: ET.Element | None) -> str | None:

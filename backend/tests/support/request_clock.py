@@ -48,7 +48,7 @@ class ManualClock:
     def sleeping(self) -> int:
         return sum(1 for _, _, f in self._sleepers if not f.done())
 
-    async def settle(self, turns: int = 20) -> None:
+    async def settle(self, turns: int = 200) -> None:
         for _ in range(turns):
             await asyncio.sleep(0)
 

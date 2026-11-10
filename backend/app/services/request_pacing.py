@@ -85,6 +85,9 @@ def registry() -> PacingRegistry:
     test) gets a fresh registry, so no pacing state crosses loops."""
     global _registry, _registry_loop
     loop = _running_loop()
+    if _registry is not None and _registry_loop is None:
+        # Reset outside any loop (a synchronous fixture): the first loop adopts it.
+        _registry_loop = loop
     if _registry is None or _registry_loop is not loop:
         _registry = PacingRegistry()
         _registry_loop = loop

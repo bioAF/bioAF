@@ -7,6 +7,7 @@ from datetime import date
 
 import httpx
 
+from app.services.literature import source_policy
 from app.services.literature.sources import PaperRecord, RateLimit, author_from_full_name, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.semanticscholar")
@@ -35,7 +36,15 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
     headers = {"x-api-key": api_key} if api_key else {}
     # Errors propagate so callers classify an outage as a failed attempt.
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/paper/search", params=params, headers=headers)
+        r = await source_policy.get(
+            client,
+            f"{_BASE}/paper/search",
+            source=name,
+            api_key=api_key,
+            label="semanticscholar.search",
+            params=params,
+            headers=headers,
+        )
         r.raise_for_status()
         data = r.json()
     return [_parse_result(item) for item in data.get("data", [])]
@@ -45,11 +54,19 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     headers = {"x-api-key": api_key} if api_key else {}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
-            r = await client.get(f"{_BASE}/paper/DOI:{doi}", params={"fields": _FIELDS}, headers=headers)
+            r = await source_policy.get(
+                client,
+                f"{_BASE}/paper/DOI:{doi}",
+                source=name,
+                api_key=api_key,
+                label="semanticscholar.doi",
+                params={"fields": _FIELDS},
+                headers=headers,
+            )
             r.raise_for_status()
             return _parse_result(r.json())
         except (httpx.HTTPError, ValueError) as e:
-            logger.warning("Semantic Scholar DOI fetch failed: %s", e)
+            logger.warning("Semantic Scholar DOI fetch failed: %s", type(e).__name__)
             return None
 
 
