@@ -14,13 +14,13 @@ network; the default fetcher uses httpx and transparently gunzips `.gz` suppleme
 
 from __future__ import annotations
 
-import gzip
 import logging
 import re
 from collections.abc import Awaitable, Callable
 
 import httpx
 
+from app.services import http_policy
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 logger = logging.getLogger("bioaf.ground_truth_fetch")
@@ -79,13 +79,8 @@ def parse_dir_listing(html: str) -> list[str]:
 
 
 async def _http_fetch_text(url: str) -> str:
-    """Default fetcher: GET the URL and return text, transparently gunzipping `.gz` payloads."""
-    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        if url.lower().endswith(".gz"):
-            return gzip.decompress(r.content).decode("utf-8", errors="replace")
-        return r.text
+    """Default fetcher: the shared text GET (redirects followed, ``.gz`` payloads gunzipped)."""
+    return await http_policy.fetch_text(url, label="geo.supplementary", timeout=_TIMEOUT)
 
 
 class GroundTruthFetchService:

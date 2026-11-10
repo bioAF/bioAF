@@ -15,6 +15,7 @@ class, and waits, never URLs (they can carry credentials) or bodies.
 
 from __future__ import annotations
 
+import gzip
 import logging
 import math
 import random
@@ -137,6 +138,19 @@ def parse_retry_after(value: str | None, *, now: datetime) -> float | None:
 def _backoff(policy: RequestPolicy, failed_attempts: int, rng: Callable[[], float]) -> float:
     ceiling = min(policy.max_delay, policy.base_delay * 2 ** (failed_attempts - 1))
     return ceiling * (0.5 + 0.5 * rng())
+
+
+async def fetch_text(url: str, *, label: str, timeout: float | httpx.Timeout = 30.0) -> str:
+    """GET ``url`` under METADATA_READ, following redirects, and return its text,
+    gunzipping a ``.gz`` URL's payload. Raises the final HTTP or transport
+    error; whether that means "no data" is the caller's decision. Buffered:
+    not for large downloads, and not a trusted-download boundary."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await read(client, url, policy=METADATA_READ, label=label)
+        response.raise_for_status()
+        if url.lower().endswith(".gz"):
+            return gzip.decompress(response.content).decode("utf-8", errors="replace")
+        return response.text
 
 
 async def read(
