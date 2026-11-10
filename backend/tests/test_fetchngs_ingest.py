@@ -12,12 +12,14 @@ import logging
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample, sample_files
 from app.services import sample_sheet_service
+from app.services.samplesheet_inputs import SheetSampleInput
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.sample_service import SampleService
 
@@ -256,7 +258,11 @@ async def _files_for_sample(session, sample_id) -> list[File]:
 
 async def _sample_by_external(session, exp_id, external_id) -> Sample:
     return (
-        await session.execute(select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == external_id))
+        await session.execute(
+            select(Sample)
+            .where(Sample.experiment_id == exp_id, Sample.external_id == external_id)
+            .options(selectinload(Sample.custom_fields))
+        )
     ).scalar_one()
 
 
@@ -381,8 +387,8 @@ async def test_attach_fastq_files_multirun_pairs_across_lanes(session, admin_use
     await session.commit()
     assert len(created) == 4  # two paired sibling runs
 
-    sample = await _sample_by_external(session, exp.id, "SRX079566")
-    sample._input_files = await _files_for_sample(session, sample.id)
+    orm_sample = await _sample_by_external(session, exp.id, "SRX079566")
+    sample = SheetSampleInput.from_sample(orm_sample, await _files_for_sample(session, orm_sample.id))
     pairs = sample_sheet_service._extract_fastq_lane_pairs(sample)
     assert len(pairs) == 2
     assert all(r1 and r2 for r1, r2 in pairs)  # every lane has both mates

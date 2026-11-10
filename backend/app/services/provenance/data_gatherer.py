@@ -138,7 +138,9 @@ class ProvenanceDataGatherer:
         user_ids: set[int | None] = {project.owner_user_id, project.created_by_user_id}
 
         # Experiments
-        exp_result = await session.execute(select(Experiment).where(Experiment.project_id == project_id))
+        exp_result = await session.execute(
+            select(Experiment).where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
+        )
         experiments = exp_result.scalars().all()
         for exp in experiments:
             user_ids.add(exp.owner_user_id)
@@ -147,7 +149,8 @@ class ProvenanceDataGatherer:
         ps_result = await session.execute(
             select(ProjectSample, Sample)
             .join(Sample, Sample.id == ProjectSample.sample_id)
-            .where(ProjectSample.project_id == project_id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
         )
         ps_rows = ps_result.all()
 
@@ -170,11 +173,14 @@ class ProvenanceDataGatherer:
                 sample_list.append(s)
                 seen_sample_ids.add(s.id)
 
-        # Pipeline runs
+        # Pipeline runs. Only this organization's, filtered before their users,
+        # references and audit entries are collected: a run of another
+        # organization's may still point here from before launch checked the
+        # project it was filed under.
         run_result = await session.execute(
             select(PipelineRun)
             .options(selectinload(PipelineRun.references))
-            .where(PipelineRun.project_id == project_id)
+            .where(PipelineRun.project_id == project_id, PipelineRun.organization_id == org_id)
         )
         project_runs = list(run_result.scalars().all())
 
@@ -182,7 +188,11 @@ class ProvenanceDataGatherer:
             exp_run_result = await session.execute(
                 select(PipelineRun)
                 .options(selectinload(PipelineRun.references))
-                .where(PipelineRun.experiment_id.in_(exp_ids), PipelineRun.project_id.is_(None))
+                .where(
+                    PipelineRun.experiment_id.in_(exp_ids),
+                    PipelineRun.project_id.is_(None),
+                    PipelineRun.organization_id == org_id,
+                )
             )
             project_runs.extend(exp_run_result.scalars().all())
 
@@ -201,7 +211,11 @@ class ProvenanceDataGatherer:
             user_ids.add(f.uploader_user_id)
 
         # Snapshots
-        snap_result = await session.execute(select(AnalysisSnapshot).where(AnalysisSnapshot.project_id == project_id))
+        snap_result = await session.execute(
+            select(AnalysisSnapshot).where(
+                AnalysisSnapshot.project_id == project_id, AnalysisSnapshot.organization_id == org_id
+            )
+        )
         snapshots = snap_result.scalars().all()
 
         # References (from runs)
@@ -756,10 +770,15 @@ class ProvenanceDataGatherer:
                 }
             )
 
-        # Resume from
+        # Resume from. A parent of another organization's (stored before launch
+        # checked it) resolves to nothing rather than to its name and status.
         resume_from = None
-        if run.resume_from_run_id:
-            resume_result = await session.execute(select(PipelineRun).where(PipelineRun.id == run.resume_from_run_id))
+        if run.resume_from_run_id is not None:
+            resume_result = await session.execute(
+                select(PipelineRun).where(
+                    PipelineRun.id == run.resume_from_run_id, PipelineRun.organization_id == org_id
+                )
+            )
             parent_run = resume_result.scalar_one_or_none()
             if parent_run:
                 resume_from = {

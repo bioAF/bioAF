@@ -6,6 +6,7 @@ sample_files junction table and use their GCS URIs as fastq_1/fastq_2.
 """
 
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_inputs import SheetSampleInput
 
 from unittest.mock import MagicMock
 
@@ -15,8 +16,7 @@ def _make_sample(sample_id: int, external_id: str, files: list[dict] | None = No
     sample = MagicMock()
     sample.id = sample_id
     sample.external_id = external_id
-    sample.files = files or []
-    return sample
+    return SheetSampleInput.from_sample(sample, files or [])
 
 
 class TestAutoPopulateFiles:

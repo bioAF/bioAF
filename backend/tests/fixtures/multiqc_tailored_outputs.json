@@ -1,0 +1,167 @@
+{
+ "atacseq/atacseq_run24.json": {
+  "avg_sequence_length": 150.0,
+  "frip": 0.0508,
+  "peak_count": 31914,
+  "percent_duplicates": 49.0,
+  "percent_gc": 45.5,
+  "reads_mapped_genome": 0.9978,
+  "total_samples": 1,
+  "total_sequences": 58365790,
+  "tss_enrichment": null
+ },
+ "atacseq/bulk_rnaseq_run17.json": {
+  "avg_sequence_length": 73.6,
+  "frip": null,
+  "peak_count": null,
+  "percent_duplicates": 86.3,
+  "percent_gc": 41.2,
+  "reads_mapped_genome": 1.0,
+  "total_samples": 4,
+  "total_sequences": 6677908,
+  "tss_enrichment": null
+ },
+ "atacseq/chipseq_run22.json": {
+  "avg_sequence_length": 150.0,
+  "frip": 0.135,
+  "peak_count": 16484,
+  "percent_duplicates": 20.7,
+  "percent_gc": 43.0,
+  "reads_mapped_genome": 0.9988,
+  "total_samples": 2,
+  "total_sequences": 24427238,
+  "tss_enrichment": null
+ },
+ "atacseq/generic_run34.json": {
+  "avg_sequence_length": 59.5,
+  "frip": null,
+  "peak_count": null,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": null,
+  "total_samples": null,
+  "total_sequences": null,
+  "tss_enrichment": null
+ },
+ "atacseq/scrnaseq_run11.json": {
+  "avg_sequence_length": 59.5,
+  "frip": null,
+  "peak_count": null,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": null,
+  "total_samples": 1,
+  "total_sequences": 66601887,
+  "tss_enrichment": null
+ },
+ "bulk_rnaseq/atacseq_run24.json": {
+  "avg_sequence_length": 150.0,
+  "percent_duplicates": 47.4,
+  "percent_gc": 45.5,
+  "reads_mapped_genome": null,
+  "reads_mapped_genome_unique": null,
+  "total_samples": 1,
+  "total_sequences": 58365790
+ },
+ "bulk_rnaseq/bulk_rnaseq_run17.json": {
+  "avg_sequence_length": 73.6,
+  "percent_duplicates": 74.3,
+  "percent_gc": 41.2,
+  "reads_mapped_genome": 0.955,
+  "reads_mapped_genome_unique": 0.7769,
+  "total_samples": 4,
+  "total_sequences": 6677908
+ },
+ "bulk_rnaseq/chipseq_run22.json": {
+  "avg_sequence_length": 150.0,
+  "percent_duplicates": 20.1,
+  "percent_gc": 43.0,
+  "reads_mapped_genome": null,
+  "reads_mapped_genome_unique": null,
+  "total_samples": 2,
+  "total_sequences": 24427238
+ },
+ "bulk_rnaseq/generic_run34.json": {
+  "avg_sequence_length": 59.5,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": null,
+  "reads_mapped_genome_unique": null,
+  "total_samples": null,
+  "total_sequences": null
+ },
+ "bulk_rnaseq/scrnaseq_run11.json": {
+  "avg_sequence_length": 59.5,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": 0.9562,
+  "reads_mapped_genome_unique": 0.8755,
+  "total_samples": 1,
+  "total_sequences": 66601887
+ },
+ "chipseq/atacseq_run24.json": {
+  "avg_sequence_length": 150.0,
+  "frip": 0.0508,
+  "nsc": null,
+  "peak_count": 31914,
+  "percent_duplicates": 49.0,
+  "percent_gc": 45.5,
+  "reads_mapped_genome": 0.9978,
+  "reads_mapped_genome_unique": null,
+  "rsc": null,
+  "total_samples": 1,
+  "total_sequences": 58365790
+ },
+ "chipseq/bulk_rnaseq_run17.json": {
+  "avg_sequence_length": 73.6,
+  "frip": null,
+  "nsc": null,
+  "peak_count": null,
+  "percent_duplicates": 86.3,
+  "percent_gc": 41.2,
+  "reads_mapped_genome": 1.0,
+  "reads_mapped_genome_unique": null,
+  "rsc": null,
+  "total_samples": 4,
+  "total_sequences": 6677908
+ },
+ "chipseq/chipseq_run22.json": {
+  "avg_sequence_length": 150.0,
+  "frip": 0.135,
+  "nsc": 1.044,
+  "peak_count": 16484,
+  "percent_duplicates": 20.7,
+  "percent_gc": 43.0,
+  "reads_mapped_genome": 0.9988,
+  "reads_mapped_genome_unique": null,
+  "rsc": 0.222,
+  "total_samples": 2,
+  "total_sequences": 24427238
+ },
+ "chipseq/generic_run34.json": {
+  "avg_sequence_length": 59.5,
+  "frip": null,
+  "nsc": null,
+  "peak_count": null,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": null,
+  "reads_mapped_genome_unique": null,
+  "rsc": null,
+  "total_samples": null,
+  "total_sequences": null
+ },
+ "chipseq/scrnaseq_run11.json": {
+  "avg_sequence_length": 59.5,
+  "frip": null,
+  "nsc": null,
+  "peak_count": null,
+  "percent_duplicates": 50.4,
+  "percent_gc": 46.0,
+  "reads_mapped_genome": null,
+  "reads_mapped_genome_unique": null,
+  "rsc": null,
+  "total_samples": 1,
+  "total_sequences": 66601887
+ }
+}

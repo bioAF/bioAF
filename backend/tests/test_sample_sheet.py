@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_inputs import SheetSampleInput
 
 
 def _make_sample(sample_id: int, external_id: str):
@@ -8,7 +9,7 @@ def _make_sample(sample_id: int, external_id: str):
     sample = MagicMock()
     sample.id = sample_id
     sample.external_id = external_id
-    return sample
+    return SheetSampleInput.from_sample(sample, [])
 
 
 def test_generate_scrnaseq_sheet():
@@ -113,7 +114,7 @@ def _chip_sample(sample_id: int, external_id: str, prep_notes: str = ""):
     s.id = sample_id
     s.external_id = external_id
     s.prep_notes = prep_notes
-    return s
+    return SheetSampleInput.from_sample(s, [])
 
 
 def _rows_by_sample(csv_text: str) -> dict[str, list[str]]:
