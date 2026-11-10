@@ -19,7 +19,9 @@ class ProvenanceService:
         seen_nodes: set[str] = set()
 
         # Load project
-        project_result = await session.execute(select(Project).where(Project.id == project_id))
+        project_result = await session.execute(
+            select(Project).where(Project.id == project_id, Project.organization_id == org_id)
+        )
         project = project_result.scalar_one_or_none()
         if not project:
             return ProvenanceDAG(nodes=[], edges=[])
@@ -36,7 +38,9 @@ class ProvenanceService:
         seen_nodes.add(project_node_id)
 
         # Load experiments directly linked via experiment.project_id
-        direct_exp_result = await session.execute(select(Experiment).where(Experiment.project_id == project_id))
+        direct_exp_result = await session.execute(
+            select(Experiment).where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
+        )
         direct_experiments = direct_exp_result.scalars().all()
 
         for experiment in direct_experiments:
@@ -90,7 +94,7 @@ class ProvenanceService:
             select(ProjectSample, Sample, Experiment)
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
-            .where(ProjectSample.project_id == project_id)
+            .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
         )
         ps_rows = ps_result.all()
 
@@ -228,7 +232,11 @@ class ProvenanceService:
                     )
 
         # Load snapshots (will be empty until Phase 10b)
-        snap_result = await session.execute(select(AnalysisSnapshot).where(AnalysisSnapshot.project_id == project_id))
+        snap_result = await session.execute(
+            select(AnalysisSnapshot).where(
+                AnalysisSnapshot.project_id == project_id, AnalysisSnapshot.organization_id == org_id
+            )
+        )
         snapshots = snap_result.scalars().all()
         for snap in snapshots:
             snap_node_id = f"snapshot:{snap.id}"

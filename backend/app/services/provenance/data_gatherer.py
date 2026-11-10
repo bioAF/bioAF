@@ -138,7 +138,9 @@ class ProvenanceDataGatherer:
         user_ids: set[int | None] = {project.owner_user_id, project.created_by_user_id}
 
         # Experiments
-        exp_result = await session.execute(select(Experiment).where(Experiment.project_id == project_id))
+        exp_result = await session.execute(
+            select(Experiment).where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
+        )
         experiments = exp_result.scalars().all()
         for exp in experiments:
             user_ids.add(exp.owner_user_id)
@@ -147,7 +149,8 @@ class ProvenanceDataGatherer:
         ps_result = await session.execute(
             select(ProjectSample, Sample)
             .join(Sample, Sample.id == ProjectSample.sample_id)
-            .where(ProjectSample.project_id == project_id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
         )
         ps_rows = ps_result.all()
 
@@ -208,7 +211,11 @@ class ProvenanceDataGatherer:
             user_ids.add(f.uploader_user_id)
 
         # Snapshots
-        snap_result = await session.execute(select(AnalysisSnapshot).where(AnalysisSnapshot.project_id == project_id))
+        snap_result = await session.execute(
+            select(AnalysisSnapshot).where(
+                AnalysisSnapshot.project_id == project_id, AnalysisSnapshot.organization_id == org_id
+            )
+        )
         snapshots = snap_result.scalars().all()
 
         # References (from runs)
