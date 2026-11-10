@@ -22,6 +22,7 @@ from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.project import Project
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
+from app.platform.nextflow_params import refuse_unlaunchable_parameters
 from app.services.audit_service import log_action
 from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.launch_outcome import mark_submission_failed, record_submission_accepted
@@ -911,6 +912,9 @@ class PipelineRunService:
             if species is not None:
                 merged_params.setdefault("mirtrace_species", species)
 
+        # Every parameter becomes a Nextflow argument; a malformed name or one the
+        # platform sets itself (input, outdir) is refused here, before anything exists.
+        refuse_unlaunchable_parameters(merged_params)
         return merged_params
 
     @staticmethod
@@ -984,6 +988,7 @@ class PipelineRunService:
         # catalog has gained since, which no samplesheet check can see.
         if recorded is not None:
             merged_params = copy.deepcopy(recorded.parameters)
+            refuse_unlaunchable_parameters(merged_params)
         else:
             merged_params = PipelineRunService.resolve_parameters(
                 pipeline, data.parameters, data.reference_genome, samples

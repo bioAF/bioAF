@@ -10,9 +10,9 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 """
 
 import asyncio
-import dataclasses
 import logging
 import os
+import shlex
 import time
 import uuid
 from datetime import datetime, timezone
@@ -23,6 +23,9 @@ from app.adapters.base import ComputeProvider
 from app.adapters.compute.k8s_manifest import ManifestInputs, NextflowLaunch, build_job_manifest, builds_nextflow
 from app.adapters.job_specs import CustomCommandJobSpec, JobSpec, NextflowJobSpec, job_spec_from_dict
 from app.adapters.capabilities import ProviderCapabilities
+from app.exceptions import ValidationError
+from app.platform.nextflow_params import INTERNAL_PARAMS, parameter_argument, refuse_malformed_parameter_names
+from app.platform.run_output_layout import directory_prefix, results_bucket_from_config, run_output_key
 from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
@@ -149,20 +152,10 @@ def _pod_log_to_text(value) -> str:
 def _resolve_results_bucket(cfg: dict) -> str | None:
     """Resolve the pipeline results bucket from cluster config.
 
-    Prefers the explicit ``results_bucket_name`` (set by Terraform); falls back to
-    deriving it from ``raw_bucket_name`` (bioaf-raw-X -> bioaf-results-X) for
-    installs where the raw bucket was populated before the results bucket. Returns
-    None when neither yields a bucket. Sync mirror of
-    ``qc.extractors.gcs_helpers.get_results_bucket`` for the config-dict the compute
-    adapter holds (it has no DB session at job-build time).
+    The shared rule in ``app.platform.run_output_layout``, applied to the config
+    dict the compute adapter holds (it has no DB session at job-build time).
     """
-    results = cfg.get("results_bucket_name")
-    if results and results != "null":
-        return results
-    raw = cfg.get("raw_bucket_name", "")
-    if raw and raw.startswith("bioaf-raw-"):
-        return raw.replace("bioaf-raw-", "bioaf-results-", 1)
-    return None
+    return results_bucket_from_config(cfg)
 
 
 class KubernetesComputeProvider(ComputeProvider):
@@ -1031,11 +1024,22 @@ class KubernetesComputeProvider(ComputeProvider):
         report_gcs_path: str = "",
         trace_gcs_path: str = "",
         igenomes_ignore: bool = False,
+        outdir: str | None = None,
     ) -> list[str]:
         """Build a Nextflow run command from the job spec.
 
         Translates pipeline_source, pipeline_version, parameters, and
-        sample_sheet into a shell command that nextflow can execute.
+        sample_sheet into the head pod's ``/bin/sh -c`` command. The shell is
+        there only for the fixed ``cat /data/nextflow.config &&`` prologue; every
+        argument after it is quoted with ``shlex.join``, so no value can run a
+        command, and each parameter is one ``--key=value`` argument, so no value
+        can become another flag (see ``app.platform.nextflow_params``).
+
+        ``outdir`` is the run's authorized output location and is emitted once,
+        last. A parameter named ``outdir`` is accepted only when it names that
+        same location; ``input`` is always the platform's samplesheet. Names are
+        checked here as well as at launch, because typed, legacy and replayed
+        specs reach this without passing the launch.
 
         When ``igenomes_ignore`` is set (AWS runs), append ``--igenomes_ignore
         true`` unless the run already sets it. nf-core pipelines default
@@ -1054,87 +1058,81 @@ class KubernetesComputeProvider(ComputeProvider):
         parameters = spec.parameters
         sample_sheet = spec.sample_sheet
 
-        # Log the config file before running so it appears in pod logs
-        parts = ["cat /data/nextflow.config &&", "nextflow", "run", pipeline_source]
+        for name, value in (("pipeline source", pipeline_source), ("pipeline version", pipeline_version)):
+            if value and str(value).startswith("-"):
+                raise ValidationError(f"The {name} {value!r} would be read as a Nextflow option")
+        refuse_malformed_parameter_names(parameters)
+        if "input" in parameters:
+            raise ValidationError("The input parameter is the platform's samplesheet and cannot be supplied")
+        stated_outdir = parameters.get("outdir")
+        if outdir is None:
+            outdir = str(stated_outdir) if stated_outdir is not None else None
+        elif stated_outdir is not None and directory_prefix(str(stated_outdir)) != directory_prefix(outdir):
+            raise ValidationError("A run's outdir is its authorized output location and cannot be redirected")
+
+        args = ["nextflow", "run", pipeline_source]
 
         if pipeline_version:
-            parts.extend(["-r", pipeline_version])
+            args.extend(["-r", pipeline_version])
 
         # Use a generated nextflow.config with K8s executor settings.
         # GKE uses containerd (no Docker daemon), so -profile docker won't work.
-        parts.extend(["-c", "/data/nextflow.config"])
+        args.extend(["-c", "/data/nextflow.config"])
 
         if sample_sheet:
-            parts.extend(["--input", "/data/samplesheet.csv"])
+            args.extend(["--input", "/data/samplesheet.csv"])
 
         # Write Nextflow HTML report to GCS so it persists after pod cleanup
         if report_gcs_path:
-            parts.extend(["-with-report", report_gcs_path])
+            args.extend(["-with-report", report_gcs_path])
 
         # Write Nextflow execution trace to GCS
         if trace_gcs_path:
-            parts.extend(["-with-trace", trace_gcs_path])
-
-        # outdir is guaranteed durable by _ensure_outdir before this runs (a gs://
-        # results path, or the launch already failed closed), so it is never
-        # defaulted to a pod-local path that pod cleanup would destroy.
+            args.extend(["-with-trace", trace_gcs_path])
 
         # Default iGenomes off on AWS (signed IRSA reads 403 on the public
         # ngi-igenomes bucket). Skip when the run sets igenomes_ignore explicitly
         # so an operator override below still wins.
         if igenomes_ignore and "igenomes_ignore" not in parameters:
-            parts.extend(["--igenomes_ignore", "true"])
-
-        # Strip bioAF-internal config knobs that are not Nextflow parameters. "accessions" is the
-        # carrier for fetchngs's ids file (materialized into --input via the sample sheet), not a
-        # nextflow flag, so it must never be emitted as a bogus --accessions argument.
-        internal_keys = {"fusion_enabled", "accessions"}
+            args.append(parameter_argument("igenomes_ignore", "true"))
 
         for key, value in sorted(parameters.items()):
-            if key in internal_keys:
+            if key in INTERNAL_PARAMS or key == "outdir":
                 continue
-            parts.extend([f"--{key}", str(value)])
+            args.append(parameter_argument(key, value))
 
-        return ["/bin/sh", "-c", " ".join(parts)]
+        if outdir is not None:
+            args.append(parameter_argument("outdir", outdir))
 
-    def _ensure_outdir(self, job_spec: dict) -> dict:
-        """Return the dict ``job_spec`` with a durable outdir guaranteed; see ``_durable_outdir``.
+        # Log the config file before running so it appears in pod logs
+        return ["/bin/sh", "-c", "cat /data/nextflow.config && " + shlex.join(args)]
 
-        Returns a new dict; the input job_spec is not mutated.
-        """
-        params = job_spec.get("parameters", {})
-        if "outdir" in params:
-            return job_spec
-        outdir = self._durable_outdir(job_spec.get("experiment_id", "unknown"), job_spec.get("run_id", 0))
-        return {**job_spec, "parameters": {**params, "outdir": outdir}}
+    def _durable_outdir(self, experiment_id: int | None, run_id: int) -> str:
+        """The run's authorized output location in the results bucket.
 
-    def _with_durable_outdir(self, spec: NextflowJobSpec) -> NextflowJobSpec:
-        if "outdir" in spec.parameters:
-            return spec
-        outdir = self._durable_outdir(spec.experiment_id if spec.experiment_id is not None else "unknown", spec.run_id)
-        return dataclasses.replace(spec, parameters={**spec.parameters, "outdir": outdir})
-
-    def _durable_outdir(self, experiment_id: int | str, run_id: int) -> str:
-        """The results-bucket path a run's outputs go to when it did not name one.
-
-        Resolves the results bucket (explicit results_bucket_name, else derived from
-        raw_bucket_name). FAILS CLOSED when no results bucket can be resolved, rather than letting
-        outdir fall back to a pod-local path that the Job's ttlSecondsAfterFinished destroys an hour
-        later (the (!)E silent-loss path).
+        The same location the monitor and the registration CLI collect from (see
+        ``app.platform.run_output_layout``). FAILS CLOSED when no results bucket
+        can be resolved, rather than letting outdir fall back to a pod-local path
+        that the Job's ttlSecondsAfterFinished destroys an hour later (the (!)E
+        silent-loss path).
         """
         results_bucket = _resolve_results_bucket(self._cluster_config or {})
         if not results_bucket:
             raise RuntimeError(
                 "Cannot launch pipeline: no results bucket is configured (set "
                 "results_bucket_name in platform_config, or a bioaf-raw- prefixed "
-                "raw_bucket_name) and no explicit outdir was provided. Refusing to "
-                "write outputs to a pod-local path that is destroyed at pod cleanup."
+                "raw_bucket_name). Refusing to write outputs to a pod-local path "
+                "that is destroyed at pod cleanup."
             )
+        try:
+            key = run_output_key(run_id=run_id, experiment_id=experiment_id)
+        except ValueError as e:
+            raise RuntimeError(f"Cannot launch pipeline: {e}") from e
         # Backend-neutral outdir URI (gs:// on GCS, s3:// on S3) via the storage
         # seam, instead of a hardcoded gs:// literal.
         from app.adapters.registry import get_storage_adapter
 
-        return get_storage_adapter().build_uri(results_bucket, f"experiments/{experiment_id}/pipeline-runs/{run_id}")
+        return get_storage_adapter().build_uri(results_bucket, key)
 
     @staticmethod
     def scratch_work_dir_key(run_id: int) -> str:
@@ -1536,15 +1534,15 @@ class KubernetesComputeProvider(ComputeProvider):
         )
         trace_gcs_path = storage.build_uri(raw_bucket, f"nextflow-traces/{job_name}/trace.tsv") if raw_bucket else ""
 
-        # Set --outdir to a durable results-bucket path so pipeline outputs
-        # persist after pod cleanup. The path mirrors the prefix that
-        # _gcs_collect_outputs and _extract_metrics use to find outputs.
-        # It fails closed if no results bucket is configured (rather than
-        # silently using a pod-local path).
-        spec = self._with_durable_outdir(spec)
+        # --outdir is the run's authorized output location in the results bucket,
+        # the one the monitor collects from. It fails closed if no results bucket
+        # is configured (rather than silently using a pod-local path), and the
+        # renderer refuses a spec whose own outdir names anywhere else.
+        outdir = self._durable_outdir(spec.experiment_id, spec.run_id)
 
         command = self._build_nextflow_command(
             spec,
+            outdir=outdir,
             report_gcs_path=report_gcs_path,
             trace_gcs_path=trace_gcs_path,
             # AWS runs carry an IRSA runner role; default iGenomes off there
