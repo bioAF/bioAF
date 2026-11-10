@@ -283,3 +283,63 @@ def test_named_policies_are_bounded():
         assert 1 <= policy.max_attempts <= 3
         assert math.isfinite(policy.max_delay)
     assert SINGLE_ATTEMPT.max_attempts == 1
+
+
+# --- Review of 5dde62e4: deadlines bound the request in flight -------------------------
+
+
+def _slow_client(seconds: float) -> httpx.AsyncClient:
+    async def slow(request):
+        await asyncio.sleep(seconds)
+        return httpx.Response(200, json={"ok": True})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(slow), timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_a_request_in_flight_is_cut_off_at_the_operation_deadline():
+    import time
+
+    policy = http_policy.RequestPolicy(name="short", budget_seconds=0.01)
+    started = time.monotonic()
+    async with _slow_client(0.5) as client:
+        with pytest.raises(http_policy.BudgetExhausted):
+            await send(client, "GET", "https://x.test/a", policy=policy, label="t")
+    assert time.monotonic() - started < 0.3
+
+
+@pytest.mark.asyncio
+async def test_single_attempt_requests_have_no_operation_budget():
+    """Paid inference keeps its own long client timeouts; the policy adds no deadline."""
+    assert SINGLE_ATTEMPT.budget_seconds is None
+    async with _slow_client(0.05) as client:
+        resp = await send(client, "POST", "https://x.test/a", policy=SINGLE_ATTEMPT, label="t", json={})
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_deadline_still_bounds_a_single_attempt():
+    import time
+
+    async with _slow_client(0.5) as client:
+        with pytest.raises(http_policy.BudgetExhausted):
+            await send(
+                client,
+                "POST",
+                "https://x.test/a",
+                policy=SINGLE_ATTEMPT,
+                label="t",
+                deadline=time.monotonic() + 0.01,
+                json={},
+            )
+
+
+@pytest.mark.parametrize("value", ["9" * 400, "86401", "999999999"])
+def test_unbounded_or_absurd_numeric_hints_are_ignored(value):
+    assert parse_retry_after(value, now=ManualClock().wall()) is None
+
+
+def test_a_far_future_date_hint_is_ignored():
+    clock = ManualClock()
+    far = format_datetime(clock.wall() + timedelta(days=30), usegmt=True)
+    assert parse_retry_after(far, now=clock.wall()) is None

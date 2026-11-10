@@ -65,7 +65,7 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
             )
             r.raise_for_status()
             return _parse_result(r.json())
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, ValueError, TimeoutError) as e:
             logger.warning("Semantic Scholar DOI fetch failed: %s", type(e).__name__)
             return None
 

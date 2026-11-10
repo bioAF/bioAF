@@ -287,3 +287,38 @@ async def test_quota_and_budget_failures_keep_distinct_categories(clock):
         with source_policy.bound(_execution("europepmc", 10.0), budget_seconds=0):
             with pytest.raises(BudgetExhausted):
                 await europepmc.search("q", 5, None)
+
+
+async def test_an_overflowing_retry_hint_does_not_block_the_bucket(clock):
+    hits = Hits(clock)
+    with respx.mock:
+        hits.route(
+            "GET",
+            f"{europepmc._BASE}/search",
+            httpx.Response(429, headers={"Retry-After": "9" * 400}),
+            httpx.Response(200, json={"resultList": {"result": []}}),
+        )
+        assert await _drive(clock, europepmc.search("a", 5, None)) == []
+        assert await _drive(clock, europepmc.search("b", 5, None)) == []
+    times = hits.times()
+    assert len(times) == 3
+    assert times[-1] - times[0] < 10
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: FullTextFetchService.fetch(pmcid="PMC1"),
+        lambda: europepmc.fetch_by_doi("10.1/x", None),
+        lambda: biorxiv.fetch_by_doi("10.1/x", None),
+        lambda: semanticscholar.fetch_by_doi("10.1/x", None),
+    ],
+    ids=["full_text", "europepmc_doi", "biorxiv_doi", "semanticscholar_doi"],
+)
+async def test_best_effort_lookups_return_none_when_quota_runs_out(clock, call):
+    for source in ("europepmc", "biorxiv", "semanticscholar"):
+        request_pacing.registry().pacer((source, "service")).cool_down(500)
+    with respx.mock(assert_all_called=False) as router:
+        router.route().respond(200, json={})
+        assert await call() is None
+        assert router.calls.call_count == 0

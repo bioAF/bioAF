@@ -15,6 +15,7 @@ class, and waits, never URLs (they can carry credentials) or bodies.
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import logging
 import math
@@ -47,8 +48,6 @@ class SystemClock:
         return datetime.now(UTC)
 
     async def sleep(self, seconds: float) -> None:
-        import asyncio
-
         await asyncio.sleep(seconds)
 
 
@@ -56,7 +55,11 @@ SYSTEM_CLOCK = SystemClock()
 
 
 class BudgetExhausted(TimeoutError):
-    """The operation's deadline passed before a request could be sent."""
+    """The operation's deadline passed before a request could be sent or completed."""
+
+
+# A retry hint longer than a day is treated as malformed rather than obeyed.
+MAX_RETRY_HINT_SECONDS = 86_400.0
 
 
 @dataclass(frozen=True)
@@ -69,8 +72,9 @@ class RequestPolicy:
     # shortened; if it does not fit the remaining budget the operation ends.
     base_delay: float = 1.0
     max_delay: float = 8.0
-    # The operation budget when the caller supplies no deadline.
-    budget_seconds: float = 60.0
+    # The operation budget when the caller supplies no deadline: it bounds
+    # waits, retries, and the request in flight. None adds no deadline.
+    budget_seconds: float | None = 60.0
     retry_methods: frozenset[str] = field(default=frozenset({"GET", "HEAD"}))
 
 
@@ -122,20 +126,23 @@ SLACK_DELIVERY = RequestPolicy(
     budget_seconds=60.0,
     retry_methods=frozenset({"POST"}),
 )
-# Paid inference and other non-repeatable requests: exactly one attempt.
-SINGLE_ATTEMPT = RequestPolicy(name="single_attempt")
+# Paid inference and other non-repeatable requests: exactly one attempt, and
+# no operation budget, so the clients' own long read timeouts still apply.
+SINGLE_ATTEMPT = RequestPolicy(name="single_attempt", budget_seconds=None)
 
 
 def parse_retry_after(value: str | None, *, now: datetime) -> float | None:
     """Seconds to wait from a ``Retry-After`` value (delay-seconds or an HTTP
-    date), or None when it is missing or unusable. A past date means zero."""
+    date), or None when it is missing or unusable. A past date means zero; a
+    wait beyond MAX_RETRY_HINT_SECONDS (or one that overflows) is unusable."""
     if value is None:
         return None
     text = value.strip()
     if not text:
         return None
     if text.isdigit():
-        return float(text)
+        seconds = float(text)
+        return seconds if math.isfinite(seconds) and seconds <= MAX_RETRY_HINT_SECONDS else None
     try:
         number = float(text)
     except ValueError:
@@ -150,7 +157,7 @@ def parse_retry_after(value: str | None, *, now: datetime) -> float | None:
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     seconds = (when - now).total_seconds()
-    if not math.isfinite(seconds):
+    if not math.isfinite(seconds) or seconds > MAX_RETRY_HINT_SECONDS:
         return None
     return max(0.0, seconds)
 
@@ -191,7 +198,7 @@ async def send(
     label: str,
     clock: Clock = SYSTEM_CLOCK,
     deadline: float | None = None,
-    before_dispatch: Callable[[float], Awaitable[Any]] | None = None,
+    before_dispatch: Callable[[float | None], Awaitable[Any]] | None = None,
     on_throttle: Callable[[float], None] | None = None,
     retry_response: Callable[[httpx.Response], bool] | None = None,
     rng: Callable[[], float] = random.random,
@@ -201,20 +208,21 @@ async def send(
 
     Returns the final response, retried or not; raises the final transport
     exception. ``deadline`` is a ``clock.monotonic()`` instant; a wait that
-    would end past it is not started. ``before_dispatch(deadline)`` runs before
+    would end past it is not started, and a request still in flight at it is
+    abandoned with BudgetExhausted. ``before_dispatch(deadline)`` runs before
     every attempt (quota). ``on_throttle(seconds)`` reports each 429's wait so
     a shared quota can cool down. ``retry_response(response)`` lets a caller
     mark a protocol-level transient failure in an otherwise successful
     response (Slack's HTTP 200 ``ok: false``) as retryable."""
     started = clock.monotonic()
-    if deadline is None:
+    if deadline is None and policy.budget_seconds is not None:
         deadline = started + policy.budget_seconds
     retryable_method = method.upper() in policy.retry_methods
     max_attempts = policy.max_attempts if retryable_method else 1
     attempt = 0
     while True:
         attempt += 1
-        if clock.monotonic() >= deadline:
+        if deadline is not None and clock.monotonic() >= deadline:
             raise BudgetExhausted(f"{label}: budget exhausted before attempt {attempt}")
         if before_dispatch is not None:
             await before_dispatch(deadline)
@@ -222,14 +230,15 @@ async def send(
         try:
             # The method helper (client.get, client.post) rather than client.request,
             # so callers' existing client doubles keep working.
-            response = await getattr(client, method.lower())(url, **request_kwargs)
+            dispatch = getattr(client, method.lower())(url, **request_kwargs)
+            response = await _within(dispatch, deadline, clock, label)
         except policy.retry_exceptions as exc:
             if attempt >= max_attempts:
                 _log_final(label, policy, attempt, type(exc).__name__, started, clock)
                 raise
             reason = type(exc).__name__
             delay = _backoff(policy, attempt, rng)
-            if clock.monotonic() + delay > deadline:
+            if deadline is not None and clock.monotonic() + delay > deadline:
                 _log_final(label, policy, attempt, reason, started, clock)
                 raise
         else:
@@ -243,7 +252,7 @@ async def send(
             if status == 429 and on_throttle is not None:
                 on_throttle(delay)
             reason = f"status={status}"
-            if attempt >= max_attempts or clock.monotonic() + delay > deadline:
+            if attempt >= max_attempts or (deadline is not None and clock.monotonic() + delay > deadline):
                 _log_final(label, policy, attempt, reason, started, clock)
                 return response
             await response.aclose()
@@ -257,6 +266,23 @@ async def send(
             delay,
         )
         await clock.sleep(delay)
+
+
+async def _within(
+    dispatch: Awaitable[httpx.Response], deadline: float | None, clock: Clock, label: str
+) -> httpx.Response:
+    """Await one dispatch, abandoning it at the deadline."""
+    if deadline is None:
+        return await dispatch
+    remaining = deadline - clock.monotonic()
+    try:
+        async with asyncio.timeout(max(remaining, 0.0)) as scope:
+            return await dispatch
+    except TimeoutError:
+        if scope.expired():
+            logger.warning("http request abandoned at its deadline: label=%s", label)
+            raise BudgetExhausted(f"{label}: budget exhausted in flight") from None
+        raise
 
 
 def _log_final(label: str, policy: RequestPolicy, attempts: int, reason: str, started: float, clock: Clock) -> None:

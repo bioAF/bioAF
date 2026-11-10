@@ -144,3 +144,27 @@ async def test_the_registry_is_bound_to_one_event_loop_and_resets():
     assert replaced is not first and request_pacing.registry() is replaced
     first.pacer("x").cool_down(10)
     assert replaced.pacer("x").cooldown_remaining() == 0
+
+
+async def test_a_waiter_that_wakes_after_its_deadline_does_not_dispatch():
+    clock, registry = _registry()
+    log: list = []
+    await _dispatch(registry, "pubmed", 1.0, log, "first")
+    late = asyncio.create_task(_dispatch(registry, "pubmed", 1.0, log, "late", deadline=clock.now + 2.0))
+    await clock.settle()
+    # The loop was busy past the waiter's deadline.
+    await clock.jump(10.0)
+    with pytest.raises(QuotaWaitExceeded):
+        await late
+    assert [n for n, _ in log] == ["first"]
+    # Nothing was claimed: the next caller dispatches at once.
+    await _dispatch(registry, "pubmed", 1.0, log, "next")
+    assert log[-1] == ("next", clock.now)
+
+
+@pytest.mark.parametrize("seconds", [float("inf"), 10**9])
+async def test_a_shared_cooldown_is_bounded(seconds):
+    clock, registry = _registry()
+    pacer = registry.pacer("s2")
+    pacer.cool_down(seconds)
+    assert 0 < pacer.cooldown_remaining() <= request_pacing.MAX_SHARED_COOLDOWN_SECONDS

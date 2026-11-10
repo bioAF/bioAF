@@ -39,7 +39,7 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
 async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     try:
         results = await search(f'DOI:"{doi}"', 1, api_key)
-    except (httpx.HTTPError, ValueError) as e:
+    except (httpx.HTTPError, ValueError, TimeoutError) as e:
         logger.warning("Europe PMC DOI fetch failed: %s", type(e).__name__)
         return None
     return results[0] if results else None

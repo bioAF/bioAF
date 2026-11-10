@@ -65,7 +65,7 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
             r = await source_policy.get(client, url, source=name, api_key=api_key, label="biorxiv.doi")
             r.raise_for_status()
             payload = r.json()
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, ValueError, TimeoutError) as e:
             logger.warning("bioRxiv DOI fetch failed: %s", type(e).__name__)
             return None
     entries = payload.get("collection", [])

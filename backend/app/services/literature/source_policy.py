@@ -122,7 +122,7 @@ async def get(
     pacer_registry = request_pacing.registry()
     pacer = pacer_registry.pacer(execution.bucket)
 
-    async def before_dispatch(deadline: float) -> None:
+    async def before_dispatch(deadline: float | None) -> None:
         waited = await pacer.acquire(execution.interval, deadline)
         if waited > 0:
             logger.debug("source request paced: label=%s waited=%.2fs", label, waited)

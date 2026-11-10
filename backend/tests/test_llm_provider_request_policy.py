@@ -114,3 +114,27 @@ async def test_paid_requests_are_sent_exactly_once(provider, kind, upstream):
         with pytest.raises(ProviderError):
             await _post(provider, kind)
     assert route.call_count == 1
+
+
+@pytest.mark.parametrize("provider", sorted(CLIENTS))
+async def test_the_model_list_budget_bounds_a_slow_read(provider, monkeypatch):
+    import asyncio
+    import dataclasses
+    import time
+
+    from app.services import http_policy
+
+    monkeypatch.setattr(
+        http_policy, "MODEL_LIST_READ", dataclasses.replace(http_policy.MODEL_LIST_READ, budget_seconds=0.05)
+    )
+
+    async def slow(request):
+        await asyncio.sleep(1.0)
+        return httpx.Response(200, json=LIVE[provider])
+
+    started = time.monotonic()
+    with respx.mock:
+        respx.get(url__startswith=LIST_URL[provider]).mock(side_effect=slow)
+        models, used_fallback = await list_models_with_fallback(provider, KEY)
+    assert used_fallback is True
+    assert time.monotonic() - started < 0.5

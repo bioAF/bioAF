@@ -125,7 +125,7 @@ class FullTextFetchService:
                 )
                 r.raise_for_status()
                 xml_text = r.text
-            except (httpx.HTTPError, ValueError) as exc:
+            except (httpx.HTTPError, ValueError, TimeoutError) as exc:
                 logger.warning("Europe PMC full-text fetch failed: %s", type(exc).__name__)
                 return None
 

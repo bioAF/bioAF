@@ -24,6 +24,12 @@ from collections.abc import Hashable
 from app.services.http_policy import SYSTEM_CLOCK, Clock
 
 
+# Upper bound on one shared cooldown: a hostile or broken retry hint can hold a
+# bucket for at most this long. A provider still throttling answers 429 again
+# and renews it.
+MAX_SHARED_COOLDOWN_SECONDS = 900.0
+
+
 class QuotaWaitExceeded(TimeoutError):
     """The next permitted dispatch is later than the operation's deadline."""
 
@@ -36,7 +42,8 @@ class Pacer:
 
     def cool_down(self, seconds: float) -> None:
         """Hold every sender for ``seconds`` from now; never shortens a longer cooldown."""
-        self._cooldown_until = max(self._cooldown_until, self._clock.monotonic() + seconds)
+        bounded = min(seconds, MAX_SHARED_COOLDOWN_SECONDS)
+        self._cooldown_until = max(self._cooldown_until, self._clock.monotonic() + bounded)
 
     def cooldown_remaining(self) -> float:
         return max(0.0, self._cooldown_until - self._clock.monotonic())
@@ -49,6 +56,9 @@ class Pacer:
             ready = self._cooldown_until
             if self._last_dispatch is not None:
                 ready = max(ready, self._last_dispatch + interval)
+            if deadline is not None and now > deadline:
+                # Woke (late) past the deadline: claim nothing.
+                raise QuotaWaitExceeded("woke after the operation deadline")
             if now >= ready:
                 self._last_dispatch = now
                 return now - started
