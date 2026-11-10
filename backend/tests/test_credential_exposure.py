@@ -19,7 +19,6 @@ import respx
 
 from app.logging_config import RedactSecretsFilter
 from app.services.literature.sources import pubmed
-from app.services.notification_channels import slack_adapter
 from app.services.notification_channels.slack_adapter import SlackChannel
 
 SYNTHETIC_PUBMED_KEY = "pmkey-SYNTHETIC-0123456789abcdef"
@@ -152,14 +151,7 @@ async def test_a_reachable_source_still_reports_success(client, admin_token, adm
 
 @pytest.mark.parametrize("failure", ["status_410", "status_500", "connect_error"])
 @pytest.mark.asyncio
-async def test_a_failed_slack_webhook_delivery_never_logs_the_webhook_url(failure, monkeypatch, captured_logs):
-    delays: list[float] = []
-
-    async def fake_sleep(seconds):
-        delays.append(seconds)
-
-    monkeypatch.setattr(slack_adapter.asyncio, "sleep", fake_sleep)
-
+async def test_a_failed_slack_webhook_delivery_never_logs_the_webhook_url(failure, captured_logs):
     with respx.mock(assert_all_called=False) as router:
         route = router.post(WEBHOOK_URL)
         if failure == "status_410":
@@ -173,10 +165,9 @@ async def test_a_failed_slack_webhook_delivery_never_logs_the_webhook_url(failur
         )
         attempts = route.call_count
 
-    # Delivery behavior is unchanged by this correction.
     assert delivered is False
-    assert attempts == slack_adapter.MAX_RETRIES
-    assert delays == [2, 8]
+    # A gone webhook (410) fails at once; transient failures use the bounded retries.
+    assert attempts == (1 if failure == "status_410" else 3)
 
     logs = captured_logs()
     assert logs, "failures must still be logged"

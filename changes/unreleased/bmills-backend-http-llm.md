@@ -28,3 +28,12 @@
   context and open-access lookups are refused while OpenAlex is turned off.
 - Semantic Scholar's default rate with an API key is now 1 request per second,
   the provider's documented starting rate.
+
+### Slack notifications
+
+- Slack delivery retries only transient failures: rate limiting (waiting as
+  long as Slack asks, within a minute), server errors, Slack's transient
+  errors, and dropped connections. Other Slack errors (for example an archived
+  channel) and a deleted or invalid incoming webhook now fail at once instead
+  of being retried. A post that may already have reached Slack is still
+  retried, so a channel can occasionally see a duplicate notification.

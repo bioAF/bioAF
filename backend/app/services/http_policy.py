@@ -102,6 +102,26 @@ METADATA_READ = RequestPolicy(
     retry_exceptions=(httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
     budget_seconds=90.0,
 )
+# Slack notification posts. POST is opted in deliberately: delivery is
+# at-least-once (owner decision 2026-11-09), so a send that may have reached
+# Slack is retried and a channel can occasionally see a duplicate.
+SLACK_DELIVERY = RequestPolicy(
+    name="slack_delivery",
+    max_attempts=3,
+    retry_statuses=frozenset({429, 500, 502, 503, 504}),
+    retry_exceptions=(
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+        httpx.ReadError,
+        httpx.WriteError,
+        httpx.RemoteProtocolError,
+    ),
+    base_delay=2.0,
+    max_delay=8.0,
+    budget_seconds=60.0,
+    retry_methods=frozenset({"POST"}),
+)
 # Paid inference and other non-repeatable requests: exactly one attempt.
 SINGLE_ATTEMPT = RequestPolicy(name="single_attempt")
 
@@ -173,6 +193,7 @@ async def send(
     deadline: float | None = None,
     before_dispatch: Callable[[float], Awaitable[Any]] | None = None,
     on_throttle: Callable[[float], None] | None = None,
+    retry_response: Callable[[httpx.Response], bool] | None = None,
     rng: Callable[[], float] = random.random,
     **request_kwargs: Any,
 ) -> httpx.Response:
@@ -182,7 +203,9 @@ async def send(
     exception. ``deadline`` is a ``clock.monotonic()`` instant; a wait that
     would end past it is not started. ``before_dispatch(deadline)`` runs before
     every attempt (quota). ``on_throttle(seconds)`` reports each 429's wait so
-    a shared quota can cool down."""
+    a shared quota can cool down. ``retry_response(response)`` lets a caller
+    mark a protocol-level transient failure in an otherwise successful
+    response (Slack's HTTP 200 ``ok: false``) as retryable."""
     started = clock.monotonic()
     if deadline is None:
         deadline = started + policy.budget_seconds
@@ -214,7 +237,7 @@ async def send(
             hint = None
             if status == 429:
                 hint = parse_retry_after(response.headers.get("Retry-After"), now=clock.wall())
-            if status not in policy.retry_statuses:
+            if status not in policy.retry_statuses and not (retry_response is not None and retry_response(response)):
                 return response
             delay = hint if hint is not None else _backoff(policy, attempt, rng)
             if status == 429 and on_throttle is not None:

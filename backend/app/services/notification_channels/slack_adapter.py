@@ -1,14 +1,12 @@
 """Slack notification channel adapter supporting bot token (chat.postMessage) and legacy webhooks."""
 
-import asyncio
 import logging
 
 import httpx
 
-logger = logging.getLogger("bioaf.notifications.slack")
+from app.services import http_policy, request_pacing
 
-MAX_RETRIES = 3
-BACKOFF_BASE = 2  # seconds: 2, 8, 32
+logger = logging.getLogger("bioaf.notifications.slack")
 
 SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 
@@ -52,6 +50,36 @@ def _safe_webhook_failure(exc: Exception) -> str:
     return type(exc).__name__
 
 
+# Slack's documented transient chat.postMessage errors; every other ok:false
+# error (auth, channel, archived, payload) is permanent and fails at once.
+TRANSIENT_ERRORS = frozenset({"ratelimited", "internal_error", "fatal_error", "service_unavailable", "request_timeout"})
+
+
+def _slack_error(response: httpx.Response) -> str | None:
+    """The ok:false error code, or None for ok:true or an unreadable body."""
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("ok"):
+        return None
+    error = data.get("error")
+    return error if isinstance(error, str) and error else "unknown_error"
+
+
+async def _post(client: httpx.AsyncClient, url: str, label: str, **kwargs) -> httpx.Response:
+    return await http_policy.send(
+        client,
+        "POST",
+        url,
+        policy=http_policy.SLACK_DELIVERY,
+        label=label,
+        clock=request_pacing.registry().clock,
+        retry_response=lambda r: _slack_error(r) in TRANSIENT_ERRORS,
+        **kwargs,
+    )
+
+
 class SlackChannel:
     @staticmethod
     async def deliver(
@@ -63,52 +91,38 @@ class SlackChannel:
     ) -> tuple[bool, str]:
         """Send a notification via Slack's chat.postMessage API.
 
-        Returns (success, error_code). error_code is empty on success.
+        Returns (success, error_code). error_code is empty on success. Transient
+        failures are retried under SLACK_DELIVERY (at-least-once); permanent
+        Slack errors return at once.
         """
         payload = {
             "channel": channel_id,
             "text": f"{title}: {message}",
             "attachments": _build_blocks(title, message, severity),
         }
-
-        last_error = ""
-        for attempt in range(MAX_RETRIES):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(
-                        SLACK_POST_MESSAGE_URL,
-                        json=payload,
-                        headers={"Authorization": f"Bearer {bot_token}"},
-                    )
-                    data = response.json()
-                    if data.get("ok"):
-                        logger.info("Slack notification sent to %s: %s", channel_id, title)
-                        return True, ""
-                    last_error = data.get("error", "unknown_error")
-                    logger.warning("Slack API error: %s", last_error)
-                    # Do not retry on auth/channel errors
-                    if last_error in (
-                        "channel_not_found",
-                        "not_in_channel",
-                        "invalid_auth",
-                        "token_revoked",
-                    ):
-                        return False, last_error
-            except Exception as e:
-                last_error = str(e)
-                backoff = BACKOFF_BASE ** (attempt * 2 + 1)
-                logger.warning(
-                    "Slack attempt %d/%d failed: %s (backoff %ds)",
-                    attempt + 1,
-                    MAX_RETRIES,
-                    e,
-                    backoff,
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await _post(
+                    client,
+                    SLACK_POST_MESSAGE_URL,
+                    "slack.post_message",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {bot_token}"},
                 )
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(backoff)
-
-        logger.error("Slack delivery failed after %d attempts", MAX_RETRIES)
-        return False, last_error
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = None
+        except (httpx.HTTPError, TimeoutError) as e:
+            logger.error("Slack delivery failed: %s", type(e).__name__)
+            return False, type(e).__name__
+        if isinstance(data, dict) and data.get("ok"):
+            logger.info("Slack notification sent to %s: %s", channel_id, title)
+            return True, ""
+        error = data.get("error") if isinstance(data, dict) else None
+        error = error if isinstance(error, str) and error else f"http_{response.status_code}"
+        logger.warning("Slack API error: %s (status %s)", error, response.status_code)
+        return False, error
 
     @staticmethod
     async def deliver_webhook(
@@ -117,7 +131,10 @@ class SlackChannel:
         message: str,
         severity: str,
     ) -> bool:
-        """Legacy webhook delivery for backward compatibility."""
+        """Legacy webhook delivery for backward compatibility.
+
+        The webhook URL is the credential, and httpx errors embed it; logs carry
+        only the status or exception class."""
         color = SEVERITY_COLORS.get(severity, "#36a64f")
         payload = {
             "attachments": [
@@ -136,27 +153,12 @@ class SlackChannel:
                 }
             ]
         }
-
-        for attempt in range(MAX_RETRIES):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(webhook_url, json=payload)
-                    response.raise_for_status()
-                logger.info("Slack webhook notification sent: %s", title)
-                return True
-            except Exception as e:
-                backoff = BACKOFF_BASE ** (attempt * 2 + 1)
-                # The webhook URL is the credential, and httpx errors embed it;
-                # log only the status or exception class.
-                logger.warning(
-                    "Slack webhook attempt %d/%d failed: %s (backoff %ds)",
-                    attempt + 1,
-                    MAX_RETRIES,
-                    _safe_webhook_failure(e),
-                    backoff,
-                )
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(backoff)
-
-        logger.error("Slack webhook delivery failed after %d attempts", MAX_RETRIES)
-        return False
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await _post(client, webhook_url, "slack.webhook", json=payload)
+                response.raise_for_status()
+        except (httpx.HTTPError, TimeoutError) as e:
+            logger.error("Slack webhook delivery failed: %s", _safe_webhook_failure(e))
+            return False
+        logger.info("Slack webhook notification sent: %s", title)
+        return True
