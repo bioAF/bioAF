@@ -270,27 +270,33 @@ async def test_openalex_context_lookups_are_paced_by_the_override(clock, client,
 
 
 @pytest.mark.parametrize(
-    ("method", "path"),
-    [("GET", "/api/literature/papers/{id}/openalex"), ("POST", "/api/literature/papers/{id}/fetch-open-access")],
+    ("method", "path", "expected"),
+    [
+        ("GET", "/api/literature/papers/{id}/openalex", 200),
+        ("POST", "/api/literature/papers/{id}/fetch-open-access", 404),
+    ],
 )
-async def test_openalex_routes_do_not_contact_a_disabled_source(
-    clock, client, admin_token, admin_user, session, method, path, monkeypatch
+async def test_openalex_paper_routes_are_always_on(
+    clock, client, admin_token, admin_user, session, method, path, expected, monkeypatch
 ):
+    """OpenAlex paper context and open-access lookup are always available (owner, 2026-11-10):
+    the Literature Sources enabled flag never gates them. They still use the organization's
+    OpenAlex key and rate."""
     from app.api.literature import papers as papers_api
 
     async def bucket(_session):
         return "bucket"
 
     monkeypatch.setattr(papers_api.storage, "get_literature_bucket", bucket)
-    await _configure(session, admin_user, source="openalex", enabled=False)
+    await _configure(session, admin_user, source="openalex", enabled=False, api_key="SYNTH-OA-KEY")
     paper_id = await _paper(session, admin_user)
     upstream = Upstream(clock)
     with respx.mock:
         upstream.route(f"{openalex._BASE}/works", httpx.Response(200, json={"results": []}), "works")
-        resp = await client.request(method, path.format(id=paper_id), headers=_auth(admin_token))
-    assert resp.status_code == 409
-    assert "OpenAlex" in resp.json()["detail"]
-    assert upstream.hits == []
+        resp = await drive(clock, client.request(method, path.format(id=paper_id), headers=_auth(admin_token)))
+    assert resp.status_code == expected, resp.text
+    assert len(upstream.hits) == 1
+    assert upstream.hits[0][2].headers["Authorization"] == "Bearer SYNTH-OA-KEY"
 
 
 # --- Cancellation while waiting for quota ---------------------------------------------------

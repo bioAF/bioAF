@@ -51,7 +51,6 @@ logger = logging.getLogger("bioaf.literature.papers")
 router = APIRouter()
 
 _OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
-_OPENALEX_DISABLED = "OpenAlex is turned off in Literature Sources settings."
 _OPENALEX_BUSY = "OpenAlex is limiting requests right now. Try again shortly."
 _NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
 _PDF_NOT_SAVED = "The PDF could not be saved, so it was not attached. Try again later."
@@ -359,11 +358,9 @@ async def _attach_pdf(
 
 
 async def _openalex_execution(session: AsyncSession, org_id: int) -> source_policy.SourceExecution:
-    """The organization's OpenAlex snapshot; a disabled source is never contacted."""
-    execution = (await sources_config_service.resolve(session, org_id, [openalex.name]))[openalex.name]
-    if not execution.enabled:
-        raise HTTPException(409, _OPENALEX_DISABLED)
-    return execution
+    """The organization's OpenAlex key and rate. Paper context and open-access lookup are
+    always on: the Literature Sources enabled flag (which governs searches) never gates them."""
+    return (await sources_config_service.resolve(session, org_id, [openalex.name]))[openalex.name]
 
 
 @router.post("/papers/{paper_id}/fetch-open-access", response_model=PaperResponse)
