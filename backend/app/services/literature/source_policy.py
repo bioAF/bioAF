@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import functools
 import hashlib
 import logging
+import secrets
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -48,13 +50,25 @@ class SourceExecution:
         from app.services.literature.sources import get_adapter
 
         if self.api_key and getattr(get_adapter(self.source), "CREDENTIAL_SCOPED_QUOTA", False):
-            digest = hashlib.sha256(f"{self.source}\0{self.api_key}".encode()).hexdigest()[:16]
-            return (self.source, digest)
+            return (self.source, _credential_fingerprint(self.source, self.api_key))
         return (self.source, "service")
 
     @property
     def interval(self) -> float:
         return 1.0 / self.requests_per_second if self.requests_per_second > 0 else 0.0
+
+
+# Random per process: a fingerprint identifies a quota bucket in memory only and
+# is meaningless outside this process (pacing state is process-local anyway).
+_FINGERPRINT_SALT = secrets.token_bytes(16)
+
+
+@functools.lru_cache(maxsize=256)
+def _credential_fingerprint(source: str, api_key: str) -> str:
+    """An opaque bucket id for a credential, derived with a salted, deliberately
+    slow KDF so the id cannot be used to recover or test guesses of the key.
+    Cached: computed once per credential, not per request."""
+    return hashlib.pbkdf2_hmac("sha256", api_key.encode(), _FINGERPRINT_SALT + source.encode(), 100_000).hex()[:16]
 
 
 def effective_rate(source: str, has_api_key: bool, override: int | None) -> float:

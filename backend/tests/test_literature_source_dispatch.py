@@ -175,7 +175,10 @@ async def test_providers_that_ignore_keys_share_one_service_bucket(clock):
     assert _execution("europepmc", 10, "a").bucket == _execution("europepmc", 10, "b").bucket
     assert _execution("biorxiv", 5, "a").bucket == _execution("biorxiv", 5, None).bucket
     assert _execution("pubmed", 10, "a").bucket != _execution("pubmed", 10, "b").bucket
-    assert "a" not in "".join(_execution("pubmed", 10, "a").bucket[1:])
+    secret = "SYNTH-KEY-ZZZZ"
+    fingerprint = _execution("pubmed", 10, secret).bucket[1]
+    assert secret not in fingerprint and "ZZZZ" not in fingerprint
+    assert _execution("pubmed", 10, secret).bucket == _execution("pubmed", 10, secret).bucket
 
 
 async def test_europe_pmc_full_text_shares_the_search_bucket(clock):
