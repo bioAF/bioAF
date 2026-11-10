@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import and_, delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission, require_results_view
@@ -140,7 +140,10 @@ async def _load_summary_context(session: AsyncSession, org_id: int, dashboards) 
                 Project.name,
                 Experiment.name,
             )
-            .outerjoin(Project, Project.id == PipelineRun.project_id)
+            # The project's organization belongs in the join, not the WHERE: a run
+            # filed under another organization's project (stored before launch
+            # checked it) keeps its dashboard, with no project name.
+            .outerjoin(Project, and_(Project.id == PipelineRun.project_id, Project.organization_id == org_id))
             .outerjoin(Experiment, Experiment.id == PipelineRun.experiment_id)
             .where(
                 PipelineRun.id.in_(run_ids),

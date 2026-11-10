@@ -13,7 +13,7 @@ from app.schemas.provenance import ProvenanceDAG, ProvenanceEdge, ProvenanceNode
 
 class ProvenanceService:
     @staticmethod
-    async def build_project_provenance(session: AsyncSession, project_id: int) -> ProvenanceDAG:
+    async def build_project_provenance(session: AsyncSession, project_id: int, org_id: int) -> ProvenanceDAG:
         nodes: list[ProvenanceNode] = []
         edges: list[ProvenanceEdge] = []
         seen_nodes: set[str] = set()
@@ -138,11 +138,13 @@ class ProvenanceService:
                     )
                 )
 
-        # Load pipeline runs (project-scoped)
+        # Load pipeline runs (project-scoped). Only this organization's: a run of
+        # another organization's may still point here from before launch checked
+        # the project it was filed under.
         run_result = await session.execute(
             select(PipelineRun)
             .options(selectinload(PipelineRun.references))
-            .where(PipelineRun.project_id == project_id)
+            .where(PipelineRun.project_id == project_id, PipelineRun.organization_id == org_id)
         )
         project_runs = run_result.scalars().all()
 
@@ -155,6 +157,7 @@ class ProvenanceService:
                 .where(
                     PipelineRun.experiment_id.in_(experiment_ids),
                     PipelineRun.project_id.is_(None),
+                    PipelineRun.organization_id == org_id,
                 )
             )
             if experiment_ids

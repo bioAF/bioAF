@@ -204,7 +204,13 @@ class SamplesheetMappingService:
         """
         project_id = None
         if experiment_id is not None:
-            project_id = await session.scalar(select(Experiment.project_id).where(Experiment.id == experiment_id))
+            # Only through an experiment of this organization's: callers authorize
+            # the experiment, but resolution must not depend on that alone.
+            project_id = await session.scalar(
+                select(Experiment.project_id).where(
+                    Experiment.id == experiment_id, Experiment.organization_id == org_id
+                )
+            )
 
         for scope in MAPPING_SCOPES:
             query = select(SamplesheetMapping).where(

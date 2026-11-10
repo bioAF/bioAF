@@ -522,3 +522,30 @@ class TestPreviewAndLaunchResolveTheSameParameters:
         assert r.status_code == 200
         assert r.json()["can_launch"] is False
         assert r.json()["reason"] == "these samples cannot share one protocol"
+
+
+class TestSavedDesignResolution:
+    @pytest.mark.asyncio
+    async def test_a_foreign_experiment_does_not_lead_to_a_project_design(self, session, world):
+        """Resolution read the experiment's project by bare id. A design filed (wrongly) in our
+        organization against their project must not be reached through their experiment."""
+        from app.models.samplesheet_mapping import SamplesheetMapping
+        from app.services.samplesheet_mapping_service import SamplesheetMappingService
+
+        world["foreign_exp"].project_id = world["foreign_project"].id
+        session.add(
+            SamplesheetMapping(
+                organization_id=world["org_id"],
+                pipeline_key="nf-core/demo",
+                scope="project",
+                project_id=world["foreign_project"].id,
+                values_json={},
+            )
+        )
+        await session.commit()
+
+        mapping, scope = await SamplesheetMappingService.resolve(
+            session, world["org_id"], "nf-core/demo", world["foreign_exp"].id
+        )
+
+        assert scope != "project"
