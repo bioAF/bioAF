@@ -13,12 +13,14 @@ at the approval gate where a human decides whether to pay for the download again
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.adapters.models import StoredObject
+from app.adapters.storage.gcs import GcsStorageProvider
 from app.models.file import File
 from app.models.sample import Sample, sample_files
 from app.services.validation_fetch_reaper import ValidationFetchReaper
@@ -32,6 +34,10 @@ async def parked_study(session, admin_user):
     from app.models.pipeline_run import PipelineRun
 
     async def _make(*, days_since_error: float = 5.0, stamped: bool = True, state: str = "error"):
+        from app.platform.platform_config_service import PlatformConfigService
+
+        # The fetched FASTQ lie in the fetch run's own output location in this results bucket.
+        await PlatformConfigService.set(session, "results_bucket_name", "results")
         org_id = admin_user.organization_id
         exp = Experiment(
             organization_id=org_id, name="Reproduction: 10.1234/x", owner_user_id=admin_user.id, status="processing"
@@ -86,12 +92,15 @@ async def parked_study(session, admin_user):
 
 
 def _storage(objects: int = 2):
-    adapter = MagicMock()
+    """The real adapter's URI handling, with listing and deletion recorded (real ``StoredObject``
+    results under the requested prefix; the old doubles exposed ``.uri``, which hid the defect)."""
+    adapter = GcsStorageProvider(org_slug="test")
     adapter.list_objects = AsyncMock(
-        return_value=[MagicMock(uri=f"gs://raw/nextflow-work/run-1/{i}") for i in range(objects)]
+        side_effect=lambda prefix, **kw: [
+            StoredObject(filename=str(i), storage_uri=f"{prefix}{i}") for i in range(objects)
+        ]
     )
     adapter.delete = AsyncMock()
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key}")
     return adapter
 
 
