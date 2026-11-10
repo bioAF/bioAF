@@ -18,11 +18,16 @@ _TIMEOUT = 30.0
 _FIELDS = "title,authors,abstract,year,venue,publicationDate,externalIds,openAccessPdf"
 
 
+# The key identifies this deployment's quota with Semantic Scholar.
+CREDENTIAL_SCOPED_QUOTA = True
+
+
 def get_rate_limit(has_api_key: bool) -> RateLimit:
-    # Semantic Scholar publishes 100 / 5 min unauthenticated. v1 cap matches
-    # the documented rate; an org-level api_key relaxes this via the
-    # rate_limit_override in literature_sources_config.
-    return RateLimit(requests_per_second=0.5 if not has_api_key else 5.0)
+    # Checked 2026-11-09 (semanticscholar.org/product/api): unauthenticated
+    # requests share one pool across all anonymous users and are throttled
+    # under load, so this stays conservative; an individual key starts at
+    # 1 request/second. A larger granted rate is set with rate_limit_override.
+    return RateLimit(requests_per_second=0.5 if not has_api_key else 1.0)
 
 
 async def search(query: str, max_results: int, api_key: str | None) -> list[PaperRecord]:

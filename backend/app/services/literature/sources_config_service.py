@@ -11,10 +11,19 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import ValidationError
 from app.models.literature import EXTERNAL_SOURCES, LiteratureSourcesConfig
 from app.services import audit_service
+from app.services.literature.source_policy import SourceExecution, effective_rate
 
 logger = logging.getLogger("bioaf.literature.sources_config")
+
+
+class _Unset:
+    pass
+
+
+_UNSET = _Unset()
 
 
 class SourceNotFound(Exception):
@@ -38,6 +47,41 @@ async def list_enabled(session: AsyncSession, org_id: int) -> list[LiteratureSou
     """The org's currently enabled sources. Every AI Literature Review boundary
     (creation, execution, scheduled sweep) reads configuration through here."""
     return [row for row in await list_for_org(session, org_id) if row.enabled]
+
+
+async def resolve(session: AsyncSession, org_id: int, sources: list[str]) -> dict[str, SourceExecution]:
+    """Snapshot each source's enabled state, credential, and effective rate for
+    one operation. A source with no configuration row resolves enabled at its
+    defaults (bootstrap seeds every source; the row default is enabled). A
+    persisted override that is not a positive integer resolves to the default."""
+    unknown = [s for s in sources if s not in EXTERNAL_SOURCES]
+    if unknown:
+        raise UnknownSource(f"unknown sources: {unknown}")
+    rows = {
+        row.source: row
+        for row in (
+            await session.execute(
+                select(LiteratureSourcesConfig).where(
+                    LiteratureSourcesConfig.organization_id == org_id,
+                    LiteratureSourcesConfig.source.in_(sources),
+                )
+            )
+        ).scalars()
+    }
+    resolved: dict[str, SourceExecution] = {}
+    for source in sources:
+        row = rows.get(source)
+        api_key = (row.api_key or None) if row is not None else None
+        raw = row.rate_limit_override if row is not None else None
+        override = raw if isinstance(raw, int) and raw > 0 else None
+        resolved[source] = SourceExecution(
+            source=source,
+            enabled=row.enabled if row is not None else True,
+            api_key=api_key,
+            requests_per_second=effective_rate(source, bool(api_key), override),
+            override=override,
+        )
+    return resolved
 
 
 async def get_or_create(session: AsyncSession, org_id: int, source: str) -> LiteratureSourcesConfig:
@@ -66,9 +110,13 @@ async def update(
     user_id: int,
     enabled: bool | None = None,
     api_key: str | None = None,
-    rate_limit_override: int | None = None,
+    rate_limit_override: int | None | _Unset = _UNSET,
     api_key_id: int | None = None,
 ) -> LiteratureSourcesConfig:
+    """Omitted ``rate_limit_override`` leaves it unchanged; None or 0 resets it;
+    a negative value is refused."""
+    if isinstance(rate_limit_override, int) and rate_limit_override < 0:
+        raise ValidationError("rate_limit_override must be a positive number of requests per second")
     row = await get_or_create(session, org_id, source)
     previous = {
         "enabled": row.enabled,
@@ -79,7 +127,7 @@ async def update(
         row.enabled = enabled
     if api_key is not None:
         row.api_key = api_key or None
-    if rate_limit_override is not None:
+    if not isinstance(rate_limit_override, _Unset):
         row.rate_limit_override = rate_limit_override or None
     await session.flush()
     await audit_service.log_action(

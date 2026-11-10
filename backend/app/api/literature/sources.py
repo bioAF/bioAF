@@ -48,6 +48,9 @@ async def update_source_endpoint(
 ):
     if source not in EXTERNAL_SOURCES:
         raise HTTPException(404, "unknown source")
+    changes = {}
+    if "rate_limit_override" in body.model_fields_set:
+        changes["rate_limit_override"] = body.rate_limit_override
     try:
         row = await sources_config_service.update(
             session,
@@ -56,7 +59,7 @@ async def update_source_endpoint(
             user_id=int(current_user["sub"]),
             enabled=body.enabled,
             api_key=body.api_key,
-            rate_limit_override=body.rate_limit_override,
+            **changes,
         )
     except sources_config_service.UnknownSource:
         raise HTTPException(404, "unknown source")
