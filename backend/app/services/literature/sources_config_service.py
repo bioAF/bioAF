@@ -3,11 +3,18 @@ override rate limit. Audit all writes."""
 
 from __future__ import annotations
 
+import logging
+import time
+import xml.etree.ElementTree as ET
+
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.literature import EXTERNAL_SOURCES, LiteratureSourcesConfig
 from app.services import audit_service
+
+logger = logging.getLogger("bioaf.literature.sources_config")
 
 
 class SourceNotFound(Exception):
@@ -93,11 +100,27 @@ async def update(
     return row
 
 
+def _safe_failure_message(exc: Exception) -> str:
+    """A fixed diagnostic for a failed connection test. Exception text is never
+    echoed: source clients put credentials (PubMed's api_key) in request URLs,
+    and httpx includes the URL in its error messages."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "Source rate limited the request (HTTP 429)"
+        return f"Source returned HTTP {status}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "Source timed out"
+    if isinstance(exc, httpx.TransportError):
+        return "Could not reach source"
+    if isinstance(exc, ValueError | ET.ParseError):
+        return "Source returned an unreadable response"
+    return f"Source test failed ({type(exc).__name__})"
+
+
 async def test_connection(source: str, api_key: str | None) -> dict:
     """Run a trivial query against the source to confirm reachability. Returns
     {success, message, latency_ms}."""
-    import time
-
     from app.services.literature.sources import get_adapter
 
     if source not in EXTERNAL_SOURCES:
@@ -112,6 +135,8 @@ async def test_connection(source: str, api_key: str | None) -> dict:
             "message": f"Source reachable; returned {len(results)} result(s)",
             "latency_ms": latency_ms,
         }
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)
-        return {"success": False, "message": str(e)[:200], "latency_ms": latency_ms}
+        message = _safe_failure_message(e)
+        logger.warning("Literature source test failed: source=%s failure=%s", source, type(e).__name__)
+        return {"success": False, "message": message, "latency_ms": latency_ms}

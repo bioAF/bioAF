@@ -46,6 +46,12 @@ def _build_blocks(title: str, message: str, severity: str) -> list[dict]:
     ]
 
 
+def _safe_webhook_failure(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return type(exc).__name__
+
+
 class SlackChannel:
     @staticmethod
     async def deliver(
@@ -140,11 +146,13 @@ class SlackChannel:
                 return True
             except Exception as e:
                 backoff = BACKOFF_BASE ** (attempt * 2 + 1)
+                # The webhook URL is the credential, and httpx errors embed it;
+                # log only the status or exception class.
                 logger.warning(
                     "Slack webhook attempt %d/%d failed: %s (backoff %ds)",
                     attempt + 1,
                     MAX_RETRIES,
-                    e,
+                    _safe_webhook_failure(e),
                     backoff,
                 )
                 if attempt < MAX_RETRIES - 1:
