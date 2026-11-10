@@ -356,7 +356,7 @@ async def test_a_quota_wait_past_the_review_budget_is_a_failed_attempt_not_a_han
         await drive(clock, h.execute(run_id), step=1.0)
     run = await h.load(run_id)
     assert run.status == "failed"
-    assert "pubmed 1/1 attempts failed" in run.error_message
+    assert "pubmed 1/1 attempts failed" in (run.error_message or "")
     audit = [a for a in await h.audits(run_id) if a.action in ("fail", "failed", "complete")]
     assert audit, "the run's terminal audit is recorded"
     assert upstream.hits == []
