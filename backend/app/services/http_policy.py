@@ -226,12 +226,15 @@ async def send(
             raise BudgetExhausted(f"{label}: budget exhausted before attempt {attempt}")
         if before_dispatch is not None:
             await before_dispatch(deadline)
+            # The quota wait may have used the rest of the budget.
+            if deadline is not None and clock.monotonic() >= deadline:
+                raise BudgetExhausted(f"{label}: budget exhausted waiting for quota")
         reason: str
         try:
             # The method helper (client.get, client.post) rather than client.request,
             # so callers' existing client doubles keep working.
-            dispatch = getattr(client, method.lower())(url, **request_kwargs)
-            response = await _within(dispatch, deadline, clock, label)
+            method_helper = getattr(client, method.lower())
+            response = await _within(lambda: method_helper(url, **request_kwargs), deadline, clock, label)
         except policy.retry_exceptions as exc:
             if attempt >= max_attempts:
                 _log_final(label, policy, attempt, type(exc).__name__, started, clock)
@@ -269,15 +272,17 @@ async def send(
 
 
 async def _within(
-    dispatch: Awaitable[httpx.Response], deadline: float | None, clock: Clock, label: str
+    dispatch: Callable[[], Awaitable[httpx.Response]], deadline: float | None, clock: Clock, label: str
 ) -> httpx.Response:
-    """Await one dispatch, abandoning it at the deadline."""
+    """Start one dispatch only if the deadline has not been reached, and abandon it there."""
     if deadline is None:
-        return await dispatch
+        return await dispatch()
     remaining = deadline - clock.monotonic()
+    if remaining <= 0:
+        raise BudgetExhausted(f"{label}: budget exhausted before dispatch")
     try:
-        async with asyncio.timeout(max(remaining, 0.0)) as scope:
-            return await dispatch
+        async with asyncio.timeout(remaining) as scope:
+            return await dispatch()
     except TimeoutError:
         if scope.expired():
             logger.warning("http request abandoned at its deadline: label=%s", label)

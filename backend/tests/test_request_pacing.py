@@ -162,9 +162,31 @@ async def test_a_waiter_that_wakes_after_its_deadline_does_not_dispatch():
     assert log[-1] == ("next", clock.now)
 
 
-@pytest.mark.parametrize("seconds", [float("inf"), 10**9])
-async def test_a_shared_cooldown_is_bounded(seconds):
+async def test_a_valid_long_cooldown_is_honored_in_full():
+    clock, registry = _registry()
+    log: list = []
+    registry.pacer("s2").cool_down(3600.0)
+    task = asyncio.create_task(_dispatch(registry, "s2", 0.1, log, "next"))
+    await clock.advance(3599.0)
+    assert log == []
+    await clock.advance(1.0)
+    await task
+    assert log == [("next", clock._start + 3600.0)]
+
+
+@pytest.mark.parametrize("seconds", [float("inf"), float("nan"), -5.0])
+async def test_an_unusable_cooldown_is_ignored(seconds):
     clock, registry = _registry()
     pacer = registry.pacer("s2")
     pacer.cool_down(seconds)
-    assert 0 < pacer.cooldown_remaining() <= request_pacing.MAX_SHARED_COOLDOWN_SECONDS
+    assert pacer.cooldown_remaining() == 0
+
+
+async def test_a_waiter_ready_exactly_at_its_deadline_does_not_dispatch():
+    clock, registry = _registry()
+    log: list = []
+    await _dispatch(registry, "pubmed", 1.0, log, "first")
+    with pytest.raises(QuotaWaitExceeded):
+        await _dispatch(registry, "pubmed", 1.0, log, "edge", deadline=clock.now + 1.0)
+    # The ready instant equals the deadline: refused without sleeping or claiming.
+    assert [n for n, _ in log] == ["first"]

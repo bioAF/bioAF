@@ -19,15 +19,10 @@ other software sharing a key.
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Hashable
 
 from app.services.http_policy import SYSTEM_CLOCK, Clock
-
-
-# Upper bound on one shared cooldown: a hostile or broken retry hint can hold a
-# bucket for at most this long. A provider still throttling answers 429 again
-# and renews it.
-MAX_SHARED_COOLDOWN_SECONDS = 900.0
 
 
 class QuotaWaitExceeded(TimeoutError):
@@ -41,9 +36,13 @@ class Pacer:
         self._cooldown_until = float("-inf")
 
     def cool_down(self, seconds: float) -> None:
-        """Hold every sender for ``seconds`` from now; never shortens a longer cooldown."""
-        bounded = min(seconds, MAX_SHARED_COOLDOWN_SECONDS)
-        self._cooldown_until = max(self._cooldown_until, self._clock.monotonic() + bounded)
+        """Hold every sender for ``seconds`` from now; never shortens a longer cooldown.
+
+        A valid hint is honored in full (http_policy already rejects hints that
+        overflow or exceed a day); a non-finite or non-positive value is ignored."""
+        if not (math.isfinite(seconds) and seconds > 0):
+            return
+        self._cooldown_until = max(self._cooldown_until, self._clock.monotonic() + seconds)
 
     def cooldown_remaining(self) -> float:
         return max(0.0, self._cooldown_until - self._clock.monotonic())
@@ -56,13 +55,13 @@ class Pacer:
             ready = self._cooldown_until
             if self._last_dispatch is not None:
                 ready = max(ready, self._last_dispatch + interval)
-            if deadline is not None and now > deadline:
-                # Woke (late) past the deadline: claim nothing.
-                raise QuotaWaitExceeded("woke after the operation deadline")
+            if deadline is not None and now >= deadline:
+                # At or past the deadline (including a late wakeup): claim nothing.
+                raise QuotaWaitExceeded("operation deadline reached while waiting for quota")
             if now >= ready:
                 self._last_dispatch = now
                 return now - started
-            if deadline is not None and ready > deadline:
+            if deadline is not None and ready >= deadline:
                 raise QuotaWaitExceeded("next permitted dispatch is past the operation deadline")
             await self._clock.sleep(ready - now)
 

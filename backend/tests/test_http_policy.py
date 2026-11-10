@@ -343,3 +343,76 @@ def test_a_far_future_date_hint_is_ignored():
     clock = ManualClock()
     far = format_datetime(clock.wall() + timedelta(days=30), usegmt=True)
     assert parse_retry_after(far, now=clock.wall()) is None
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_sent_when_the_quota_wait_ends_at_the_deadline():
+    clock = ManualClock()
+    upstream = Upstream(clock, [_ok()])
+
+    async def wait_until_deadline(deadline):
+        await clock.sleep(deadline - clock.monotonic())
+
+    async with upstream.client() as client:
+        task = asyncio.create_task(
+            send(
+                client,
+                "GET",
+                "https://x.test/a",
+                policy=SOURCE_READ,
+                clock=clock,
+                label="t",
+                deadline=clock.now + 1.0,
+                before_dispatch=wait_until_deadline,
+            )
+        )
+        await clock.settle()
+        await clock.advance(1.0)
+        with pytest.raises(http_policy.BudgetExhausted):
+            await task
+    assert upstream.dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_a_source_hint_of_an_hour_holds_other_callers_for_the_full_hour():
+    from app.services import request_pacing
+
+    clock = ManualClock()
+    registry = request_pacing.reset(clock)
+    upstream = Upstream(clock, [httpx.Response(429, headers={"Retry-After": "3600"}), _ok()])
+    pacer = registry.pacer("bucket")
+
+    async def acquire(deadline):
+        await pacer.acquire(0.0, deadline)
+
+    async with upstream.client() as client:
+        first = await send(
+            client,
+            "GET",
+            "https://x.test/a",
+            policy=SOURCE_READ,
+            clock=clock,
+            label="t",
+            before_dispatch=acquire,
+            on_throttle=pacer.cool_down,
+        )
+        assert first.status_code == 429  # 3600 s exceeds this operation's budget
+        task = asyncio.create_task(
+            send(
+                client,
+                "GET",
+                "https://x.test/a",
+                policy=SOURCE_READ,
+                clock=clock,
+                label="t",
+                deadline=clock.now + 7200,
+                before_dispatch=acquire,
+                on_throttle=pacer.cool_down,
+            )
+        )
+        await clock.settle()
+        await clock.advance(3599.0)
+        assert len(upstream.dispatched) == 1
+        await clock.advance(1.0)
+        assert (await task).status_code == 200
+    assert upstream.dispatched[1] - upstream.dispatched[0] == pytest.approx(3600.0)
