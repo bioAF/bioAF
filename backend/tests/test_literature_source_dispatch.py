@@ -249,3 +249,41 @@ async def test_cancelling_during_a_quota_wait_sends_nothing_later(clock):
             await task
         await clock.advance(60)
     assert hits.times() == []
+
+
+async def test_source_diagnostics_distinguish_wait_throttle_and_exhaustion_without_secrets(clock, caplog):
+    caplog.set_level("DEBUG", logger="bioaf")
+    hits = Hits(clock)
+    key = "SYNTH-S2-KEY-0123456789"
+    with respx.mock:
+        hits.route(
+            "GET",
+            f"{semanticscholar._BASE}/paper/search",
+            httpx.Response(429, headers={"Retry-After": "3"}),
+            httpx.Response(503),
+        )
+        with source_policy.bound(_execution("semanticscholar", 0.5, key)):
+            with pytest.raises(httpx.HTTPStatusError):
+                await _drive(clock, semanticscholar.search("q", 5, key))
+    text = caplog.text
+    assert "source throttled: label=semanticscholar.search cooldown=3.00s" in text
+    assert "source request paced: label=semanticscholar.search waited=" in text
+    assert "http request ended unsuccessfully: label=semanticscholar.search" in text and "attempts=3" in text
+    assert key not in text and "api.semanticscholar.org" not in text
+
+
+async def test_quota_and_budget_failures_keep_distinct_categories(clock):
+    from app.services.http_policy import BudgetExhausted
+    from app.services.request_pacing import QuotaWaitExceeded
+
+    with respx.mock:
+        respx.get(f"{europepmc._BASE}/search").mock(
+            return_value=httpx.Response(200, json={"resultList": {"result": []}})
+        )
+        request_pacing.registry().pacer(("europepmc", "service")).cool_down(500)
+        with source_policy.bound(_execution("europepmc", 10.0), budget_seconds=10):
+            with pytest.raises(QuotaWaitExceeded):
+                await europepmc.search("q", 5, None)
+        with source_policy.bound(_execution("europepmc", 10.0), budget_seconds=0):
+            with pytest.raises(BudgetExhausted):
+                await europepmc.search("q", 5, None)
