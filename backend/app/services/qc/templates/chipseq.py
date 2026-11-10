@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.template_helpers import first_number, mean, number, numbers, pick_raw_fastqc
 from app.services.qc.multiqc_registry import Roster, read_depth_and_samples
 from app.services.qc.roster import roster_for_run
 
@@ -181,60 +182,6 @@ def compute_quality(metrics: dict[str, Any]) -> str:
 # ---- MultiQC parsing (pure) ----
 
 
-def _num(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _field(sample: dict, *keys: str) -> float | None:
-    """First numeric value among the given keys for one sample record."""
-    for k in keys:
-        if k in sample:
-            n = _num(sample[k])
-            if n is not None:
-                return n
-    return None
-
-
-def _numbers(section: dict, *keys: str) -> list[float]:
-    out: list[float] = []
-    for v in section.values():
-        if isinstance(v, dict):
-            n = _field(v, *keys)
-            if n is not None:
-                out.append(n)
-    return out
-
-
-def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs)
-
-
-def _pick_raw_fastqc(raw: dict) -> dict:
-    """nf-core FastQC runs on raw + trimmed reads; MultiQC stores them as
-    multiqc_fastqc / multiqc_fastqc_1. Trimming only removes reads, so the RAW
-    section is the one with the higher total read count -- identify it by that
-    physical invariant, not by the section suffix. Read depth is a pre-trim
-    (raw) quantity."""
-    sections = [v for k, v in raw.items() if isinstance(v, dict) and k.startswith("multiqc_fastqc")]
-    best: dict = {}
-    best_total = -1.0
-    for sec in sections:
-        total = sum(_numbers(sec, "Total Sequences", "total_sequences"))
-        if total > best_total:
-            best_total = total
-            best = sec
-    return best
-
-
 def _plot_values(section: dict) -> list[float]:
     """Extract numeric values from a MultiQC bar-plot raw-data section.
 
@@ -248,11 +195,11 @@ def _plot_values(section: dict) -> list[float]:
     for v in (section or {}).values():
         if isinstance(v, dict):
             for iv in v.values():
-                n = _num(iv)
+                n = number(iv)
                 if n is not None:
                     out.append(n)
         else:
-            n = _num(v)
+            n = number(v)
             if n is not None:
                 out.append(n)
     return out
@@ -277,7 +224,7 @@ def _scan_general_stats(gstats: Any, *keys: str) -> list[float]:
             for col, val in sample_vals.items():
                 cl = str(col).lower()
                 if any(w in cl for w in wanted):
-                    n = _num(val)
+                    n = number(val)
                     if n is not None:
                         out.append(n)
     return out
@@ -299,12 +246,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     gstats = data.get("report_general_stats_data")
 
     # -- FastQC (raw): depth / GC / length / (fallback) duplication --
-    fastqc = _pick_raw_fastqc(raw)
+    fastqc = pick_raw_fastqc(raw)
     if fastqc:
-        total_seqs = _numbers(fastqc, "Total Sequences", "total_sequences")
-        gc = _numbers(fastqc, "%GC", "percent_gc")
-        dedup = _numbers(fastqc, "total_deduplicated_percentage")
-        lengths = _numbers(fastqc, "avg_sequence_length")
+        total_seqs = numbers(fastqc, "Total Sequences", "total_sequences")
+        gc = numbers(fastqc, "%GC", "percent_gc")
+        dedup = numbers(fastqc, "total_deduplicated_percentage")
+        lengths = numbers(fastqc, "avg_sequence_length")
         if total_seqs:
             # Per-SAMPLE derivation (aligner roster, raw FastQC counts, lanes
             # added and mates collapsed). ChIP runs are paired-end, so counting
@@ -315,12 +262,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             if total_samples is not None:
                 metrics["total_samples"] = total_samples
         if gc:
-            metrics["percent_gc"] = round(_mean(gc), 1)
+            metrics["percent_gc"] = round(mean(gc), 1)
         if dedup:
             # FastQC reports % remaining after dedup; duplication is the complement.
-            metrics["percent_duplicates"] = round(_mean([100.0 - d for d in dedup]), 1)
+            metrics["percent_duplicates"] = round(mean([100.0 - d for d in dedup]), 1)
         if lengths:
-            metrics["avg_sequence_length"] = round(_mean(lengths), 1)
+            metrics["avg_sequence_length"] = round(mean(lengths), 1)
 
     # -- samtools flagstat: mapping rate (prefer the pre-filter alignment view) --
     flagstat = _find_section(raw, "multiqc_samtools_flagstat", "samtools_flagstat")
@@ -329,37 +276,37 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
         for v in flagstat.values():
             if not isinstance(v, dict):
                 continue
-            pct = _field(v, "mapped_passed_pct")
+            pct = first_number(v, "mapped_passed_pct")
             if pct is not None:
                 fracs.append(pct / 100.0)
                 continue
-            mapped = _field(v, "mapped_passed", "mapped")
-            total = _field(v, "total_passed", "total")
+            mapped = first_number(v, "mapped_passed", "mapped")
+            total = first_number(v, "total_passed", "total")
             if mapped is not None and total:
                 fracs.append(mapped / total)
         if fracs:
-            metrics["reads_mapped_genome"] = round(_mean(fracs), 4)
+            metrics["reads_mapped_genome"] = round(mean(fracs), 4)
 
     # -- Picard MarkDuplicates: authoritative duplication (0-1 -> percent) --
     picard = _find_section(raw, "multiqc_picard_dups", "picard_dups", "multiqc_picard_deduplication")
     if picard:
-        dups = _numbers(picard, "PERCENT_DUPLICATION", "percent_duplication")
+        dups = numbers(picard, "PERCENT_DUPLICATION", "percent_duplication")
         if dups:
             # Picard reports a 0-1 fraction; the vocab's percent_duplicates is 0-100.
-            metrics["percent_duplicates"] = round(_mean([d * 100.0 for d in dups]), 1)
+            metrics["percent_duplicates"] = round(mean([d * 100.0 for d in dups]), 1)
 
     # -- phantompeakqualtools: NSC / RSC (strand cross-correlation) --
     phantom = _find_section(raw, "multiqc_phantompeakqualtools", "phantompeakqualtools", "multiqc_spp")
-    nsc = _numbers(phantom, "NSC", "nsc") if phantom else []
-    rsc = _numbers(phantom, "RSC", "rsc") if phantom else []
+    nsc = numbers(phantom, "NSC", "nsc") if phantom else []
+    rsc = numbers(phantom, "RSC", "rsc") if phantom else []
     if not nsc:
         nsc = _scan_general_stats(gstats, "nsc")
     if not rsc:
         rsc = _scan_general_stats(gstats, "rsc")
     if nsc:
-        metrics["nsc"] = round(_mean(nsc), 3)
+        metrics["nsc"] = round(mean(nsc), 3)
     if rsc:
-        metrics["rsc"] = round(_mean(rsc), 3)
+        metrics["rsc"] = round(mean(rsc), 3)
 
     # -- MACS2 peak count + FRiP: nf-core/chipseq stores these as MultiQC bar-plot data under
     # `multiqc_peak_count-plot` / `multiqc_frip_score-plot` ({sample: {series: value}}), NOT a flat
@@ -396,7 +343,7 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     if not peaks:
         peaks = _scan_general_stats(gstats, "peak_count", "num_peaks", "n_peaks")
     if peaks:
-        metrics["peak_count"] = int(round(_mean(peaks)))
+        metrics["peak_count"] = int(round(mean(peaks)))
 
     frip = _plot_values(
         _find_section(
@@ -415,7 +362,7 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     if frip:
         # FRiP is a 0-1 fraction; some reports express it as a 0-100 percent.
         vals = [f / 100.0 if f > 1.0 else f for f in frip]
-        metrics["frip"] = round(_mean(vals), 4)
+        metrics["frip"] = round(mean(vals), 4)
 
     return metrics
 

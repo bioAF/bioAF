@@ -10,6 +10,8 @@ from app.models.experiment import Experiment, EXPERIMENT_STATUS_TRANSITIONS
 from app.models.experiment_custom_field import ExperimentCustomField
 from app.models.experiment_field_default import DEFAULTABLE_SAMPLE_FIELDS, ExperimentFieldDefault
 from app.models.experiment_template import ExperimentTemplate
+from app.models.naming_profile import NamingProfile
+from app.models.project import Project
 from app.models.sample import Sample
 from app.schemas.experiment import CustomFieldValue, ExperimentCreate, ExperimentUpdate, FieldDefaultValue
 from app.services.audit_service import log_action
@@ -26,6 +28,7 @@ class ExperimentService:
         session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate, *, via_assistant: bool = False
     ) -> Experiment:
         await VocabularyValidator.validate_experiment_fields(session, {"design_type": data.design_type})
+        await ExperimentService._require_owned_links(session, org_id, data)
         code = await CodeService.next_experiment_code(session, org_id, data.project_id)
         experiment = Experiment(
             organization_id=org_id,
@@ -85,6 +88,25 @@ class ExperimentService:
             snapshot=serialize_entity(experiment),
         )
         return experiment
+
+    @staticmethod
+    async def _require_owned_links(session: AsyncSession, org_id: int, data: ExperimentCreate) -> None:
+        """Refuse a project, template or naming profile this organization does not own.
+
+        Missing and foreign ids are refused alike, so the answer says nothing
+        about another organization's records. Checked before the row exists:
+        the response names the linked project and template.
+        """
+        for model, value, label in (
+            (Project, data.project_id, "Project"),
+            (ExperimentTemplate, data.template_id, "Experiment template"),
+            (NamingProfile, data.naming_profile_id, "Naming profile"),
+        ):
+            if value is None:
+                continue
+            owned = await session.scalar(select(model.id).where(model.id == value, model.organization_id == org_id))
+            if owned is None:
+                raise NotFoundError(f"{label} {value} not found")
 
     @staticmethod
     async def _merge_template_config(

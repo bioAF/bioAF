@@ -21,6 +21,7 @@ from app.models.organization import Organization
 from app.models.sample import Sample
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_schema import parse_contract
+from app.services.samplesheet_inputs import SheetSampleInput
 
 FIXTURES = Path(__file__).parent / "fixtures" / "schema_input"
 
@@ -48,8 +49,8 @@ def _sample(sex=None):
     s.sex = sex
     for attr in ("donor_source", "organism", "tissue_type", "treatment_condition"):
         setattr(s, attr, None)
-    s._input_files = []
-    return s
+    _eligible = []
+    return SheetSampleInput.from_sample(s, _eligible)
 
 
 class TestSexIsOptionalOnTheSample:

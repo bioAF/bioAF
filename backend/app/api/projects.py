@@ -172,4 +172,4 @@ async def get_project_provenance(
     if not project:
         raise HTTPException(404, "Project not found")
 
-    return await ProvenanceService.build_project_provenance(session, project_id)
+    return await ProvenanceService.build_project_provenance(session, project_id, org_id)

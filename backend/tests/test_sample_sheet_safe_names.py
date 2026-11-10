@@ -8,13 +8,14 @@ schema's string 'sample' field. The generators must emit string-safe names.
 from unittest.mock import MagicMock
 
 from app.services.sample_sheet_service import SampleSheetService, _safe_sample_name
+from app.services.samplesheet_inputs import SheetSampleInput
 
 
 def _sample(sample_id, external_id):
     s = MagicMock()
     s.id = sample_id
     s.external_id = external_id
-    return s
+    return SheetSampleInput.from_sample(s, [])
 
 
 def test_numeric_names_are_prefixed():

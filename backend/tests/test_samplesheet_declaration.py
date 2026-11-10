@@ -31,6 +31,7 @@ import pytest
 from app.exceptions import DomainError
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_declaration import DEFAULT_DECLARATION, parse_declaration
+from app.services.samplesheet_inputs import SheetSampleInput
 
 
 def _make_file(filename: str, file_type: str = "fastq", read_type: str | None = None):
@@ -58,9 +59,9 @@ def _make_sample(sample_id: int, external_id: str, files=None, customs=None, **f
     sample.external_id = external_id
     for attr in ("donor_source", "organism", "tissue_type", "treatment_condition", "sex", "assay"):
         setattr(sample, attr, fields.get(attr))
-    sample._input_files = list(files or [])
+    _eligible = list(files or [])
     sample.custom_fields = list(customs or [])
-    return sample
+    return SheetSampleInput.from_sample(sample, _eligible)
 
 
 def _reads(name: str):

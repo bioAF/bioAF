@@ -78,3 +78,92 @@ def lane_from_filename(filename: str) -> int | None:
         return None
     lane = int(match.group(1))
     return lane or None
+
+
+# -- A file's sequencing identity ---------------------------------------------
+#
+# One rule for every consumer that asks which unit a file came from: the typed
+# column migration 119 added, then the legacy ``lane:``/``read:`` tag files
+# written before it still carry, then the filename. Read groups and the sheet
+# builder's mate pairing both read it here, and each keeps its own policy about
+# WHICH files it looks at (a read-group view shows index reads; a sheet never
+# feeds them to a pipeline).
+
+# A unit about which nothing is known: a pre-merged FASTQ from a CRO, or a path
+# a caller named directly. Every fact is absent.
+UNKNOWN_UNIT: tuple[str, int, str] = ("", 0, "")
+
+
+def _typed(f, column: str, kind: type):
+    """A typed sequencing-identity column, or None when it says nothing.
+
+    The isinstance check is load-bearing rather than defensive. Much of the test
+    suite builds files out of MagicMock, which auto-vivifies any attribute into a
+    truthy object; reading one of those as a lane would scatter a sample's files
+    across as many units as it has files. The same guard covers a real row whose
+    column is NULL.
+    """
+    value = getattr(f, column, None)
+    return value if isinstance(value, kind) and not isinstance(value, bool) else None
+
+
+def _tags(f) -> list:
+    tags = getattr(f, "tags_json", None) or []
+    return tags if isinstance(tags, (list, tuple)) else []
+
+
+def read_type(f) -> str | None:
+    """R1, R2, I1 or I2: the typed column, then the legacy ``read:`` tag, then the filename."""
+    typed = _typed(f, "read_type", str)
+    if typed in READ_TYPES:
+        return typed
+    for tag in _tags(f):
+        if isinstance(tag, str) and tag.startswith("read:"):
+            return tag.split(":", 1)[1]
+    return read_type_from_filename(getattr(f, "filename", "") or "")
+
+
+def lane(f) -> int | None:
+    """The physical lane, or None when it is not known.
+
+    None rather than a sentinel. ``"000"`` used to stand in for "I do not know",
+    and it is a fabricated value that would be emitted as a real lane the moment
+    a pipeline's own ``lane`` column gets filled. A lane is 1-based, so a parsed
+    zero is not a lane either, and a typed zero does not fall through to the tag.
+    """
+    typed = _typed(f, "lane", int)
+    if typed is not None:
+        return typed if typed > 0 else None
+    for tag in _tags(f):
+        if isinstance(tag, str) and tag.startswith("lane:"):
+            # Both spellings the two legacy writers produced ("1" and "001") are
+            # one lane. Read as strings they were two dict keys, which is how one
+            # physical lane became two units and a sample's mates stopped
+            # pairing.
+            digits = tag.split(":", 1)[1].strip()
+            return int(digits) if digits.isdigit() and int(digits) > 0 else None
+    return lane_from_filename(getattr(f, "filename", "") or "")
+
+
+def flowcell_id(f) -> str | None:
+    """The flow cell the file was read off, when bioAF holds it."""
+    return _typed(f, "flowcell_id", str) or None
+
+
+def run_accession(f) -> str | None:
+    """The archive run accession a fetched file came from, when bioAF holds it."""
+    return _typed(f, "source_run_accession", str) or None
+
+
+def sequencing_unit(f) -> tuple[str, int, str]:
+    """What tells two sequencing units of one sample apart, as a sort key.
+
+    The read-group axis is (flow cell, lane): ``L001`` on two flow cells is two
+    different lanes, so a lane number alone collides. A fetched FASTQ has neither
+    and carries its archive run accession instead, which distinguishes sibling
+    runs of one sample without pretending to be a lane.
+
+    Everything unknown collapses to ``UNKNOWN_UNIT``, which is the case that must
+    stay untouched: a CRO's pre-merged FASTQs have no lane at all.
+    """
+    return (flowcell_id(f) or "", lane(f) or 0, run_accession(f) or "")

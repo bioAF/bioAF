@@ -419,3 +419,270 @@ describe("a selection holding a sample with no input files", () => {
     await waitFor(() => expect(lastPreflightBody().drop_samples_without_files).toBe(false));
   });
 });
+
+/**
+ * A preflight the server refuses as not found (or not permitted).
+ *
+ * The page treated every preflight failure as "we do not know" and set the
+ * verdict to null, which left Launch ENABLED: a refusal to describe another
+ * organization's experiment became permission to proceed. Now a 404 or 403
+ * clears the stale preview, says so, and holds Launch disabled until a fresh
+ * preflight for the current request succeeds. Nothing else clears it: not a
+ * retry that fails again, not a changed selection still in flight, and not a
+ * late answer to an older request.
+ */
+describe("a preflight refused as not found", () => {
+  const SECOND = { id: 4, external_id: "SLIDE-2", organism: "Homo sapiens", qc_status: null, status: "registered" };
+  const notFound = () => {
+    // Built from the mocked module so `instanceof ApiError` holds in the page.
+    const { ApiError } = jest.requireMock("@/lib/api");
+    return new ApiError(404, "Experiment 7 not found", "not_found");
+  };
+
+  function withARow() {
+    return preflight({
+      declaration: { declarable: false, file_types: [], custom_fields: [] },
+      samplesheet: {
+        columns: ["sample"],
+        rows: [{ sample_id: 3, external_id: "SLIDE-1", values: ["SLIDE-1"] }],
+        csv: "sample\nSLIDE-1\n",
+        omissions: [],
+      },
+    });
+  }
+
+  let reply: () => Promise<unknown>;
+
+  beforeEach(() => {
+    reply = () => Promise.resolve(withARow());
+    mockGet.mockImplementation((url: string) => {
+      if (url.startsWith("/api/pipelines/")) {
+        return Promise.resolve({ pipeline_key: "nf-core/mcmicro", name: "mcmicro", default_params: null, parameter_schema: null });
+      }
+      if (url.startsWith("/api/experiments/")) return Promise.resolve([SAMPLE, SECOND]);
+      if (url.startsWith("/api/experiments")) return Promise.resolve({ experiments: [EXPERIMENT], total: 1 });
+      return Promise.resolve({});
+    });
+    mockPost.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/preflight") return reply();
+      if (url === "/api/pipeline-runs") return Promise.resolve({ id: 99 });
+      return Promise.resolve({});
+    });
+  });
+
+  function deferred() {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function toReview() {
+    render(<LaunchPage />);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "7" } });
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("SLIDE-2")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Configure Parameters")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Launch Pipeline" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("sample for SLIDE-1")).toBeInTheDocument());
+  }
+
+  /** At Review, a correction re-asks the preflight, which now answers 404. */
+  async function refuseOnReview() {
+    await toReview();
+    reply = () => Promise.reject(notFound());
+    fireEvent.change(screen.getByLabelText("sample for SLIDE-1"), { target: { value: "renamed" } });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not be found/i));
+  }
+
+  const launchButton = () => screen.getByRole("button", { name: "Launch Pipeline" });
+
+  it("clears the stale preview, explains, and keeps Launch disabled", async () => {
+    await refuseOnReview();
+
+    expect(screen.queryByLabelText("sample for SLIDE-1")).not.toBeInTheDocument();
+    expect(launchButton()).toBeDisabled();
+  });
+
+  it("treats a 403 the same way", async () => {
+    await toReview();
+    const { ApiError } = jest.requireMock("@/lib/api");
+    reply = () => Promise.reject(new ApiError(403, "Insufficient permissions", "permission_denied"));
+    fireEvent.change(screen.getByLabelText("sample for SLIDE-1"), { target: { value: "renamed" } });
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(launchButton()).toBeDisabled();
+  });
+
+  it("stays blocked when a retry is refused again, and recovers on a fresh success", async () => {
+    await refuseOnReview();
+    const before = preflightBodies().length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(before));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(launchButton()).toBeDisabled();
+
+    reply = () => Promise.resolve(withARow());
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(launchButton()).toBeEnabled();
+  });
+
+  it("does not unblock while a changed selection is still being checked", async () => {
+    await refuseOnReview();
+    const pending = deferred();
+    reply = () => pending.promise;
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByText("Select Samples")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select sample SLIDE-2/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(launchButton()).toBeInTheDocument());
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(launchButton()).toBeDisabled();
+
+    pending.resolve(withARow());
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(launchButton()).toBeEnabled();
+  });
+
+  it("is not cleared by a late answer to an older request", async () => {
+    await toReview();
+    const older = deferred();
+    reply = () => older.promise;
+    fireEvent.change(screen.getByLabelText("sample for SLIDE-1"), { target: { value: "first" } });
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(1));
+
+    reply = () => Promise.reject(notFound());
+    fireEvent.change(screen.getByLabelText("sample for SLIDE-1"), { target: { value: "second" } });
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    older.resolve(withARow());
+    // Give the late answer every chance to land.
+    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(launchButton()).toBeDisabled();
+  });
+
+  it("leaves an ordinary transport failure as it was: no block", async () => {
+    await toReview();
+    reply = () => Promise.reject(new Error("network down"));
+    fireEvent.change(screen.getByLabelText("sample for SLIDE-1"), { target: { value: "renamed" } });
+
+    await waitFor(() => expect(screen.queryByLabelText("sample for SLIDE-1")).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(launchButton()).toBeEnabled();
+  });
+});
+
+describe("an experiment whose samples are not found", () => {
+  const OTHER = { id: 8, name: "Sequencing", status: "registered", sample_count: 1 };
+  const outage = /could not be loaded/i;
+  const { ApiError } = jest.requireMock("@/lib/api");
+  const { toastMock } = jest.requireMock("@/components/shared/Toast");
+
+  let samplesFor: (url: string) => Promise<unknown>;
+  let reply: () => Promise<unknown>;
+
+  beforeEach(() => {
+    samplesFor = () => Promise.reject(new ApiError(404, "Experiment 7 not found", "not_found"));
+    // Never answers, so whatever the page shows came from the samples request.
+    reply = () => new Promise(() => {});
+    mockGet.mockImplementation((url: string) => {
+      if (url.startsWith("/api/pipelines/")) {
+        return Promise.resolve({ pipeline_key: "nf-core/mcmicro", name: "mcmicro", default_params: null, parameter_schema: null });
+      }
+      if (url.startsWith("/api/experiments/")) return samplesFor(url);
+      if (url.startsWith("/api/experiments")) return Promise.resolve({ experiments: [EXPERIMENT, OTHER], total: 2 });
+      return Promise.resolve({});
+    });
+    mockPost.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/preflight") return reply();
+      return Promise.resolve({});
+    });
+  });
+
+  async function choose(id: string) {
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: id } });
+  }
+
+  const outageToasts = () =>
+    (toastMock.error as jest.Mock).mock.calls.filter(([message]) => outage.test(String(message)));
+
+  it("explains with the not-found banner, not the outage toast, before the preflight answers", async () => {
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not be found/i));
+    expect(outageToasts()).toHaveLength(0);
+  });
+
+  it("says the same when the preflight is refused too", async () => {
+    reply = () => Promise.reject(new ApiError(404, "Experiment 7 not found", "not_found"));
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not be found/i));
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(0));
+    expect(outageToasts()).toHaveLength(0);
+  });
+
+  it.each([
+    ["a server error", () => new ApiError(500, "Internal Server Error", "internal_error")],
+    ["a network failure", () => new Error("Failed to fetch")],
+  ])("still reports %s as an outage, without the banner", async (_label, failure) => {
+    samplesFor = () => Promise.reject(failure());
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(outageToasts()).toHaveLength(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("is not blocked by a late not-found for an experiment no longer chosen", async () => {
+    let refuseOlder!: () => void;
+    samplesFor = (url) =>
+      url.startsWith("/api/experiments/7/")
+        ? new Promise((_res, rej) => {
+            refuseOlder = () => rej(new ApiError(404, "Experiment 7 not found", "not_found"));
+          })
+        : Promise.resolve([SAMPLE]);
+    render(<LaunchPage />);
+    await choose("7");
+    await waitFor(() => expect(refuseOlder).toBeDefined());
+    await choose("8");
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/experiments/8/samples"));
+
+    refuseOlder();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("asks for the samples again on Check again, and recovers when they load", async () => {
+    render(<LaunchPage />);
+    await choose("7");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    samplesFor = () => Promise.resolve([SAMPLE]);
+    reply = () => Promise.resolve(preflight());
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(outageToasts()).toHaveLength(0);
+  });
+});

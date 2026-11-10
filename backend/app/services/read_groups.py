@@ -25,7 +25,7 @@ receiving pre-merged FASTQs from a CRO, or pulling from a public archive, has no
 lane at all and is wholly unaffected.
 """
 
-from app.services.sample_sheet_service import _get_lane, _get_read_type, _typed
+from app.services import sequencing_identity
 
 # What bioAF says when it holds no sequencing identity for a group at all. Not
 # "unknown.0" and never a fabricated lane: the scientist reading this has one
@@ -63,10 +63,10 @@ def read_groups_for(files: list) -> list[dict]:
     for f in files or []:
         if getattr(f, "deleted_at", None) is not None:
             continue
-        flowcell = _typed(f, "flowcell_id", str) or None
-        lane = _get_lane(f)
-        accession = _typed(f, "source_run_accession", str) or None
-        key = (flowcell or "", lane or 0, accession or "")
+        flowcell = sequencing_identity.flowcell_id(f)
+        lane = sequencing_identity.lane(f)
+        accession = sequencing_identity.run_accession(f)
+        key = sequencing_identity.sequencing_unit(f)
         group = grouped.setdefault(
             key,
             {
@@ -79,7 +79,7 @@ def read_groups_for(files: list) -> list[dict]:
             },
         )
         group["files"].append({"id": getattr(f, "id", None), "filename": getattr(f, "filename", None)})
-        read_type = _get_read_type(f)
+        read_type = sequencing_identity.read_type(f)
         if read_type and read_type not in group["read_types"]:
             group["read_types"].append(read_type)
 

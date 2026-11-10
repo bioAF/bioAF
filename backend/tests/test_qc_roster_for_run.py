@@ -206,6 +206,7 @@ def test_the_record_a_real_launch_writes_is_the_record_this_reads():
     from unittest.mock import MagicMock
 
     from app.services.sample_sheet_service import SampleSheetService
+    from app.services.samplesheet_inputs import SheetSampleInput
 
     sample = MagicMock()
     sample.id = 7
@@ -223,7 +224,7 @@ def test_the_record_a_real_launch_writes_is_the_record_this_reads():
         "identity_column": "sample",
     }
 
-    snapshot = SampleSheetService.identity_snapshot(preview, [sample])
+    snapshot = SampleSheetService.identity_snapshot(preview, [SheetSampleInput.from_sample(sample, [])])
 
     # Two read groups, under the name the sheet emitted rather than the one the
     # sample carries.

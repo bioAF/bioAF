@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_schema import parse_contract
+from app.services.samplesheet_inputs import SheetSampleInput
 
 FIXTURES = Path(__file__).parent / "fixtures" / "schema_input"
 
@@ -28,15 +29,16 @@ def _contract(name: str):
     return parse_contract(json.loads((FIXTURES / f"{name}.json").read_text()))
 
 
-def _make_sample(sample_id: int, external_id: str, **fields):
+def _make_sample(sample_id: int, external_id: str, files=None, **fields):
     """A Sample with no metadata unless the test gives it some."""
     sample = MagicMock()
     sample.id = sample_id
     sample.external_id = external_id
     for attr in ("donor_source", "organism", "tissue_type", "treatment_condition", "library_layout"):
         setattr(sample, attr, fields.get(attr))
-    sample._input_files = []
-    return sample
+    for attr, value in fields.items():
+        setattr(sample, attr, value)
+    return SheetSampleInput.from_sample(sample, list(files or []))
 
 
 def _rows(csv_text: str) -> list[list[str]]:
@@ -162,8 +164,7 @@ def test_an_unmapped_column_is_never_filled_from_a_same_named_sample_attribute()
     columns are now dropped entirely (see
     test_sample_sheet_exclusive_columns.py), so absence from the header is the
     stronger form of the same guarantee: the value never reached the sheet."""
-    sample = _make_sample(1, "S1")
-    sample.status = "SHOULD_NOT_APPEAR"
+    sample = _make_sample(1, "S1", status="SHOULD_NOT_APPEAR")
 
     csv_text = SampleSheetService.generate_from_contract(_contract("sarek"), [sample], {})
 
@@ -210,14 +211,17 @@ def test_numeric_external_id_is_still_prefixed():
 def test_multi_lane_samples_emit_one_row_per_lane():
     """Preserves _extract_fastq_lane_pairs through the new path: lanes are
     separate rows, and index reads are excluded."""
-    sample = _make_sample(1, "S1")
-    sample._input_files = [
-        _file("S1_L001_R1_001.fastq.gz", "gs://b/S1_L001_R1.fastq.gz"),
-        _file("S1_L001_R2_001.fastq.gz", "gs://b/S1_L001_R2.fastq.gz"),
-        _file("S1_L002_R1_001.fastq.gz", "gs://b/S1_L002_R1.fastq.gz"),
-        _file("S1_L002_R2_001.fastq.gz", "gs://b/S1_L002_R2.fastq.gz"),
-        _file("S1_L001_I1_001.fastq.gz", "gs://b/S1_L001_I1.fastq.gz"),
-    ]
+    sample = _make_sample(
+        1,
+        "S1",
+        files=[
+            _file("S1_L001_R1_001.fastq.gz", "gs://b/S1_L001_R1.fastq.gz"),
+            _file("S1_L001_R2_001.fastq.gz", "gs://b/S1_L001_R2.fastq.gz"),
+            _file("S1_L002_R1_001.fastq.gz", "gs://b/S1_L002_R1.fastq.gz"),
+            _file("S1_L002_R2_001.fastq.gz", "gs://b/S1_L002_R2.fastq.gz"),
+            _file("S1_L001_I1_001.fastq.gz", "gs://b/S1_L001_I1.fastq.gz"),
+        ],
+    )
 
     csv_text = SampleSheetService.generate_from_contract(_contract("demo"), [sample], {})
 

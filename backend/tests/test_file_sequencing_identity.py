@@ -34,6 +34,7 @@ from sqlalchemy import select, text
 
 from app.models.file import File
 from app.services import sample_sheet_service
+from app.services.samplesheet_inputs import SheetSampleInput
 from app.services.upload_service import UploadService, _pending_uploads
 
 MIGRATION = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "119_file_sequencing_identity.py"
@@ -61,7 +62,7 @@ def _file(**kw):
 
 
 def _sample(files):
-    return SimpleNamespace(id=1, external_id="SAMPLE-101", files=files)
+    return SheetSampleInput.from_sample(SimpleNamespace(id=1, external_id="SAMPLE-101"), files)
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +303,8 @@ async def test_fetchngs_sibling_runs_still_emit_separate_rows(session, admin_use
     await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir, storage_adapter=storage)
     await session.commit()
 
-    sample = await _sample_by_external(session, exp.id, "SRX079566")
-    sample._input_files = await _files_for_sample(session, sample.id)
+    orm_sample = await _sample_by_external(session, exp.id, "SRX079566")
+    sample = SheetSampleInput.from_sample(orm_sample, await _files_for_sample(session, orm_sample.id))
 
     pairs = sample_sheet_service._extract_fastq_lane_pairs(sample)
 

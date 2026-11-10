@@ -34,6 +34,7 @@ import pytest
 
 from app.exceptions import SamplesMissingRequiredFieldsError
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_inputs import SheetSampleInput
 from app.services.samplesheet_schema import parse_contract
 
 FIXTURES = Path(__file__).parent / "fixtures" / "schema_input"
@@ -63,8 +64,7 @@ def _sample(sample_id: int, external_id: str, files: list):
     for attr in ("donor_source", "organism", "tissue_type", "treatment_condition"):
         setattr(sample, attr, None)
     sample.files = files
-    sample._input_files = files
-    return sample
+    return SheetSampleInput.from_sample(sample, files)
 
 
 def _check(contract, samples, parameters=None):

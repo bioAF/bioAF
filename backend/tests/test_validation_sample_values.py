@@ -208,10 +208,10 @@ class _File:
         self.tags_json = [f"read:R{read}", "lane:001"]
 
 
-class _SequencedSample(_Sample):
-    def __init__(self, sample_id, external_id):
-        super().__init__(sample_id, external_id)
-        self._input_files = [_File(external_id, 1), _File(external_id, 2)]
+def _sequenced_sample(sample_id, external_id):
+    from app.services.samplesheet_inputs import SheetSampleInput
+
+    return SheetSampleInput.from_sample(_Sample(sample_id, external_id), [_File(external_id, 1), _File(external_id, 2)])
 
 
 def test_a_cutandrun_shaped_launch_stops_being_refused():
@@ -221,7 +221,7 @@ def test_a_cutandrun_shaped_launch_stops_being_refused():
     from app.exceptions import SamplesMissingRequiredFieldsError
     from app.services.sample_sheet_service import SampleSheetService
 
-    samples = [_SequencedSample(i + 1, e) for i, e in enumerate(["S1", "S2", "S3", "S4", "S5", "S6"])]
+    samples = [_sequenced_sample(i + 1, e) for i, e in enumerate(["S1", "S2", "S3", "S4", "S5", "S6"])]
 
     with pytest.raises(SamplesMissingRequiredFieldsError) as ei:
         SampleSheetService.check_contract_satisfiable(_CUTANDRUN, samples, {}, {})
@@ -235,7 +235,7 @@ def test_the_sheet_that_results_carries_the_arms_it_was_given():
     """A satisfiable check is not the same as a correct sheet. This is the sheet that would run."""
     from app.services.sample_sheet_service import SampleSheetService
 
-    samples = [_SequencedSample(i + 1, e) for i, e in enumerate(["S1", "S2", "S3", "S4", "S5", "S6"])]
+    samples = [_sequenced_sample(i + 1, e) for i, e in enumerate(["S1", "S2", "S3", "S4", "S5", "S6"])]
     values = sample_values_from_design(_PAIRED_DESIGN, samples, _CUTANDRUN)
 
     csv = SampleSheetService.generate_from_contract(_CUTANDRUN, samples, {}, values)
