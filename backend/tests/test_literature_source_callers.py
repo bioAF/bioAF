@@ -291,3 +291,72 @@ async def test_openalex_routes_do_not_contact_a_disabled_source(
     assert resp.status_code == 409
     assert "OpenAlex" in resp.json()["detail"]
     assert upstream.hits == []
+
+
+# --- Cancellation while waiting for quota ---------------------------------------------------
+
+
+async def test_a_search_cancelled_during_a_quota_wait_sends_nothing_later(clock, session, admin_user):
+    await _configure(session, admin_user)
+    search_id = await _search(session, admin_user, ["pubmed"])
+    request_pacing.registry().pacer(("pubmed", "service")).cool_down(120)
+    upstream = Upstream(clock)
+    with respx.mock:
+        upstream.pubmed()
+        task = asyncio.ensure_future(search_service._run_search(search_id, admin_user.id, 5))
+        for _ in range(20):
+            await clock.advance(0.5)
+        assert clock.sleeping >= 1
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await clock.advance(300)
+    assert upstream.hits == []
+    assert clock.sleeping == 0
+
+
+async def test_a_review_cancelled_during_a_quota_wait_records_cancellation(clock, session, admin_user, monkeypatch):
+    from tests.test_literature_lit_review_outcomes import Harness
+
+    h = Harness(session, admin_user, monkeypatch)
+    await h.setup(sources=("pubmed",))
+    monkeypatch.setattr(pubmed, "search", REAL_SEARCH["pubmed"])
+    h.script_llm("q1", scores((0, 0.9)))
+    request_pacing.registry().pacer(("pubmed", "service")).cool_down(120)
+    upstream = Upstream(clock)
+    with respx.mock:
+        upstream.pubmed()
+        run_id = await h.create_run()
+        task = asyncio.ensure_future(h.execute(run_id))
+        for _ in range(40):
+            await clock.advance(0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await clock.advance(300)
+    run = await h.load(run_id)
+    assert run.status == "failed" and run.error_message == "cancelled"
+    assert upstream.hits == []
+
+
+async def test_a_quota_wait_past_the_review_budget_is_a_failed_attempt_not_a_hang(
+    clock, session, admin_user, monkeypatch
+):
+    from tests.test_literature_lit_review_outcomes import Harness
+
+    h = Harness(session, admin_user, monkeypatch)
+    await h.setup(sources=("pubmed",))
+    monkeypatch.setattr(pubmed, "search", REAL_SEARCH["pubmed"])
+    h.script_llm("q1", scores((0, 0.9)))
+    request_pacing.registry().pacer(("pubmed", "service")).cool_down(10_000)
+    upstream = Upstream(clock)
+    with respx.mock:
+        upstream.pubmed()
+        run_id = await h.create_run()
+        await drive(clock, h.execute(run_id), step=1.0)
+    run = await h.load(run_id)
+    assert run.status == "failed"
+    assert "pubmed 1/1 attempts failed" in run.error_message
+    audit = [a for a in await h.audits(run_id) if a.action in ("fail", "failed", "complete")]
+    assert audit, "the run's terminal audit is recorded"
+    assert upstream.hits == []
