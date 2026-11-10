@@ -7,6 +7,7 @@ from datetime import date
 
 import httpx
 
+from app.services.literature import source_policy
 from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.europepmc")
@@ -18,6 +19,8 @@ _TIMEOUT = 30.0
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
+    # Checked 2026-11-09 (Europe PMC web services forum): 10 requests/second per
+    # IP address. The adapter sends no key, so all traffic shares one bucket.
     return RateLimit(requests_per_second=10.0)
 
 
@@ -25,7 +28,9 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
     params = {"query": query, "format": "json", "resultType": "core", "pageSize": str(min(max_results, 100))}
     # Errors propagate so callers classify an outage as a failed attempt.
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/search", params=params)
+        r = await source_policy.get(
+            client, f"{_BASE}/search", source=name, api_key=api_key, label="europepmc.search", params=params
+        )
         r.raise_for_status()
         data = r.json()
     return [_parse_result(item) for item in data.get("resultList", {}).get("result", [])]
@@ -34,7 +39,7 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
 async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     try:
         results = await search(f'DOI:"{doi}"', 1, api_key)
-    except (httpx.HTTPError, ValueError) as e:
+    except (httpx.HTTPError, ValueError, TimeoutError) as e:
         logger.warning("Europe PMC DOI fetch failed: %s", type(e).__name__)
         return None
     return results[0] if results else None

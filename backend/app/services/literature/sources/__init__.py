@@ -58,7 +58,8 @@ def author_from_full_name(full: str | None) -> dict | None:
 
 @dataclass(frozen=True)
 class RateLimit:
-    """Per-source rate limit. Requests per second; v1 uses a simple semaphore."""
+    """A source's default dispatch rate in requests per second, enforced per
+    quota bucket by source_policy at each HTTP send."""
 
     requests_per_second: float
 

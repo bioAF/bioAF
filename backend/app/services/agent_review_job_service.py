@@ -552,11 +552,16 @@ async def _execute_hosted_inner(
             api_key=provider_cfg.api_key,
         )
     except ProviderError as exc:
+        # The message can carry a provider response body: logs get only safe fields.
         logger.warning(
-            "execute_hosted provider_error: job_id=%d error_class=%s detail=%s",
+            "execute_hosted provider_error: job_id=%d provider=%s error_class=%s upstream_status=%s "
+            "upstream_code=%s timeout=%s",
             job.id,
+            exc.provider or job.provider,
             exc.error_class,
-            str(exc) or repr(exc),
+            exc.upstream_status if exc.upstream_status is not None else "none",
+            exc.upstream_code or "none",
+            str(exc.timeout).lower(),
         )
         err_text = str(exc).strip() or f"{exc.error_class} (no provider detail)"
         async with session_factory() as session:

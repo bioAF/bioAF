@@ -38,7 +38,8 @@ from app.services.literature import (
     dismissal_service,
     fulltext_service,
     paper_service,
-    search_service,
+    source_policy,
+    sources_config_service,
     storage,
     upload_service,
 )
@@ -50,6 +51,7 @@ logger = logging.getLogger("bioaf.literature.papers")
 router = APIRouter()
 
 _OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
+_OPENALEX_BUSY = "OpenAlex is limiting requests right now. Try again shortly."
 _NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
 _PDF_NOT_SAVED = "The PDF could not be saved, so it was not attached. Try again later."
 _PDF_PARSER_BUSY = "bioAF is busy reading other PDFs. Try again in a minute."
@@ -355,6 +357,12 @@ async def _attach_pdf(
     await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
 
 
+async def _openalex_execution(session: AsyncSession, org_id: int) -> source_policy.SourceExecution:
+    """The organization's OpenAlex key and rate. Paper context and open-access lookup are
+    always on: the Literature Sources enabled flag (which governs searches) never gates them."""
+    return (await sources_config_service.resolve(session, org_id, [openalex.name]))[openalex.name]
+
+
 @router.post("/papers/{paper_id}/fetch-open-access", response_model=PaperResponse)
 async def fetch_open_access_endpoint(
     paper_id: int,
@@ -376,10 +384,11 @@ async def fetch_open_access_endpoint(
     if not await storage.get_literature_bucket(session):
         raise HTTPException(503, _NO_LITERATURE_STORAGE)
 
-    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    execution = await _openalex_execution(session, org_id)
     try:
         async with asyncio.timeout(_OPEN_ACCESS_BUDGET_SECONDS):
-            work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+            with source_policy.bound(execution, budget_seconds=_OPEN_ACCESS_BUDGET_SECONDS):
+                work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=execution.api_key)
             locations = openalex.work_context(work)["oa_locations"] if work else []
             copy = await fulltext_service.fetch_open_access_pdf(locations)
     except TimeoutError:
@@ -513,9 +522,15 @@ async def get_openalex_context_endpoint(
         paper = await paper_service.get_paper(session, org_id, paper_id)
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
-    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    execution = await _openalex_execution(session, org_id)
+    doi, pmid = paper.doi, paper.pmid
+    # Nothing else is read from the session: end its transaction before the network wait.
+    await session.commit()
     try:
-        work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+        with source_policy.bound(execution):
+            work = await openalex.fetch_work(doi=doi, pmid=pmid, api_key=execution.api_key)
+    except TimeoutError:
+        raise HTTPException(503, _OPENALEX_BUSY)
     except (httpx.HTTPError, ValueError):
         logger.warning("OpenAlex context lookup failed for paper %s", paper_id, exc_info=True)
         raise HTTPException(502, _OPENALEX_UNREACHABLE)

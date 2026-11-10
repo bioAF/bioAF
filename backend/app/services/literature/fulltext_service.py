@@ -25,6 +25,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 from app import runtime
+from app.services.literature import source_policy
 
 logger = logging.getLogger("bioaf.literature.fulltext")
 
@@ -80,8 +81,12 @@ async def _resolve_open_access_id(
     else:
         return None
 
-    r = await client.get(
+    r = await source_policy.get(
+        client,
         f"{_BASE}/search",
+        source="europepmc",
+        api_key=None,
+        label="europepmc.fulltext_lookup",
         params={"query": query, "format": "json", "resultType": "core", "pageSize": "1"},
     )
     r.raise_for_status()
@@ -111,11 +116,17 @@ class FullTextFetchService:
                     return None
                 # Europe PMC keys full text by the bare PMCID: {BASE}/{PMCID}/fullTextXML. There is no
                 # extra source path segment; {BASE}/PMC/{PMCID}/fullTextXML 404s.
-                r = await client.get(f"{_BASE}/{ext_id}/fullTextXML")
+                r = await source_policy.get(
+                    client,
+                    f"{_BASE}/{ext_id}/fullTextXML",
+                    source="europepmc",
+                    api_key=None,
+                    label="europepmc.fulltext",
+                )
                 r.raise_for_status()
                 xml_text = r.text
-            except (httpx.HTTPError, ValueError) as exc:
-                logger.warning("Europe PMC full-text fetch failed: %s", exc)
+            except (httpx.HTTPError, ValueError, TimeoutError) as exc:
+                logger.warning("Europe PMC full-text fetch failed: %s", type(exc).__name__)
                 return None
 
         text = _jats_to_text(xml_text)

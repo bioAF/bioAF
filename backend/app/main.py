@@ -5,6 +5,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 
 from app import runtime, startup
+from app.services import request_pacing
 from app.config import settings
 from app.database import engine
 from app.logging_config import configure_logging
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI):
     logger.info("bioAF backend starting up (env=%s)", settings.environment)
     owner = TaskOwner()
     app.state.runtime = owner
+    # Source pacing and cooldowns belong to this application instance's lifetime.
+    request_pacing.reset()
     # Read the module's engine when the lifespan starts (tests substitute it).
     ctx = startup.StartupContext(engine=engine, stack=AsyncExitStack(), subscriptions=AsyncExitStack())
     # Unwound in reverse: owned work stops and settles, then this lifespan's subscriptions go, then

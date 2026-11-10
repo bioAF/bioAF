@@ -163,8 +163,12 @@ class PipelineCatalogService:
         branch = version or "master"
         schema_url = f"{raw_url}/{branch}/nextflow_schema.json"
 
+        from app.services import http_policy
+
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(schema_url)
+            response = await http_policy.read(
+                client, schema_url, policy=http_policy.METADATA_READ, label="pipeline.nextflow_schema"
+            )
             if response.status_code == 200:
                 return response.json()
             logger.warning("Failed to fetch schema from %s: %d", schema_url, response.status_code)
@@ -188,6 +192,7 @@ class PipelineCatalogService:
         """
         import httpx
 
+        from app.services import http_policy
         from app.services.samplesheet_schema import SCHEMA_ABSENT
 
         if not source_url:
@@ -198,7 +203,9 @@ class PipelineCatalogService:
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(schema_url)
+                response = await http_policy.read(
+                    client, schema_url, policy=http_policy.METADATA_READ, label="pipeline.input_schema"
+                )
                 if response.status_code == 200:
                     return response.json()
                 if response.status_code == 404:

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date as date_type, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 
 class AuthorPayload(BaseModel):
@@ -245,7 +245,10 @@ class SourceConfigListResponse(BaseModel):
 class SourceConfigUpdateRequest(BaseModel):
     enabled: bool | None = None
     api_key: str | None = None
-    rate_limit_override: int | None = None
+    # Requests per second at dispatch. Omitted leaves it unchanged; null (or the
+    # legacy 0) resets to the source default. Booleans, strings, and fractions
+    # are rejected rather than coerced.
+    rate_limit_override: StrictInt | None = Field(default=None, ge=0)
 
 
 class SourceTestResponse(BaseModel):

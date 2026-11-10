@@ -22,7 +22,6 @@ from app.models.literature import (
     LiteraturePaper,
     LiteratureSearch,
     LiteratureSearchResult,
-    LiteratureSourcesConfig,
     PROVENANCE_SOURCE_SEARCH,
     SEARCH_COMPLETE,
     SEARCH_FAILED,
@@ -35,7 +34,8 @@ from app.services.event_types import (
     LITERATURE_SEARCH_COMPLETED,
     LITERATURE_SEARCH_FAILED,
 )
-from app.services.literature import paper_service
+from app.services.literature import paper_service, source_policy, sources_config_service
+from app.services.literature.source_policy import SourceDisabled, SourceExecution
 from app.services.literature.sources import PaperRecord, get_adapter
 from app import runtime
 
@@ -50,6 +50,10 @@ class SearchNotFound(Exception):
     pass
 
 
+class SourcesUnavailable(Exception):
+    """The search names no enabled source (none enabled, or one it asked for is off)."""
+
+
 async def create_search(
     session: AsyncSession,
     *,
@@ -60,10 +64,19 @@ async def create_search(
     max_per_source: int = _DEFAULT_MAX_PER_SOURCE,
     api_key_id: int | None = None,
 ) -> LiteratureSearch:
-    sources = sources or list(EXTERNAL_SOURCES)
-    invalid = [s for s in sources if s not in EXTERNAL_SOURCES]
+    invalid = [s for s in sources or [] if s not in EXTERNAL_SOURCES]
     if invalid:
         raise ValidationError(f"unknown sources: {invalid}")
+    # An ordinary search runs the enabled sources; asking for a disabled one is refused.
+    resolved = await sources_config_service.resolve(session, org_id, list(sources or EXTERNAL_SOURCES))
+    if sources:
+        disabled = [s for s in sources if not resolved[s].enabled]
+        if disabled:
+            raise SourcesUnavailable(f"Turned off in Literature Sources settings: {', '.join(disabled)}")
+    else:
+        sources = [s for s in EXTERNAL_SOURCES if resolved[s].enabled]
+        if not sources:
+            raise SourcesUnavailable("No Literature Sources are enabled.")
     search = LiteratureSearch(
         organization_id=org_id,
         user_id=user_id,
@@ -104,7 +117,8 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
         if search is None:
             return
         sources = list(search.sources_json or [])
-        api_keys = await _load_api_keys(s, search.organization_id, sources)
+        # One configuration snapshot for this search, taken before any network wait.
+        executions = await sources_config_service.resolve(s, search.organization_id, sources)
         query_text = search.query_text
         search.status = SEARCH_RUNNING
         search.started_at = datetime.now(UTC)
@@ -114,7 +128,7 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
     results: dict[str, list[PaperRecord] | Exception] = {}
     tasks = {
         src: runtime.spawn(
-            _run_source_with_timeout(src, query_text, api_keys.get(src), max_per_source),
+            _run_source_with_timeout(src, query_text, executions[src], max_per_source),
             role="literature-search-source",
         )
         for src in sources
@@ -187,28 +201,24 @@ async def _run_search(search_id: int, user_id: int, max_per_source: int) -> None
             logger.exception("event_bus emit failed for search %s", search_id)
 
 
-async def _run_source_with_timeout(src: str, query: str, api_key: str | None, max_per_source: int) -> list[PaperRecord]:
+async def _run_source_with_timeout(
+    src: str, query: str, execution: SourceExecution, max_per_source: int
+) -> list[PaperRecord]:
+    """One source's search under its configuration snapshot. Queueing, both
+    requests of a multi-request source, and retries share the budget."""
+    if not execution.enabled:
+        raise SourceDisabled(src)
     adapter = get_adapter(src)
     try:
-        return await asyncio.wait_for(
-            adapter.search(query=query, max_results=max_per_source, api_key=api_key),
-            timeout=_PER_SOURCE_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError as e:
+        with source_policy.bound(execution, budget_seconds=_PER_SOURCE_TIMEOUT_SECONDS):
+            return await asyncio.wait_for(
+                adapter.search(query=query, max_results=max_per_source, api_key=execution.api_key),
+                timeout=_PER_SOURCE_TIMEOUT_SECONDS,
+            )
+    except TimeoutError as e:
+        if type(e) is not TimeoutError:
+            raise  # a quota wait or retry budget that ran out keeps its own category
         raise TimeoutError(f"source {src} exceeded {_PER_SOURCE_TIMEOUT_SECONDS}s") from e
-
-
-async def _load_api_keys(session: AsyncSession, org_id: int, sources: list[str]) -> dict[str, str | None]:
-    result = await session.execute(
-        select(LiteratureSourcesConfig).where(
-            LiteratureSourcesConfig.organization_id == org_id,
-            LiteratureSourcesConfig.source.in_(sources),
-        )
-    )
-    keys: dict[str, str | None] = {s: None for s in sources}
-    for row in result.scalars().all():
-        keys[row.source] = row.api_key if row.enabled else None
-    return keys
 
 
 async def _ingest_records(

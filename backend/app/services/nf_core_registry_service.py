@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.nf_core_registry_refresh import NfCoreRegistryRefresh
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+from app.services import http_policy
 from app.services.audit_service import log_action
 from app.services.pipeline_catalog_service import PipelineCatalogService
 
@@ -85,7 +86,12 @@ class NfCoreRegistryService:
 
         try:
             async with httpx.AsyncClient(timeout=NfCoreRegistryService.HTTP_TIMEOUT_SECONDS) as client:
-                response = await client.get(NfCoreRegistryService.REGISTRY_URL)
+                response = await http_policy.read(
+                    client,
+                    NfCoreRegistryService.REGISTRY_URL,
+                    policy=http_policy.METADATA_READ,
+                    label="nf_core.registry",
+                )
                 response.raise_for_status()
                 payload = response.json()
         except Exception as exc:

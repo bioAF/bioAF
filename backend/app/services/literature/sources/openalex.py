@@ -12,6 +12,7 @@ from datetime import date
 
 import httpx
 
+from app.services.literature import source_policy
 from app.services.literature.sources import PaperRecord, RateLimit, author_from_full_name, sanitize_source_text
 
 name = "openalex"
@@ -24,10 +25,14 @@ _SELECT = (
 )
 _CITATION_QUERY_RE = re.compile(r"(cites|cited_by):W\d+")
 _CONTEXT_SELECT = "id,doi,is_retracted,cited_by_count,counts_by_year,locations,best_oa_location"
+# The key carries this deployment's OpenAlex budget.
+CREDENTIAL_SCOPED_QUOTA = True
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
-    # Published limits: 10 req/s without a key, 30 req/s with a free key.
+    # Checked 2026-11-09 (docs.openalex.org, rate limits): every caller is
+    # capped at 100 requests/second, with a daily budget that a free key
+    # raises. These defaults stay well under the cap.
     return RateLimit(requests_per_second=30.0 if has_api_key else 10.0)
 
 
@@ -59,7 +64,15 @@ async def fetch_work(*, doi: str | None, pmid: str | None, api_key: str | None) 
 async def _works(params: dict, api_key: str | None, select: str = _SELECT) -> list[dict]:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/works", params={**params, "select": select}, headers=headers)
+        r = await source_policy.get(
+            client,
+            f"{_BASE}/works",
+            source=name,
+            api_key=api_key,
+            label="openalex.works",
+            params={**params, "select": select},
+            headers=headers,
+        )
         r.raise_for_status()
         return r.json().get("results", [])
 
