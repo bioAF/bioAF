@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.platform.run_output_layout import directory_prefix
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -132,24 +133,15 @@ class GcsStorageProvider(StorageProvider):
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
 
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        items = (
-            await self._local_collect_outputs(working_dir, pipeline_run)
-            if self.is_local
-            else await self._gcs_collect_outputs(working_dir, pipeline_run)
-        )
-        return [
-            StoredObject(
-                filename=d["filename"],
-                storage_uri=d.get("gcs_uri", ""),
-                size_bytes=d.get("size_bytes"),
-                md5_hash=d.get("md5_hash"),
-                provider_details={
-                    k: v for k, v in d.items() if k not in {"filename", "gcs_uri", "size_bytes", "md5_hash"}
-                },
-            )
-            for d in items
-        ]
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """Every object under the run's output directory URI, with its canonical, readable URI.
+
+        Discovery only: nothing is copied. The directory is listed with a trailing separator, so
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        """
+        self._parse_uri(output_uri)
+        objects = await self.list_objects(directory_prefix(output_uri))
+        return [o for o in objects if o.filename]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         d = self._local_storage_metrics() if self.is_local else await self._gcs_storage_metrics()
@@ -663,29 +655,6 @@ class GcsStorageProvider(StorageProvider):
 
     # -- Local mode implementations --
 
-    async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
-        os.makedirs(results_dir, exist_ok=True)
-
-        collected = []
-        if os.path.isdir(working_dir):
-            for fname in os.listdir(working_dir):
-                src = os.path.join(working_dir, fname)
-                if os.path.isfile(src):
-                    dest = os.path.join(results_dir, fname)
-                    shutil.copy2(src, dest)
-                    collected.append(
-                        {
-                            "filename": fname,
-                            "local_path": dest,
-                            "gcs_uri": f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
-                            "size_bytes": os.path.getsize(dest),
-                        }
-                    )
-        return collected
-
     def _local_storage_metrics(self) -> dict:
         from app.config import settings
 
@@ -748,45 +717,6 @@ class GcsStorageProvider(StorageProvider):
         return storage.Client(credentials=credentials) if credentials else storage.Client()
 
     # -- GCS API implementations (production) --
-
-    async def _gcs_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        """List output objects in GCS and return file records."""
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-
-        # Parse bucket and prefix from working_dir URI
-        if working_dir.startswith("gs://"):
-            parts = working_dir[5:].split("/", 1)
-            bucket_name = parts[0]
-            prefix = parts[1] if len(parts) > 1 else ""
-        else:
-            bucket_name = self.results_bucket
-            prefix = f"experiments/{experiment_id}/pipeline-runs/{run_id}/"
-
-        client = self._get_gcs_client()
-        bucket = client.bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix=prefix)
-
-        collected = []
-        for blob in blobs:
-            # Extract filename from the full blob path
-            filename = blob.name.split("/")[-1]
-            if not filename:
-                continue
-
-            gcs_uri = f"gs://{bucket_name}/{blob.name}"
-            collected.append(
-                {
-                    "filename": filename,
-                    "gcs_uri": gcs_uri,
-                    "size_bytes": blob.size,
-                    "md5_hash": blob.md5_hash,
-                    "experiment_id": experiment_id,
-                    "pipeline_run_id": run_id,
-                }
-            )
-
-        return collected
 
     async def _read_storage_config(self) -> dict[str, str]:
         """Read storage_deployed + the per-store bucket-name keys.

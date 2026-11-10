@@ -244,15 +244,10 @@ def test_native_upload_client_unsupported(nfs):
 
 @pytest.mark.asyncio
 async def test_nfs_integration_collect(nfs, tmp_path):
-    working = str(tmp_path / "work")
-    # Simulate a pipeline writing an output into the working dir.
-    import os
+    out = "file://results/experiments/3/pipeline-runs/7"
+    await nfs.write_text(f"{out}/result.txt", "done")
 
-    os.makedirs(working)
-    with open(os.path.join(working, "result.txt"), "w") as f:
-        f.write("done")
-
-    outputs = await nfs.collect_outputs(working, {"id": 7, "experiment_id": 3})
+    outputs = await nfs.collect_outputs(out, {"id": 7, "experiment_id": 3})
     names = {o.filename for o in outputs}
     assert "result.txt" in names
     # Collected outputs are addressable storage URIs that read back.

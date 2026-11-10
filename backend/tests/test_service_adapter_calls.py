@@ -70,6 +70,9 @@ class RecordingStorage:
     def build_uri(self, bucket: str, path: str) -> str:
         return f"gs://{bucket}/{path}"
 
+    async def resolve_uri(self, store, key: str) -> str:
+        return f"gs://adapter-{store.value}/{key}"
+
     async def collect_outputs(self, outdir: str, metadata: dict):
         self.collected_from.append((outdir, metadata))
         return self.outputs
@@ -210,25 +213,24 @@ async def _complete(session, run, storage: RecordingStorage) -> PipelineRun:
 
 @pytest.mark.asyncio
 async def test_completion_collects_outputs_from_the_runs_outdir_through_storage(session, admin_user, experiment):
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, "results_bucket_name", "lab-results")
     run = await _run(
-        session,
-        admin_user,
-        experiment,
-        compute_job_ref="bioaf-pipeline-45",
-        k8s_job_name="bioaf-pipeline-45",
-        parameters_json={"outdir": "gs://lab-results/experiments/1/pipeline-runs/45"},
+        session, admin_user, experiment, compute_job_ref="bioaf-pipeline-45", k8s_job_name="bioaf-pipeline-45"
     )
+    # A stored outdir is accepted only when it is the run's own location (plan 17, D3).
+    own = f"gs://lab-results/experiments/{experiment.id}/pipeline-runs/{run.id}"
+    run.parameters_json = {"outdir": own}
     storage = RecordingStorage(
         outputs=[
-            StoredObject(filename="multiqc_report.html", storage_uri="gs://lab-results/x/multiqc_report.html"),
+            StoredObject(filename="multiqc_report.html", storage_uri=f"{own}/multiqc_report.html"),
         ]
     )
 
     completed = await _complete(session, run, storage)
 
-    assert storage.collected_from == [
-        ("gs://lab-results/experiments/1/pipeline-runs/45", {"id": run.id, "experiment_id": experiment.id})
-    ]
+    assert storage.collected_from == [(own, {"id": run.id, "experiment_id": experiment.id})]
     assert completed.status == "completed"
     assert (completed.output_files_json or {}).get("files") == ["multiqc_report.html"]
 
@@ -536,9 +538,11 @@ async def test_cancelling_an_unknown_run_is_not_found(session, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_completion_without_an_outdir_or_results_bucket_collects_from_local_results(
+async def test_completion_without_an_outdir_or_results_bucket_collects_from_the_adapters_results_store(
     session, admin_user, experiment
 ):
+    """No bucket configured: the storage adapter names its own results store (local/NFS modes).
+    The old fallback was a pod-local /data/results path that nothing could read."""
     run = await _run(
         session, admin_user, experiment, compute_job_ref="bioaf-pipeline-47", k8s_job_name="bioaf-pipeline-47"
     )
@@ -547,8 +551,25 @@ async def test_completion_without_an_outdir_or_results_bucket_collects_from_loca
     await _complete(session, run, storage)
 
     assert [outdir for outdir, _ in storage.collected_from] == [
-        f"/data/results/experiments/{experiment.id}/pipeline-runs/{run.id}"
+        f"gs://adapter-results/experiments/{experiment.id}/pipeline-runs/{run.id}"
     ]
+
+
+@pytest.mark.asyncio
+async def test_completion_with_a_foreign_stored_outdir_collects_nothing(session, admin_user, experiment):
+    run = await _run(
+        session,
+        admin_user,
+        experiment,
+        compute_job_ref="bioaf-pipeline-48",
+        k8s_job_name="bioaf-pipeline-48",
+        parameters_json={"outdir": "gs://someone-elses-bucket/"},
+    )
+    storage = RecordingStorage()
+
+    await _complete(session, run, storage)
+
+    assert storage.collected_from == []
 
 
 @pytest.mark.asyncio

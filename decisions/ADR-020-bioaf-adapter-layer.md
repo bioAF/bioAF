@@ -47,6 +47,8 @@ The storage provider interface defines operations for managing data files used b
 | `collect_outputs(working_dir, pipeline_run)` | Move outputs to permanent storage and register in metadata DB | List of file records |
 | `get_storage_metrics()` | Get storage usage and cost | Normalized metrics (used, cost, breakdown by tier) |
 
+**Amendment (2026-11-10): the staging/path operations are retired.** `resolve_input_path`, `resolve_output_path` and `stage_inputs` never gained an application caller: pipeline inputs reach containers through the samplesheet plus Fusion/gcsfuse, and custom pipelines stage with the adapter's `cli_copy_in` command. They were removed from `StorageProvider` and every adapter rather than repaired. `collect_outputs(output_uri, pipeline_run)` is now discovery: it lists the objects under a run's authorized output URI and returns their canonical URIs, copying nothing; registration in the metadata database is the caller's job.
+
 ### Notebook Provider
 
 The notebook provider interface defines operations for launching and managing interactive analysis sessions.

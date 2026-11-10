@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.platform.run_output_layout import directory_prefix
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -197,21 +198,15 @@ class S3StorageProvider(StorageProvider):
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
 
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        if self.is_local:
-            items = await self._local_collect_outputs(working_dir, pipeline_run)
-            return [
-                StoredObject(filename=d["filename"], storage_uri=d["storage_uri"], size_bytes=d.get("size_bytes"))
-                for d in items
-            ]
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if working_dir.startswith("s3://"):
-            prefix_uri = working_dir if working_dir.endswith("/") else working_dir + "/"
-        else:
-            prefix_uri = f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/"
-        objs = await self.list_objects(prefix_uri)
-        return [o for o in objs if o.filename]
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """Every object under the run's output directory URI, with its canonical, readable URI.
+
+        Discovery only: nothing is copied. The directory is listed with a trailing separator, so
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        """
+        self._parse_uri(output_uri)
+        objects = await self.list_objects(directory_prefix(output_uri))
+        return [o for o in objects if o.filename]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         d = self._local_storage_metrics() if self.is_local else await self._s3_storage_metrics()
@@ -617,29 +612,6 @@ class S3StorageProvider(StorageProvider):
     def _local_move(self, source_uri: str, dest_uri: str) -> None:
         self._local_copy(source_uri, dest_uri)
         os.remove(self._local_path(source_uri))
-
-    # -- Local-mode pipeline collection (parity with the GCS adapter) ---------
-
-    async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
-        os.makedirs(results_dir, exist_ok=True)
-        collected = []
-        if os.path.isdir(working_dir):
-            for fname in os.listdir(working_dir):
-                src = os.path.join(working_dir, fname)
-                if os.path.isfile(src):
-                    dest = os.path.join(results_dir, fname)
-                    shutil.copy2(src, dest)
-                    collected.append(
-                        {
-                            "filename": fname,
-                            "storage_uri": f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
-                            "size_bytes": os.path.getsize(dest),
-                        }
-                    )
-        return collected
 
     def _local_storage_metrics(self) -> dict:
         from app.config import settings

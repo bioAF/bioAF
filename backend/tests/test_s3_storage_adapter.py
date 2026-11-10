@@ -545,14 +545,14 @@ class TestS3SignedUrls:
 class TestCollectOutputs:
     @pytest.mark.asyncio
     async def test_local_collect_outputs_returns_stored_objects(self, local_adapter, tmp_path):
-        work = tmp_path / "work"
-        work.mkdir()
-        (work / "result.txt").write_text("out")
-        objs = await local_adapter.collect_outputs(str(work), {"id": "r1", "experiment_id": "e1"})
+        out = "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1"
+        await local_adapter.write_text(f"{out}/result.txt", "out")
+        objs = await local_adapter.collect_outputs(out, {"id": "r1", "experiment_id": "e1"})
         assert len(objs) == 1
         assert objs[0].filename == "result.txt"
-        assert objs[0].storage_uri == "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1/result.txt"
+        assert objs[0].storage_uri == f"{out}/result.txt"
         assert objs[0].size_bytes == 3
+        assert await local_adapter.read_text(objs[0].storage_uri) == "out"
 
     @pytest.mark.asyncio
     async def test_real_collect_outputs_lists_results_prefix(self, s3_adapter):
@@ -563,7 +563,12 @@ class TestCollectOutputs:
             ]
         }
         client.get_paginator.return_value.paginate.return_value = [page]
-        objs = await adapter.collect_outputs("/ignored", {"id": "r1", "experiment_id": "e1"})
+        objs = await adapter.collect_outputs(
+            "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1", {"id": "r1", "experiment_id": "e1"}
+        )
+        assert client.get_paginator.return_value.paginate.call_args.kwargs["Prefix"] == (
+            "experiments/e1/pipeline-runs/r1/"
+        )
         assert len(objs) == 1
         assert objs[0].filename == "out.txt"
         assert objs[0].storage_uri == "s3://bioaf-results-testorg/experiments/e1/pipeline-runs/r1/out.txt"

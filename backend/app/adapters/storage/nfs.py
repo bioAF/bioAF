@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
+from app.platform.run_output_layout import directory_prefix
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
@@ -131,24 +132,15 @@ class NfsStorageProvider(StorageProvider):
 
     # -- pipeline output collection ------------------------------------------
 
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        return await asyncio.to_thread(self._collect_outputs, working_dir, run_id, experiment_id)
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """Every object under the run's output directory URI, with its canonical, readable URI.
 
-    def _collect_outputs(self, working_dir: str, run_id, experiment_id) -> list[StoredObject]:
-        collected: list[StoredObject] = []
-        if not os.path.isdir(working_dir):
-            return collected
-        for fname in os.listdir(working_dir):
-            src = os.path.join(working_dir, fname)
-            if not os.path.isfile(src):
-                continue
-            key = f"experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}"
-            uri = f"file://{StorageStore.RESULTS.value}/{key}"
-            _copy_file(src, self._path(uri))
-            collected.append(StoredObject(filename=fname, storage_uri=uri, size_bytes=os.path.getsize(src)))
-        return collected
+        Discovery only: nothing is copied. The directory is listed with a trailing separator, so
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        """
+        self._parse_uri(output_uri)
+        objects = await self.list_objects(directory_prefix(output_uri))
+        return [o for o in objects if o.filename]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         return await asyncio.to_thread(self._storage_metrics)

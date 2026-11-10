@@ -190,8 +190,12 @@ class StorageProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        """Move outputs to permanent storage. Returns a list of StoredObject."""
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """List the objects under a run's output directory URI (discovery; nothing is copied).
+
+        ``output_uri`` is the run's authorized location (``RunOutputLocationService``), never a
+        filesystem path; each returned ``storage_uri`` reads back the object's bytes.
+        """
 
     @abstractmethod
     async def get_storage_metrics(self) -> StorageMetrics:

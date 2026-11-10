@@ -25,52 +25,31 @@ def temp_dir():
 
 
 class TestGcsCollectOutputs:
+    """Collection lists the run's output URI (plan 17, D2); it used to copy a local directory."""
+
     @pytest.mark.asyncio
-    async def test_collect_outputs_copies_files(self, adapter, temp_dir, monkeypatch):
-        monkeypatch.setenv("BIOAF_LOCAL_DATA_ROOT", temp_dir)
-        # Need to reimport to pick up env var change
+    async def test_collect_outputs_lists_the_run_directory(self, adapter, temp_dir, monkeypatch):
         from app.adapters.storage import gcs
 
-        original_root = gcs.LOCAL_DATA_ROOT
-        gcs.LOCAL_DATA_ROOT = temp_dir
+        monkeypatch.setattr(gcs, "LOCAL_DATA_ROOT", temp_dir)
+        out = "gs://bioaf-results-testorg/experiments/3/pipeline-runs/10"
+        await adapter.write_text(f"{out}/results.h5ad", "anndata content")
+        await adapter.write_text(f"{out}/umap.png", "plot data")
 
-        try:
-            # Create output files in working dir
-            working = os.path.join(temp_dir, "pipeline-output")
-            os.makedirs(working)
-            with open(os.path.join(working, "results.h5ad"), "w") as f:
-                f.write("anndata content")
-            with open(os.path.join(working, "umap.png"), "w") as f:
-                f.write("plot data")
-
-            collected = await adapter.collect_outputs(working, {"id": 10, "experiment_id": 3})
-            assert len(collected) == 2
-            filenames = [c.filename for c in collected]
-            assert "results.h5ad" in filenames
-            assert "umap.png" in filenames
-
-            for item in collected:
-                assert "local_path" in item.provider_details
-                assert item.storage_uri
-                assert item.size_bytes is not None
-                assert item.storage_uri.startswith("gs://bioaf-results-testorg/")
-        finally:
-            gcs.LOCAL_DATA_ROOT = original_root
+        collected = await adapter.collect_outputs(out, {"id": 10, "experiment_id": 3})
+        assert sorted(c.filename for c in collected) == ["results.h5ad", "umap.png"]
+        for item in collected:
+            assert item.storage_uri.startswith(out + "/")
+            assert item.size_bytes is not None
+            assert await adapter.read_text(item.storage_uri) in ("anndata content", "plot data")
 
     @pytest.mark.asyncio
     async def test_collect_outputs_empty_dir(self, adapter, temp_dir, monkeypatch):
         from app.adapters.storage import gcs
 
-        original_root = gcs.LOCAL_DATA_ROOT
-        gcs.LOCAL_DATA_ROOT = temp_dir
-
-        try:
-            working = os.path.join(temp_dir, "empty-output")
-            os.makedirs(working)
-            collected = await adapter.collect_outputs(working, {"id": 1, "experiment_id": 1})
-            assert collected == []
-        finally:
-            gcs.LOCAL_DATA_ROOT = original_root
+        monkeypatch.setattr(gcs, "LOCAL_DATA_ROOT", temp_dir)
+        collected = await adapter.collect_outputs("gs://bioaf-results-testorg/experiments/1/pipeline-runs/1", {})
+        assert collected == []
 
 
 class TestGcsStorageMetrics:

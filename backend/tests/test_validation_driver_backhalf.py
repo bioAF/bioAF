@@ -64,7 +64,7 @@ async def _run(
     *,
     name,
     status,
-    outdir="gs://bioaf-results/run",
+    outdir=None,
     run_id_out=None,
     failure_reason=None,
     error_message=None,
@@ -75,7 +75,8 @@ async def _run(
         pipeline_name=name,
         pipeline_version="1.0",
         status=status,
-        parameters_json={"outdir": outdir},
+        # A run records no outdir unless a test says so; its location derives from its id (plan 17, D3).
+        parameters_json={"outdir": outdir} if outdir else {},
         submitted_by_user_id=user.id,
         failure_reason=failure_reason,
         error_message=error_message,
@@ -172,6 +173,9 @@ async def test_acquiring_data_runs_d2_and_advances_to_setup_when_fetch_completes
     monkeypatch.setattr(FetchngsIngestService, "ingest_for_run", _fake_ingest)
     monkeypatch.setattr(FetchngsIngestService, "attach_fastq_files", _fake_attach)
 
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, "results_bucket_name", "bioaf-results")  # the run's location
     exp_id = await _experiment_id(session, admin_user)
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
     fetch = await _run(session, admin_user, exp_id, name="nf-core/fetchngs", status="completed")
