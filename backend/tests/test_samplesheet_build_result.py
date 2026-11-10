@@ -157,3 +157,65 @@ class TestRows:
             result.csv = "sample\nforged\n"  # type: ignore[misc]
         assert isinstance(result.rows, tuple)
         assert isinstance(result.rows[0].values, tuple)
+
+
+class TestTheResultIsOneSnapshot:
+    """Nothing a caller holds or is handed can change what the result says."""
+
+    def test_changing_the_callers_contract_afterwards_changes_nothing(self):
+        expected = SampleSheetService.build("nf-core/mag", SAMPLES, {}, contract=_contract("mag"))
+        contract = _contract("mag")
+        result = SampleSheetService.build("nf-core/mag", SAMPLES, {}, contract=contract)
+
+        contract.required.clear()
+        contract.enums.clear()
+
+        assert result.csv == expected.csv
+        assert result.issues == expected.issues
+        assert result.per_sample_inputs == expected.per_sample_inputs
+        assert result.refusal.details == expected.refusal.details
+        with pytest.raises(SamplesMissingRequiredFieldsError):
+            result.raise_if_blocked()
+
+    def test_mutating_what_it_hands_out_changes_nothing(self):
+        values = {"1": {"patient": "DONOR_9"}}
+        contract = _contract("sarek")
+        expected = SampleSheetService.build("nf-core/sarek", SAMPLES, {}, contract=contract, sample_values=values)
+        result = SampleSheetService.build("nf-core/sarek", SAMPLES, {}, contract=contract, sample_values=values)
+        assert expected.issues and expected.per_sample_inputs and expected.sample_field_updates()
+
+        result.issues.clear()
+        result.per_sample_inputs.clear()
+        result.refusal.details.clear()
+        result.preview()["rows"].clear()
+        result.identity_snapshot()["emitted"].clear()
+        result.sample_field_updates().clear()
+        for omission in result.omissions:
+            omission.clear()
+
+        assert result.issues == expected.issues
+        assert result.per_sample_inputs == expected.per_sample_inputs
+        assert result.preview() == expected.preview()
+        assert result.identity_snapshot() == expected.identity_snapshot()
+        assert result.sample_field_updates() == expected.sample_field_updates()
+        with pytest.raises(SamplesMissingRequiredFieldsError) as raised:
+            result.raise_if_blocked()
+        assert raised.value.details == expected.refusal.details
+
+    @pytest.mark.parametrize("name", ["demo", "mag", "sarek", "ampliseq"])
+    def test_the_rows_are_resolved_once_and_validated_from_them(self, name, monkeypatch):
+        from app.services import sample_sheet_service as module
+
+        calls = []
+        resolve = module._sheet_rows
+
+        def counted(*args, **kwargs):
+            calls.append(1)
+            return resolve(*args, **kwargs)
+
+        monkeypatch.setattr(module, "_sheet_rows", counted)
+        result = SampleSheetService.build(f"nf-core/{name}", SAMPLES, {}, contract=_contract(name))
+        result.issues, result.refusal, result.per_sample_inputs
+        result.identity_snapshot(), result.sample_field_updates(), result.preview()
+
+        assert len(calls) == 1

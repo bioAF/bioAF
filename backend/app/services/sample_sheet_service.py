@@ -5,11 +5,10 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field as dataclass_field
-from functools import cached_property, lru_cache
-from typing import Any
+from functools import lru_cache
 
 from app.services import sequencing_identity
-from app.services.samplesheet_inputs import SheetSampleInput, require_sheet_samples
+from app.services.samplesheet_inputs import require_sheet_samples
 from app.exceptions import (
     DomainError,
     PipelineNotSampleLaunchableError,
@@ -856,6 +855,24 @@ def _sheet_rows(
     return columns, rows, list(omissions.values())
 
 
+class _Sheet:
+    """A schema-driven sheet's rows, resolved at most once however many checks read them.
+
+    ``build`` hands in the rows it already resolved, so the checks judge the
+    rows that are submitted rather than a second resolution of the request.
+    """
+
+    def __init__(self, contract, samples: list, parameters: dict, sample_values=None, resolved=None) -> None:
+        self._inputs = (contract, samples, parameters, sample_values)
+        self._resolved = resolved
+
+    def rows(self) -> tuple[list[str], list[dict]]:
+        if self._resolved is None:
+            columns, rows, _omissions = _sheet_rows(*self._inputs)
+            self._resolved = (columns, rows)
+        return self._resolved
+
+
 def _parsed_rows(csv_text: str, samples: list) -> tuple[list[str], list[dict]]:
     """A sheet a tailored generator produced, read back into columns and rows.
 
@@ -1126,7 +1143,9 @@ def _collision_gaps(
     return gaps
 
 
-def _incomplete_row_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+def _incomplete_row_gaps(
+    contract, samples: list, parameters: dict, sample_values=None, sheet: "_Sheet | None" = None
+) -> dict[str, dict]:
     """Rows bioAF would emit with a required column left empty.
 
     Required-column checking is otherwise per SAMPLE, and the sheet is per ROW.
@@ -1159,7 +1178,7 @@ def _incomplete_row_gaps(contract, samples: list, parameters: dict, sample_value
     if not required:
         return {}
 
-    columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
+    columns, rows = (sheet or _Sheet(contract, samples, parameters, sample_values)).rows()
     index = {column: position for position, column in enumerate(columns)}
     checkable = sorted(required & set(index))
     if not checkable:
@@ -1283,7 +1302,9 @@ def _uniqueness_remedy(column: str, companions: tuple, repeated: list[dict]) -> 
     return None
 
 
-def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+def _uniqueness_gaps(
+    contract, samples: list, parameters: dict, sample_values=None, sheet: "_Sheet | None" = None
+) -> dict[str, dict]:
     """Rows the pipeline would not be able to tell apart.
 
     A schema can declare that a column, on its own or paired with others, may not
@@ -1335,7 +1356,7 @@ def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=No
     if not declared and not getattr(contract, "unique_rows", False):
         return {}
 
-    columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
+    columns, rows = (sheet or _Sheet(contract, samples, parameters, sample_values)).rows()
     if len(rows) < 2:
         return {}
 
@@ -1686,43 +1707,47 @@ class SheetBuildResult:
     The submitted CSV, the review table, the blocking issues, the entry grid,
     the identity snapshot and the sample-field updates are all read from here,
     so no consumer resolves the request again and gets a different answer.
+
+    Every answer is decided when the result is built, the blocking issues from
+    the very rows it holds, and each is handed out as a fresh copy. The result
+    keeps no reference to the caller's contract, parameters or values, so
+    nothing a caller holds, or is handed, can change what it says.
     """
 
     columns: tuple[str, ...]
     rows: tuple[SheetRow, ...]
     csv: str
     identity_column: str | None
-    omissions: tuple[dict, ...]
-    samples: tuple[SheetSampleInput, ...] = dataclass_field(repr=False)
-    contract: Any = dataclass_field(repr=False)
-    parameters: dict = dataclass_field(repr=False, compare=False)
-    sample_values: dict = dataclass_field(repr=False, compare=False)
-    # Whether the contract decides this sheet's blocking issues: true for a
-    # schema-driven sheet, false where a tailored generator owns it.
-    judged: bool = dataclass_field(repr=False)
+    _omissions: tuple[dict, ...] = dataclass_field(repr=False)
+    _issues: dict[str, dict] = dataclass_field(repr=False)
+    _refusal: DomainError | None = dataclass_field(repr=False, compare=False)
+    _grid: list[dict] = dataclass_field(repr=False)
+    _snapshot: dict = dataclass_field(repr=False)
+    _updates: dict[int, dict[str, str]] = dataclass_field(repr=False)
 
-    @cached_property
+    @property
+    def omissions(self) -> tuple[dict, ...]:
+        return copy.deepcopy(self._omissions)
+
+    @property
     def issues(self) -> dict[str, dict]:
         """Every column that blocks the sheet, as ``SampleSheetService.column_gaps`` reports them."""
-        if not self.judged:
-            return {}
-        return SampleSheetService.column_gaps(self.contract, list(self.samples), self.parameters, self.sample_values)
+        return copy.deepcopy(self._issues)
 
-    @cached_property
+    @property
     def refusal(self) -> DomainError | None:
         """The error the launch raises for this sheet, or None when it may run."""
-        if not self.judged:
-            return None
-        return _refusal(self.contract, lambda: self.issues)
+        return copy.deepcopy(self._refusal)
 
-    @cached_property
+    @property
     def per_sample_inputs(self) -> list[dict]:
         """The entry grid's questions, from the same issues as the refusal."""
-        return _grid_specs(self.contract, self.issues) if self.judged else []
+        return copy.deepcopy(self._grid)
 
     def raise_if_blocked(self) -> None:
-        if self.refusal is not None:
-            raise self.refusal
+        refusal = self.refusal
+        if refusal is not None:
+            raise refusal
 
     def preview(self) -> dict:
         """The established dict the preflight response and older callers read."""
@@ -1730,17 +1755,17 @@ class SheetBuildResult:
             "columns": list(self.columns),
             "rows": [row.as_dict() for row in self.rows],
             "csv": self.csv,
-            "omissions": [dict(o) for o in self.omissions],
+            "omissions": list(self.omissions),
             "identity_column": self.identity_column,
         }
 
     def identity_snapshot(self) -> dict:
         """The annotated copy and the emitted names, from these rows and these samples."""
-        return SampleSheetService.identity_snapshot(self.preview(), list(self.samples))
+        return copy.deepcopy(self._snapshot)
 
     def sample_field_updates(self) -> dict[int, dict[str, str]]:
         """Which stated values become facts on the sample. Decided here; applied by the caller."""
-        return SampleSheetService.sample_field_updates(self.contract, list(self.samples), self.sample_values)
+        return copy.deepcopy(self._updates)
 
 
 class SampleSheetService:
@@ -1821,7 +1846,9 @@ class SampleSheetService:
         return updates
 
     @staticmethod
-    def column_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    def column_gaps(
+        contract, samples: list, parameters: dict, sample_values=None, sheet: _Sheet | None = None
+    ) -> dict[str, dict]:
         """Every column that stops this run producing a valid samplesheet.
 
         The single computation behind both a refusal and a form. ``launch_run``
@@ -1832,8 +1859,12 @@ class SampleSheetService:
 
         Empty when nothing is outstanding. Empty too when the contract is empty,
         because no schema means "we do not know", not "nothing is required".
+
+        ``sheet`` carries rows already resolved for these inputs; without it the
+        rows are resolved here, once, for every check that reads them.
         """
         samples = require_sheet_samples(samples)
+        sheet = sheet or _Sheet(contract, samples, parameters, sample_values)
         # A DECLARED contract is launchable by construction: the scientist said
         # what the sheet is, and bioAF has no schema with which to contradict
         # them. ``is_sample_launchable`` answers a question about a PUBLISHED
@@ -1908,7 +1939,7 @@ class SampleSheetService:
         # Rows the pipeline could not tell apart, under a uniqueness rule the
         # schema declares. Added rather than substituted: the column is usually
         # absent from the sheet entirely, so nothing else reports it.
-        for column, gap in _uniqueness_gaps(contract, samples, parameters, sample_values).items():
+        for column, gap in _uniqueness_gaps(contract, samples, parameters, sample_values, sheet).items():
             missing.setdefault(column, gap)
 
         # A row about to be emitted with a required column empty. Last, and by
@@ -1919,7 +1950,7 @@ class SampleSheetService:
         # narrower problem is answered. The launch is blocked either way, and a
         # report that named samples under someone else's reason would be wrong
         # about all of them.
-        for column, gap in _incomplete_row_gaps(contract, samples, parameters, sample_values).items():
+        for column, gap in _incomplete_row_gaps(contract, samples, parameters, sample_values, sheet).items():
             missing.setdefault(column, gap)
 
         return missing
@@ -2024,57 +2055,69 @@ class SampleSheetService:
         samples = require_sheet_samples(samples)
         parameters = copy.deepcopy(parameters or {})
         sample_values = copy.deepcopy(sample_values or {})
-        context = {
-            "samples": tuple(samples),
-            "contract": contract,
-            "parameters": parameters,
-            "sample_values": sample_values,
-            "judged": contract is not None and not SampleSheetService.has_handwritten_generator(pipeline_key),
-        }
+        resolved: tuple[list[str], list[dict]] | None = None
+
         if "fetchngs" in pipeline_key:
             # An accession list has no header and no name column. Reading its
             # first field as a sample name would invent a mapping.
-            return SheetBuildResult(
-                columns=(),
-                rows=(),
-                csv=SampleSheetService.generate_fetchngs_ids(parameters),
-                identity_column=None,
-                omissions=(),
-                **context,
-            )
-
-        schema_driven = (
+            columns: list[str] = []
+            rows: list[dict] = []
+            csv_text = SampleSheetService.generate_fetchngs_ids(parameters)
+            identity_column = None
+            omissions: list[dict] = []
+        elif (
             not SampleSheetService.has_handwritten_generator(pipeline_key)
             and contract is not None
             and not contract.is_empty
-        )
-        if schema_driven:
+        ):
             columns, rows, omissions = _sheet_rows(contract, samples, parameters, sample_values)
-            return SheetBuildResult(
-                columns=tuple(columns),
-                rows=tuple(SheetRow(r["sample_id"], r["external_id"], tuple(r["values"])) for r in rows),
-                csv=_to_csv(columns, [r["values"] for r in rows]),
-                identity_column=_identity_column(contract, columns),
-                omissions=tuple(omissions),
-                **context,
+            resolved = (columns, rows)
+            csv_text = _to_csv(columns, [r["values"] for r in rows])
+            identity_column = _identity_column(contract, columns)
+        else:
+            csv_text = SampleSheetService.generate_sheet(
+                pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
             )
+            columns, rows = _parsed_rows(csv_text, samples)
+            # Nothing is claimed about a sheet bioAF did not build from a contract:
+            # a tailored generator decides its own columns and bioAF cannot say what
+            # it chose to leave out. Every tailored generator writes the name into a
+            # `sample` column, which is also the column `_parsed_rows` joined the
+            # rows back on.
+            identity_column = "sample" if "sample" in columns else None
+            omissions = []
 
-        csv_text = SampleSheetService.generate_sheet(
-            pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
-        )
-        columns, rows = _parsed_rows(csv_text, samples)
-        # Nothing is claimed about a sheet bioAF did not build from a contract:
-        # a tailored generator decides its own columns and bioAF cannot say what
-        # it chose to leave out. Every tailored generator writes the name into a
-        # `sample` column, which is also the column `_parsed_rows` joined the
-        # rows back on.
+        # Only a schema-driven sheet is judged by its contract: a tailored
+        # generator owns its own sheet. Judged against the rows just resolved.
+        issues: dict[str, dict] = {}
+        refusal: DomainError | None = None
+        if contract is not None and not SampleSheetService.has_handwritten_generator(pipeline_key):
+            sheet = _Sheet(contract, samples, parameters, sample_values, resolved)
+            issues = SampleSheetService.column_gaps(contract, samples, parameters, sample_values, sheet)
+            refusal = _refusal(contract, lambda: issues)
+        grid = _grid_specs(contract, issues)
+
+        sheet_rows = tuple(SheetRow(r["sample_id"], r["external_id"], tuple(r["values"])) for r in rows)
+        preview = {
+            "columns": list(columns),
+            "rows": [row.as_dict() for row in sheet_rows],
+            "csv": csv_text,
+            "omissions": copy.deepcopy(omissions),
+            "identity_column": identity_column,
+        }
+        # Copied in: a gap's allowed values and a grid's descriptions are read
+        # off the contract, which stays the caller's to change.
         return SheetBuildResult(
             columns=tuple(columns),
-            rows=tuple(SheetRow(r["sample_id"], r["external_id"], tuple(r["values"])) for r in rows),
+            rows=sheet_rows,
             csv=csv_text,
-            identity_column="sample" if "sample" in columns else None,
-            omissions=(),
-            **context,
+            identity_column=identity_column,
+            _omissions=tuple(copy.deepcopy(omissions)),
+            _issues=copy.deepcopy(issues),
+            _refusal=copy.deepcopy(refusal),
+            _grid=copy.deepcopy(grid),
+            _snapshot=SampleSheetService.identity_snapshot(preview, samples),
+            _updates=SampleSheetService.sample_field_updates(contract, samples, sample_values),
         )
 
     # The column holding a sample's identity in the run's own record. It is
