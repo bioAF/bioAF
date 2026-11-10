@@ -89,6 +89,14 @@ export default function PipelineLauncherPage() {
   // permission to launch something the server would not even describe. Only a
   // fresh successful preflight for the current request clears it.
   const [preflightRefused, setPreflightRefused] = useState(false);
+  // The chosen experiment's samples answered "not found". Classified on its own
+  // because that request and the preflight complete independently, and either
+  // may be the first to say the experiment is not there.
+  const [samplesMissing, setSamplesMissing] = useState(false);
+  // Bumped by "Check again" while the samples were not found, so they are asked
+  // for once more. Not bumped otherwise: reloading resets the selection.
+  const [samplesAttempt, setSamplesAttempt] = useState(0);
+  const refused = preflightRefused || samplesMissing;
   // Bumped by "Check again", so the same request can be asked once more.
   const [preflightAttempt, setPreflightAttempt] = useState(0);
   // Whether the scientist has agreed to leave the samples with no input files
@@ -103,9 +111,12 @@ export default function PipelineLauncherPage() {
   }, [router, pipelineKey]);
 
   useEffect(() => {
-    if (selectedExperimentId && pipeline) loadSamples(selectedExperimentId);
+    if (!selectedExperimentId || !pipeline) return;
+    let cancelled = false;
+    loadSamples(selectedExperimentId, () => cancelled);
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedExperimentId, pipeline]);
+  }, [selectedExperimentId, pipeline, samplesAttempt]);
 
   // A drop that was right for one selection is not a standing answer for the
   // next. Changing the samples (or the experiment) puts the question back, so a
@@ -187,9 +198,11 @@ export default function PipelineLauncherPage() {
     } finally { setLoading(false); }
   }
 
-  async function loadSamples(experimentId: number) {
+  async function loadSamples(experimentId: number, isCancelled: () => boolean) {
+    setSamplesMissing(false);
     try {
       const data = await api.get<SampleBrief[]>(`/api/experiments/${experimentId}/samples`);
+      if (isCancelled()) return;
       setSamples(data);
       setSelectedSampleIds(data.map((s) => s.id));
       // Auto-detect the 10x protocol from sample chemistry, but only offer it to
@@ -204,13 +217,22 @@ export default function PipelineLauncherPage() {
         setUserParams((prev) => ({ ...prev, protocol }));
       }
     } catch (e) {
+      if (isCancelled()) return;
+      // Not there for this user: the refusal banner says so. Only an
+      // unexpected failure is an outage worth logging and a toast.
+      if (e instanceof ApiError && e.status === 404) {
+        setSamples([]);
+        setSelectedSampleIds([]);
+        setSamplesMissing(true);
+        return;
+      }
       logError("loading samples", e);
       toast.error(loadFailureMessage("Samples"));
     }
   }
 
   async function handleLaunch(dropForThisAttempt = dropSamplesWithoutFiles) {
-    if (!selectedExperimentId || !pipeline || preflightRefused) return;
+    if (!selectedExperimentId || !pipeline || refused) return;
     setLaunching(true);
     try {
       const request: PipelineRunLaunchRequest = {
@@ -397,7 +419,7 @@ export default function PipelineLauncherPage() {
         ))}
       </div>
 
-      {preflightRefused && (
+      {refused && (
         <div role="alert" className="mb-6 p-3 border border-red-200 bg-red-50 rounded text-sm text-gray-800 max-w-2xl">
           <p>
             Something this launch refers to could not be found, so bioAF cannot check or launch it. Choose a
@@ -405,7 +427,10 @@ export default function PipelineLauncherPage() {
           </p>
           <button
             type="button"
-            onClick={() => setPreflightAttempt((n) => n + 1)}
+            onClick={() => {
+              setPreflightAttempt((n) => n + 1);
+              if (samplesMissing) setSamplesAttempt((n) => n + 1);
+            }}
             className="mt-2 border px-3 py-1 rounded-md text-sm hover:bg-gray-100"
           >
             Check again
@@ -614,7 +639,7 @@ export default function PipelineLauncherPage() {
             <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
             <button
               onClick={() => handleLaunch()}
-              disabled={launching || preflightRefused || preflight?.can_launch === false}
+              disabled={launching || refused || preflight?.can_launch === false}
               className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50"
             >
               {launching ? "Launching..." : "Launch Pipeline"}

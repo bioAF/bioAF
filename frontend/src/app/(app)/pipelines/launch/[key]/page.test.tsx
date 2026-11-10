@@ -587,3 +587,102 @@ describe("a preflight refused as not found", () => {
     expect(launchButton()).toBeEnabled();
   });
 });
+
+describe("an experiment whose samples are not found", () => {
+  const OTHER = { id: 8, name: "Sequencing", status: "registered", sample_count: 1 };
+  const outage = /could not be loaded/i;
+  const { ApiError } = jest.requireMock("@/lib/api");
+  const { toastMock } = jest.requireMock("@/components/shared/Toast");
+
+  let samplesFor: (url: string) => Promise<unknown>;
+  let reply: () => Promise<unknown>;
+
+  beforeEach(() => {
+    samplesFor = () => Promise.reject(new ApiError(404, "Experiment 7 not found", "not_found"));
+    // Never answers, so whatever the page shows came from the samples request.
+    reply = () => new Promise(() => {});
+    mockGet.mockImplementation((url: string) => {
+      if (url.startsWith("/api/pipelines/")) {
+        return Promise.resolve({ pipeline_key: "nf-core/mcmicro", name: "mcmicro", default_params: null, parameter_schema: null });
+      }
+      if (url.startsWith("/api/experiments/")) return samplesFor(url);
+      if (url.startsWith("/api/experiments")) return Promise.resolve({ experiments: [EXPERIMENT, OTHER], total: 2 });
+      return Promise.resolve({});
+    });
+    mockPost.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/preflight") return reply();
+      return Promise.resolve({});
+    });
+  });
+
+  async function choose(id: string) {
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: id } });
+  }
+
+  const outageToasts = () =>
+    (toastMock.error as jest.Mock).mock.calls.filter(([message]) => outage.test(String(message)));
+
+  it("explains with the not-found banner, not the outage toast, before the preflight answers", async () => {
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not be found/i));
+    expect(outageToasts()).toHaveLength(0);
+  });
+
+  it("says the same when the preflight is refused too", async () => {
+    reply = () => Promise.reject(new ApiError(404, "Experiment 7 not found", "not_found"));
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not be found/i));
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(0));
+    expect(outageToasts()).toHaveLength(0);
+  });
+
+  it.each([
+    ["a server error", () => new ApiError(500, "Internal Server Error", "internal_error")],
+    ["a network failure", () => new Error("Failed to fetch")],
+  ])("still reports %s as an outage, without the banner", async (_label, failure) => {
+    samplesFor = () => Promise.reject(failure());
+    render(<LaunchPage />);
+    await choose("7");
+
+    await waitFor(() => expect(outageToasts()).toHaveLength(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("is not blocked by a late not-found for an experiment no longer chosen", async () => {
+    let refuseOlder!: () => void;
+    samplesFor = (url) =>
+      url.startsWith("/api/experiments/7/")
+        ? new Promise((_res, rej) => {
+            refuseOlder = () => rej(new ApiError(404, "Experiment 7 not found", "not_found"));
+          })
+        : Promise.resolve([SAMPLE]);
+    render(<LaunchPage />);
+    await choose("7");
+    await waitFor(() => expect(refuseOlder).toBeDefined());
+    await choose("8");
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/experiments/8/samples"));
+
+    refuseOlder();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("asks for the samples again on Check again, and recovers when they load", async () => {
+    render(<LaunchPage />);
+    await choose("7");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    samplesFor = () => Promise.resolve([SAMPLE]);
+    reply = () => Promise.resolve(preflight());
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(outageToasts()).toHaveLength(0);
+  });
+});
