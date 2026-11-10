@@ -92,6 +92,15 @@ MODEL_LIST_READ = RequestPolicy(
     retry_exceptions=(httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError),
     budget_seconds=30.0,
 )
+# Public metadata reads (nf-core registry, pipeline schemas, GEO/ENA text):
+# three attempts within a short budget; callers keep their own fallbacks.
+METADATA_READ = RequestPolicy(
+    name="metadata_read",
+    max_attempts=3,
+    retry_statuses=_TRANSIENT_STATUSES,
+    retry_exceptions=(httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
+    budget_seconds=90.0,
+)
 # Paid inference and other non-repeatable requests: exactly one attempt.
 SINGLE_ATTEMPT = RequestPolicy(name="single_attempt")
 
@@ -130,6 +139,15 @@ def _backoff(policy: RequestPolicy, failed_attempts: int, rng: Callable[[], floa
     return ceiling * (0.5 + 0.5 * rng())
 
 
+async def read(
+    client: httpx.AsyncClient, url: str, *, policy: RequestPolicy, label: str, **kwargs: Any
+) -> httpx.Response:
+    """A GET under ``policy`` on the application's request clock."""
+    from app.services import request_pacing
+
+    return await send(client, "GET", url, policy=policy, label=label, clock=request_pacing.registry().clock, **kwargs)
+
+
 async def send(
     client: httpx.AsyncClient,
     method: str,
@@ -165,7 +183,9 @@ async def send(
             await before_dispatch(deadline)
         reason: str
         try:
-            response = await client.request(method, url, **request_kwargs)
+            # The method helper (client.get, client.post) rather than client.request,
+            # so callers' existing client doubles keep working.
+            response = await getattr(client, method.lower())(url, **request_kwargs)
         except policy.retry_exceptions as exc:
             if attempt >= max_attempts:
                 _log_final(label, policy, attempt, type(exc).__name__, started, clock)
