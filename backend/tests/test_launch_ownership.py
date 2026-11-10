@@ -551,3 +551,28 @@ class TestSavedDesignResolution:
         )
 
         assert scope != "project"
+
+
+class TestTheReviewedSheetIsTheRecordedSheet:
+    @pytest.mark.asyncio
+    async def test_preview_submission_snapshot_and_roster_agree(self, client, session, admin_token, world):
+        """One build feeds all four: what the scientist reviewed, what Nextflow got, the run's
+        annotated record, and the QC roster read back from that record."""
+        from app.services.qc.roster import roster_for_run
+
+        body = {"pipeline_key": "nf-core/demo", "experiment_id": world["exp"].id, "sample_ids": [world["ours"].id]}
+        preview = (await client.post(PREFLIGHT, json=body, headers=_auth(admin_token))).json()["samplesheet"]
+        captured: list = []
+        launched = await _launch(client, admin_token, body, captured)
+        run = await session.get(PipelineRun, launched.json()["id"])
+        await session.refresh(run)
+
+        assert preview["csv"] == captured[0].sample_sheet == run.samplesheet_csv
+        assert "bioaf_sample_uid" not in run.samplesheet_csv
+        snapshot_header = run.samplesheet_snapshot_csv.splitlines()[0].split(",")
+        assert snapshot_header == preview["columns"] + ["bioaf_sample_uid"]
+        assert run.samplesheet_emitted_json == [
+            {"name": "OURS_A", "uuid": str(world["ours"].uuid), "sample_id": world["ours"].id}
+        ]
+        roster = await roster_for_run(session, run)
+        assert roster is not None and list(roster.names) == ["OURS_A"]

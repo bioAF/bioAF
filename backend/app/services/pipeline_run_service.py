@@ -540,26 +540,24 @@ class PipelineRunService:
         # Built for every pipeline, including the ones a schema does not
         # describe: design section 6 puts the review step on EVERY launch, and a
         # tailored generator's sheet needs reviewing as much as a derived one.
-        preview = SampleSheetService.preview(
+        # One build answers the sheet, the grid and the block, so none of them
+        # can describe a different resolution of this request.
+        sheet = SampleSheetService.build(
             pipeline.pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
         )
+        preview = sheet.preview()
 
-        inputs: list[dict] = []
-        if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
-            # Still derived when a sample has no files, because the grid asks
-            # about the columns a scientist fills and those questions stand
-            # whatever else blocks the run.
-            inputs = SampleSheetService.per_sample_inputs(contract, samples, parameters, sample_values)
-            if verdict["can_launch"]:
-                try:
-                    SampleSheetService.check_contract_satisfiable(contract, samples, parameters, sample_values)
-                except DomainError as exc:
-                    verdict = {
-                        "can_launch": False,
-                        "code": exc.code,
-                        "reason": str(exc),
-                        "details": exc.details,
-                    }
+        # Still derived when a sample has no files, because the grid asks about
+        # the columns a scientist fills and those questions stand whatever else
+        # blocks the run. Empty for a tailored generator, which no schema judges.
+        inputs = sheet.per_sample_inputs
+        if verdict["can_launch"] and sheet.refusal is not None:
+            verdict = {
+                "can_launch": False,
+                "code": sheet.refusal.code,
+                "reason": str(sheet.refusal),
+                "details": sheet.refusal.details,
+            }
 
         carried = SamplesheetMappingService.flatten(mapping)
         prefill = {
@@ -1003,23 +1001,22 @@ class PipelineRunService:
         # set, or the run submits a sheet other than the one confirmed.
         sample_values = data.sample_values or {}
 
-        if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
-            SampleSheetService.check_contract_satisfiable(contract, samples, merged_params, sample_values)
-
-        # 6c. Generate the sample sheet, through the same call the review step
-        # used. One computation produces the CSV, the rows (each naming the
-        # sample it belongs to) and the column holding the name, so the sheet
-        # that runs and the record of what it emitted cannot disagree about
-        # either. Pure, so it is computed before anything is created: a
-        # reproduction checks it against the sheet the original recorded.
-        sheet = SampleSheetService.preview(
+        # 6c. Build the sample sheet through the same call the review step used.
+        # One computation produces the CSV, the rows (each naming the sample it
+        # belongs to), the column holding the name, the blocking issues, the
+        # identity snapshot and the sample-field updates, so the sheet that runs
+        # and the record of what it emitted cannot disagree about any of them.
+        # Pure, so it is computed before anything is created: a reproduction
+        # checks it against the sheet the original recorded.
+        sheet = SampleSheetService.build(
             pipeline.pipeline_key,
             samples,
             merged_params,
             contract=contract,
             sample_values=sample_values,
         )
-        sample_sheet_csv = sheet["csv"]
+        sheet.raise_if_blocked()
+        sample_sheet_csv = sheet.csv
         if recorded is not None and not PipelineRunService._sheet_matches(
             recorded.samplesheet, sample_sheet_csv, allow_dropped_rows=data.drop_samples_without_files
         ):
@@ -1085,7 +1082,7 @@ class PipelineRunService:
         # nobody. The annotated CSV is the same fact for a person to read; the
         # UID column is in that copy alone and never in the sheet submitted,
         # because an undeclared column fails nf-schema for the whole sheet.
-        identity = SampleSheetService.identity_snapshot(sheet, samples)
+        identity = sheet.identity_snapshot()
         run.samplesheet_snapshot_csv = identity["csv"]
         run.samplesheet_emitted_json = identity["emitted"]
         run.samplesheet_mapping_json = SamplesheetMappingService.snapshot(sample_values, None, user_id)
@@ -1097,7 +1094,7 @@ class PipelineRunService:
         # value is never overwritten.
         # Decided on the snapshots, applied to the loaded records by sample id:
         # the sheet computation never changes a sample.
-        field_updates = SampleSheetService.sample_field_updates(contract, samples, sample_values)
+        field_updates = sheet.sample_field_updates()
         for sample_id, updates in field_updates.items():
             for field, value in updates.items():
                 setattr(orm_samples[sample_id], field, value)
