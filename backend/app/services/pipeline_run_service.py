@@ -19,6 +19,7 @@ from app.exceptions import (
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_input_file import PipelineRunInputFile
+from app.models.project import Project
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.audit_service import log_action
@@ -468,24 +469,24 @@ class PipelineRunService:
         if not pipeline:
             raise NotFoundError(f"Pipeline {data.pipeline_key} not found")
 
-        sample_query = (
-            select(Sample)
-            .where(Sample.experiment_id == data.experiment_id)
-            .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
-        )
-        if data.sample_ids:
-            sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
-        samples = PipelineRunService._in_requested_order(
-            list((await session.execute(sample_query)).scalars().all()), data.sample_ids
-        )
+        # Authorized before anything about the experiment is read, and refused
+        # as not found: a preview of another organization's experiment is its
+        # samples, their file URIs and its saved design.
+        await PipelineRunService._authorize_references(session, org_id, data, NotFoundError)
+        try:
+            samples = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
+        except ValidationError as exc:
+            # A selection that is not wholly ours is a verdict, not a preview of
+            # the part that is: that would look like the whole selection.
+            return {"can_launch": False, "code": exc.code, "reason": str(exc), "details": {}, "samplesheet": {}}
         for sample in samples:
             # Resolved with the SAME opt-in the launch will use. Hardcoding this
             # off previewed a sheet with empty read columns and then submitted
             # populated ones, so the scientist approved a sheet that was not the
             # one that ran, which is the single property the review step exists
             # to provide.
-            sample._input_files = PipelineRunService._input_eligible_files(
-                sample.files, getattr(data, "include_derived_inputs", False)
+            sample._input_files = PipelineRunService._launchable_files(
+                sample.files, data.include_derived_inputs, org_id
             )
 
         contract, mapping, scope = await PipelineRunService._effective_contract(
@@ -497,7 +498,6 @@ class PipelineRunService:
         # then ignored, because its generator builds a sheet a schema cannot
         # describe.
         declarable = await PipelineRunService._is_declarable(session, pipeline)
-        parameters = data.parameters or {}
         sample_values = getattr(data, "sample_values", None) or {}
 
         verdict: dict = {"can_launch": True, "code": None, "reason": None, "details": {}}
@@ -519,6 +519,18 @@ class PipelineRunService:
                 "reason": str(exc),
                 "details": exc.details,
             }
+
+        # The parameters the launch would resolve, from the same samples it would
+        # keep, so a catalog default reaches the preview as it reaches the run.
+        # A refusal here is the launch's too, and is reported the same way.
+        try:
+            parameters = PipelineRunService.resolve_parameters(
+                pipeline, data.parameters, data.reference_genome, samples
+            )
+        except DomainError as exc:
+            parameters = data.parameters
+            if verdict["can_launch"]:
+                verdict = {"can_launch": False, "code": exc.code, "reason": str(exc), "details": exc.details}
 
         # Built for every pipeline, including the ones a schema does not
         # describe: design section 6 puts the review step on EVERY launch, and a
@@ -733,6 +745,69 @@ class PipelineRunService:
         return sorted(samples, key=lambda s: (position.get(s.id, len(position)), s.id))
 
     @staticmethod
+    async def _authorize_references(session, org_id: int, data, refuse: type[DomainError]) -> Experiment:
+        """The request's experiment, having checked every reference it names belongs to ``org_id``.
+
+        One rule for the preflight and the launch, which differ only in how they
+        refuse: ``refuse`` is ``NotFoundError`` for the preflight and the launch's
+        long-standing ``ValidationError``. A missing id and another
+        organization's id read the same, so the answer reveals nothing. ``None``
+        is absent; any id supplied, zero included, is looked up.
+        """
+        experiment = await session.scalar(
+            select(Experiment).where(Experiment.id == data.experiment_id, Experiment.organization_id == org_id)
+        )
+        if experiment is None:
+            raise refuse(f"Experiment {data.experiment_id} not found")
+        if data.project_id is not None:
+            project = await session.scalar(
+                select(Project.id).where(Project.id == data.project_id, Project.organization_id == org_id)
+            )
+            if project is None:
+                raise refuse(f"Project {data.project_id} not found")
+        if data.resume_from_run_id is not None:
+            parent = await session.scalar(
+                select(PipelineRun.id).where(
+                    PipelineRun.id == data.resume_from_run_id, PipelineRun.organization_id == org_id
+                )
+            )
+            if parent is None:
+                raise refuse(f"Pipeline run {data.resume_from_run_id} not found")
+        return experiment
+
+    @staticmethod
+    async def _selected_samples(session, experiment_id: int, sample_ids: list[int] | None) -> list:
+        """The selected samples of an authorized experiment, in the order they were asked for.
+
+        No selection means every sample in the experiment. A selection naming
+        any sample outside it, or one that does not exist, is refused whole:
+        running the part that resolved would run something nobody selected.
+        """
+        query = (
+            select(Sample)
+            .where(Sample.experiment_id == experiment_id)
+            .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
+        )
+        if sample_ids:
+            query = query.where(Sample.id.in_(sample_ids))
+        samples = list((await session.execute(query)).scalars().all())
+        if sample_ids and len(samples) != len(sample_ids):
+            raise ValidationError("Some sample IDs do not belong to this experiment")
+        return PipelineRunService._in_requested_order(samples, sample_ids)
+
+    @staticmethod
+    def _launchable_files(files: list, include_derived: bool, org_id: int) -> list:
+        """A sample's linked files that may feed a run of ``org_id``.
+
+        Only this organization's files, whatever the sample is linked to: a
+        stale link to another organization's file must not put its URI in a
+        sheet or its id in provenance. Ownership is decided first, so
+        ``include_derived`` can never widen it.
+        """
+        owned = [f for f in (files or []) if getattr(f, "organization_id", None) == org_id]
+        return PipelineRunService._input_eligible_files(owned, include_derived)
+
+    @staticmethod
     def _input_eligible_files(files: list, include_derived: bool) -> list:
         """Filter a sample's files to those eligible as pipeline inputs.
 
@@ -850,38 +925,13 @@ class PipelineRunService:
         if not pipeline:
             raise ValidationError(f"Pipeline '{data.pipeline_key}' not found or not enabled")
 
-        # 2. Load experiment
-        exp_result = await session.execute(
-            select(Experiment).where(
-                Experiment.id == data.experiment_id,
-                Experiment.organization_id == org_id,
-            )
-        )
-        experiment = exp_result.scalar_one_or_none()
-        if not experiment:
-            raise ValidationError(f"Experiment {data.experiment_id} not found")
+        # 2. The experiment, and any project or resume parent the request names,
+        # must be this organization's. Refused here, before the run row, the
+        # quota check or the submission. Launch has always answered 400.
+        await PipelineRunService._authorize_references(session, org_id, data, ValidationError)
 
         # 3. Resolve sample_ids
-        if data.sample_ids:
-            sample_result = await session.execute(
-                select(Sample)
-                .where(
-                    Sample.id.in_(data.sample_ids),
-                    Sample.experiment_id == data.experiment_id,
-                )
-                .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
-            )
-            samples = list(sample_result.scalars().all())
-            if len(samples) != len(data.sample_ids):
-                raise ValidationError("Some sample IDs do not belong to this experiment")
-        else:
-            sample_result = await session.execute(
-                select(Sample)
-                .where(Sample.experiment_id == data.experiment_id)
-                .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
-            )
-            samples = list(sample_result.scalars().all())
-        samples = PipelineRunService._in_requested_order(samples, data.sample_ids)
+        samples = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
 
         # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
         # outputs are excluded by default so they are never fed back in as inputs
@@ -889,7 +939,7 @@ class PipelineRunService:
         # Stored on a transient attribute the sample-sheet builder reads; it is
         # not a mapped column, so it never touches the ORM/DB.
         for s in samples:
-            s._input_files = PipelineRunService._input_eligible_files(s.files, data.include_derived_inputs)
+            s._input_files = PipelineRunService._launchable_files(s.files, data.include_derived_inputs, org_id)
 
         # 3b. The samplesheet contract, which decides both whether this pipeline
         # reads FASTQ at all and whether bioAF can fill every required column.
@@ -980,7 +1030,7 @@ class PipelineRunService:
             status="pending",
             work_dir="/data/working/nextflow/run-{id}",
         )
-        if data.resume_from_run_id:
+        if data.resume_from_run_id is not None:
             run.resume_from_run_id = data.resume_from_run_id
         session.add(run)
         await session.flush()
