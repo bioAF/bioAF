@@ -206,3 +206,12 @@ async def test_repeated_lifespans_deliver_each_event_once(startup, monkeypatch):
     assert len(delivered) == 1
     assert len(unrelated) == 1
     assert other in event_bus._subscribers[PIPELINE_COMPLETED]
+
+
+async def test_source_pacing_state_does_not_survive_into_the_next_lifespan(startup):
+    from app.services import request_pacing
+
+    async with main_module.lifespan(FastAPI()):
+        request_pacing.registry().pacer(("semanticscholar", "service")).cool_down(600)
+    async with main_module.lifespan(FastAPI()):
+        assert request_pacing.registry().pacer(("semanticscholar", "service")).cooldown_remaining() == 0

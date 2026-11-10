@@ -7,6 +7,17 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.http_contract import (
+    allowlisted_code,
+    incomplete,
+    json_object,
+    object_list,
+    optional_text,
+    parse_error,
+    raise_for_status,
+    send,
+    transport_error,
+)
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.anthropic")
@@ -21,9 +32,22 @@ _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 _API_VERSION = "2023-06-01"
 
 
-def _transport_detail(exc: httpx.HTTPError) -> str:
-    text = str(exc).strip()
-    return text or repr(exc)
+_PROVIDER = "anthropic"
+_LABEL = "Anthropic"
+
+# Anthropic error types worth logging (error.type). Anything else is dropped.
+_KNOWN_CODES = frozenset(
+    {
+        "invalid_request_error",
+        "authentication_error",
+        "permission_error",
+        "not_found_error",
+        "request_too_large",
+        "rate_limit_error",
+        "api_error",
+        "overloaded_error",
+    }
+)
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -34,33 +58,39 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
-def _raise_for_status(resp: httpx.Response) -> None:
-    if resp.status_code in (401, 403):
-        raise ProviderError(resp.text, error_class="auth")
-    if resp.status_code == 429:
-        raise ProviderError(resp.text, error_class="rate_limit")
-    if resp.status_code >= 500:
-        raise ProviderError(resp.text, error_class="server")
-    if resp.status_code >= 400:
-        raise ProviderError(resp.text, error_class="other")
+def _raise_for_status(resp: httpx.Response, operation: str) -> None:
+    raise_for_status(
+        resp, provider=_PROVIDER, operation=operation, upstream_code=allowlisted_code(resp, ("type",), _KNOWN_CODES)
+    )
+
+
+def _require_key(api_key: str | None) -> str:
+    if not api_key:
+        raise ProviderError("Anthropic requires an API key", error_class="auth", provider=_PROVIDER)
+    return api_key
 
 
 async def list_models(api_key: str | None) -> list[str]:
-    if not api_key:
-        raise ProviderError("Anthropic requires an API key", error_class="auth")
+    key = _require_key(api_key)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(f"{_BASE_URL}/models", headers=_headers(api_key))
+            resp = await send(
+                client,
+                "GET",
+                provider=_PROVIDER,
+                operation="list_models",
+                url=f"{_BASE_URL}/models",
+                headers=_headers(key),
+            )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("anthropic list_models transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-    _raise_for_status(resp)
-    try:
-        data = resp.json()
-        return [m["id"] for m in data.get("data", [])]
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderError(f"Anthropic /models response not parseable: {exc}", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="list_models") from exc
+    _raise_for_status(resp, "list_models")
+    data = json_object(resp, provider=_PROVIDER, label=_LABEL, what="/models")
+    items = object_list(data.get("data"), provider=_PROVIDER, label=_LABEL, what="/models data")
+    ids = [item.get("id") for item in items]
+    if not all(isinstance(model_id, str) and model_id for model_id in ids):
+        raise parse_error("Anthropic /models entry has no model id", provider=_PROVIDER)
+    return ids
 
 
 async def submit(
@@ -70,8 +100,7 @@ async def submit(
     api_key: str | None,
     attachments: list[dict] | None = None,
 ) -> str:
-    if not api_key:
-        raise ProviderError("Anthropic requires an API key", error_class="auth")
+    key = _require_key(api_key)
     body = {
         "model": model,
         "max_tokens": 4096,
@@ -86,25 +115,54 @@ async def submit(
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/messages",
-                headers=_headers(api_key),
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit",
+                url=f"{_BASE_URL}/messages",
+                headers=_headers(key),
                 json=body,
             )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("anthropic submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit") from exc
     logger.info("anthropic submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
-    if resp.status_code >= 400:
-        logger.warning("anthropic submit non-2xx body: %s", resp.text[:2000])
-    _raise_for_status(resp)
-    try:
-        data = resp.json()
-        parts = data.get("content", [])
-        return "".join(p.get("text", "") for p in parts if p.get("type") == "text")
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderError(f"Anthropic message response not parseable: {exc}", error_class="parse") from exc
+    _raise_for_status(resp, "submit")
+    text, _ = _parse_message(json_object(resp, provider=_PROVIDER, label=_LABEL, what="message"))
+    if text is None:
+        raise parse_error("Anthropic message has no text", provider=_PROVIDER)
+    return text
+
+
+def _parse_message(data: dict) -> tuple[str | None, list[ToolCall]]:
+    """Text and tool calls from a Messages API response. A max_tokens stop is
+    truncated output, never an answer; a refusal with no text has nothing to show."""
+    stop_reason = optional_text(data.get("stop_reason"), provider=_PROVIDER, label=_LABEL, what="stop_reason")
+    if stop_reason == "max_tokens":
+        raise incomplete("Anthropic response was truncated", provider=_PROVIDER, reason="max_tokens")
+    parts = object_list(data.get("content"), provider=_PROVIDER, label=_LABEL, what="message content")
+    texts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for part in parts:
+        kind = part.get("type")
+        if kind == "text":
+            value = part.get("text")
+            if not isinstance(value, str):
+                raise parse_error("Anthropic text block is not text", provider=_PROVIDER)
+            texts.append(value)
+        elif kind == "tool_use":
+            name, call_id, args = part.get("name"), part.get("id"), part.get("input")
+            if not (isinstance(name, str) and name and isinstance(call_id, str) and call_id):
+                raise parse_error("Anthropic tool call is missing its name or id", provider=_PROVIDER)
+            if args is None:
+                args = {}
+            if not isinstance(args, dict):
+                raise parse_error("Anthropic tool call input is not an object", provider=_PROVIDER)
+            tool_calls.append(ToolCall(tool=name, args=args, id=call_id))
+    text = "".join(texts) or None
+    if text is None and stop_reason == "refusal":
+        raise incomplete("Anthropic declined to respond", provider=_PROVIDER, reason="refusal")
+    return text, tool_calls
 
 
 def _tools_to_anthropic(tools: list[dict]) -> list[dict]:
@@ -175,21 +233,16 @@ def _messages_to_anthropic(messages: list[dict]) -> list[dict]:
 
 
 def _parse_anthropic_tool_use(data: dict) -> ToolUseResult:
-    parts = data.get("content", [])
-    text = "".join(p.get("text", "") for p in parts if p.get("type") == "text") or None
-    tool_calls = [
-        ToolCall(tool=p["name"], args=p.get("input", {}) or {}, id=p.get("id"))
-        for p in parts
-        if p.get("type") == "tool_use"
-    ]
+    text, tool_calls = _parse_message(data)
+    if text is None and not tool_calls:
+        raise parse_error("Anthropic response has no text or tool calls", provider=_PROVIDER)
     return ToolUseResult(text=text, tool_calls=tool_calls)
 
 
 async def submit_with_tools(
     *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
-    if not api_key:
-        raise ProviderError("Anthropic requires an API key", error_class="auth")
+    key = _require_key(api_key)
     body: dict = {
         "model": model,
         "max_tokens": 4096,
@@ -200,13 +253,16 @@ async def submit_with_tools(
         body["system"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(f"{_BASE_URL}/messages", headers=_headers(api_key), json=body)
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit_with_tools",
+                url=f"{_BASE_URL}/messages",
+                headers=_headers(key),
+                json=body,
+            )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("anthropic submit_with_tools transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-    _raise_for_status(resp)
-    try:
-        return _parse_anthropic_tool_use(resp.json())
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderError(f"Anthropic tool-use response not parseable: {exc}", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit_with_tools") from exc
+    _raise_for_status(resp, "submit_with_tools")
+    return _parse_anthropic_tool_use(json_object(resp, provider=_PROVIDER, label=_LABEL, what="tool-use"))

@@ -22,13 +22,14 @@ gunzips ``.gz``. Best-effort by design: any failure yields an empty manifest + a
 
 from __future__ import annotations
 
-import gzip
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import httpx
+
+from app.services import http_policy
 
 logger = logging.getLogger("bioaf.accession_manifest")
 
@@ -194,13 +195,8 @@ def dominant_library_strategy(samples: list[dict]) -> str | None:
 
 
 async def _http_fetch_text(url: str) -> str:
-    """Default fetcher: GET the URL and return text, transparently gunzipping ``.gz`` payloads."""
-    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        if url.lower().endswith(".gz"):
-            return gzip.decompress(r.content).decode("utf-8", errors="replace")
-        return r.text
+    """Default fetcher: the shared text GET (redirects followed, ``.gz`` payloads gunzipped)."""
+    return await http_policy.fetch_text(url, label="geo_ena.manifest", timeout=_TIMEOUT)
 
 
 def _classify(accession: str) -> str:

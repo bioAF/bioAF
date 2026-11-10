@@ -13,6 +13,7 @@ from datetime import date, timedelta
 
 import httpx
 
+from app.services.literature import source_policy
 from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.biorxiv")
@@ -24,6 +25,8 @@ _TIMEOUT = 30.0
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
+    # bioRxiv publishes no rate limit (checked 2026-11-09); this is a
+    # conservative choice, not a documented quota. No key is used.
     return RateLimit(requests_per_second=5.0)
 
 
@@ -36,7 +39,7 @@ async def search(query: str, max_results: int, api_key: str | None) -> list[Pape
     url = f"{_BASE}/details/biorxiv/{interval}/0"
     # Errors propagate so callers classify an outage as a failed attempt.
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(url)
+        r = await source_policy.get(client, url, source=name, api_key=api_key, label="biorxiv.search")
         r.raise_for_status()
         payload = r.json()
     records: list[PaperRecord] = []
@@ -59,11 +62,11 @@ async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
     url = f"{_BASE}/details/biorxiv/{doi}"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
-            r = await client.get(url)
+            r = await source_policy.get(client, url, source=name, api_key=api_key, label="biorxiv.doi")
             r.raise_for_status()
             payload = r.json()
-        except (httpx.HTTPError, ValueError) as e:
-            logger.warning("bioRxiv DOI fetch failed: %s", e)
+        except (httpx.HTTPError, ValueError, TimeoutError) as e:
+            logger.warning("bioRxiv DOI fetch failed: %s", type(e).__name__)
             return None
     entries = payload.get("collection", [])
     if not entries:

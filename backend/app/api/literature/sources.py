@@ -28,7 +28,7 @@ async def list_sources_endpoint(
     items = [
         SourceConfigPayload(
             source=row.source,
-            enabled=row.enabled,
+            enabled=sources_config_service.is_enabled(row),
             has_api_key=bool(row.api_key),
             rate_limit_override=row.rate_limit_override,
             last_success_at=row.last_success_at,
@@ -48,6 +48,9 @@ async def update_source_endpoint(
 ):
     if source not in EXTERNAL_SOURCES:
         raise HTTPException(404, "unknown source")
+    changes = {}
+    if "rate_limit_override" in body.model_fields_set:
+        changes["rate_limit_override"] = body.rate_limit_override
     try:
         row = await sources_config_service.update(
             session,
@@ -56,14 +59,14 @@ async def update_source_endpoint(
             user_id=int(current_user["sub"]),
             enabled=body.enabled,
             api_key=body.api_key,
-            rate_limit_override=body.rate_limit_override,
+            **changes,
         )
     except sources_config_service.UnknownSource:
         raise HTTPException(404, "unknown source")
     await session.commit()
     return SourceConfigPayload(
         source=row.source,
-        enabled=row.enabled,
+        enabled=sources_config_service.is_enabled(row),
         has_api_key=bool(row.api_key),
         rate_limit_override=row.rate_limit_override,
         last_success_at=row.last_success_at,
@@ -79,6 +82,8 @@ async def test_source_endpoint(
 ):
     if source not in EXTERNAL_SOURCES:
         raise HTTPException(404, "unknown source")
-    row = await sources_config_service.get_or_create(session, int(current_user["org_id"]), source)
-    result = await sources_config_service.test_connection(source, row.api_key)
+    resolved = await sources_config_service.resolve(session, int(current_user["org_id"]), [source])
+    # The snapshot is taken; end the read transaction before any network wait.
+    await session.commit()
+    result = await sources_config_service.test_connection(resolved[source])
     return SourceTestResponse(**result)

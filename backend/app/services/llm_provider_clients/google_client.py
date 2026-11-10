@@ -8,6 +8,17 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.http_contract import (
+    allowlisted_code,
+    incomplete,
+    json_object,
+    object_list,
+    optional_text,
+    parse_error,
+    raise_for_status,
+    send,
+    transport_error,
+)
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.google")
@@ -21,45 +32,73 @@ _BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
-def _transport_detail(exc: httpx.HTTPError) -> str:
-    text = str(exc).strip()
-    return text or repr(exc)
+_PROVIDER = "google"
+_LABEL = "Google"
+
+# Google RPC status names worth logging (error.status). Anything else is dropped.
+_KNOWN_CODES = frozenset(
+    {
+        "INVALID_ARGUMENT",
+        "FAILED_PRECONDITION",
+        "OUT_OF_RANGE",
+        "UNAUTHENTICATED",
+        "PERMISSION_DENIED",
+        "NOT_FOUND",
+        "RESOURCE_EXHAUSTED",
+        "CANCELLED",
+        "INTERNAL",
+        "UNAVAILABLE",
+        "DEADLINE_EXCEEDED",
+    }
+)
+# finishReason values that end a candidate before a usable answer. Each is an
+# allowlisted identifier carried as upstream_code.
+_TRUNCATED = frozenset({"MAX_TOKENS"})
+_FILTERED = frozenset(
+    {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "LANGUAGE", "IMAGE_SAFETY", "OTHER"}
+)
+_BLOCK_REASONS = frozenset({"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY", "OTHER"})
 
 
-def _raise_for_status(resp: httpx.Response) -> None:
-    if resp.status_code in (401, 403):
-        raise ProviderError(resp.text, error_class="auth")
-    if resp.status_code == 429:
-        raise ProviderError(resp.text, error_class="rate_limit")
-    if resp.status_code >= 500:
-        raise ProviderError(resp.text, error_class="server")
-    if resp.status_code >= 400:
-        raise ProviderError(resp.text, error_class="other")
+def _raise_for_status(resp: httpx.Response, operation: str) -> None:
+    raise_for_status(
+        resp, provider=_PROVIDER, operation=operation, upstream_code=allowlisted_code(resp, ("status",), _KNOWN_CODES)
+    )
+
+
+def _require_key(api_key: str | None) -> str:
+    if not api_key:
+        raise ProviderError("Google requires an API key", error_class="auth", provider=_PROVIDER)
+    return api_key
 
 
 async def list_models(api_key: str | None) -> list[str]:
-    if not api_key:
-        raise ProviderError("Google requires an API key", error_class="auth")
+    key = _require_key(api_key)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(f"{_BASE_URL}/models", params={"key": api_key})
+            resp = await send(
+                client,
+                "GET",
+                provider=_PROVIDER,
+                operation="list_models",
+                url=f"{_BASE_URL}/models",
+                params={"key": key},
+            )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("google list_models transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-    _raise_for_status(resp)
-    try:
-        data = resp.json()
-        models = []
-        for m in data.get("models", []):
-            name = m.get("name", "")
-            if name.startswith("models/"):
-                name = name[len("models/") :]
-            if name:
-                models.append(name)
-        return models
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderError(f"Google /models response not parseable: {exc}", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="list_models") from exc
+    _raise_for_status(resp, "list_models")
+    data = json_object(resp, provider=_PROVIDER, label=_LABEL, what="/models")
+    items = object_list(data.get("models"), provider=_PROVIDER, label=_LABEL, what="/models list")
+    models = []
+    for item in items:
+        name = item.get("name")
+        if not isinstance(name, str):
+            raise parse_error("Google /models entry has no model name", provider=_PROVIDER)
+        if name.startswith("models/"):
+            name = name[len("models/") :]
+        if name:
+            models.append(name)
+    return models
 
 
 async def submit(
@@ -69,8 +108,7 @@ async def submit(
     api_key: str | None,
     attachments: list[dict] | None = None,
 ) -> str:
-    if not api_key:
-        raise ProviderError("Google requires an API key", error_class="auth")
+    key = _require_key(api_key)
     body = {
         "contents": [{"role": "user", "parts": [{"text": f"{prompt}\n\n{payload}"}]}],
     }
@@ -82,26 +120,70 @@ async def submit(
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/models/{model}:generateContent",
-                params={"key": api_key},
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit",
+                url=f"{_BASE_URL}/models/{model}:generateContent",
+                params={"key": key},
                 headers={"Content-Type": "application/json"},
                 json=body,
             )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("google submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit") from exc
     logger.info("google submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
-    if resp.status_code >= 400:
-        logger.warning("google submit non-2xx body: %s", resp.text[:2000])
-    _raise_for_status(resp)
-    try:
-        data = resp.json()
-        parts = data["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts)
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ProviderError(f"Google generateContent response not parseable: {exc}", error_class="parse") from exc
+    _raise_for_status(resp, "submit")
+    text, _ = _parse_candidate(json_object(resp, provider=_PROVIDER, label=_LABEL, what="generateContent"))
+    if text is None:
+        raise parse_error("Google generateContent response has no text", provider=_PROVIDER)
+    return text
+
+
+def _parse_candidate(data: dict) -> tuple[str | None, list[ToolCall]]:
+    """Text and function calls from the first candidate. A blocked prompt, a
+    truncated candidate, or a filtered candidate is never an answer."""
+    feedback = data.get("promptFeedback")
+    block = feedback.get("blockReason") if isinstance(feedback, dict) else None
+    block = optional_text(block or None, provider=_PROVIDER, label=_LABEL, what="blockReason")
+    candidates = data.get("candidates")
+    if block and not candidates:
+        reason = block if block in _BLOCK_REASONS else None
+        raise incomplete("Google blocked the prompt", provider=_PROVIDER, reason=reason)
+    candidates = object_list(candidates, provider=_PROVIDER, label=_LABEL, what="candidates")
+    if not candidates:
+        raise parse_error("Google response has no candidates", provider=_PROVIDER)
+    candidate = candidates[0]
+    finish = optional_text(candidate.get("finishReason"), provider=_PROVIDER, label=_LABEL, what="finishReason")
+    if finish in _TRUNCATED:
+        raise incomplete("Google response was truncated", provider=_PROVIDER, reason=finish)
+    if finish in _FILTERED:
+        raise incomplete("Google response was filtered", provider=_PROVIDER, reason=finish)
+    content = candidate.get("content")
+    if not isinstance(content, dict):
+        raise parse_error("Google candidate has no content", provider=_PROVIDER)
+    parts = object_list(content.get("parts"), provider=_PROVIDER, label=_LABEL, what="candidate parts")
+    texts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for part in parts:
+        if "text" in part:
+            value = part["text"]
+            if not isinstance(value, str):
+                raise parse_error("Google text part is not text", provider=_PROVIDER)
+            texts.append(value)
+        if "functionCall" in part:
+            call = part["functionCall"]
+            if not isinstance(call, dict):
+                raise parse_error("Google function call is not an object", provider=_PROVIDER)
+            name, args = call.get("name"), call.get("args")
+            if not (isinstance(name, str) and name):
+                raise parse_error("Google function call is missing its name", provider=_PROVIDER)
+            if args is None:
+                args = {}
+            if not isinstance(args, dict):
+                raise parse_error("Google function call args are not an object", provider=_PROVIDER)
+            tool_calls.append(ToolCall(tool=name, args=args))
+    return "".join(texts) or None, tool_calls
 
 
 def _tools_to_google(tools: list[dict]) -> list[dict]:
@@ -176,21 +258,16 @@ def _messages_to_google(messages: list[dict]) -> list[dict]:
 
 
 def _parse_google_tool_use(data: dict) -> ToolUseResult:
-    parts = data["candidates"][0]["content"]["parts"]
-    text = "".join(p.get("text", "") for p in parts if "text" in p) or None
-    tool_calls = [
-        ToolCall(tool=p["functionCall"]["name"], args=p["functionCall"].get("args", {}) or {})
-        for p in parts
-        if "functionCall" in p
-    ]
+    text, tool_calls = _parse_candidate(data)
+    if text is None and not tool_calls:
+        raise parse_error("Google response has no text or function calls", provider=_PROVIDER)
     return ToolUseResult(text=text, tool_calls=tool_calls)
 
 
 async def submit_with_tools(
     *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
-    if not api_key:
-        raise ProviderError("Google requires an API key", error_class="auth")
+    key = _require_key(api_key)
     body: dict = {
         "contents": _messages_to_google(messages),
         "tools": _tools_to_google(tools),
@@ -199,18 +276,17 @@ async def submit_with_tools(
         body["systemInstruction"] = {"parts": [{"text": system}]}
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/models/{model}:generateContent",
-                params={"key": api_key},
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit_with_tools",
+                url=f"{_BASE_URL}/models/{model}:generateContent",
+                params={"key": key},
                 headers={"Content-Type": "application/json"},
                 json=body,
             )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("google submit_with_tools transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-    _raise_for_status(resp)
-    try:
-        return _parse_google_tool_use(resp.json())
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ProviderError(f"Google tool-use response not parseable: {exc}", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit_with_tools") from exc
+    _raise_for_status(resp, "submit_with_tools")
+    return _parse_google_tool_use(json_object(resp, provider=_PROVIDER, label=_LABEL, what="tool-use"))

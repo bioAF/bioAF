@@ -19,6 +19,17 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.http_contract import (
+    allowlisted_code,
+    incomplete,
+    json_object,
+    object_list,
+    optional_text,
+    parse_error,
+    raise_for_status,
+    send,
+    transport_error,
+)
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.openai")
@@ -32,39 +43,32 @@ _BASE_URL = "https://api.openai.com/v1"
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
-def _transport_detail(exc: httpx.HTTPError) -> str:
-    text = str(exc).strip()
-    return text or repr(exc)
+_PROVIDER = "openai"
+_LABEL = "OpenAI"
 
 
 async def list_models(api_key: str | None) -> list[str]:
     if not api_key:
-        raise ProviderError("OpenAI requires an API key", error_class="auth")
+        raise ProviderError("OpenAI requires an API key", error_class="auth", provider=_PROVIDER)
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(
-                f"{_BASE_URL}/models",
+            resp = await send(
+                client,
+                "GET",
+                provider=_PROVIDER,
+                operation="list_models",
+                url=f"{_BASE_URL}/models",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("openai list_models transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
-
-    if resp.status_code in (401, 403):
-        raise ProviderError(resp.text, error_class="auth")
-    if resp.status_code == 429:
-        raise ProviderError(resp.text, error_class="rate_limit")
-    if resp.status_code >= 500:
-        raise ProviderError(resp.text, error_class="server")
-    if resp.status_code >= 400:
-        raise ProviderError(resp.text, error_class="other")
-
-    try:
-        data = resp.json()
-        return [m["id"] for m in data.get("data", [])]
-    except (ValueError, KeyError, TypeError) as exc:
-        raise ProviderError(f"OpenAI /models response not parseable: {exc}", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="list_models") from exc
+    raise_for_status(resp, provider=_PROVIDER, operation="list_models", upstream_code=_upstream_code(resp))
+    data = json_object(resp, provider=_PROVIDER, label=_LABEL, what="/models")
+    items = object_list(data.get("data"), provider=_PROVIDER, label=_LABEL, what="/models data")
+    ids = [item.get("id") for item in items]
+    if not all(isinstance(model_id, str) and model_id for model_id in ids):
+        raise parse_error("OpenAI /models entry has no model id", provider=_PROVIDER)
+    return ids
 
 
 async def submit(
@@ -75,7 +79,7 @@ async def submit(
     attachments: list[dict] | None = None,
 ) -> str:
     if not api_key:
-        raise ProviderError("OpenAI requires an API key", error_class="auth")
+        raise ProviderError("OpenAI requires an API key", error_class="auth", provider=_PROVIDER)
     body = {
         "model": model,
         "messages": [
@@ -91,8 +95,12 @@ async def submit(
     )
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/chat/completions",
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit",
+                url=f"{_BASE_URL}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -100,28 +108,35 @@ async def submit(
                 json=body,
             )
     except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("openai submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit") from exc
 
     logger.info("openai submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
-    if resp.status_code >= 400:
-        logger.warning("openai submit non-2xx body: %s", resp.text[:2000])
+    raise_for_status(resp, provider=_PROVIDER, operation="submit", upstream_code=_upstream_code(resp))
+    return _parse_chat_completion(json_object(resp, provider=_PROVIDER, label=_LABEL, what="completion"))
 
-    if resp.status_code in (401, 403):
-        raise ProviderError(resp.text, error_class="auth")
-    if resp.status_code == 429:
-        raise ProviderError(resp.text, error_class="rate_limit")
-    if resp.status_code >= 500:
-        raise ProviderError(resp.text, error_class="server")
-    if resp.status_code >= 400:
-        raise ProviderError(resp.text, error_class="other")
 
-    try:
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ProviderError(f"OpenAI completion response not parseable: {exc}", error_class="parse") from exc
+# finish_reason values that end a completion before a usable answer.
+_INCOMPLETE_FINISH = {"length": "OpenAI completion was truncated", "content_filter": "OpenAI completion was filtered"}
+
+
+def _parse_chat_completion(data: dict) -> str:
+    choices = object_list(data.get("choices"), provider=_PROVIDER, label=_LABEL, what="completion choices")
+    if not choices:
+        raise parse_error("OpenAI completion has no choices", provider=_PROVIDER)
+    choice = choices[0]
+    finish = optional_text(choice.get("finish_reason"), provider=_PROVIDER, label=_LABEL, what="finish_reason")
+    if finish in _INCOMPLETE_FINISH:
+        raise incomplete(_INCOMPLETE_FINISH[finish], provider=_PROVIDER, reason=finish)
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise parse_error("OpenAI completion choice has no message", provider=_PROVIDER)
+    content = message.get("content")
+    if isinstance(content, str) and content:
+        return content
+    refusal = message.get("refusal")
+    if content is None and isinstance(refusal, str) and refusal:
+        return refusal
+    raise parse_error("OpenAI completion has no text", provider=_PROVIDER)
 
 
 # Provider error codes/types worth logging. Only these exact values are carried: a value merely
@@ -147,41 +162,11 @@ _KNOWN_CODES = frozenset(
         "insufficient_quota_error",
     }
 )
-_TIMEOUT_STATUSES = (408, 504)
 
 
 def _upstream_code(resp: httpx.Response) -> str | None:
     """The provider's error code (or type), only when it is a recognized value."""
-    try:
-        error = resp.json().get("error") or {}
-    except (ValueError, AttributeError):
-        return None
-    if not isinstance(error, dict):
-        return None
-    for key in ("code", "type"):
-        value = error.get(key)
-        if isinstance(value, str) and value in _KNOWN_CODES:
-            return value
-    return None
-
-
-def _tool_http_error(resp: httpx.Response) -> ProviderError:
-    status = resp.status_code
-    if status in (401, 403):
-        error_class = "auth"
-    elif status == 429:
-        error_class = "rate_limit"
-    elif status >= 500:
-        error_class = "server"
-    else:
-        error_class = "other"
-    return ProviderError(
-        f"OpenAI responses request failed with HTTP {status}",
-        error_class=error_class,
-        upstream_status=status,
-        upstream_code=_upstream_code(resp),
-        timeout=status in _TIMEOUT_STATUSES,
-    )
+    return allowlisted_code(resp, ("code", "type"), _KNOWN_CODES)
 
 
 def _tools_to_responses(tools: list[dict]) -> list[dict]:
@@ -259,40 +244,42 @@ def _messages_to_responses(messages: list[dict]) -> list[dict]:
 
 
 def _parse_responses_tool_use(data: dict, model: str) -> ToolUseResult:
-    status = data.get("status")
+    status = optional_text(data.get("status"), provider=_PROVIDER, label=_LABEL, what="response status")
     if status == "incomplete":
-        raise ProviderError("OpenAI response incomplete", error_class="incomplete")
+        raise ProviderError("OpenAI response incomplete", error_class="incomplete", provider=_PROVIDER)
     if status == "failed":
-        raise ProviderError("OpenAI response failed", error_class="server")
+        raise ProviderError("OpenAI response failed", error_class="server", provider=_PROVIDER)
     if status not in (None, "completed"):
-        raise ProviderError("OpenAI response not completed", error_class="incomplete")
+        raise ProviderError("OpenAI response not completed", error_class="incomplete", provider=_PROVIDER)
 
-    output = data["output"]
-    if not isinstance(output, list):
-        raise TypeError("output is not a list")
+    output = object_list(data.get("output"), provider=_PROVIDER, label=_LABEL, what="response output")
     texts: list[str] = []
     tool_calls: list[ToolCall] = []
     for item in output:
         kind = item.get("type")
         if kind == "message":
-            for part in item.get("content") or []:
-                if part.get("type") == "output_text" and part.get("text"):
+            parts = object_list(
+                item.get("content") or [], provider=_PROVIDER, label=_LABEL, what="response message content"
+            )
+            for part in parts:
+                if part.get("type") == "output_text" and isinstance(part.get("text"), str) and part["text"]:
                     texts.append(part["text"])
-                elif part.get("type") == "refusal" and part.get("refusal"):
+                elif part.get("type") == "refusal" and isinstance(part.get("refusal"), str) and part["refusal"]:
                     texts.append(part["refusal"])
         elif kind == "function_call":
             try:
                 args = json.loads(item.get("arguments") or "{}")
             except (ValueError, TypeError) as exc:
-                raise ProviderError("OpenAI function call arguments are not valid JSON", error_class="parse") from exc
+                raise parse_error("OpenAI function call arguments are not valid JSON", provider=_PROVIDER) from exc
             if not isinstance(args, dict):
-                raise ProviderError("OpenAI function call arguments are not an object", error_class="parse")
-            if not item.get("name") or not item.get("call_id"):
-                raise ProviderError("OpenAI function call is missing its name or call id", error_class="parse")
-            tool_calls.append(ToolCall(tool=item["name"], args=args, id=item["call_id"]))
+                raise parse_error("OpenAI function call arguments are not an object", provider=_PROVIDER)
+            name, call_id = item.get("name"), item.get("call_id")
+            if not (isinstance(name, str) and name and isinstance(call_id, str) and call_id):
+                raise parse_error("OpenAI function call is missing its name or call id", provider=_PROVIDER)
+            tool_calls.append(ToolCall(tool=name, args=args, id=call_id))
     text = "\n\n".join(texts) or None
     if text is None and not tool_calls:
-        raise ProviderError("OpenAI response has no text or function calls", error_class="parse")
+        raise parse_error("OpenAI response has no text or function calls", provider=_PROVIDER)
     return ToolUseResult(
         text=text,
         tool_calls=tool_calls,
@@ -304,7 +291,7 @@ async def submit_with_tools(
     *, messages: list[dict], tools: list[dict], model: str, api_key: str | None, system: str | None = None
 ) -> ToolUseResult:
     if not api_key:
-        raise ProviderError("OpenAI requires an API key", error_class="auth")
+        raise ProviderError("OpenAI requires an API key", error_class="auth", provider=_PROVIDER)
     # bioAF owns the conversation history (store=false) and replays it each request. No reasoning
     # settings are sent: the model's own default applies.
     body: dict = {
@@ -317,24 +304,22 @@ async def submit_with_tools(
         body["instructions"] = system
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/responses",
+            resp = await send(
+                client,
+                "POST",
+                provider=_PROVIDER,
+                operation="submit_with_tools",
+                url=f"{_BASE_URL}/responses",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=body,
             )
-    except httpx.TimeoutException as exc:
-        logger.warning("openai submit_with_tools transport failure: exception_type=%s timeout=true", type(exc).__name__)
-        raise ProviderError("OpenAI request timed out", error_class="transport", timeout=True) from exc
     except httpx.HTTPError as exc:
-        logger.warning(
-            "openai submit_with_tools transport failure: exception_type=%s timeout=false", type(exc).__name__
-        )
-        raise ProviderError(f"OpenAI transport failure: {type(exc).__name__}", error_class="transport") from exc
-    if resp.status_code >= 400:
-        raise _tool_http_error(resp)
-    try:
-        return _parse_responses_tool_use(resp.json(), model)
-    except ProviderError:
-        raise
-    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
-        raise ProviderError("OpenAI tool-use response not parseable", error_class="parse") from exc
+        raise transport_error(exc, provider=_PROVIDER, label=_LABEL, operation="submit_with_tools") from exc
+    raise_for_status(
+        resp,
+        provider=_PROVIDER,
+        operation="submit_with_tools",
+        upstream_code=_upstream_code(resp),
+        message=f"OpenAI responses request failed with HTTP {resp.status_code}",
+    )
+    return _parse_responses_tool_use(json_object(resp, provider=_PROVIDER, label=_LABEL, what="tool-use"), model)

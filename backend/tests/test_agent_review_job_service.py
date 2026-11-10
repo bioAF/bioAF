@@ -675,7 +675,9 @@ async def test_execute_hosted_emits_lifecycle_logs(db_engine, admin_user, caplog
 
 @pytest.mark.asyncio
 async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_user, caplog):
-    """A ProviderError during submit must surface in the logs with the error_class."""
+    """A ProviderError during submit surfaces in the logs with its safe structured fields, never
+    its message (which can carry a provider response body). Changed with owner approval
+    2026-11-09: the raw-detail assertion became an exclusion."""
     import logging
 
     caplog.set_level(logging.WARNING, logger="bioaf.agent_review_job")
@@ -684,7 +686,9 @@ async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_u
         return None
 
     async def submit(*, prompt, payload, model, api_key):
-        raise ProviderError("dns lookup failed for api.anthropic.com", error_class="transport")
+        raise ProviderError(
+            "SYNTH-PROVIDER-BODY dns lookup failed", error_class="transport", upstream_status=None, timeout=True
+        )
 
     async with _factory(db_engine)() as session:
         await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
@@ -704,8 +708,10 @@ async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_u
     await job_service.execute_hosted(factory, job_id=job_id, gcs_writer=writer, submit_override=submit)
 
     messages = [r.getMessage() for r in caplog.records if r.name == "bioaf.agent_review_job"]
-    assert any("provider_error" in m and "transport" in m for m in messages), messages
-    assert any("dns lookup failed" in m for m in messages), messages
+    assert any("provider_error" in m and "error_class=transport" in m and "timeout=true" in m for m in messages), (
+        messages
+    )
+    assert not any("SYNTH-PROVIDER-BODY" in m for m in messages), messages
 
 
 @pytest.mark.asyncio

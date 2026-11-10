@@ -69,6 +69,8 @@ RESET_OBJECT_STATE: tuple[tuple[str, str, str], ...] = (("app.services.event_bus
 NOT_RESET: dict[tuple[str, str], str] = {
     ("app.database", "engine"): "replaced by the database fixture's session-factory redirect",
     ("app.database", "async_session_factory"): "redirected per test by redirect_session_factories",
+    ("app.services.request_pacing", "_registry"): "reset per test by the autouse request_clock fixture",
+    ("app.services.request_pacing", "_registry_loop"): "reset per test by the autouse request_clock fixture",
     ("app.adapters.registry", "_compute_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_storage_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_notebook_adapter"): "reset by the _init_adapter_registry fixture",
