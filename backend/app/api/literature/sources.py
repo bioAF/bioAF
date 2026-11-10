@@ -28,7 +28,7 @@ async def list_sources_endpoint(
     items = [
         SourceConfigPayload(
             source=row.source,
-            enabled=row.enabled,
+            enabled=sources_config_service.is_enabled(row),
             has_api_key=bool(row.api_key),
             rate_limit_override=row.rate_limit_override,
             last_success_at=row.last_success_at,
@@ -66,7 +66,7 @@ async def update_source_endpoint(
     await session.commit()
     return SourceConfigPayload(
         source=row.source,
-        enabled=row.enabled,
+        enabled=sources_config_service.is_enabled(row),
         has_api_key=bool(row.api_key),
         rate_limit_override=row.rate_limit_override,
         last_success_at=row.last_success_at,

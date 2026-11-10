@@ -663,7 +663,11 @@ async def _run_count(h) -> int:
 
 
 @pytest.mark.asyncio
-async def test_manual_creation_without_enabled_sources_is_rejected(h, client, admin_token, monkeypatch):
+async def test_manual_creation_with_every_optional_source_off_still_runs_on_openalex(
+    h, client, admin_token, monkeypatch
+):
+    # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
+    # organization without a source. Changed with owner approval (plan 15).
     await _set_sources_enabled(h, False)
     scheduled: list[int] = []
 
@@ -678,26 +682,28 @@ async def test_manual_creation_without_enabled_sources_is_rejected(h, client, ad
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    assert resp.status_code == 409
-    assert resp.json()["detail"] == "no_literature_sources_enabled"
-    assert await _run_count(h) == 0
-    assert scheduled == []
-    assert h.llm.payloads == []
+    assert resp.status_code in (200, 201), resp.text
+    assert await _run_count(h) == 1
+    assert len(scheduled) == 1
 
 
 @pytest.mark.asyncio
-async def test_create_run_service_rejects_without_enabled_sources(h):
+async def test_create_run_service_with_every_optional_source_off_searches_openalex_only(h):
+    # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
+    # organization without a source. Changed with owner approval (plan 15).
     await _set_sources_enabled(h, False)
+    h.script_llm("q1", scores((0, 0.9)))
 
-    with pytest.raises(lit_review_run_service.NoLiteratureSourcesEnabled):
-        await h.create_run()
+    run = await h.run()
 
-    await h.session.rollback()
-    assert await _run_count(h) == 0
+    assert run.status == "complete"
+    assert h.calls == [("openalex", "q1")]
 
 
 @pytest.mark.asyncio
-async def test_sources_disabled_after_creation_fail_before_llm_spend(h):
+async def test_sources_disabled_after_creation_leave_the_run_on_openalex(h):
+    # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
+    # organization without a source. Changed with owner approval (plan 15).
     run_id = await h.create_run()
     await _set_sources_enabled(h, False)
     h.script_llm("q1", scores((0, 0.9)))
@@ -705,12 +711,10 @@ async def test_sources_disabled_after_creation_fail_before_llm_spend(h):
     await h.execute(run_id)
     run = await h.load(run_id)
 
-    assert run.status == "failed"
-    assert run.error_message == "no_literature_sources_enabled"
+    assert run.status == "complete"
     assert run.completed_at is not None
-    assert h.llm.payloads == []
-    assert h.calls == []
-    assert h.terminal_events() == [(LITERATURE_REVIEW_RUN_FAILED, {"run_id": run_id})]
+    assert h.calls == [("openalex", "q1")]
+    assert [event for event, _ in h.terminal_events()] == [LITERATURE_REVIEW_RUN_COMPLETED]
 
 
 async def _make_due(h) -> None:
@@ -729,18 +733,24 @@ async def _make_due(h) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_sweep_skips_org_without_enabled_sources(h):
+async def test_scheduled_sweep_runs_on_openalex_when_every_optional_source_is_off(h, monkeypatch):
+    # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
+    # organization without a source. Changed with owner approval (plan 15).
     from app.services.literature import lit_review_auto_service
 
     await _make_due(h)
     await _set_sources_enabled(h, False)
+    scheduled: list[int] = []
+
+    async def record_schedule(*, run_id):
+        scheduled.append(run_id)
+
+    monkeypatch.setattr(lit_review_run_service, "schedule_run", record_schedule)
 
     result = await lit_review_auto_service.run_due_sweep(h.session, h.org_id)
 
-    assert result["skipped_reason"] == "no_literature_sources_enabled"
-    assert result["ran"] == []
-    assert await _run_count(h) == 0
-    assert h.llm.payloads == []
+    assert result["skipped_reason"] is None
+    assert result["ran"]
 
 
 @pytest.mark.asyncio
@@ -752,7 +762,12 @@ async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, 
     from app.tasks.periodic import run_periodic
 
     await _make_due(h)
-    await _set_sources_enabled(h, False)
+    # The sweep skips because no LLM provider is active (changed with owner approval, plan 15:
+    # OpenAlex is always on, so turning sources off no longer produces a skipped sweep).
+    from app.services import llm_provider_config_service
+
+    await llm_provider_config_service.deactivate_all(h.session, h.org_id, h.user.id)
+    await h.session.commit()
 
     # The loop is hard-wired to org 1; route its calls to this test's org.
     real_sweep, real_advance = auto.run_due_sweep, auto.advance_next_run
@@ -787,7 +802,7 @@ async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, 
     await run_periodic(job, wait=fake_wait)
     after = datetime.now(UTC)
 
-    assert [s["skipped_reason"] for s in sweeps] == ["no_literature_sources_enabled"]
+    assert [s["skipped_reason"] for s in sweeps] == ["no_active_llm_provider"]
     async with _database.async_session_factory() as s:
         next_run = await auto.get_next_run(s)
     assert next_run is not None

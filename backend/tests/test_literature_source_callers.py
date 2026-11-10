@@ -14,10 +14,10 @@ import asyncio
 import httpx
 import pytest
 import respx
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 import app.database as _database
-from app.models.literature import LiteratureSearch
+from app.models.literature import LiteratureSearch, LiteratureSourcesConfig
 from app.services import request_pacing
 from app.services.bootstrap_literature import seed_literature_sources
 from app.services.literature import search_service, sources_config_service
@@ -129,23 +129,28 @@ async def test_an_ordinary_search_runs_only_enabled_sources(client, admin_token,
 
 
 async def test_explicitly_requesting_a_disabled_source_is_refused(client, admin_token, admin_user, session):
-    await _configure(session, admin_user, source="openalex", enabled=False)
+    await _configure(session, admin_user, source="semanticscholar", enabled=False)
     resp = await client.post(
-        "/api/literature/searches", json={"query": "tgf", "sources": ["openalex"]}, headers=_auth(admin_token)
+        "/api/literature/searches", json={"query": "tgf", "sources": ["semanticscholar"]}, headers=_auth(admin_token)
     )
     assert resp.status_code == 409
-    assert "openalex" in resp.json()["detail"].lower() or "OpenAlex" in resp.json()["detail"]
+    assert "semanticscholar" in resp.json()["detail"]
 
 
-async def test_a_search_with_no_enabled_sources_is_refused(client, admin_token, admin_user, session):
+async def test_openalex_still_runs_when_every_other_source_is_off(
+    client, admin_token, admin_user, session, monkeypatch
+):
+    """OpenAlex is always on (owner, 2026-11-10), so a search always has a source."""
     await seed_literature_sources(session, admin_user.organization_id)
-    for source in ("pubmed", "biorxiv", "europepmc", "semanticscholar", "openalex"):
+    for source in ("pubmed", "biorxiv", "europepmc", "semanticscholar"):
         await sources_config_service.update(
             session, org_id=admin_user.organization_id, source=source, user_id=admin_user.id, enabled=False
         )
     await session.commit()
+    monkeypatch.setattr(search_service, "schedule_search_run", _no_schedule)
     resp = await client.post("/api/literature/searches", json={"query": "tgf"}, headers=_auth(admin_token))
-    assert resp.status_code == 409
+    assert resp.status_code == 201
+    assert resp.json()["sources"] == ["openalex"]
 
 
 async def test_a_source_disabled_after_submission_is_not_contacted(clock, session, admin_user):
@@ -288,7 +293,17 @@ async def test_openalex_paper_routes_are_always_on(
         return "bucket"
 
     monkeypatch.setattr(papers_api.storage, "get_literature_bucket", bucket)
-    await _configure(session, admin_user, source="openalex", enabled=False, api_key="SYNTH-OA-KEY")
+    await _configure(session, admin_user, source="openalex", api_key="SYNTH-OA-KEY")
+    # A row disabled before OpenAlex became always-on (or written directly) changes nothing.
+    await session.execute(
+        update(LiteratureSourcesConfig)
+        .where(
+            LiteratureSourcesConfig.organization_id == admin_user.organization_id,
+            LiteratureSourcesConfig.source == "openalex",
+        )
+        .values(enabled=False)
+    )
+    await session.commit()
     paper_id = await _paper(session, admin_user)
     upstream = Upstream(clock)
     with respx.mock:
@@ -361,7 +376,8 @@ async def test_a_quota_wait_past_the_review_budget_is_a_failed_attempt_not_a_han
         run_id = await h.create_run()
         await drive(clock, h.execute(run_id), step=1.0)
     run = await h.load(run_id)
-    assert run.status == "failed"
+    # OpenAlex (always on) answered; PubMed's attempt failed on its quota budget.
+    assert run.status == "partial"
     assert "pubmed 1/1 attempts failed" in (run.error_message or "")
     audit = [a for a in await h.audits(run_id) if a.action in ("fail", "failed", "complete")]
     assert audit, "the run's terminal audit is recorded"

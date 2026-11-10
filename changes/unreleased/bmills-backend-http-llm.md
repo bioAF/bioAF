@@ -24,8 +24,9 @@
 - Clearing a rate override (sending `null`) now works; negative or non-integer
   overrides are rejected.
 - An ordinary Literature Search runs only enabled sources. Asking for a
-  disabled source, or searching with none enabled, is refused. OpenAlex paper
-  context and open-access lookups are always available.
+  disabled source is refused. OpenAlex is always on: it cannot be turned off,
+  and it is always used for searches, AI Literature Reviews, citation
+  searches, paper context, and open-access lookup.
 - Semantic Scholar's default rate with an API key is now 1 request per second,
   the provider's documented starting rate.
 

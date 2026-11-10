@@ -26,6 +26,15 @@ class _Unset:
 _UNSET = _Unset()
 
 
+# Sources that are on at all times (owner, 2026-11-10): their enabled flag
+# cannot be cleared and is never consulted.
+ALWAYS_ON_SOURCES = frozenset({"openalex"})
+
+
+def is_enabled(row: LiteratureSourcesConfig) -> bool:
+    return row.enabled or row.source in ALWAYS_ON_SOURCES
+
+
 class SourceNotFound(Exception):
     pass
 
@@ -46,7 +55,7 @@ async def list_for_org(session: AsyncSession, org_id: int) -> list[LiteratureSou
 async def list_enabled(session: AsyncSession, org_id: int) -> list[LiteratureSourcesConfig]:
     """The org's currently enabled sources. Every AI Literature Review boundary
     (creation, execution, scheduled sweep) reads configuration through here."""
-    return [row for row in await list_for_org(session, org_id) if row.enabled]
+    return [row for row in await list_for_org(session, org_id) if is_enabled(row)]
 
 
 async def resolve(session: AsyncSession, org_id: int, sources: list[str]) -> dict[str, SourceExecution]:
@@ -76,7 +85,7 @@ async def resolve(session: AsyncSession, org_id: int, sources: list[str]) -> dic
         override = raw if isinstance(raw, int) and raw > 0 else None
         resolved[source] = SourceExecution(
             source=source,
-            enabled=row.enabled if row is not None else True,
+            enabled=is_enabled(row) if row is not None else True,
             api_key=api_key,
             requests_per_second=effective_rate(source, bool(api_key), override),
             override=override,
@@ -115,6 +124,8 @@ async def update(
 ) -> LiteratureSourcesConfig:
     """Omitted ``rate_limit_override`` leaves it unchanged; None or 0 resets it;
     a negative value is refused."""
+    if enabled is False and source in ALWAYS_ON_SOURCES:
+        raise ValidationError(f"{source} is always on and cannot be turned off")
     if isinstance(rate_limit_override, int) and rate_limit_override < 0:
         raise ValidationError("rate_limit_override must be a positive number of requests per second")
     row = await get_or_create(session, org_id, source)

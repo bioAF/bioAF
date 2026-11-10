@@ -139,3 +139,43 @@ async def test_a_key_change_is_seen_by_the_next_resolution(session, admin_user):
     await sources_config_service.update(session, org_id=org, source="pubmed", user_id=uid, api_key="")
     removed = (await sources_config_service.resolve(session, org, ["pubmed"]))["pubmed"]
     assert removed.api_key is None and removed.requests_per_second == 3.0
+
+
+# --- OpenAlex is always on (owner, 2026-11-10) -----------------------------------------------
+
+
+async def _disable_openalex_row(session, user):
+    await session.execute(
+        update(LiteratureSourcesConfig)
+        .where(
+            LiteratureSourcesConfig.organization_id == user.organization_id,
+            LiteratureSourcesConfig.source == "openalex",
+        )
+        .values(enabled=False)
+    )
+    await session.commit()
+
+
+async def test_openalex_cannot_be_turned_off(client, admin_token, admin_user, session):
+    await _seed(session, admin_user)
+    resp = await _patch(client, admin_token, {"enabled": False}, source="openalex")
+    assert resp.status_code in (400, 422)
+    listed = (await client.get("/api/literature/sources", headers=_auth(admin_token))).json()["items"]
+    assert {i["source"]: i["enabled"] for i in listed}["openalex"] is True
+
+
+async def test_openalex_settings_other_than_enabled_still_apply(client, admin_token, admin_user, session):
+    await _seed(session, admin_user)
+    resp = await _patch(client, admin_token, {"rate_limit_override": 4, "enabled": True}, source="openalex")
+    assert resp.status_code == 200 and resp.json()["rate_limit_override"] == 4
+
+
+async def test_a_persisted_disabled_openalex_row_still_resolves_enabled(client, admin_token, admin_user, session):
+    await _seed(session, admin_user)
+    await _disable_openalex_row(session, admin_user)
+    resolved = await sources_config_service.resolve(session, admin_user.organization_id, ["openalex"])
+    assert resolved["openalex"].enabled is True
+    enabled = {row.source for row in await sources_config_service.list_enabled(session, admin_user.organization_id)}
+    assert "openalex" in enabled
+    listed = (await client.get("/api/literature/sources", headers=_auth(admin_token))).json()["items"]
+    assert {i["source"]: i["enabled"] for i in listed}["openalex"] is True
