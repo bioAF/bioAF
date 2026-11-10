@@ -667,7 +667,7 @@ async def test_manual_creation_with_every_optional_source_off_still_runs_on_open
     h, client, admin_token, monkeypatch
 ):
     # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
-    # organization without a source. Changed with owner approval (plan 15).
+    # organization without a source. Changed with owner approval.
     await _set_sources_enabled(h, False)
     scheduled: list[int] = []
 
@@ -690,7 +690,7 @@ async def test_manual_creation_with_every_optional_source_off_still_runs_on_open
 @pytest.mark.asyncio
 async def test_create_run_service_with_every_optional_source_off_searches_openalex_only(h):
     # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
-    # organization without a source. Changed with owner approval (plan 15).
+    # organization without a source. Changed with owner approval.
     await _set_sources_enabled(h, False)
     h.script_llm("q1", scores((0, 0.9)))
 
@@ -703,7 +703,7 @@ async def test_create_run_service_with_every_optional_source_off_searches_openal
 @pytest.mark.asyncio
 async def test_sources_disabled_after_creation_leave_the_run_on_openalex(h):
     # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
-    # organization without a source. Changed with owner approval (plan 15).
+    # organization without a source. Changed with owner approval.
     run_id = await h.create_run()
     await _set_sources_enabled(h, False)
     h.script_llm("q1", scores((0, 0.9)))
@@ -735,7 +735,7 @@ async def _make_due(h) -> None:
 @pytest.mark.asyncio
 async def test_scheduled_sweep_runs_on_openalex_when_every_optional_source_is_off(h, monkeypatch):
     # OpenAlex is always on (owner, 2026-11-10): turning every other source off never leaves an
-    # organization without a source. Changed with owner approval (plan 15).
+    # organization without a source. Changed with owner approval.
     from app.services.literature import lit_review_auto_service
 
     await _make_due(h)
@@ -762,7 +762,7 @@ async def test_auto_loop_advances_schedule_one_cadence_after_a_skipped_sweep(h, 
     from app.tasks.periodic import run_periodic
 
     await _make_due(h)
-    # The sweep skips because no LLM provider is active (changed with owner approval, plan 15:
+    # The sweep skips because no LLM provider is active (changed with owner approval:
     # OpenAlex is always on, so turning sources off no longer produces a skipped sweep).
     from app.services import llm_provider_config_service
 

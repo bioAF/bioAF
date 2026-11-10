@@ -677,7 +677,7 @@ async def test_execute_hosted_emits_lifecycle_logs(db_engine, admin_user, caplog
 async def test_execute_hosted_logs_provider_error_with_detail(db_engine, admin_user, caplog):
     """A ProviderError during submit surfaces in the logs with its safe structured fields, never
     its message (which can carry a provider response body). Changed with owner approval
-    2026-11-09 (plan 15 review): the raw-detail assertion became an exclusion."""
+    2026-11-09: the raw-detail assertion became an exclusion."""
     import logging
 
     caplog.set_level(logging.WARNING, logger="bioaf.agent_review_job")
