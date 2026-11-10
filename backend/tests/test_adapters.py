@@ -121,11 +121,6 @@ class TestNfsImplemented:
         assert nfs_storage.capabilities().signed_url_upload is False
 
     @pytest.mark.asyncio
-    async def test_stage_inputs_works(self, nfs_storage, tmp_path):
-        staged = await nfs_storage.stage_inputs([{"filename": "x.txt"}], str(tmp_path / "work"))
-        assert len(staged) == 1
-
-    @pytest.mark.asyncio
     async def test_get_storage_metrics_works(self, nfs_storage):
         metrics = await nfs_storage.get_storage_metrics()
         assert metrics.total_size_gb >= 0.0

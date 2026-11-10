@@ -1,6 +1,6 @@
 """Tests for GCS storage adapter pipeline operations (spec tests 12-15).
 
-Tests generate_stage_commands and collect_outputs for real GCS mode.
+Tests collect_outputs for real GCS mode.
 """
 
 from unittest.mock import MagicMock, patch
@@ -14,26 +14,6 @@ from app.adapters.storage.gcs import GcsStorageProvider
 def adapter(monkeypatch):
     monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
     return GcsStorageProvider(org_slug="testorg")
-
-
-class TestGenerateStageCommands:
-    def test_produces_gsutil_commands(self, adapter):
-        """Test 12: generate_stage_commands produces correct gsutil cp commands."""
-        file_records = [
-            {"filename": "sample_R1.fastq.gz", "gcs_uri": "gs://bioaf-raw-testorg/exp1/sample_R1.fastq.gz"},
-            {"filename": "sample_R2.fastq.gz", "gcs_uri": "gs://bioaf-raw-testorg/exp1/sample_R2.fastq.gz"},
-        ]
-
-        commands = adapter.generate_stage_commands(file_records, "/data/inputs")
-
-        assert len(commands) == 2
-        assert "gsutil cp gs://bioaf-raw-testorg/exp1/sample_R1.fastq.gz /data/inputs/sample_R1.fastq.gz" in commands[0]
-        assert "gsutil cp gs://bioaf-raw-testorg/exp1/sample_R2.fastq.gz /data/inputs/sample_R2.fastq.gz" in commands[1]
-
-    def test_empty_file_records(self, adapter):
-        """generate_stage_commands returns empty list for no files."""
-        commands = adapter.generate_stage_commands([], "/data/inputs")
-        assert commands == []
 
 
 class TestCollectOutputsRegistersFiles:

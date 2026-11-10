@@ -239,17 +239,16 @@ def test_native_upload_client_unsupported(nfs):
         nfs.native_upload_client()
 
 
-# -- integration: stage inputs -> collect outputs -----------------------------
+# -- integration: collect outputs ---------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_nfs_integration_stage_and_collect(nfs, tmp_path):
+async def test_nfs_integration_collect(nfs, tmp_path):
     working = str(tmp_path / "work")
-    staged = await nfs.stage_inputs([{"filename": "reads.fastq", "local_path": None}], working)
-    assert len(staged) == 1
     # Simulate a pipeline writing an output into the working dir.
     import os
 
+    os.makedirs(working)
     with open(os.path.join(working, "result.txt"), "w") as f:
         f.write("done")
 

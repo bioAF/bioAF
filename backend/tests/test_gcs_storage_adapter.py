@@ -24,53 +24,6 @@ def temp_dir():
         yield d
 
 
-class TestGcsResolveInputPath:
-    @pytest.mark.asyncio
-    async def test_returns_local_path(self, adapter):
-        path = await adapter.resolve_input_path({"filename": "sample.fastq.gz"})
-        assert path == "/data/inputs/sample.fastq.gz"
-
-    @pytest.mark.asyncio
-    async def test_handles_missing_filename(self, adapter):
-        path = await adapter.resolve_input_path({})
-        assert "unknown" in path
-
-
-class TestGcsResolveOutputPath:
-    @pytest.mark.asyncio
-    async def test_returns_local_results_path(self, adapter):
-        path = await adapter.resolve_output_path({"id": 42, "experiment_id": 7}, "counts.h5ad")
-        assert "experiments/7/pipeline-runs/42/counts.h5ad" in path
-
-
-class TestGcsStageInputs:
-    @pytest.mark.asyncio
-    async def test_stage_inputs_creates_files(self, adapter, temp_dir):
-        working = os.path.join(temp_dir, "work")
-        records = [
-            {"filename": "sample_R1.fastq.gz"},
-            {"filename": "sample_R2.fastq.gz"},
-        ]
-        paths = await adapter.stage_inputs(records, working)
-        assert len(paths) == 2
-        for p in paths:
-            assert os.path.exists(p)
-
-    @pytest.mark.asyncio
-    async def test_stage_inputs_copies_existing_files(self, adapter, temp_dir):
-        # Create a real source file
-        src = os.path.join(temp_dir, "source.txt")
-        with open(src, "w") as f:
-            f.write("real content")
-
-        working = os.path.join(temp_dir, "work")
-        records = [{"filename": "source.txt", "local_path": src}]
-        paths = await adapter.stage_inputs(records, working)
-        assert len(paths) == 1
-        with open(paths[0]) as f:
-            assert f.read() == "real content"
-
-
 class TestGcsCollectOutputs:
     @pytest.mark.asyncio
     async def test_collect_outputs_copies_files(self, adapter, temp_dir, monkeypatch):

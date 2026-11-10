@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import uuid
 from typing import BinaryIO
 from urllib.parse import urlparse
 
@@ -130,43 +129,7 @@ class NfsStorageProvider(StorageProvider):
             raise ValidationError(f"Storage URI escapes the mount root: {uri!r}")
         return full
 
-    # -- pipeline staging -----------------------------------------------------
-
-    async def resolve_input_path(self, file_record: dict) -> str:
-        uri = file_record.get("storage_uri") or file_record.get("gcs_uri")
-        if uri and uri.startswith("file://"):
-            return self._path(uri)
-        filename = file_record.get("filename", "unknown")
-        return os.path.join(self._root, "inputs", filename)
-
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        return os.path.join(
-            self._root, "results", "experiments", str(experiment_id), "pipeline-runs", str(run_id), filename
-        )
-
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        return await asyncio.to_thread(self._stage_inputs, file_records, working_dir)
-
-    def _stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        os.makedirs(working_dir, exist_ok=True)
-        staged_paths = []
-        for record in file_records:
-            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
-            src = record.get("local_path")
-            if not src:
-                uri = record.get("storage_uri") or record.get("gcs_uri")
-                if uri and uri.startswith("file://"):
-                    src = self._path(uri)
-            dest = os.path.join(working_dir, filename)
-            if src and os.path.exists(src):
-                shutil.copy2(src, dest)
-            else:
-                with open(dest, "w") as f:
-                    f.write(f"# placeholder for {filename}\n")
-            staged_paths.append(dest)
-        return staged_paths
+    # -- pipeline output collection ------------------------------------------
 
     async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
         run_id = pipeline_run.get("id", "unknown")

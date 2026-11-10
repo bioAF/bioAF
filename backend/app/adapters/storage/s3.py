@@ -21,7 +21,6 @@ import asyncio
 import logging
 import os
 import shutil
-import uuid
 from typing import BinaryIO
 from urllib.parse import urlparse
 
@@ -198,23 +197,6 @@ class S3StorageProvider(StorageProvider):
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
 
-    async def resolve_input_path(self, file_record: dict) -> str:
-        return f"/data/inputs/{file_record.get('filename', 'unknown')}"
-
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if self.is_local:
-            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-        return f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        if self.is_local:
-            return await self._local_stage_inputs(file_records, working_dir)
-        # Real S3: staging runs in an init container via the CLI, so (like the GCS
-        # adapter) return the command strings the init container executes.
-        return self.generate_stage_commands(file_records, working_dir)
-
     async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
         if self.is_local:
             items = await self._local_collect_outputs(working_dir, pipeline_run)
@@ -238,21 +220,6 @@ class S3StorageProvider(StorageProvider):
             total_size_gb=d.get("total_size_gb", 0.0),
             total_cost_monthly_usd=d.get("total_cost_monthly_usd", 0.0),
         )
-
-    def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate ``aws s3 cp`` commands for an init container to stage inputs.
-
-        The S3 counterpart of the GCS adapter's gsutil staging commands; reuses the
-        ``cli_copy_in`` seam token so the CLI string lives in exactly one place.
-        Reads ``storage_uri`` (the neutral field), falling back to the retained
-        ``gcs_uri`` mirror for records that predate the rename.
-        """
-        commands = []
-        for record in file_records:
-            uri = record.get("storage_uri") or record.get("gcs_uri", "")
-            filename = record.get("filename", "unknown")
-            commands.append(self.cli_copy_in(uri, f"{working_dir}/{filename}"))
-        return commands
 
     # -- URI / scheme (the s3:// counterpart of the GCS gs:// methods) ---------
 
@@ -651,22 +618,7 @@ class S3StorageProvider(StorageProvider):
         self._local_copy(source_uri, dest_uri)
         os.remove(self._local_path(source_uri))
 
-    # -- Local-mode pipeline staging (parity with the GCS adapter) ------------
-
-    async def _local_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        os.makedirs(working_dir, exist_ok=True)
-        staged_paths = []
-        for record in file_records:
-            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
-            src = record.get("local_path") or record.get("storage_uri") or record.get("gcs_uri", "")
-            dest = os.path.join(working_dir, filename)
-            if src and os.path.exists(src):
-                shutil.copy2(src, dest)
-            else:
-                with open(dest, "w") as f:
-                    f.write(f"# placeholder for {filename}\n")
-            staged_paths.append(dest)
-        return staged_paths
+    # -- Local-mode pipeline collection (parity with the GCS adapter) ---------
 
     async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
         run_id = pipeline_run.get("id", "unknown")

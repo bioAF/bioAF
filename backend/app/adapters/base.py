@@ -190,18 +190,6 @@ class StorageProvider(ABC):
         return ProviderCapabilities()
 
     @abstractmethod
-    async def resolve_input_path(self, file_record: dict) -> str:
-        """Resolve the path a pipeline container uses for input."""
-
-    @abstractmethod
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        """Resolve the path for writing pipeline output."""
-
-    @abstractmethod
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Prepare input files for a pipeline run. Returns list of local paths."""
-
-    @abstractmethod
     async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
         """Move outputs to permanent storage. Returns a list of StoredObject."""
 

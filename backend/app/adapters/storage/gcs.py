@@ -8,7 +8,6 @@ import asyncio
 import logging
 import os
 import shutil
-import uuid
 from typing import BinaryIO
 from urllib.parse import urlparse
 
@@ -132,23 +131,6 @@ class GcsStorageProvider(StorageProvider):
     @property
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
-
-    async def resolve_input_path(self, file_record: dict) -> str:
-        if self.is_local:
-            return f"/data/inputs/{file_record.get('filename', 'unknown')}"
-        return f"/data/inputs/{file_record.get('filename', 'unknown')}"
-
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if self.is_local:
-            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-        return f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        if self.is_local:
-            return await self._local_stage_inputs(file_records, working_dir)
-        return await self._gcs_stage_inputs(file_records, working_dir)
 
     async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
         items = (
@@ -681,22 +663,6 @@ class GcsStorageProvider(StorageProvider):
 
     # -- Local mode implementations --
 
-    async def _local_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        os.makedirs(working_dir, exist_ok=True)
-        staged_paths = []
-        for record in file_records:
-            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
-            src = record.get("local_path") or record.get("gcs_uri", "")
-            dest = os.path.join(working_dir, filename)
-            if src and os.path.exists(src):
-                shutil.copy2(src, dest)
-            else:
-                # Create placeholder for local mode
-                with open(dest, "w") as f:
-                    f.write(f"# placeholder for {filename}\n")
-            staged_paths.append(dest)
-        return staged_paths
-
     async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
         run_id = pipeline_run.get("id", "unknown")
         experiment_id = pipeline_run.get("experiment_id", "unknown")
@@ -770,18 +736,6 @@ class GcsStorageProvider(StorageProvider):
             "total_cost_monthly_usd": total_monthly,
         }
 
-    # -- GCS stage/collect helpers --
-
-    def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate gsutil cp commands for an init container to stage input files."""
-        commands = []
-        for record in file_records:
-            gcs_uri = record.get("gcs_uri", "")
-            filename = record.get("filename", "unknown")
-            dest = f"{working_dir}/{filename}"
-            commands.append(f"gsutil cp {gcs_uri} {dest}")
-        return commands
-
     def _get_gcs_client(self, credentials=None):
         """Get a Google Cloud Storage client. Tests mock this method.
 
@@ -794,14 +748,6 @@ class GcsStorageProvider(StorageProvider):
         return storage.Client(credentials=credentials) if credentials else storage.Client()
 
     # -- GCS API implementations (production) --
-
-    async def _gcs_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate stage commands for the init container (GCS mode).
-
-        In GCS mode, staging is handled by the init container using gsutil,
-        so we return the list of commands that the init container will execute.
-        """
-        return self.generate_stage_commands(file_records, working_dir)
 
     async def _gcs_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
         """List output objects in GCS and return file records."""
