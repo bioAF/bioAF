@@ -478,7 +478,14 @@ class PipelineRunService:
         except ValidationError as exc:
             # A selection that is not wholly ours is a verdict, not a preview of
             # the part that is: that would look like the whole selection.
-            return {"can_launch": False, "code": exc.code, "reason": str(exc), "details": {}, "samplesheet": {}}
+            empty_sheet = {"columns": [], "rows": [], "csv": "", "omissions": [], "identity_column": None}
+            return {
+                "can_launch": False,
+                "code": exc.code,
+                "reason": str(exc),
+                "details": {},
+                "samplesheet": empty_sheet,
+            }
         for sample in samples:
             # Resolved with the SAME opt-in the launch will use. Hardcoding this
             # off previewed a sheet with empty read columns and then submitted

@@ -298,7 +298,9 @@ class TestPreflightSampleSelection:
         assert body["code"] == "validation_error"
         assert body["reason"]
         # Not a preview of the valid subset dressed up as the whole selection.
-        assert body["samplesheet"].get("rows", []) == []
+        assert body["samplesheet"]["rows"] == []
+        assert body["samplesheet"]["columns"] == []
+        assert body["samplesheet"]["csv"] == ""
         assert "OURS_A" not in r.text
         assert "THEIRS" not in r.text
 
