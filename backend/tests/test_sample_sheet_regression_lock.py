@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_schema import parse_contract
+from app.services.samplesheet_inputs import SheetSampleInput
 
 # A contract that WOULD produce a different sheet if it were ever consulted, so
 # these tests fail loudly if a hand-written generator starts deferring to it.
@@ -37,8 +38,8 @@ def _make_sample(sample_id: int, external_id: str, prep_notes: str = ""):
     sample.id = sample_id
     sample.external_id = external_id
     sample.prep_notes = prep_notes
-    sample._input_files = []
-    return sample
+    _eligible = []
+    return SheetSampleInput.from_sample(sample, _eligible)
 
 
 def _paths(*ids):

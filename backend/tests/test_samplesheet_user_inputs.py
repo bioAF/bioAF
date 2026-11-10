@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_inputs import SheetSampleInput
 from app.services.samplesheet_schema import parse_contract
 
 FIXTURES = Path(__file__).parent / "fixtures" / "schema_input"
@@ -167,7 +168,6 @@ def test_supplying_the_value_satisfies_the_check():
         tissue_type = None
         treatment_condition = None
         sex = None
-        _input_files = []
 
     params = {s["name"]: s["allowed_values"][0] if s["allowed_values"] else "x" for s in specs}
-    SampleSheetService.check_contract_satisfiable(contract, [S()], params)
+    SampleSheetService.check_contract_satisfiable(contract, [SheetSampleInput.from_sample(S(), [])], params)

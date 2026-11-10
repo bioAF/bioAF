@@ -30,6 +30,7 @@ from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
 from app.services.samplesheet_declaration import parse_declaration
+from app.services.samplesheet_inputs import SheetSampleInput
 from app.services.samplesheet_mapping_service import SamplesheetMappingService
 from app.adapters.job_specs import NextflowJobSpec
 from app.adapters.registry import get_compute_adapter
@@ -429,7 +430,7 @@ class PipelineRunService:
         if not PipelineRunService._requires_per_sample_fastq(pipeline, contract):
             return samples
 
-        missing = [s for s in samples if not s._input_files]
+        missing = [s for s in samples if not s.input_files]
         if not missing:
             return samples
 
@@ -439,7 +440,7 @@ class PipelineRunService:
                 details={"samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]},
             )
 
-        kept = [s for s in samples if s._input_files]
+        kept = [s for s in samples if s.input_files]
         if not kept:
             raise ValidationError("All selected samples lack input files; nothing to run")
         return kept
@@ -474,7 +475,7 @@ class PipelineRunService:
         # samples, their file URIs and its saved design.
         await PipelineRunService._authorize_references(session, org_id, data, NotFoundError)
         try:
-            samples = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
+            selected = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
         except ValidationError as exc:
             # A selection that is not wholly ours is a verdict, not a preview of
             # the part that is: that would look like the whole selection.
@@ -486,15 +487,12 @@ class PipelineRunService:
                 "details": {},
                 "samplesheet": empty_sheet,
             }
-        for sample in samples:
-            # Resolved with the SAME opt-in the launch will use. Hardcoding this
-            # off previewed a sheet with empty read columns and then submitted
-            # populated ones, so the scientist approved a sheet that was not the
-            # one that ran, which is the single property the review step exists
-            # to provide.
-            sample._input_files = PipelineRunService._launchable_files(
-                sample.files, data.include_derived_inputs, org_id
-            )
+        # Resolved with the SAME rule and opt-in the launch will use. Hardcoding
+        # the opt-in off previewed a sheet with empty read columns and then
+        # submitted populated ones, so the scientist approved a sheet that was
+        # not the one that ran, which is the single property the review step
+        # exists to provide.
+        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id)
 
         contract, mapping, scope = await PipelineRunService._effective_contract(
             session, pipeline, org_id, getattr(data, "experiment_id", None), getattr(data, "columns", None)
@@ -591,7 +589,7 @@ class PipelineRunService:
             "declaration": {
                 "declarable": declarable,
                 "file_types": sorted(
-                    {(f.file_type or "").strip() for s in samples for f in (s._input_files or []) if f.file_type}
+                    {(f.file_type or "").strip() for s in samples for f in s.input_files if f.file_type}
                 ),
                 "custom_fields": sorted(
                     {
@@ -803,6 +801,14 @@ class PipelineRunService:
         return PipelineRunService._in_requested_order(samples, sample_ids)
 
     @staticmethod
+    def _sheet_inputs(samples: list, include_derived: bool, org_id: int) -> list[SheetSampleInput]:
+        """Typed snapshots of authorized, loaded samples, each with its eligible files decided here."""
+        return [
+            SheetSampleInput.from_sample(s, PipelineRunService._launchable_files(s.files, include_derived, org_id))
+            for s in samples
+        ]
+
+    @staticmethod
     def _launchable_files(files: list, include_derived: bool, org_id: int) -> list:
         """A sample's linked files that may feed a run of ``org_id``.
 
@@ -938,15 +944,15 @@ class PipelineRunService:
         await PipelineRunService._authorize_references(session, org_id, data, ValidationError)
 
         # 3. Resolve sample_ids
-        samples = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
+        selected = await PipelineRunService._selected_samples(session, data.experiment_id, data.sample_ids)
 
         # 3a. Resolve each sample's INPUT-eligible files. Prior pipeline/notebook
         # outputs are excluded by default so they are never fed back in as inputs
         # (which compounded the dataset every run); include_derived_inputs opts in.
-        # Stored on a transient attribute the sample-sheet builder reads; it is
-        # not a mapped column, so it never touches the ORM/DB.
-        for s in samples:
-            s._input_files = PipelineRunService._launchable_files(s.files, data.include_derived_inputs, org_id)
+        # The sheet, the missing-file decision and the input provenance below all
+        # read these typed snapshots, never the ORM samples' linked files.
+        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id)
+        orm_samples = {s.id: s for s in selected}
 
         # 3b. The samplesheet contract, which decides both whether this pipeline
         # reads FASTQ at all and whether bioAF can fill every required column.
@@ -1056,7 +1062,7 @@ class PipelineRunService:
         # fed the run (raw inputs, not re-ingested prior outputs).
         seen_file_ids: set[int] = set()
         for sample in samples:
-            for f in sample._input_files or []:
+            for f in sample.input_files:
                 if f.id not in seen_file_ids:
                     session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
                     seen_file_ids.add(f.id)
@@ -1089,10 +1095,12 @@ class PipelineRunService:
         # owns the column-to-field map: a column the pipeline constrains is an
         # accommodation and stays on the run, and a field that already holds a
         # value is never overwritten.
+        # Decided on the snapshots, applied to the loaded records by sample id:
+        # the sheet computation never changes a sample.
         field_updates = SampleSheetService.sample_field_updates(contract, samples, sample_values)
-        for sample in samples:
-            for field, value in field_updates.get(sample.id, {}).items():
-                setattr(sample, field, value)
+        for sample_id, updates in field_updates.items():
+            for field, value in updates.items():
+                setattr(orm_samples[sample_id], field, value)
 
         # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
         # having refused the job; see launch_outcome for the case where it had in fact accepted it.

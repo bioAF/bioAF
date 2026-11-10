@@ -5,6 +5,7 @@ import re
 from functools import lru_cache
 
 from app.services import sequencing_identity
+from app.services.samplesheet_inputs import require_sheet_samples
 from app.exceptions import (
     PipelineNotSampleLaunchableError,
     SamplesMissingRequiredFieldsError,
@@ -125,17 +126,16 @@ def _unit_facts(contract, unit: tuple) -> dict[str, str]:
 
 
 def _input_files(sample) -> list:
-    """The sample's input-eligible files.
+    """The sample's input-eligible files that have somewhere to be read from.
 
-    Prefers the set the launcher resolves (raw inputs only, with prior
-    pipeline/notebook outputs excluded by default). Falls back to all linked
-    files for callers that don't set it. The isinstance guard stops a MagicMock
-    auto-vivifying the attribute in unit tests.
+    Exactly the set the launcher decided (organization, deletion, derived
+    opt-in), carried on the typed input. There is no fallback to the sample's
+    linked files: a sample with no eligible files has none.
     """
-    files = getattr(sample, "_input_files", None)
-    if not isinstance(files, list):
-        files = getattr(sample, "files", None) or []
-    return [f for f in files if getattr(f, "storage_uri", None)]
+    files = getattr(sample, "input_files", None)
+    if not isinstance(files, tuple):
+        raise TypeError("a sheet sample must carry its eligible files explicitly; build a SheetSampleInput")
+    return [f for f in files if f.storage_uri]
 
 
 def _candidates(value: str) -> list[str]:
@@ -1657,6 +1657,7 @@ class SampleSheetService:
         Only values the SCIENTIST stated are considered. Everything else was
         read off the sample to begin with.
         """
+        samples = require_sheet_samples(samples)
         updates: dict[int, dict[str, str]] = {}
         for sample in samples:
             stated = _supplied(sample_values, sample)
@@ -1687,6 +1688,7 @@ class SampleSheetService:
         Empty when nothing is outstanding. Empty too when the contract is empty,
         because no schema means "we do not know", not "nothing is required".
         """
+        samples = require_sheet_samples(samples)
         # A DECLARED contract is launchable by construction: the scientist said
         # what the sheet is, and bioAF has no schema with which to contradict
         # them. ``is_sample_launchable`` answers a question about a PUBLISHED
@@ -1799,6 +1801,7 @@ class SampleSheetService:
         **bioAF explains a column only in the pipeline's own words.** An absent
         description stays absent.
         """
+        samples = require_sheet_samples(samples)
         gaps = SampleSheetService.column_gaps(contract, samples, parameters, sample_values)
         if not gaps:
             return []
@@ -1851,6 +1854,7 @@ class SampleSheetService:
         sample id. It must be the same set generation will use, or this reports a
         gap the sheet does not have and refuses a launch that would work.
         """
+        samples = require_sheet_samples(samples)
         if contract.is_empty:
             return
 
@@ -1889,6 +1893,7 @@ class SampleSheetService:
         ``PipelineRunService``: this builds the best sheet it can and reports
         nothing, so that the blocking decision lives in one place.
         """
+        samples = require_sheet_samples(samples)
         columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
         return _to_csv(columns, [row["values"] for row in rows])
 
@@ -1907,6 +1912,7 @@ class SampleSheetService:
         and fetchngs' accession list is carried as its own text, since rendering
         that as a table would invent a structure it does not have.
         """
+        samples = require_sheet_samples(samples)
         if "fetchngs" in pipeline_key:
             return {
                 "columns": [],
@@ -1982,6 +1988,7 @@ class SampleSheetService:
         A row bioAF cannot attribute carries an EMPTY uid rather than a borrowed
         one, and contributes nothing to ``emitted``.
         """
+        samples = require_sheet_samples(samples)
         columns = list(preview.get("columns") or [])
         rows = list(preview.get("rows") or [])
         identity_column = preview.get("identity_column")
@@ -2016,6 +2023,7 @@ class SampleSheetService:
 
         If samples don't have linked files, falls back to input_paths in parameters.
         """
+        samples = require_sheet_samples(samples)
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["sample", "fastq_1", "fastq_2", "expected_cells"])
@@ -2039,6 +2047,7 @@ class SampleSheetService:
     @staticmethod
     def generate_rnaseq_sheet(samples: list, parameters: dict) -> str:
         """Generate nf-core/rnaseq sample sheet CSV."""
+        samples = require_sheet_samples(samples)
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["sample", "fastq_1", "fastq_2", "strandedness"])
@@ -2073,6 +2082,7 @@ class SampleSheetService:
         emitted WITHOUT antibody/control -- still schema-valid and the run completes (alignment + QC),
         but those samples are not peak-called. This degrade is logged, never a launch failure.
         """
+        samples = require_sheet_samples(samples)
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["sample", "fastq_1", "fastq_2", "replicate", "antibody", "control", "control_replicate"])
@@ -2116,6 +2126,7 @@ class SampleSheetService:
         (unlike chipseq) there is no antibody/control -- but ``replicate`` is required by the schema.
         One replicate per sample (=1); a downstream user can merge biological replicates by editing it.
         """
+        samples = require_sheet_samples(samples)
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["sample", "fastq_1", "fastq_2", "replicate"])
@@ -2137,6 +2148,7 @@ class SampleSheetService:
     @staticmethod
     def generate_generic_sheet(samples: list, parameters: dict) -> str:
         """Generic fallback CSV sample sheet."""
+        samples = require_sheet_samples(samples)
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(["sample", "fastq_1", "fastq_2"])
@@ -2189,6 +2201,7 @@ class SampleSheetService:
         is built from the pipeline's own schema when one is available, and falls
         back to the fixed generic sheet when it is not.
         """
+        samples = require_sheet_samples(samples)
         if "scrnaseq" in pipeline_key:
             return SampleSheetService.generate_scrnaseq_sheet(samples, parameters)
         elif "rnaseq" in pipeline_key:

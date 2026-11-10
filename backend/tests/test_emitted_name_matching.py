@@ -38,6 +38,7 @@ from app.services.auth_service import AuthService
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.pipeline_output_service import PipelineOutputService
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_inputs import SheetSampleInput
 
 
 def _sample(sample_id: int, external_id: str, uid: uuid_pkg.UUID | None = None):
@@ -45,7 +46,7 @@ def _sample(sample_id: int, external_id: str, uid: uuid_pkg.UUID | None = None):
     sample.id = sample_id
     sample.external_id = external_id
     sample.uuid = uid or uuid_pkg.uuid4()
-    return sample
+    return SheetSampleInput.from_sample(sample, [])
 
 
 def _preview(columns, rows, identity_column="sample"):
