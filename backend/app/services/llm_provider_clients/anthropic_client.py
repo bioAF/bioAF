@@ -12,6 +12,7 @@ from app.services.llm_provider_clients.http_contract import (
     incomplete,
     json_object,
     object_list,
+    optional_text,
     parse_error,
     raise_for_status,
     send,
@@ -136,7 +137,7 @@ async def submit(
 def _parse_message(data: dict) -> tuple[str | None, list[ToolCall]]:
     """Text and tool calls from a Messages API response. A max_tokens stop is
     truncated output, never an answer; a refusal with no text has nothing to show."""
-    stop_reason = data.get("stop_reason")
+    stop_reason = optional_text(data.get("stop_reason"), provider=_PROVIDER, label=_LABEL, what="stop_reason")
     if stop_reason == "max_tokens":
         raise incomplete("Anthropic response was truncated", provider=_PROVIDER, reason="max_tokens")
     parts = object_list(data.get("content"), provider=_PROVIDER, label=_LABEL, what="message content")

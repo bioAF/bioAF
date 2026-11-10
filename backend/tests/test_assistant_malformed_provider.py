@@ -80,7 +80,15 @@ CASES = [
     ("google", httpx.Response(200, json={"candidates": [{"finishReason": "SAFETY"}]}), 502, "stopped before"),
     ("google", httpx.ReadTimeout("SYNTH-RAW"), 504, "did not respond in time"),
     ("google", httpx.Response(504, text="SYNTH-RAW"), 504, "did not respond in time"),
+    (
+        "google",
+        httpx.Response(200, json={"candidates": [{"finishReason": [], "content": {"parts": [{"text": "a"}]}}]}),
+        502,
+        "could not use",
+    ),
+    ("google", httpx.Response(200, json={"promptFeedback": {"blockReason": ["SAFETY"]}}), 502, "could not use"),
     ("openai", httpx.Response(200, json=[]), 502, "could not use"),
+    ("openai", httpx.Response(200, json={"status": [], "output": []}), 502, "could not use"),
     ("openai", httpx.Response(200, json={"status": "completed", "output": [None]}), 502, "could not use"),
 ]
 

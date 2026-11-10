@@ -149,6 +149,14 @@ def object_list(value: object, *, provider: str, label: str, what: str) -> list[
     return value
 
 
+def optional_text(value: object, *, provider: str, label: str, what: str) -> str | None:
+    """A protocol field that is absent (None) or a string; anything else is a
+    parse-class ProviderError, never a TypeError from a later lookup."""
+    if value is None or isinstance(value, str):
+        return value
+    raise parse_error(f"{label} {what} is not text", provider=provider)
+
+
 def incomplete(message: str, *, provider: str, reason: str | None) -> ProviderError:
     """The provider stopped before a usable answer (truncation, content filter)."""
     return ProviderError(message, error_class="incomplete", upstream_code=reason, provider=provider)

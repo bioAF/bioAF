@@ -13,6 +13,7 @@ from app.services.llm_provider_clients.http_contract import (
     incomplete,
     json_object,
     object_list,
+    optional_text,
     parse_error,
     raise_for_status,
     send,
@@ -144,6 +145,7 @@ def _parse_candidate(data: dict) -> tuple[str | None, list[ToolCall]]:
     truncated candidate, or a filtered candidate is never an answer."""
     feedback = data.get("promptFeedback")
     block = feedback.get("blockReason") if isinstance(feedback, dict) else None
+    block = optional_text(block or None, provider=_PROVIDER, label=_LABEL, what="blockReason")
     candidates = data.get("candidates")
     if block and not candidates:
         reason = block if block in _BLOCK_REASONS else None
@@ -152,7 +154,7 @@ def _parse_candidate(data: dict) -> tuple[str | None, list[ToolCall]]:
     if not candidates:
         raise parse_error("Google response has no candidates", provider=_PROVIDER)
     candidate = candidates[0]
-    finish = candidate.get("finishReason")
+    finish = optional_text(candidate.get("finishReason"), provider=_PROVIDER, label=_LABEL, what="finishReason")
     if finish in _TRUNCATED:
         raise incomplete("Google response was truncated", provider=_PROVIDER, reason=finish)
     if finish in _FILTERED:

@@ -24,6 +24,7 @@ from app.services.llm_provider_clients.http_contract import (
     incomplete,
     json_object,
     object_list,
+    optional_text,
     parse_error,
     raise_for_status,
     send,
@@ -123,7 +124,7 @@ def _parse_chat_completion(data: dict) -> str:
     if not choices:
         raise parse_error("OpenAI completion has no choices", provider=_PROVIDER)
     choice = choices[0]
-    finish = choice.get("finish_reason")
+    finish = optional_text(choice.get("finish_reason"), provider=_PROVIDER, label=_LABEL, what="finish_reason")
     if finish in _INCOMPLETE_FINISH:
         raise incomplete(_INCOMPLETE_FINISH[finish], provider=_PROVIDER, reason=finish)
     message = choice.get("message")
@@ -243,7 +244,7 @@ def _messages_to_responses(messages: list[dict]) -> list[dict]:
 
 
 def _parse_responses_tool_use(data: dict, model: str) -> ToolUseResult:
-    status = data.get("status")
+    status = optional_text(data.get("status"), provider=_PROVIDER, label=_LABEL, what="response status")
     if status == "incomplete":
         raise ProviderError("OpenAI response incomplete", error_class="incomplete", provider=_PROVIDER)
     if status == "failed":

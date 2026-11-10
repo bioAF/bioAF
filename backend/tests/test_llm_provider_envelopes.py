@@ -504,3 +504,46 @@ async def test_a_status_failure_with_an_empty_body_still_has_a_message(provider)
         with pytest.raises(ProviderError) as info:
             await _submit(provider)
     assert "500" in str(info.value)
+
+
+# --- Review of 5dde62e4: stop and block reasons of the wrong type ------------------------
+
+WRONG_TYPED_REASONS = [
+    pytest.param(
+        "openai", "submit", {"choices": [{"finish_reason": [], "message": {"content": "a"}}]}, id="openai-finish-array"
+    ),
+    pytest.param(
+        "openai", "submit", {"choices": [{"finish_reason": {}, "message": {"content": "a"}}]}, id="openai-finish-object"
+    ),
+    pytest.param(
+        "google",
+        "submit",
+        {"candidates": [{"finishReason": {}, "content": {"parts": [{"text": "a"}]}}]},
+        id="google-finish-object",
+    ),
+    pytest.param(
+        "google",
+        "tools",
+        {"candidates": [{"finishReason": [], "content": {"parts": [{"text": "a"}]}}]},
+        id="google-tool-finish-array",
+    ),
+    pytest.param("google", "tools", {"promptFeedback": {"blockReason": ["SAFETY"]}}, id="google-block-array"),
+    pytest.param("google", "submit", {"promptFeedback": {"blockReason": {}}}, id="google-block-object"),
+    pytest.param(
+        "anthropic",
+        "submit",
+        {"content": [{"type": "text", "text": "a"}], "stop_reason": []},
+        id="anthropic-stop-array",
+    ),
+]
+
+
+@pytest.mark.parametrize("provider,kind,body", WRONG_TYPED_REASONS)
+@pytest.mark.asyncio
+async def test_a_stop_or_block_reason_of_the_wrong_type_is_a_parse_error(provider, kind, body):
+    url = SUBMIT_URL[provider] if kind == "submit" else TOOL_URL[provider]
+    with respx.mock:
+        _respond("POST", url, httpx.Response(200, json=body))
+        with pytest.raises(ProviderError) as info:
+            await (_submit(provider) if kind == "submit" else _tools(provider))
+    _assert_provider_error(info.value, provider)
