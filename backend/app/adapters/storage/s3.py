@@ -51,18 +51,6 @@ _LOCAL_OBJECTS_DIR = "_objects"
 # -- Local-mode filesystem helpers (the s3:// emulation; parity with gcs.py) ---
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def _is_not_found(error) -> bool:
     """True if a botocore ClientError is an object-absent error.
 

@@ -29,6 +29,7 @@ from app.platform.run_output_layout import directory_prefix, results_bucket_from
 from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
+from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.models import (
     ClusterDetail,
     ClusterMetrics,
@@ -773,24 +774,14 @@ class KubernetesComputeProvider(ComputeProvider):
         self._namespace_ready = True
 
     def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the pipeline-runner KSA carries the pod-identity binding.
-
-        Used on the upgrade path where the namespace was created before pod
-        identity was wired (no binding annotation on the existing KSA).
-        """
-        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
-        try:
-            sa = core_v1.read_namespaced_service_account(name="bioaf-pipeline-runner", namespace=namespace)
-            current = sa.metadata.annotations or {}
-            if desired and any(current.get(k) != v for k, v in desired.items()):
-                core_v1.patch_namespaced_service_account(
-                    name="bioaf-pipeline-runner",
-                    namespace=namespace,
-                    body={"metadata": {"annotations": desired}},
-                )
-                logger.info("Patched pod-identity annotation on bioaf-pipeline-runner")
-        except Exception:
-            logger.exception("Failed to patch pod-identity annotation on bioaf-pipeline-runner")
+        """Ensure the bioaf-pipeline-runner KSA carries the pod-identity binding (the upgrade path, where it
+        predates pod identity)."""
+        ensure_service_account_annotations(
+            core_v1,
+            namespace=namespace,
+            service_account="bioaf-pipeline-runner",
+            desired=self._pod_identity.pod_identity_annotations(gcp_sa_email),
+        )
 
     # -- K8s API implementations (production) --
 

@@ -37,18 +37,6 @@ from app.adapters.models import (
 _DEFAULT_ROOT = os.environ.get("BIOAF_NFS_ROOT", "/srv/bioaf")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def _dir_size_and_count(path: str) -> tuple[int, int]:
     total = 0
     count = 0

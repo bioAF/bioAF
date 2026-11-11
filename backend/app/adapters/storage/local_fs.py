@@ -215,6 +215,8 @@ class LocalObjectFilesystem:
             except FileNotFoundError:
                 continue  # removed while listing
             results.append(
-                StoredObject(filename=key.rsplit("/", 1)[-1], storage_uri=self._build_uri(container, key), size_bytes=size)
+                StoredObject(
+                    filename=key.rsplit("/", 1)[-1], storage_uri=self._build_uri(container, key), size_bytes=size
+                )
             )
         return results

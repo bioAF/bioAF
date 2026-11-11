@@ -56,18 +56,6 @@ _METRICS_STORES = (
 )
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def gcs_cli_source(operand: str) -> str:
     """A ``gcloud storage``/``gsutil`` SOURCE operand that matches only itself.
 

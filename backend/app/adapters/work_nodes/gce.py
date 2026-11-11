@@ -20,6 +20,7 @@ from app.adapters.models import (
     VmStatus,
     to_service_state,
 )
+from app.adapters.session_status import update_compute_session
 from app.exceptions import ValidationError
 from app.adapters.storage.gcs import gcs_cli_source
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
@@ -554,7 +555,15 @@ class GceVmInstance(VmInstance):
         creds = vm_spec.get("session_credentials", {})
         ssh_username = creds.get("username", "")
         runtime.spawn(
-            self._poll_vm_ready(session_id, instance_name, project, zone, ssh_username), role="work-node-readiness"
+            self._poll_vm_ready(
+                session_id,
+                instance_name,
+                project,
+                zone,
+                ssh_username,
+                organization_id=vm_spec.get("organization_id"),
+            ),
+            role="work-node-readiness",
         )
 
         return {
@@ -572,6 +581,8 @@ class GceVmInstance(VmInstance):
         project: str,
         zone: str,
         ssh_username: str = "",
+        *,
+        organization_id: int | None = None,
     ) -> None:
         """Background: poll for VM running status + external IP, then update DB."""
         try:
@@ -602,6 +613,7 @@ class GceVmInstance(VmInstance):
                             instances_client, project, zone, instance_name, last_terminal_status
                         )
                         await self._update_session_in_db(
+                            organization_id,
                             session_id,
                             status="failed",
                             access_url=None,
@@ -619,6 +631,7 @@ class GceVmInstance(VmInstance):
                     instances_client, project, zone, instance_name, last_terminal_status
                 )
                 await self._update_session_in_db(
+                    organization_id,
                     session_id,
                     status="failed",
                     access_url=None,
@@ -630,13 +643,14 @@ class GceVmInstance(VmInstance):
             user_prefix = f"{ssh_username}@" if ssh_username else ""
             access_url = f"ssh://{user_prefix}{external_ip}:22"
             logger.info("VM %s ready at %s", instance_name, external_ip)
-            await self._update_session_in_db(session_id, status="running", access_url=access_url)
+            await self._update_session_in_db(organization_id, session_id, status="running", access_url=access_url)
 
         except Exception as e:
             from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
             logger.exception("Background poll failed for VM session %s", session_id)
             await self._update_session_in_db(
+                organization_id,
                 session_id,
                 status="failed",
                 access_url=None,
@@ -687,55 +701,24 @@ class GceVmInstance(VmInstance):
 
     async def _update_session_in_db(
         self,
+        organization_id: int | None,
         session_id: int,
         status: str,
         access_url: str | None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> None:
-        """Update a work node session's status, access_url, and (on failure)
-        the failure_reason / failure_message taxonomy. Only writes the
-        failure fields when they are set so we don't clobber a row that was
-        already explained by the service layer."""
-        if not self._session_factory:
-            logger.warning("No session_factory, cannot update session %s", session_id)
-            return
-
-        try:
-            async with self._session_factory() as db:
-                from sqlalchemy import text
-
-                if failure_reason is not None or failure_message is not None:
-                    await db.execute(
-                        text(
-                            "UPDATE compute_sessions "
-                            "SET status = :status, access_url = :url, "
-                            "    failure_reason = :reason, failure_message = :msg "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "status": status,
-                            "url": access_url,
-                            "reason": failure_reason,
-                            "msg": failure_message,
-                            "id": session_id,
-                        },
-                    )
-                else:
-                    await db.execute(
-                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                        {"status": status, "url": access_url, "id": session_id},
-                    )
-                await db.commit()
-                logger.info(
-                    "Updated session %s: status=%s access_url=%s failure_reason=%s",
-                    session_id,
-                    status,
-                    access_url,
-                    failure_reason,
-                )
-        except Exception:
-            logger.exception("Failed to update session %s in DB", session_id)
+        """Record the poll's outcome on the session row (id AND organization; see
+        ``app.adapters.session_status``). Failure fields are written only when set."""
+        await update_compute_session(
+            self._session_factory,
+            organization_id=organization_id,
+            session_id=session_id,
+            status=status,
+            access_url=access_url,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+        )
 
     async def _gce_terminate_vm(
         self,

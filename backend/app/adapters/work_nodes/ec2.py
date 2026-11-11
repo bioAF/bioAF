@@ -35,6 +35,7 @@ from app.adapters.models import (
     VmStatus,
     to_service_state,
 )
+from app.adapters.session_status import update_compute_session
 from app.exceptions import ValidationError
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app import runtime
@@ -472,7 +473,10 @@ class Ec2VmInstance(VmInstance):
         # Background readiness poll
         creds = vm_spec.get("session_credentials", {})
         ssh_username = creds.get("username", "")
-        runtime.spawn(self._poll_vm_ready(session_id, instance_id, ssh_username), role="work-node-readiness")
+        runtime.spawn(
+            self._poll_vm_ready(session_id, instance_id, ssh_username, organization_id=vm_spec.get("organization_id")),
+            role="work-node-readiness",
+        )
 
         return VmInfo(
             instance_name=instance_id,
@@ -482,7 +486,9 @@ class Ec2VmInstance(VmInstance):
             provider_details={"image_id": ami_id},
         )
 
-    async def _poll_vm_ready(self, session_id: int, instance_id: str, ssh_username: str = "") -> None:
+    async def _poll_vm_ready(
+        self, session_id: int, instance_id: str, ssh_username: str = "", *, organization_id: int | None = None
+    ) -> None:
         """Background: poll for running status + public IP, then update the DB."""
         try:
             ec2 = self._client("ec2")
@@ -501,6 +507,7 @@ class Ec2VmInstance(VmInstance):
                     elif state in ("terminated", "stopped", "shutting-down"):
                         logger.error("EC2 work node %s entered %s", instance_id, state)
                         await self._update_session_in_db(
+                            organization_id,
                             session_id,
                             status="failed",
                             access_url=None,
@@ -514,6 +521,7 @@ class Ec2VmInstance(VmInstance):
             if not public_ip:
                 logger.error("EC2 work node %s not running with a public IP after 5 min", instance_id)
                 await self._update_session_in_db(
+                    organization_id,
                     session_id,
                     status="failed",
                     access_url=None,
@@ -524,12 +532,13 @@ class Ec2VmInstance(VmInstance):
             user_prefix = f"{ssh_username}@" if ssh_username else ""
             access_url = f"ssh://{user_prefix}{public_ip}:22"
             logger.info("EC2 work node %s ready at %s", instance_id, public_ip)
-            await self._update_session_in_db(session_id, status="running", access_url=access_url)
+            await self._update_session_in_db(organization_id, session_id, status="running", access_url=access_url)
         except Exception as e:
             from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
             logger.exception("Background poll failed for EC2 work node session %s", session_id)
             await self._update_session_in_db(
+                organization_id,
                 session_id,
                 status="failed",
                 access_url=None,
@@ -539,49 +548,24 @@ class Ec2VmInstance(VmInstance):
 
     async def _update_session_in_db(
         self,
+        organization_id: int | None,
         session_id: int,
         status: str,
         access_url: str | None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> None:
-        """Update a work node session's status / access_url / failure fields.
-
-        Identical contract to the GCE adapter's updater; only writes the failure
-        columns when set so a service-layer explanation is not clobbered.
-        """
-        if not self._session_factory:
-            logger.warning("No session_factory, cannot update session %s", session_id)
-            return
-
-        try:
-            async with self._session_factory() as db:
-                from sqlalchemy import text
-
-                if failure_reason is not None or failure_message is not None:
-                    await db.execute(
-                        text(
-                            "UPDATE compute_sessions "
-                            "SET status = :status, access_url = :url, "
-                            "    failure_reason = :reason, failure_message = :msg "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "status": status,
-                            "url": access_url,
-                            "reason": failure_reason,
-                            "msg": failure_message,
-                            "id": session_id,
-                        },
-                    )
-                else:
-                    await db.execute(
-                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                        {"status": status, "url": access_url, "id": session_id},
-                    )
-                await db.commit()
-        except Exception:
-            logger.exception("Failed to update session %s in DB", session_id)
+        """Record the poll's outcome on the session row (id AND organization; see
+        ``app.adapters.session_status``). Failure fields are written only when set."""
+        await update_compute_session(
+            self._session_factory,
+            organization_id=organization_id,
+            session_id=session_id,
+            status=status,
+            access_url=access_url,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+        )
 
     async def _ec2_terminate_vm(
         self,

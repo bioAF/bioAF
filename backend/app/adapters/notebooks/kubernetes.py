@@ -22,6 +22,8 @@ from app.platform.shell_args import ShellExpr, safe_relative_path, shell_word
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
+from app.adapters.kubernetes.service_account import ensure_service_account_annotations
+from app.adapters.session_status import update_compute_session
 from app.exceptions import ValidationError
 from app.adapters.models import (
     SessionInfo,
@@ -366,20 +368,14 @@ class KubernetesNotebookProvider(NotebookProvider):
         return True
 
     def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the notebook-runner KSA carries the pod-identity binding."""
-        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
-        try:
-            sa = core_v1.read_namespaced_service_account(name="bioaf-notebook-runner", namespace=namespace)
-            current = sa.metadata.annotations or {}
-            if desired and any(current.get(k) != v for k, v in desired.items()):
-                core_v1.patch_namespaced_service_account(
-                    name="bioaf-notebook-runner",
-                    namespace=namespace,
-                    body={"metadata": {"annotations": desired}},
-                )
-                logger.info("Patched pod-identity annotation on bioaf-notebook-runner")
-        except Exception:
-            logger.exception("Failed to patch pod-identity annotation on bioaf-notebook-runner")
+        """Ensure the bioaf-notebook-runner KSA carries the pod-identity binding (the upgrade path, where it
+        predates pod identity)."""
+        ensure_service_account_annotations(
+            core_v1,
+            namespace=namespace,
+            service_account="bioaf-notebook-runner",
+            desired=self._pod_identity.pod_identity_annotations(gcp_sa_email),
+        )
 
     # -- K8s API implementations (production) --
 
@@ -838,7 +834,14 @@ class KubernetesNotebookProvider(NotebookProvider):
             # Launch background task to poll for pod readiness and LB IP,
             # then update the DB session record once both are available.
             runtime.spawn(
-                self._poll_session_ready(session_id, pod_name, service_name, namespace, container_port),
+                self._poll_session_ready(
+                    session_id,
+                    pod_name,
+                    service_name,
+                    namespace,
+                    container_port,
+                    organization_id=session_spec.get("organization_id"),
+                ),
                 role="notebook-readiness",
             )
 
@@ -858,6 +861,8 @@ class KubernetesNotebookProvider(NotebookProvider):
         service_name: str,
         namespace: str,
         container_port: int,
+        *,
+        organization_id: int | None = None,
     ) -> None:
         """Background: poll for pod readiness and LB IP, then update the DB."""
         try:
@@ -877,6 +882,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                         logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
                         reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
                         await self._update_session_in_db(
+                            organization_id,
                             session_id,
                             status="failed",
                             access_url=None,
@@ -892,6 +898,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 logger.error("Pod %s not ready after 5 min", pod_name)
                 reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
                 await self._update_session_in_db(
+                    organization_id,
                     session_id,
                     status="failed",
                     access_url=None,
@@ -925,13 +932,14 @@ class KubernetesNotebookProvider(NotebookProvider):
                     service_name,
                 )
 
-            await self._update_session_in_db(session_id, status="running", access_url=access_url)
+            await self._update_session_in_db(organization_id, session_id, status="running", access_url=access_url)
 
         except Exception as e:
             from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
             logger.exception("Background poll failed for session %s", session_id)
             await self._update_session_in_db(
+                organization_id,
                 session_id,
                 status="failed",
                 access_url=None,
@@ -965,55 +973,24 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     async def _update_session_in_db(
         self,
+        organization_id: int | None,
         session_id: int,
         status: str,
         access_url: str | None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> None:
-        """Update a notebook session's status, access_url, and (on failure)
-        the failure_reason / failure_message taxonomy. Only writes the
-        failure fields when they are set so we don't clobber a row that was
-        already explained by the service layer."""
-        if not self._session_factory:
-            logger.warning("No session_factory, cannot update session %s in DB", session_id)
-            return
-
-        try:
-            async with self._session_factory() as db:
-                from sqlalchemy import text
-
-                if failure_reason is not None or failure_message is not None:
-                    await db.execute(
-                        text(
-                            "UPDATE compute_sessions "
-                            "SET status = :status, access_url = :url, "
-                            "    failure_reason = :reason, failure_message = :msg "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "status": status,
-                            "url": access_url,
-                            "reason": failure_reason,
-                            "msg": failure_message,
-                            "id": session_id,
-                        },
-                    )
-                else:
-                    await db.execute(
-                        text("UPDATE compute_sessions SET status = :status, access_url = :url WHERE id = :id"),
-                        {"status": status, "url": access_url, "id": session_id},
-                    )
-                await db.commit()
-                logger.info(
-                    "Updated session %s: status=%s access_url=%s failure_reason=%s",
-                    session_id,
-                    status,
-                    access_url,
-                    failure_reason,
-                )
-        except Exception:
-            logger.exception("Failed to update session %s in DB", session_id)
+        """Record the poll's outcome on the session row (id AND organization; see
+        ``app.adapters.session_status``). Failure fields are written only when set."""
+        await update_compute_session(
+            self._session_factory,
+            organization_id=organization_id,
+            session_id=session_id,
+            status=status,
+            access_url=access_url,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+        )
 
     async def _k8s_terminate_session(
         self,
