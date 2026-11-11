@@ -101,7 +101,16 @@ export function useFocusTrap<T extends HTMLElement>(open: boolean) {
       }
       const first = items[0];
       const last = items[items.length - 1];
-      // Only intervene at the two edges. Anywhere in between, the browser's own
+      // The container itself is focused when nothing inside could be (a busy
+      // dialog, or recovery from focus lost to <body>). Once its controls are
+      // back, the browser's order from there leads out of the dialog on
+      // Shift+Tab, so both directions are decided here.
+      if (document.activeElement === container) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
+      // Otherwise intervene only at the two edges. Anywhere in between, the browser's own
       // tab order is already right and overriding it would break it.
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
