@@ -21,3 +21,8 @@ test("a link styled as an action uses the same classes as the button", () => {
     screen.getByRole("button", { name: "Small" }).className,
   );
 });
+
+test("the large size keeps the launch dialog's footer hit target", () => {
+  render(<Button size="lg">Launch</Button>);
+  expect(screen.getByRole("button", { name: "Launch" }).className).toMatch(/\bpx-6\b.*\bpy-2\.5\b/);
+});

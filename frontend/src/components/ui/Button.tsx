@@ -18,7 +18,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
  */
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
-type Size = "sm" | "md";
+type Size = "sm" | "md" | "lg";
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   variant?: Variant;
@@ -45,6 +45,8 @@ const VARIANTS: Record<Variant, string> = {
 const SIZES: Record<Size, string> = {
   sm: "px-3 py-1.5 text-sm",
   md: "px-4 py-2 text-sm",
+  /** The work node launch footer's existing target. */
+  lg: "px-6 py-2.5 text-sm",
 };
 
 /**
