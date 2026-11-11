@@ -17,20 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 from typing import BinaryIO
 from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
     StorageMetrics,
-    StorageObjectNotFound,
     StorageStore,
     StoredObject,
 )
@@ -38,41 +37,16 @@ from app.adapters.models import (
 _DEFAULT_ROOT = os.environ.get("BIOAF_NFS_ROOT", "/srv/bioaf")
 
 
-def _read_file_bytes(path: str) -> bytes:
-    with open(path, "rb") as f:
-        return f.read()
 
 
-def _read_file_prefix(path: str, length: int) -> bytes:
-    with open(path, "rb") as f:
-        return f.read(length)
 
 
-def _write_file_bytes(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(data)
 
 
-def _write_file_stream(path: str, file_obj) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if hasattr(file_obj, "seek"):
-        try:
-            file_obj.seek(0)
-        except (OSError, ValueError):
-            pass
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file_obj, f)
 
 
-def _stream_file_into(path: str, file_obj) -> None:
-    with open(path, "rb") as f:
-        shutil.copyfileobj(f, file_obj)
 
 
-def _copy_file(src: str, dest: str) -> None:
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    shutil.copy2(src, dest)
 
 
 def _dir_size_and_count(path: str) -> tuple[int, int]:
@@ -113,23 +87,18 @@ class NfsStorageProvider(StorageProvider):
     def _store_root(self, store: str) -> str:
         return os.path.join(self._root, store)
 
+    @property
+    def _fs(self) -> LocalObjectFilesystem:
+        return LocalObjectFilesystem(self._root, self._parse_uri, self.build_uri)
+
     def _path(self, uri: str) -> str:
         """Resolve a URI to a concrete path, confined under the mount root.
 
-        Rejects any key that would escape the root (path traversal), so a crafted
-        ``file://working/../../etc/passwd`` cannot read or write outside the mount.
+        Rejects a store or key that would escape the root (path traversal, a symlink out), so a
+        crafted ``file://working/../../etc/passwd`` cannot read or write outside the mount. A URI
+        ending in ``/`` names a directory.
         """
-        store, key = self._parse_uri(uri)
-        # Reject traversal in the user-derived key first (the explicit '..'/abs
-        # check is a CodeQL-recognised path-injection barrier), then confirm the
-        # resolved real path stays under the mount root (the semantic guard).
-        if os.path.isabs(key) or ".." in key.split("/"):
-            raise ValidationError(f"Storage URI escapes the mount root: {uri!r}")
-        base = os.path.realpath(self._root)
-        full = os.path.realpath(os.path.join(base, store, key))
-        if full != base and not full.startswith(base + os.sep):
-            raise ValidationError(f"Storage URI escapes the mount root: {uri!r}")
-        return full
+        return self._fs.path(uri, directory=uri.endswith("/"))
 
     # -- pipeline output collection ------------------------------------------
 
@@ -256,49 +225,35 @@ class NfsStorageProvider(StorageProvider):
         return (await self.read_bytes(uri)).decode(encoding)
 
     async def read_bytes(self, uri: str) -> bytes:
-        path = self._path(uri)
-        if not os.path.exists(path):
-            raise StorageObjectNotFound(uri)
-        return await asyncio.to_thread(_read_file_bytes, path)
+        return await asyncio.to_thread(self._fs.read_bytes, uri)
 
     async def read_prefix(self, uri: str, length: int) -> bytes:
-        path = self._path(uri)
-        if not os.path.exists(path):
-            raise StorageObjectNotFound(uri)
-        return await asyncio.to_thread(_read_file_prefix, path, length)
+        return await asyncio.to_thread(self._fs.read_prefix, uri, length)
 
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
 
     async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
-        await asyncio.to_thread(_write_file_bytes, self._path(uri), data)
+        await asyncio.to_thread(self._fs.write_bytes, uri, data)
 
     async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
-        await asyncio.to_thread(_write_file_stream, self._path(uri), file_obj)
+        await asyncio.to_thread(self._fs.write_stream, uri, file_obj)
 
     async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
-        await asyncio.to_thread(_copy_file, local_path, self._path(uri))
+        await asyncio.to_thread(self._fs.upload_filename, uri, local_path)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
-        path = self._path(uri)
-        if not os.path.exists(path):
-            raise StorageObjectNotFound(uri)
-        await asyncio.to_thread(_stream_file_into, path, file_obj)
+        await asyncio.to_thread(self._fs.stream_into, uri, file_obj)
 
     async def download_to_filename(self, uri: str, local_path: str) -> None:
-        src = self._path(uri)
-        if not os.path.exists(src):
-            raise StorageObjectNotFound(uri)
-        await asyncio.to_thread(_copy_file, src, local_path)
+        await asyncio.to_thread(self._fs.download_to_filename, uri, local_path)
 
     async def delete(self, uri: str, *, generation: int | None = None) -> None:
         # A filesystem has no object generations; ignore ``generation``.
-        path = self._path(uri)
-        if os.path.exists(path):
-            await asyncio.to_thread(os.remove, path)
+        await asyncio.to_thread(self._fs.delete, uri)
 
     async def exists(self, uri: str) -> bool:
-        return os.path.exists(self._path(uri))
+        return await asyncio.to_thread(self._fs.exists, uri)
 
     async def list_objects(
         self,
@@ -308,57 +263,19 @@ class NfsStorageProvider(StorageProvider):
         include_versions: bool = False,
         max_results: int | None = None,
     ) -> list[StoredObject]:
-        return await asyncio.to_thread(self._list_objects, uri_prefix, max_results)
-
-    def _list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
-        store, key_prefix = self._parse_uri(uri_prefix)
-        store_root = self._store_root(store)
-        results: list[StoredObject] = []
-        if not os.path.isdir(store_root):
-            return results
-        for dirpath, _dirs, files in os.walk(store_root):
-            for fname in files:
-                full = os.path.join(dirpath, fname)
-                rel = os.path.relpath(full, store_root).replace(os.sep, "/")
-                if key_prefix and not rel.startswith(key_prefix):
-                    continue
-                results.append(
-                    StoredObject(
-                        filename=fname,
-                        storage_uri=f"file://{store}/{rel}",
-                        size_bytes=os.path.getsize(full),
-                    )
-                )
-                if max_results is not None and len(results) >= max_results:
-                    return results
-        return results
+        return await asyncio.to_thread(self._fs.list, uri_prefix, recursive=recursive, max_results=max_results)
 
     async def copy(self, source_uri: str, dest_uri: str) -> str:
-        await asyncio.to_thread(self._copy, source_uri, dest_uri)
+        await asyncio.to_thread(self._fs.copy, source_uri, dest_uri)
         return dest_uri
-
-    def _copy(self, source_uri: str, dest_uri: str) -> None:
-        src = self._path(source_uri)
-        if not os.path.exists(src):
-            raise StorageObjectNotFound(source_uri)
-        _copy_file(src, self._path(dest_uri))
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
-        await asyncio.to_thread(self._move, source_uri, dest_uri)
+        # Copy-verify-delete: leave the source intact if the copy fails.
+        await asyncio.to_thread(self._fs.move, source_uri, dest_uri)
         return dest_uri
 
-    def _move(self, source_uri: str, dest_uri: str) -> None:
-        # Copy-verify-delete: leave the source intact if the copy fails.
-        self._copy(source_uri, dest_uri)
-        if not os.path.exists(self._path(dest_uri)):
-            raise RuntimeError(f"Move verification failed: {dest_uri!r} not written")
-        os.remove(self._path(source_uri))
-
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
-        path = self._path(uri)
-        if not os.path.exists(path):
-            raise StorageObjectNotFound(uri)
-        size = await asyncio.to_thread(os.path.getsize, path)
+        size = await asyncio.to_thread(self._fs.size, uri)
         return ObjectMetadata(uri=uri, size_bytes=size)
 
     async def get_bucket_info(self, uri: str) -> dict:
