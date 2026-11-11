@@ -247,4 +247,7 @@ class TestWhatIsLeftAlone:
 
         assert study.id not in reaped
         assert "fetch_reaped" not in (study.evidence_json or {})
-        assert await _linked_file_count(session, study.experiment_id) == 2
+        # A failed delete may still have removed the object, so the links stay removed and the
+        # obligation stays for the next pass (owner-approved change, 2026-11-10).
+        assert await _linked_file_count(session, study.experiment_id) == 0
+        assert study.evidence_json["fetch_reap_pending"]["run_id"] == study.data_run_id

@@ -28,6 +28,7 @@ from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample, sample_files
+from app.models.validation_study import ValidationStudy
 from app.platform.work_dir_layout import work_dir_key
 from app.services.validation_fetch_reaper import ValidationFetchReaper
 from app.services.validation_study_service import ValidationStudyService
@@ -326,17 +327,33 @@ class TestValidationReaperRecovery:
         assert "fetch_reap_pending" not in (study.evidence_json or {})
 
     @pytest.mark.asyncio
-    async def test_a_failed_first_deletion_leaves_the_study_whole(self, session, parked, storage, experiment):
+    @pytest.mark.parametrize("response_lost", [False, True], ids=["refused", "deleted-then-lost"])
+    async def test_a_failed_first_deletion_keeps_the_cleanup_pending(
+        self, session, parked, storage, experiment, response_lost
+    ):
+        """A failed delete is ambiguous: storage may have removed the object and lost the response.
+        Once deletion has begun the links are never put back, so a retry cannot relaunch against a
+        FASTQ that may be gone, and the obligation stays for the next pass to finish."""
         study, fastq, work = await parked()
+        real_delete = storage.delete
 
-        async def down(*a, **k):
-            raise RuntimeError("storage went away")
+        async def failing(uri, **kw):
+            if response_lost:
+                await real_delete(uri, **kw)
+            raise TimeoutError("no response from storage")
 
-        with _reaper_storage(storage), patch.object(storage, "delete", side_effect=down):
+        with _reaper_storage(storage), patch.object(storage, "delete", side_effect=failing):
             assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == []
-        assert await _all_exist(storage, fastq + work)
-        assert len(await _links(session, experiment.id)) == 2
-        assert "fetch_reap_pending" not in (study.evidence_json or {})
+        assert await storage.exists(fastq[0]) is not response_lost
+        assert await _links(session, experiment.id) == []
+        assert len(await _files(session)) == 2
+        assert study.evidence_json["fetch_reap_pending"]["run_id"] == 7
+        assert "fetch_reaped" not in study.evidence_json
+
+        with _reaper_storage(storage):
+            assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == [study.id]
+        assert await _none_exist(storage, fastq + work)
+        assert await _files(session) == []
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("fail_after", [1, 3])
@@ -395,3 +412,114 @@ class TestValidationReaperRecovery:
         with _reaper_storage(storage):
             assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == [study.id]
         assert await _files(session) == []
+
+
+async def _current(study_id):
+    """The study as committed, read on its own connection."""
+    import app.database as database
+
+    async with database.async_session_factory() as other:
+        return (await other.execute(select(ValidationStudy).where(ValidationStudy.id == study_id))).scalar_one()
+
+
+class TestValidationReaperAgainstRetry:
+    """Cleanup admission and a user's retry decide on the same study row, one at a time.
+
+    The reaper authorizes (a storage listing) without holding anything, then admits the study under
+    a row lock and re-checks eligibility on the committed row; ``retry_study`` holds the same lock
+    from its read to its commit. Whichever comes second sees what the first decided.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_retry_committed_during_authorization_keeps_the_data(
+        self, session, parked, storage, experiment, admin_user
+    ):
+        import app.database as database
+
+        study, fastq, work = await parked()
+        real_list = storage.list_objects
+        retried = {}
+
+        async def list_while_the_user_retries(uri, **kw):
+            result = await real_list(uri, **kw)
+            if not retried:
+                async with database.async_session_factory() as other:
+                    r = await ValidationStudyService.retry_study(
+                        other, study.id, admin_user.organization_id, admin_user.id
+                    )
+                    retried["state"] = r.state
+                    await other.commit()
+            return result
+
+        with _reaper_storage(storage), patch.object(storage, "list_objects", side_effect=list_while_the_user_retries):
+            assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == []
+
+        assert retried["state"] == "setup"
+        current = await _current(study.id)
+        assert current.state == "setup"
+        assert "fetch_reap_pending" not in (current.evidence_json or {})
+        assert await _all_exist(storage, fastq + work)
+        assert len(await _links(session, experiment.id)) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_retry_in_progress_is_not_cleaned_under_it(self, session, parked, storage, experiment, admin_user):
+        """The retry has read the study and found runnable FASTQ, and has not committed yet. A reaper
+        pass in that gap must not unlink or delete what the retry is about to resume from."""
+        import app.database as database
+        from app.services import validation_study_service as vss
+
+        study, fastq, work = await parked()
+        real_runnable = vss._has_runnable_samples
+
+        async def runnable_then_reaper_runs(s, experiment_id):
+            answer = await real_runnable(s, experiment_id)
+            with _reaper_storage(storage):
+                assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == []
+            return answer
+
+        async with database.async_session_factory() as other:
+            with patch.object(vss, "_has_runnable_samples", side_effect=runnable_then_reaper_runs):
+                r = await ValidationStudyService.retry_study(other, study.id, admin_user.organization_id, admin_user.id)
+            await other.commit()
+
+        assert r.state == "setup"
+        current = await _current(study.id)
+        assert current.state == "setup"
+        assert "fetch_reap_pending" not in (current.evidence_json or {})
+        assert await _all_exist(storage, fastq + work)
+        assert len(await _links(session, experiment.id)) == 2
+
+    @pytest.mark.asyncio
+    async def test_a_retry_during_deletion_keeps_its_decision_when_cleanup_completes(
+        self, session, parked, storage, admin_user
+    ):
+        """Admitted cleanup finishes, but the completion marker is written onto the committed row,
+        not over it: the retry's approval-gate flag survives and the retry window it cleared stays
+        cleared."""
+        import app.database as database
+
+        study, fastq, work = await parked()
+        real_delete = storage.delete
+        retried = {}
+
+        async def delete_while_the_user_retries(uri, **kw):
+            if not retried:
+                async with database.async_session_factory() as other:
+                    r = await ValidationStudyService.retry_study(
+                        other, study.id, admin_user.organization_id, admin_user.id
+                    )
+                    retried["state"] = r.state
+                    await other.commit()
+            await real_delete(uri, **kw)
+
+        with _reaper_storage(storage), patch.object(storage, "delete", side_effect=delete_while_the_user_retries):
+            assert await ValidationFetchReaper.reap(session, raw_bucket=RAW) == [study.id]
+
+        assert retried["state"] == "plan_ready"
+        current = await _current(study.id)
+        assert current.state == "plan_ready"
+        assert current.evidence_json["awaiting_refetch_approval"] is True
+        assert current.evidence_json["fetch_reaped"]["run_id"] == 7
+        assert "fetch_reap_after" not in current.evidence_json
+        assert "fetch_reap_pending" not in current.evidence_json
+        assert await _none_exist(storage, fastq + work)

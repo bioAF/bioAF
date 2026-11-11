@@ -31,7 +31,15 @@ Storage and the database cannot change atomically, so the order is chosen for wh
 behind: the sample links go first and are committed (a retry can no longer treat the FASTQ as
 runnable), then the objects, then the File rows and the completion marker. `fetch_reap_pending`
 records the obligation between the two, keyed by the fetch run, and is finished on a later pass
-even if the study has been retried out of `error` in the meantime.
+even if the study has been retried out of `error` in the meantime. Once a delete has been issued the
+links are never put back: a failed delete may still have removed the object (a lost response), so
+the only safe reading of any failure is "possibly gone".
+
+Admission and `retry_study` decide on the same row, one at a time. Authorization reads storage
+without holding anything; the study is then locked (``SKIP LOCKED``: a retry in progress wins this
+pass) and its eligibility re-checked on the committed row before the unlink. ``retry_study`` holds
+the same lock from its read to its commit. Every later write of the study's evidence also re-reads
+it under the lock, so a retry that landed meanwhile is built on, not overwritten.
 """
 
 from __future__ import annotations
@@ -88,15 +96,17 @@ class ValidationFetchReaper:
         durable before deletion); the scheduled job's own commit afterwards finds nothing left.
         """
         now = datetime.now(timezone.utc)
-        studies = list(
+        study_ids = list(
             (
                 await session.execute(
-                    select(ValidationStudy).where(
+                    select(ValidationStudy.id)
+                    .where(
                         or_(
                             ValidationStudy.state == "error",
                             ValidationStudy.evidence_json.has_key(_PENDING_KEY),
                         )
                     )
+                    .order_by(ValidationStudy.id)
                 )
             )
             .scalars()
@@ -106,25 +116,18 @@ class ValidationFetchReaper:
         storage = get_storage_adapter()
         reaped: list[int] = []
 
-        for study in studies:
-            evidence = dict(study.evidence_json or {})
-            pending = evidence.get(_PENDING_KEY)
-            if pending:
-                # An obligation already begun is finished regardless of the study's state or window.
-                run_id = pending.get("run_id")
-            else:
-                done = evidence.get(_REAPED_KEY)
-                if done and done.get("run_id") in (None, study.data_run_id):
-                    continue
-                # No stamp, no proof of when the window opened. A study that stopped before this
-                # shipped is left alone deliberately: deleting a fetch somebody still intends to
-                # resume must be a decision, not a side effect of a deploy.
-                deadline = _parse_iso(evidence.get(_DEADLINE_KEY) or "")
-                if deadline is None or deadline > now:
-                    continue
-                run_id = study.data_run_id
-                if run_id is None:
-                    continue  # never fetched anything; there is no window to close
+        for study_id in study_ids:
+            # Loaded fresh each time: an earlier study's rollback expires every loaded instance.
+            study = (
+                await session.execute(
+                    select(ValidationStudy)
+                    .where(ValidationStudy.id == study_id)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            run_id = ValidationFetchReaper._due_run(study, now) if study is not None else None
+            if study is None or run_id is None:
+                continue
 
             try:
                 files, uris, objects = await ValidationFetchReaper._authorize(
@@ -132,54 +135,54 @@ class ValidationFetchReaper:
                 )
             except _Blocked as blocked:
                 logger.warning("validation study %d: fetch reap refused: %s", study.id, blocked.reason)
+                if await ValidationFetchReaper._admit(session, study.id, run_id, now) is None:
+                    continue
+                evidence = dict(study.evidence_json or {})
                 evidence[_BLOCKED_KEY] = {"at": now.isoformat(), "reason": blocked.reason, "uris": blocked.uris}
                 study.evidence_json = evidence
                 await session.commit()
                 continue
             except Exception as exc:
                 logger.warning("validation study %d: fetch reap could not start: %s", study.id, exc)
+                try:
+                    await session.commit()  # authorization only reads
+                except Exception:
+                    await ValidationFetchReaper._abandon(session, study.id)  # a database failure
                 continue
 
             file_ids = [f.id for f in files]
             freed_bytes = sum(f.size_bytes or 0 for f in files)
 
-            # 1. Unlink, durably, before anything irreversible: from here a retry lands at the
-            #    approval gate rather than relaunching against FASTQ that may be gone.
-            links = []
+            # 1. Admit under the row lock, then unlink, durably, before anything irreversible: from
+            #    here a retry lands at the approval gate rather than relaunching against FASTQ that
+            #    may be gone.
+            if await ValidationFetchReaper._admit(session, study.id, run_id, now) is None:
+                logger.info("validation study %d: fetch reap skipped, the study changed or is being retried", study.id)
+                continue
+            registered = (await session.execute(select(File.id).where(File.source_pipeline_run_id == run_id))).scalars()
+            if set(registered) != set(file_ids):
+                await session.commit()  # nothing written; registered since authorization, re-authorize next pass
+                continue
             if file_ids:
-                links = [
-                    {"sample_id": sample_id, "file_id": file_id}
-                    for sample_id, file_id in (
-                        await session.execute(
-                            select(sample_files.c.sample_id, sample_files.c.file_id).where(
-                                sample_files.c.file_id.in_(file_ids)
-                            )
-                        )
-                    ).all()
-                ]
                 await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(file_ids)))
+            evidence = dict(study.evidence_json or {})
             evidence.pop(_BLOCKED_KEY, None)
             evidence[_PENDING_KEY] = {"at": now.isoformat(), "run_id": run_id}
             study.evidence_json = evidence
             await session.commit()
 
-            # 2. The objects. Deletion is idempotent, so a later pass repeats it safely.
-            deleted = 0
+            # 2. The objects. Deletion is idempotent, so a later pass repeats it safely. Any failure
+            #    leaves the obligation (and the unlink) in place: see the module docstring.
             try:
                 for uri in uris + [o.storage_uri for o in objects]:
                     await storage.delete(uri)
-                    deleted += 1
-                # 3. The rows that pointed at them, then the marker.
+                # 3. The rows that pointed at them, then the marker, onto the committed row.
+                if await ValidationFetchReaper._admit(session, study.id, run_id, now) is None:
+                    continue  # being retried right now; the pending obligation brings us back
                 await ValidationFetchReaper._forget_files(session, file_ids)
             except Exception as exc:
-                # Deliberately unmarked: the rows still name what is left, and the pending
-                # obligation brings the next pass back here.
                 logger.warning("validation study %d: fetch reap incomplete, will retry: %s", study.id, exc)
-                await session.rollback()
-                if deleted == 0 and not pending:
-                    # Nothing is gone yet, so the data is still whole: put the links back and
-                    # withdraw the obligation, as if this pass had not started.
-                    await ValidationFetchReaper._restore(session, study, links)
+                await ValidationFetchReaper._abandon(session, study.id)
                 continue
 
             evidence = dict(study.evidence_json or {})
@@ -206,6 +209,59 @@ class ValidationFetchReaper:
             )
 
         return reaped
+
+    @staticmethod
+    def _due_run(study: ValidationStudy, now: datetime) -> int | None:
+        """The fetch run whose data this study's cleanup is due to delete now, or None."""
+        evidence = study.evidence_json or {}
+        pending = evidence.get(_PENDING_KEY)
+        if pending:
+            # An obligation already begun is finished regardless of the study's state or window.
+            return pending.get("run_id")
+        if study.state != "error":
+            return None
+        done = evidence.get(_REAPED_KEY)
+        if done and done.get("run_id") in (None, study.data_run_id):
+            return None
+        # No stamp, no proof of when the window opened. A study that stopped before this shipped
+        # is left alone deliberately: deleting a fetch somebody still intends to resume must be a
+        # decision, not a side effect of a deploy.
+        deadline = _parse_iso(evidence.get(_DEADLINE_KEY) or "")
+        if deadline is None or deadline > now:
+            return None
+        return study.data_run_id  # None: never fetched anything, no window to close
+
+    @staticmethod
+    async def _admit(session: AsyncSession, study_id: int, run_id: int, now: datetime) -> ValidationStudy | None:
+        """Lock the study's committed row and confirm the same cleanup is still due, or release.
+
+        ``SKIP LOCKED``: a retry holding the row decides first; this pass leaves the study alone.
+        The lock lasts until the caller's next commit or rollback.
+        """
+        locked = (
+            await session.execute(
+                select(ValidationStudy)
+                .where(ValidationStudy.id == study_id)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked is None or ValidationFetchReaper._due_run(locked, now) != run_id:
+            await session.commit()  # nothing was written; this only releases the lock
+            return None
+        return locked
+
+    @staticmethod
+    async def _abandon(session: AsyncSession, study_id: int) -> None:
+        """Roll back this study's unfinished transaction and reload it as committed.
+
+        A rollback expires every loaded instance, which async code cannot lazily reload; the next
+        study is reloaded by the loop, and this one here, so callers holding it read what is true.
+        """
+        await session.rollback()
+        await session.execute(
+            select(ValidationStudy).where(ValidationStudy.id == study_id).execution_options(populate_existing=True)
+        )
 
     @staticmethod
     async def _authorize(session: AsyncSession, study, run_id: int, storage, raw_bucket: str):
@@ -238,15 +294,6 @@ class ValidationFetchReaper:
         if stray:
             raise _Blocked("the work-dir listing returned objects outside the run's work directory", stray)
         return files, uris, objects
-
-    @staticmethod
-    async def _restore(session: AsyncSession, study, links: list[dict]) -> None:
-        if links:
-            await session.execute(sample_files.insert(), links)
-        evidence = dict(study.evidence_json or {})
-        evidence.pop(_PENDING_KEY, None)
-        study.evidence_json = evidence or None
-        await session.commit()
 
     @staticmethod
     async def _forget_files(session: AsyncSession, file_ids: list[int]) -> None:
