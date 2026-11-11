@@ -73,17 +73,16 @@ export function ConfirmDialog({
 
   const phraseSatisfied = !requirePhrase || phrase.trim() === requirePhrase;
 
-  // Escape works wherever focus is, but only for the dialog on top: a confirm
-  // opened from inside a Modal shares the Modal's dismissal stack, so one
-  // Escape cancels the confirm and leaves the Modal open. A busy confirm
-  // refuses the Escape rather than passing it to the dialog underneath.
-  useDismissOnEscape(open, onCancel, !busy);
-
   // Keep the keyboard inside the dialog and hand focus back to whatever opened
   // it on close. The trap focuses the first control; Cancel is focused
   // explicitly afterwards so the safe choice, not the destructive one, is the
   // default when someone hits Enter straight away.
   const trapRef = useFocusTrap<HTMLDivElement>(open);
+  // Escape works wherever focus is, but only for the dialog on top: a confirm
+  // inside a Modal shares the Modal's dismissal stack, and its element tells
+  // the stack it is the inner one even when both mount together. A busy
+  // confirm refuses the Escape rather than passing it to the dialog beneath.
+  useDismissOnEscape(open, onCancel, !busy, trapRef);
   useEffect(() => {
     if (open) cancelRef.current?.focus();
   }, [open]);

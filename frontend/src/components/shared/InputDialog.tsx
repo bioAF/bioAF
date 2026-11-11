@@ -73,7 +73,7 @@ export function InputDialog({
   const trapRef = useFocusTrap<HTMLDivElement>(open);
   // On the shared dismissal stack, so Escape closes this prompt and not a
   // Modal it was opened from; while busy it refuses Escape instead.
-  useDismissOnEscape(open, onCancel, !busy);
+  useDismissOnEscape(open, onCancel, !busy, trapRef);
 
   if (!open) return null;
 

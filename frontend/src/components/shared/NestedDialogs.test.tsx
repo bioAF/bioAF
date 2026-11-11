@@ -121,3 +121,78 @@ test("a standalone InputDialog still cancels on Escape from its field", async ()
   fireEvent.keyDown(screen.getByLabelText("Name"), { key: "Escape" });
   expect(cancel).toHaveBeenCalledTimes(1);
 });
+
+/**
+ * Both dialogs open in the same commit (a page that renders a Modal with its
+ * confirm already open, or a deep link that opens both). React runs the inner
+ * dialog's effects first, so registration order alone would make the OUTER
+ * dialog look topmost. Nesting in the DOM decides instead.
+ */
+function MountedTogether({
+  inner,
+  innerBusy = false,
+  onOuterClose,
+  onInnerCancel,
+}: {
+  inner: Inner;
+  innerBusy?: boolean;
+  onOuterClose: () => void;
+  onInnerCancel: () => void;
+}) {
+  return (
+    <Modal open title="Outer" onClose={onOuterClose}>
+      <button type="button">Outer control</button>
+      {inner === "confirm" && <ConfirmDialog open title="Inner" message="Sure?" busy={innerBusy} onConfirm={() => {}} onCancel={onInnerCancel} />}
+      {inner === "input" && <InputDialog open title="Inner" label="Name" busy={innerBusy} onConfirm={() => {}} onCancel={onInnerCancel} />}
+      {inner === "modal" && (
+        <Modal open title="Inner" dismissible={!innerBusy} onClose={onInnerCancel}>
+          <button type="button">Inside</button>
+        </Modal>
+      )}
+    </Modal>
+  );
+}
+
+describe.each(["confirm", "input", "modal"] as const)("a %s mounted in the same commit as its Modal", (inner) => {
+  test("Escape dismisses only the inner dialog", () => {
+    const outer = jest.fn();
+    const innerCancel = jest.fn();
+    render(<MountedTogether inner={inner} onOuterClose={outer} onInnerCancel={innerCancel} />);
+    escape();
+    expect(innerCancel).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  test("a busy (or non-dismissible) inner dialog refuses Escape and the outer stays open", () => {
+    const outer = jest.fn();
+    const innerCancel = jest.fn();
+    render(<MountedTogether inner={inner} innerBusy onOuterClose={outer} onInnerCancel={innerCancel} />);
+    escape();
+    expect(innerCancel).not.toHaveBeenCalled();
+    expect(outer).not.toHaveBeenCalled();
+  });
+});
+
+test("a dialog opened later beside (not inside) another is still the one on top", () => {
+  const first = jest.fn();
+  const second = jest.fn();
+  const { rerender } = render(
+    <>
+      <Modal open title="First" onClose={first}>
+        <p>a</p>
+      </Modal>
+      <ConfirmDialog open={false} title="Second" message="m" onConfirm={() => {}} onCancel={second} />
+    </>,
+  );
+  rerender(
+    <>
+      <Modal open title="First" onClose={first}>
+        <p>a</p>
+      </Modal>
+      <ConfirmDialog open title="Second" message="m" onConfirm={() => {}} onCancel={second} />
+    </>,
+  );
+  escape();
+  expect(second).toHaveBeenCalledTimes(1);
+  expect(first).not.toHaveBeenCalled();
+});

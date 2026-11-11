@@ -66,7 +66,7 @@ export function Modal({
   const titleId = useId();
   const trapRef = useFocusTrap<HTMLDivElement>(open);
 
-  useDismissOnEscape(open, onClose, dismissible);
+  useDismissOnEscape(open, onClose, dismissible, trapRef);
 
   // A modal that scrolls the page behind it reads as two documents at once, and
   // on touch the background is what actually moves.
