@@ -9,6 +9,9 @@ interface VocabularySelectProps {
   placeholder?: string;
   className?: string;
   allowEmpty?: boolean;
+  /** From a Field: a visible label then names the select instead of aria-label. */
+  id?: string;
+  "aria-describedby"?: string;
 }
 
 export function VocabularySelect({
@@ -18,12 +21,16 @@ export function VocabularySelect({
   placeholder,
   className = "border rounded px-3 py-2 text-sm",
   allowEmpty = true,
+  id,
+  "aria-describedby": describedBy,
 }: VocabularySelectProps) {
   const { values, loading } = useVocabulary(fieldName);
+  // With an id a visible label names the select, and aria-label would override it.
+  const ariaLabel = id ? undefined : placeholder ?? fieldName;
 
   if (loading) {
     return (
-      <select disabled aria-label={placeholder ?? fieldName} className={className}>
+      <select disabled id={id} aria-describedby={describedBy} aria-label={ariaLabel} className={className}>
         <option>Loading...</option>
       </select>
     );
@@ -31,7 +38,9 @@ export function VocabularySelect({
 
   return (
     <select
-      aria-label={placeholder ?? fieldName}
+      id={id}
+      aria-describedby={describedBy}
+      aria-label={ariaLabel}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       className={className}

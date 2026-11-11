@@ -30,7 +30,8 @@ interface Width {
   width?: "full" | "auto";
 }
 
-const classes = (width: Width["width"], className?: string) =>
+/** The control classes, for a select that renders its own element (VocabularySelect, AssaySelect). */
+export const controlClass = (width: Width["width"] = "full", className?: string) =>
   [width === "auto" ? "" : "block w-full", CONTROL, className].filter(Boolean).join(" ");
 
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "width"> & Width;
@@ -38,16 +39,16 @@ type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & Width;
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & Width;
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ width, className, ...rest }, ref) {
-  return <input ref={ref} className={classes(width, className)} {...rest} />;
+  return <input ref={ref} className={controlClass(width, className)} {...rest} />;
 });
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select({ width, className, ...rest }, ref) {
-  return <select ref={ref} className={classes(width, className)} {...rest} />;
+  return <select ref={ref} className={controlClass(width, className)} {...rest} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
   { width, className, ...rest },
   ref,
 ) {
-  return <textarea ref={ref} className={classes(width, className)} {...rest} />;
+  return <textarea ref={ref} className={controlClass(width, className)} {...rest} />;
 });

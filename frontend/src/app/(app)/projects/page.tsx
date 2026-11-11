@@ -1,7 +1,7 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { Suspense, useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { Input, Select, Textarea } from "@/components/ui/Input";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
@@ -39,11 +40,9 @@ function ProjectsPageInner() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newHypothesis, setNewHypothesis] = useState("");
-  const [creating, setCreating] = useState(false);
-  // `creating` drives what the button shows, but it only changes on the next
-  // render. The ref closes the gap: a second submit before that render (Enter
-  // pressed twice, a double click) finds the create already in flight.
-  const createInFlight = useRef(false);
+  // One create at a time, including a second Enter or click that lands before
+  // the busy state renders.
+  const createGuard = useSubmitGuard();
   const createFormId = useId();
 
   const { canAccess } = usePermissions();
@@ -78,28 +77,25 @@ function ProjectsPageInner() {
     }
   }, [searchParams, canCreate]);
 
-  const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
+  const handleCreate = (e: FormEvent<HTMLFormElement>) => {
     // Always, before anything else: a form with no action would otherwise make
     // the browser submit it as a GET to this page, putting the fields in the URL.
     e.preventDefault();
-    if (!newName.trim() || createInFlight.current) return;
-    createInFlight.current = true;
-    setCreating(true);
-    try {
-      await api.post("/api/projects", {
-        name: newName,
-        hypothesis: newHypothesis || null,
-      });
-      setShowCreateModal(false);
-      setNewName("");
-      setNewHypothesis("");
-      void loadProjects();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create the project.");
-    } finally {
-      createInFlight.current = false;
-      setCreating(false);
-    }
+    if (!newName.trim()) return;
+    void createGuard.run(async () => {
+      try {
+        await api.post("/api/projects", {
+          name: newName,
+          hypothesis: newHypothesis || null,
+        });
+        setShowCreateModal(false);
+        setNewName("");
+        setNewHypothesis("");
+        void loadProjects();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not create the project.");
+      }
+    });
   };
 
   return (
@@ -213,7 +209,7 @@ function ProjectsPageInner() {
               type="submit"
               form={createFormId}
               disabled={!newName.trim()}
-              busy={creating}
+              busy={createGuard.busy}
               busyLabel="Creating..."
             >
               Create Project

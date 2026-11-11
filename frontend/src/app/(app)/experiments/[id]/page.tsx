@@ -1,7 +1,7 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useId } from "react";
 import { Modal } from "@/components/shared/Modal";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -67,8 +67,14 @@ import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { Card } from "@/components/ui/Card";
 import { TabList, TabPanel, useTabIds } from "@/components/ui/Tabs";
+import { Field } from "@/components/ui/Field";
+import { Input, controlClass } from "@/components/ui/Input";
+import { Alert } from "@/components/shared/Alert";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 
 type Tab = ExperimentTabKey;
+
+const FIELD_SELECT = controlClass();
 
 export default function ExperimentDetailPage() {
   return (
@@ -97,6 +103,11 @@ function ExperimentDetailPageInner() {
   const [auditTotal, setAuditTotal] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>(() => resolveExperimentTab(searchParams?.get("tab")));
   const tabIds = useTabIds();
+  const addSampleGuard = useSubmitGuard();
+  const editSampleGuard = useSubmitGuard();
+  const bulkEditGuard = useSubmitGuard();
+  const addBatchGuard = useSubmitGuard();
+  const editSampleFormId = useId();
   const [loading, setLoading] = useState(true);
   const [aiReviewSignal, setAiReviewSignal] = useState(0);
 
@@ -858,65 +869,77 @@ function ExperimentDetailPageInner() {
             </div>
 
             {showSampleForm && (
-              <div className="bg-surface rounded-lg shadow p-4 mb-4">
+              <form
+                aria-label="Add sample"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void addSampleGuard.run(handleAddSample);
+                }}
+                className="bg-surface rounded-lg shadow p-4 mb-4"
+              >
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <input aria-label="External Sample ID" placeholder="External Sample ID" value={sampleForm.external_id ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Organism" placeholder="Organism" value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Tissue Type" placeholder="Tissue Type" value={sampleForm.tissue_type ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Donor ID" placeholder="Donor ID" value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Treatment Condition" placeholder="Treatment Condition" value={sampleForm.treatment_condition ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Chemistry Version" placeholder="Chemistry Version (e.g. NextGEM v3.1)" value={sampleForm.chemistry_version ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Cell Count" type="number" placeholder="Cell Count" min={0} value={sampleForm.cell_count ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Viability %" type="number" placeholder="Viability %" min={0} max={100} step={0.1} value={sampleForm.viability_pct ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm" />
-                  <VocabularySelect fieldName="molecule_type" value={sampleForm.molecule_type} onChange={(v) => setSampleForm({ ...sampleForm, molecule_type: v })} placeholder="Molecule Type..." />
-                  <VocabularySelect fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
-                  <VocabularySelect fieldName="library_layout" value={sampleForm.library_layout} onChange={(v) => setSampleForm({ ...sampleForm, library_layout: v })} placeholder="Library Layout..." />
-                  <AssaySelect value={sampleForm.assay} onChange={(v) => setSampleForm({ ...sampleForm, assay: v })} />
-                  <input aria-label="Sample Batch" placeholder="Sample Batch" value={sampleForm.sample_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Sequencing Batch" placeholder="Sequencing Batch" value={sampleForm.sequencing_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
+                  <Field label="External Sample ID">{(control) => <Input {...control} value={sampleForm.external_id ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, external_id: e.target.value })} />}</Field>
+                  <Field label="Organism">{(control) => <Input {...control} value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} />}</Field>
+                  <Field label="Tissue Type">{(control) => <Input {...control} value={sampleForm.tissue_type ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, tissue_type: e.target.value })} />}</Field>
+                  <Field label="Donor ID">{(control) => <Input {...control} value={sampleForm.donor_source ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, donor_source: e.target.value })} />}</Field>
+                  <Field label="Treatment Condition">{(control) => <Input {...control} value={sampleForm.treatment_condition ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, treatment_condition: e.target.value })} />}</Field>
+                  <Field label="Chemistry Version">{(control) => <Input {...control} placeholder="e.g. NextGEM v3.1" value={sampleForm.chemistry_version ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, chemistry_version: e.target.value })} />}</Field>
+                  <Field label="Cell Count">{(control) => <Input {...control} type="number" min={0} value={sampleForm.cell_count ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} />}</Field>
+                  <Field label="Viability %">{(control) => <Input {...control} type="number" min={0} max={100} step={0.1} value={sampleForm.viability_pct ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} />}</Field>
+                  <Field label="Molecule Type">{(control) => <VocabularySelect {...control} fieldName="molecule_type" value={sampleForm.molecule_type} onChange={(v) => setSampleForm({ ...sampleForm, molecule_type: v })} placeholder="Molecule Type..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Library Prep Method">{(control) => <VocabularySelect {...control} fieldName="library_prep_method" value={sampleForm.library_prep_method} onChange={(v) => setSampleForm({ ...sampleForm, library_prep_method: v })} placeholder="Library Prep Method..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Library Layout">{(control) => <VocabularySelect {...control} fieldName="library_layout" value={sampleForm.library_layout} onChange={(v) => setSampleForm({ ...sampleForm, library_layout: v })} placeholder="Library Layout..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Assay">{(control) => <AssaySelect {...control} value={sampleForm.assay} onChange={(v) => setSampleForm({ ...sampleForm, assay: v })} className={FIELD_SELECT} />}</Field>
+                  <Field label="Sample Batch">{(control) => <Input {...control} value={sampleForm.sample_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sample_batch_code: e.target.value || null })} />}</Field>
+                  <Field label="Sequencing Batch">{(control) => <Input {...control} value={sampleForm.sequencing_batch_code ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, sequencing_batch_code: e.target.value || null })} />}</Field>
                   {experiment?.custom_fields.map((cf) => (
-                    <input aria-label={cf.field_name}
-                      key={cf.id}
-                      placeholder={cf.field_name}
-                      value={sampleCustomFieldValues[cf.field_name] ?? ""}
-                      onChange={(e) => setSampleCustomFieldValues((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
-                      className="border rounded px-3 py-2 text-sm"
-                    />
+                    <Field key={cf.id} label={`${cf.field_name}${cf.is_required ? " *" : ""}`}>
+                      {(control) => (
+                        <Input
+                          {...control}
+                          value={sampleCustomFieldValues[cf.field_name] ?? ""}
+                          onChange={(e) => setSampleCustomFieldValues((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
+                        />
+                      )}
+                    </Field>
                   ))}
                 </div>
-                {sampleFormError && (
-                  <p className="text-red-600 text-sm mt-2">{sampleFormError}</p>
-                )}
+                {sampleFormError && <Alert tone="error" className="mt-3">{sampleFormError}</Alert>}
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" onClick={handleAddSample}>Save</Button>
-                  <button onClick={() => { setShowSampleForm(false); setSampleFormError(""); }} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                  <Button size="sm" type="submit" busy={addSampleGuard.busy} busyLabel="Saving...">Save</Button>
+                  <Button size="sm" variant="secondary" onClick={() => { setShowSampleForm(false); setSampleFormError(""); }}>Cancel</Button>
                 </div>
-              </div>
+              </form>
             )}
 
             {showBulkEdit && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg shadow p-4 mb-4">
+              <form
+                aria-label="Bulk edit samples"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void bulkEditGuard.run(handleBulkEdit);
+                }}
+                className="bg-amber-50 border border-amber-200 rounded-lg shadow p-4 mb-4"
+              >
                 <h3 className="text-sm font-semibold mb-2">Bulk Edit {selectedSampleIds.size} Sample{selectedSampleIds.size > 1 ? "s" : ""}</h3>
                 <p className="text-xs text-ink-subtle mb-3">Only fields you fill in will be updated. Blank fields are left unchanged.</p>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <input aria-label="Organism" placeholder="Organism" value={bulkEditForm.organism ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, organism: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Tissue Type" placeholder="Tissue Type" value={bulkEditForm.tissue_type ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, tissue_type: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Donor ID" placeholder="Donor ID" value={bulkEditForm.donor_source ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, donor_source: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Treatment Condition" placeholder="Treatment Condition" value={bulkEditForm.treatment_condition ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, treatment_condition: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
-                  <input aria-label="Chemistry Version" placeholder="Chemistry Version" value={bulkEditForm.chemistry_version ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, chemistry_version: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
-                  <VocabularySelect fieldName="molecule_type" value={bulkEditForm.molecule_type} onChange={(v) => setBulkEditForm({ ...bulkEditForm, molecule_type: v || undefined })} placeholder="Molecule Type..." />
-                  <VocabularySelect fieldName="library_prep_method" value={bulkEditForm.library_prep_method} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_prep_method: v || undefined })} placeholder="Library Prep Method..." />
-                  <VocabularySelect fieldName="library_layout" value={bulkEditForm.library_layout} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_layout: v || undefined })} placeholder="Library Layout..." />
-                  <AssaySelect value={bulkEditForm.assay} onChange={(v) => setBulkEditForm({ ...bulkEditForm, assay: v || undefined })} />
+                  <Field label="Organism">{(control) => <Input {...control} value={bulkEditForm.organism ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, organism: e.target.value || undefined })} />}</Field>
+                  <Field label="Tissue Type">{(control) => <Input {...control} value={bulkEditForm.tissue_type ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, tissue_type: e.target.value || undefined })} />}</Field>
+                  <Field label="Donor ID">{(control) => <Input {...control} value={bulkEditForm.donor_source ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, donor_source: e.target.value || undefined })} />}</Field>
+                  <Field label="Treatment Condition">{(control) => <Input {...control} value={bulkEditForm.treatment_condition ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, treatment_condition: e.target.value || undefined })} />}</Field>
+                  <Field label="Chemistry Version">{(control) => <Input {...control} value={bulkEditForm.chemistry_version ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, chemistry_version: e.target.value || undefined })} />}</Field>
+                  <Field label="Molecule Type">{(control) => <VocabularySelect {...control} fieldName="molecule_type" value={bulkEditForm.molecule_type} onChange={(v) => setBulkEditForm({ ...bulkEditForm, molecule_type: v || undefined })} placeholder="Molecule Type..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Library Prep Method">{(control) => <VocabularySelect {...control} fieldName="library_prep_method" value={bulkEditForm.library_prep_method} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_prep_method: v || undefined })} placeholder="Library Prep Method..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Library Layout">{(control) => <VocabularySelect {...control} fieldName="library_layout" value={bulkEditForm.library_layout} onChange={(v) => setBulkEditForm({ ...bulkEditForm, library_layout: v || undefined })} placeholder="Library Layout..." className={FIELD_SELECT} />}</Field>
+                  <Field label="Assay">{(control) => <AssaySelect {...control} value={bulkEditForm.assay} onChange={(v) => setBulkEditForm({ ...bulkEditForm, assay: v || undefined })} className={FIELD_SELECT} />}</Field>
                 </div>
-                {bulkEditError && (
-                  <p className="text-red-600 text-sm mt-2">{bulkEditError}</p>
-                )}
+                {bulkEditError && <Alert tone="error" className="mt-3">{bulkEditError}</Alert>}
                 <div className="flex gap-2 mt-3">
-                  <button onClick={handleBulkEdit} className="bg-amber-600 text-white px-4 py-1.5 rounded text-sm">Apply to Selected</button>
-                  <button onClick={() => setShowBulkEdit(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                  <Button size="sm" type="submit" busy={bulkEditGuard.busy} busyLabel="Applying...">Apply to Selected</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setShowBulkEdit(false)}>Cancel</Button>
                 </div>
-              </div>
+              </form>
             )}
 
             <div className="bg-surface rounded-lg shadow overflow-x-auto">
@@ -1056,82 +1079,47 @@ function ExperimentDetailPageInner() {
                 size="md"
                 footer={
                   <>
-                  <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="border px-4 py-2 rounded text-sm">Cancel</button>
-                  <Button onClick={handleSaveSampleEdit}>Save Changes</Button>
+                    <Button variant="secondary" onClick={() => { setEditingSampleId(null); setEditSampleError(""); }}>Cancel</Button>
+                    <Button type="submit" form={editSampleFormId} busy={editSampleGuard.busy} busyLabel="Saving...">Save Changes</Button>
                   </>
                 }
               >
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="external-sample-id" className="block text-xs font-medium text-ink-subtle mb-1">External Sample ID</label>
-                    <input id="external-sample-id" value={editSampleForm.external_id ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
+                <form
+                  id={editSampleFormId}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void editSampleGuard.run(handleSaveSampleEdit);
+                  }}
+                >
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="External Sample ID">{(control) => <Input {...control} value={editSampleForm.external_id ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, external_id: e.target.value })} />}</Field>
+                    <Field label="Organism">{(control) => <Input {...control} value={editSampleForm.organism ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, organism: e.target.value })} />}</Field>
+                    <Field label="Tissue Type">{(control) => <Input {...control} value={editSampleForm.tissue_type ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, tissue_type: e.target.value })} />}</Field>
+                    <Field label="Donor ID">{(control) => <Input {...control} value={editSampleForm.donor_source ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, donor_source: e.target.value })} />}</Field>
+                    <Field label="Treatment Condition">{(control) => <Input {...control} value={editSampleForm.treatment_condition ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, treatment_condition: e.target.value })} />}</Field>
+                    <Field label="Chemistry Version">{(control) => <Input {...control} value={editSampleForm.chemistry_version ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, chemistry_version: e.target.value })} />}</Field>
+                    <Field label="Cell Count">{(control) => <Input {...control} type="number" min={0} value={editSampleForm.cell_count ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} />}</Field>
+                    <Field label="Viability %">{(control) => <Input {...control} type="number" min={0} max={100} step={0.1} value={editSampleForm.viability_pct ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} />}</Field>
+                    <Field label="Molecule Type">{(control) => <VocabularySelect {...control} fieldName="molecule_type" value={editSampleForm.molecule_type} onChange={(v) => setEditSampleForm({ ...editSampleForm, molecule_type: v })} placeholder="Molecule Type..." className={FIELD_SELECT} />}</Field>
+                    <Field label="Library Prep Method">{(control) => <VocabularySelect {...control} fieldName="library_prep_method" value={editSampleForm.library_prep_method} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_prep_method: v })} placeholder="Library Prep Method..." className={FIELD_SELECT} />}</Field>
+                    <Field label="Library Layout">{(control) => <VocabularySelect {...control} fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." className={FIELD_SELECT} />}</Field>
+                    <Field label="Assay">{(control) => <AssaySelect {...control} value={editSampleForm.assay} onChange={(v) => setEditSampleForm({ ...editSampleForm, assay: v })} className={FIELD_SELECT} />}</Field>
+                    <Field label="Sample Batch">{(control) => <Input {...control} value={editSampleForm.sample_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_batch_code: e.target.value || null })} />}</Field>
+                    <Field label="Sequencing Batch">{(control) => <Input {...control} value={editSampleForm.sequencing_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sequencing_batch_code: e.target.value || null })} />}</Field>
+                    {experiment?.custom_fields.map((cf) => (
+                      <Field key={cf.id} label={`${cf.field_name}${cf.is_required ? " *" : ""}`}>
+                        {(control) => (
+                          <Input
+                            {...control}
+                            value={editSampleCustomFields[cf.field_name] ?? ""}
+                            onChange={(e) => setEditSampleCustomFields((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
+                          />
+                        )}
+                      </Field>
+                    ))}
                   </div>
-                  <div>
-                    <label htmlFor="organism" className="block text-xs font-medium text-ink-subtle mb-1">Organism</label>
-                    <input id="organism" value={editSampleForm.organism ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="tissue-type" className="block text-xs font-medium text-ink-subtle mb-1">Tissue Type</label>
-                    <input id="tissue-type" value={editSampleForm.tissue_type ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="donor-id" className="block text-xs font-medium text-ink-subtle mb-1">Donor ID</label>
-                    <input id="donor-id" value={editSampleForm.donor_source ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="treatment-condition" className="block text-xs font-medium text-ink-subtle mb-1">Treatment Condition</label>
-                    <input id="treatment-condition" value={editSampleForm.treatment_condition ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="chemistry-version" className="block text-xs font-medium text-ink-subtle mb-1">Chemistry Version</label>
-                    <input id="chemistry-version" value={editSampleForm.chemistry_version ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="cell-count" className="block text-xs font-medium text-ink-subtle mb-1">Cell Count</label>
-                    <input id="cell-count" type="number" min={0} value={editSampleForm.cell_count ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="viability" className="block text-xs font-medium text-ink-subtle mb-1">Viability %</label>
-                    <input id="viability" type="number" min={0} max={100} step={0.1} value={editSampleForm.viability_pct ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-ink-subtle mb-1">Molecule Type</label>
-                    <VocabularySelect fieldName="molecule_type" value={editSampleForm.molecule_type} onChange={(v) => setEditSampleForm({ ...editSampleForm, molecule_type: v })} placeholder="Molecule Type..." />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-ink-subtle mb-1">Library Prep Method</label>
-                    <VocabularySelect fieldName="library_prep_method" value={editSampleForm.library_prep_method} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-ink-subtle mb-1">Library Layout</label>
-                    <VocabularySelect fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-ink-subtle mb-1">Assay</label>
-                    <AssaySelect value={editSampleForm.assay} onChange={(v) => setEditSampleForm({ ...editSampleForm, assay: v })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="sample-batch" className="block text-xs font-medium text-ink-subtle mb-1">Sample Batch</label>
-                    <input id="sample-batch" value={editSampleForm.sample_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  <div>
-                    <label htmlFor="sequencing-batch" className="block text-xs font-medium text-ink-subtle mb-1">Sequencing Batch</label>
-                    <input id="sequencing-batch" value={editSampleForm.sequencing_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
-                  </div>
-                  {experiment?.custom_fields.map((cf) => (
-                    <div key={cf.id}>
-                      <label id="lbl-page-1" className="block text-xs font-medium text-ink-subtle mb-1">{cf.field_name}{cf.is_required ? " *" : ""}</label>
-                      <input aria-labelledby="lbl-page-1"
-                        value={editSampleCustomFields[cf.field_name] ?? ""}
-                        onChange={(e) => setEditSampleCustomFields((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
-                        className="border rounded px-3 py-2 text-sm w-full"
-                      />
-                    </div>
-                  ))}
-                </div>
-                {editSampleError && (
-                  <p className="text-red-600 text-sm mt-3">{editSampleError}</p>
-                )}
+                  {editSampleError && <Alert tone="error" className="mt-3">{editSampleError}</Alert>}
+                </form>
               </Modal>
             )}
           </div>
@@ -1151,17 +1139,24 @@ function ExperimentDetailPageInner() {
               </div>
 
               {showBatchForm && (
-                <div className="bg-surface rounded-lg shadow p-4 mb-4">
+                <form
+                  aria-label="Create sample batch"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void addBatchGuard.run(handleAddBatch);
+                  }}
+                  className="bg-surface rounded-lg shadow p-4 mb-4"
+                >
                   <div className="grid grid-cols-2 gap-3">
-                    <input aria-label="Batch Name" placeholder="Batch Name *" value={batchForm.name} onChange={(e) => setBatchForm({ ...batchForm, name: e.target.value })} className="border rounded px-3 py-2 text-sm" />
-                    <input aria-label="Prep Date" type="date" placeholder="Prep Date" value={batchForm.prep_date ?? ""} onChange={(e) => setBatchForm({ ...batchForm, prep_date: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
-                    <input aria-label="Notes" placeholder="Notes" value={batchForm.notes ?? ""} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value || null })} className="border rounded px-3 py-2 text-sm col-span-2" />
+                    <Field label="Batch Name *">{(control) => <Input {...control} required value={batchForm.name} onChange={(e) => setBatchForm({ ...batchForm, name: e.target.value })} />}</Field>
+                    <Field label="Prep Date">{(control) => <Input {...control} type="date" value={batchForm.prep_date ?? ""} onChange={(e) => setBatchForm({ ...batchForm, prep_date: e.target.value || null })} />}</Field>
+                    <Field label="Notes" className="col-span-2">{(control) => <Input {...control} value={batchForm.notes ?? ""} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value || null })} />}</Field>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" onClick={handleAddBatch}>Save</Button>
-                    <button onClick={() => setShowBatchForm(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
+                    <Button size="sm" type="submit" busy={addBatchGuard.busy} busyLabel="Saving...">Save</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setShowBatchForm(false)}>Cancel</Button>
                   </div>
-                </div>
+                </form>
               )}
 
               <div className="grid gap-3">
