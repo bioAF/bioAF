@@ -1,5 +1,6 @@
 "use client";
 
+import type { AriaAttributes } from "react";
 import { useVocabulary } from "@/hooks/useVocabulary";
 
 interface VocabularySelectProps {
@@ -12,6 +13,8 @@ interface VocabularySelectProps {
   /** From a Field: a visible label then names the select instead of aria-label. */
   id?: string;
   "aria-describedby"?: string;
+  /** From a Field with an error. */
+  "aria-invalid"?: AriaAttributes["aria-invalid"];
 }
 
 export function VocabularySelect({
@@ -23,6 +26,7 @@ export function VocabularySelect({
   allowEmpty = true,
   id,
   "aria-describedby": describedBy,
+  "aria-invalid": invalid,
 }: VocabularySelectProps) {
   const { values, loading } = useVocabulary(fieldName);
   // With an id a visible label names the select, and aria-label would override it.
@@ -30,7 +34,7 @@ export function VocabularySelect({
 
   if (loading) {
     return (
-      <select disabled id={id} aria-describedby={describedBy} aria-label={ariaLabel} className={className}>
+      <select disabled id={id} aria-describedby={describedBy} aria-invalid={invalid} aria-label={ariaLabel} className={className}>
         <option>Loading...</option>
       </select>
     );
@@ -40,6 +44,7 @@ export function VocabularySelect({
     <select
       id={id}
       aria-describedby={describedBy}
+      aria-invalid={invalid}
       aria-label={ariaLabel}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}

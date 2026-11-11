@@ -39,3 +39,27 @@ test("inside a Field, the visible label names them and the hint describes them",
   expect(molecule).toHaveAccessibleDescription("From the lab's vocabulary");
   expect(screen.getByLabelText("Assay used").tagName).toBe("SELECT");
 });
+
+test("a Field error marks these selects invalid, as it does an Input", () => {
+  render(
+    <>
+      <Field label="Molecule Type" error="Pick a molecule type">
+        {(control) => (
+          <VocabularySelect {...control} fieldName="molecule_type" value={null} onChange={() => {}} placeholder="Molecule Type..." />
+        )}
+      </Field>
+      <Field label="Assay used" error="Pick an assay">
+        {(control) => <AssaySelect {...control} value={null} onChange={() => {}} />}
+      </Field>
+      <Field label="Library Layout">
+        {(control) => <VocabularySelect {...control} fieldName="library_layout" value={null} onChange={() => {}} />}
+      </Field>
+    </>,
+  );
+  const molecule = screen.getByLabelText("Molecule Type");
+  expect(molecule).toHaveAttribute("aria-invalid", "true");
+  expect(molecule).toHaveAccessibleDescription("Pick a molecule type");
+  expect(screen.getByLabelText("Assay used")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.getByLabelText("Assay used")).toHaveAccessibleDescription("Pick an assay");
+  expect(screen.getByLabelText("Library Layout")).not.toHaveAttribute("aria-invalid");
+});
