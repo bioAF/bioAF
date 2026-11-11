@@ -10,6 +10,9 @@ import type {
 } from "@/lib/types";
 import { predictNextVersion } from "./referenceVersioning";
 import { Button } from "@/components/ui/Button";
+import { Field } from "@/components/ui/Field";
+import { Input, Select, Textarea } from "@/components/ui/Input";
+import { Alert } from "@/components/shared/Alert";
 import { formatBytes } from "@/lib/bytes";
 import { NOT_SET } from "@/lib/placeholders";
 
@@ -158,100 +161,93 @@ export function UploadReferenceForm({
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-4 max-w-3xl">
       <div className="grid grid-cols-2 gap-4">
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Name *</span>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => void refreshPredictedVersion(name, category)}
-            readOnly={Boolean(lockedName)}
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm read-only:bg-gray-50 read-only:text-gray-600"
-            required
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">
-            Version
-            <span className="ml-2 text-xs font-normal text-gray-500">
-              (auto, override to keep your own scheme)
-            </span>
-          </span>
-          <input
-            type="text"
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-            placeholder="v1"
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Category *</span>
-          <select
-            value={category}
-            onChange={(e) => {
-              setCategory(e.target.value);
-              if (name) void refreshPredictedVersion(name, e.target.value);
-            }}
-            disabled={Boolean(lockedCategory)}
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-600"
-            required
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Scope *</span>
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-            required
-          >
-            {SCOPES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Field label="Name *">
+          {(control) => (
+            <Input
+              {...control}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => void refreshPredictedVersion(name, category)}
+              readOnly={Boolean(lockedName)}
+              required
+            />
+          )}
+        </Field>
+        <Field label="Version" hint="Filled in automatically; override it to keep your own scheme.">
+          {(control) => (
+            <Input
+              {...control}
+              type="text"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="v1"
+            />
+          )}
+        </Field>
+        <Field label="Category *">
+          {(control) => (
+            <Select
+              {...control}
+              value={category}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                if (name) void refreshPredictedVersion(name, e.target.value);
+              }}
+              disabled={Boolean(lockedCategory)}
+              required
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label="Scope *">
+          {(control) => (
+            <Select {...control} value={scope} onChange={(e) => setScope(e.target.value)} required>
+              {SCOPES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
       </div>
 
-      <label className="block">
-        <span className="text-sm font-medium text-gray-700">Source URL (optional)</span>
-        <input
-          type="url"
-          value={sourceUrl}
-          onChange={(e) => setSourceUrl(e.target.value)}
-          placeholder="https://www.gencodegenes.org/..."
-          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        />
-      </label>
+      <Field label="Source URL (optional)">
+        {(control) => (
+          <Input
+            {...control}
+            type="url"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            placeholder="https://www.gencodegenes.org/..."
+          />
+        )}
+      </Field>
 
-      <label className="block">
-        <span className="text-sm font-medium text-gray-700">Description (optional)</span>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        />
-      </label>
+      <Field label="Description (optional)">
+        {(control) => (
+          <Textarea {...control} value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+        )}
+      </Field>
 
-      <label className="block">
-        <span className="text-sm font-medium text-gray-700">Files *</span>
-        <input
-          type="file"
-          multiple
-          onChange={handleFiles}
-          disabled={submitting}
-          className="mt-1 block w-full text-sm"
-        />
-      </label>
+      <Field label="Files *">
+        {(control) => (
+          <input
+            {...control}
+            type="file"
+            multiple
+            onChange={handleFiles}
+            disabled={submitting}
+            className="block w-full text-sm"
+          />
+        )}
+      </Field>
 
       {progress.length > 0 && (
         <div className="border-t pt-4 space-y-2">
@@ -285,24 +281,14 @@ export function UploadReferenceForm({
         </div>
       )}
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
-          {error}
-        </div>
-      )}
+      {error && <Alert tone="error">{error}</Alert>}
 
       <div className="flex justify-end gap-3 pt-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={submitting}
-          className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
-        >
+        <Button variant="secondary" onClick={onCancel} disabled={submitting}>
           Cancel
-        </button>
-        <Button type="submit"
-          disabled={submitting}>
-          {submitting ? "Uploading..." : "Start upload"}
+        </Button>
+        <Button type="submit" busy={submitting} busyLabel="Uploading...">
+          Start upload
         </Button>
       </div>
     </form>

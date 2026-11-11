@@ -1,7 +1,7 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -13,6 +13,8 @@ import { StaleNotice } from "@/components/shared/StaleNotice";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
+import { Field } from "@/components/ui/Field";
+import { Input, Textarea } from "@/components/ui/Input";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -38,6 +40,11 @@ function ProjectsPageInner() {
   const [newName, setNewName] = useState("");
   const [newHypothesis, setNewHypothesis] = useState("");
   const [creating, setCreating] = useState(false);
+  // `creating` drives what the button shows, but it only changes on the next
+  // render. The ref closes the gap: a second submit before that render (Enter
+  // pressed twice, a double click) finds the create already in flight.
+  const createInFlight = useRef(false);
+  const createFormId = useId();
 
   const { canAccess } = usePermissions();
   const canCreate = canAccess("projects", "create");
@@ -71,8 +78,12 @@ function ProjectsPageInner() {
     }
   }, [searchParams, canCreate]);
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
+  const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
+    // Always, before anything else: a form with no action would otherwise make
+    // the browser submit it as a GET to this page, putting the fields in the URL.
+    e.preventDefault();
+    if (!newName.trim() || createInFlight.current) return;
+    createInFlight.current = true;
     setCreating(true);
     try {
       await api.post("/api/projects", {
@@ -86,6 +97,7 @@ function ProjectsPageInner() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create the project.");
     } finally {
+      createInFlight.current = false;
       setCreating(false);
     }
   };
@@ -207,7 +219,8 @@ function ProjectsPageInner() {
               Cancel
             </Button>
             <Button
-              onClick={handleCreate}
+              type="submit"
+              form={createFormId}
               disabled={!newName.trim()}
               busy={creating}
               busyLabel="Creating..."
@@ -217,28 +230,31 @@ function ProjectsPageInner() {
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input id="name"
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              placeholder="e.g., GBM vs. Healthy Integration Atlas"
-            />
-          </div>
-          <div>
-            <label htmlFor="hypothesis-optional" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
-            <textarea id="hypothesis-optional"
-              value={newHypothesis}
-              onChange={(e) => setNewHypothesis(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              rows={3}
-              placeholder="What are you investigating?"
-            />
-          </div>
-        </div>
+        <form id={createFormId} onSubmit={handleCreate} className="space-y-4">
+          <Field label="Name">
+            {(control) => (
+              <Input
+                {...control}
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                required
+                placeholder="e.g., GBM vs. Healthy Integration Atlas"
+              />
+            )}
+          </Field>
+          <Field label="Hypothesis (optional)">
+            {(control) => (
+              <Textarea
+                {...control}
+                value={newHypothesis}
+                onChange={(e) => setNewHypothesis(e.target.value)}
+                rows={3}
+                placeholder="What are you investigating?"
+              />
+            )}
+          </Field>
+        </form>
       </Modal>
     </>
   );
