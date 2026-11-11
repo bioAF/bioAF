@@ -112,8 +112,30 @@ def gcs_fetch_command(uri: str, dest: str, copy: str) -> str:
     return copy
 
 
-# A Python regex for `gcloud storage rsync --exclude`: any path containing CR or LF.
-_RSYNC_SKIP_LINE_BREAKS = "--exclude=(?s).*[\\r\\n].*"
+# Uploads `gcloud` cannot name, run as `find DIR ... -exec sh -c BODY sh DIR PREFIX FILE... +`: a
+# name ending in `#<digits>` is read as a generation (`gcloud storage rsync` stored a local
+# `artifact#123` as `artifact` on blackbird). Each such file goes to PREFIX + its path relative to
+# DIR through the JSON API (bucket and key percent-encoded, token on stdin), and the crc32c the API
+# reports must equal the local file's. Every file is attempted; any failure fails the batch.
+_VERIFIED_UPLOAD = r"""d=$1; u=$2; shift 2; rc=0
+r=${u#gs://}; b=${r%%/*}; kp=${r#*/}
+enc() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/../%&/g'; }
+ep=$(gcloud config get-value api_endpoint_overrides/storage 2>/dev/null)
+base="${ep:-https://storage.googleapis.com/}"; base=${base%/}
+tok=$(gcloud auth print-access-token) || { echo "bioAF: no storage credentials for $u" >&2; exit 1; }
+for f do
+  case ${f##*#} in ''|*[!0-9]*) continue ;; esac
+  k="$kp${f#"$d"/}"
+  want=$(gcloud storage hash "$(printf '%s' "$f" | sed 's/[[*?]/[&]/g')" --skip-md5 --format='value(crc32c_hash)') || { rc=1; continue; }
+  got=$(printf 'header = "Authorization: Bearer %s"\n' "$tok" | curl -fsS -K - -X POST -H 'Content-Type: application/octet-stream' --data-binary "@$f" "$base/upload/storage/v1/b/$(enc "$b")/o?uploadType=media&name=$(enc "$k")&fields=crc32c" | sed -n 's/.*"crc32c" *: *"\([^"]*\)".*/\1/p')
+  if [ -z "$got" ] || [ "$got" != "$want" ]; then echo "bioAF: upload failed or checksum mismatch for gs://$b/$k" >&2; rc=1; fi
+done
+exit $rc"""
+
+# A Python regex for `gcloud storage rsync --exclude`: any path containing CR or LF, or ending
+# in `#<digits>` (uploaded by `_VERIFIED_UPLOAD` instead). Applied with `re.match` to the
+# relative path; the flag splits on commas, so the pattern has none.
+_RSYNC_SKIP_UNNAMEABLE = "--exclude=(?s).*[\\r\\n].*|.*#[0-9]+$"
 
 # `sh -c` body for `find ... -exec sh -c BODY sh FILE... +`: Cloud Storage refuses CR and LF in
 # an object name (HTTPError 400 on blackbird), so each such file is listed, with a backslash
@@ -301,17 +323,22 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
         # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
         # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
-        # S3 and NFS. A path with CR or LF cannot be an object name at all (Cloud Storage refuses
-        # it, and rsync crashes on it locally), so rsync skips those, copies the rest, and the copy
-        # then fails listing each one. Checked with cloud-sdk 593.0.0 and on blackbird.
+        # S3 and NFS. rsync skips two kinds of path (checked with cloud-sdk 593.0.0 and on
+        # blackbird): a name ending in `#<digits>`, which the CLI would store under a shorter name,
+        # is uploaded literally by `_VERIFIED_UPLOAD`; a path with CR or LF cannot be an object
+        # name at all, so it is listed and the copy fails. Everything else is still copied first.
         directory = absolute_path(local_dir).rstrip("/") or "/"
         prefix = self._remote(uri).rstrip("/") + "/"
-        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_LINE_BREAKS, directory, prefix])
+        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_UNNAMEABLE, directory, prefix])
+        upload = shell_join(
+            ["find", directory, "-type", "f", "-name", "*#[0-9]*", "!", "-path", "*\n*", "!", "-path", "*\r*"]
+            + ["-exec", "sh", "-c", _VERIFIED_UPLOAD, "sh", directory, prefix, "{}", "+"]
+        )
         refuse = shell_join(
             ["find", directory, "(", "-path", "*\n*", "-o", "-path", "*\r*", ")", "-type", "f"]
             + ["-exec", "sh", "-c", _REFUSE_LINE_BREAK_NAMES, "sh", "{}", "+"]
         )
-        return f"{rsync} && {refuse}"
+        return f'{rsync} && {{ {upload}; up=$?; {refuse} && [ "$up" -eq 0 ]; }}'
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.

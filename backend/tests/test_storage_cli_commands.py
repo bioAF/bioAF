@@ -69,6 +69,18 @@ if "fake-token" not in config or any("fake-token" in a for a in args):
 url = args[-1]
 out = args[args.index("-o") + 1] if "-o" in args else None
 path, _, query = url.partition("?")
+if "/upload/storage/v1/b/" in path:
+    bucket = path.split("/upload/storage/v1/b/", 1)[1].split("/o", 1)[0]
+    params = dict(p.split("=", 1) for p in query.split("&"))
+    obj = os.path.join(os.environ["FAKE_GCS"], urllib.parse.unquote(bucket), urllib.parse.unquote(params["name"]))
+    data = open(args[args.index("--data-binary") + 1][1:], "rb").read()
+    if os.environ.get("FAKE_CORRUPT"):
+        data += b"!"
+    os.makedirs(os.path.dirname(obj), exist_ok=True)
+    open(obj, "wb").write(data)
+    digest = subprocess.run(["cksum"], stdin=open(obj, "rb"), capture_output=True, text=True).stdout.split()[0]
+    print('{\\n  "crc32c": "%s"\\n}' % digest)
+    sys.exit(0)
 bucket, key = path.split("/storage/v1/b/", 1)[1].split("/o/", 1)
 obj = os.path.join(os.environ["FAKE_GCS"], urllib.parse.unquote(bucket), urllib.parse.unquote(key))
 if not os.path.isfile(obj):
@@ -138,7 +150,7 @@ class Shell:
         return [c for c in self.calls() if c[:2] not in (["auth", "print-access-token"], ["storage", "hash"])]
 
 
-GCS_LINE_BREAK_EXCLUDE = "--exclude=(?s).*[\\r\\n].*"
+GCS_RSYNC_EXCLUDE = "--exclude=(?s).*[\\r\\n].*|.*#[0-9]+$"
 
 
 def gcs_escape(name: str) -> str:
@@ -305,7 +317,7 @@ class TestCloudCopyCommandsContinued:
         sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
         sh.run(S3StorageProvider().cli_copy_out_contents(str(outputs), "s3://b/run/"))
         assert sh.calls() == [
-            ["storage", "rsync", "--recursive", GCS_LINE_BREAK_EXCLUDE, str(outputs), "gs://b/run/"],
+            ["storage", "rsync", "--recursive", GCS_RSYNC_EXCLUDE, str(outputs), "gs://b/run/"],
             ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"],
         ]
 
@@ -331,7 +343,7 @@ class TestCloudCopyCommandsContinued:
             (outputs / rel).write_text("x")
         result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run"), check=False)
         assert result.returncode != 0
-        assert sh.calls() == [["storage", "rsync", "--recursive", GCS_LINE_BREAK_EXCLUDE, str(outputs), "gs://b/run/"]]
+        assert sh.calls() == [["storage", "rsync", "--recursive", GCS_RSYNC_EXCLUDE, str(outputs), "gs://b/run/"]]
         lines = result.stderr.decode().split("\n")
         assert (
             lines[0]
@@ -342,11 +354,47 @@ class TestCloudCopyCommandsContinued:
     def test_the_rsync_exclusion_matches_exactly_cr_and_lf_paths(self):
         import re
 
-        pattern = re.compile(GCS_LINE_BREAK_EXCLUDE.removeprefix("--exclude="))
+        pattern = re.compile(GCS_RSYNC_EXCLUDE.removeprefix("--exclude="))
         for path in ("a\nb", "a\rb", "a\r\nb", "d\nx/f", "d\rx/f"):
             assert pattern.fullmatch(path), repr(path)
-        for path in ("ok.txt", "sub [x]/plain.txt", "a\\nb", "tab\tname"):
-            assert not pattern.fullmatch(path), repr(path)
+        for path in ("x#1", "#12", "d/a b#7"):
+            assert pattern.match(path), repr(path)
+        for path in ("ok.txt", "sub [x]/plain.txt", "a\\nb", "tab\tname", "hash#tag.txt", "v#1.txt", "d#1/f"):
+            assert not pattern.match(path), repr(path)
+
+    def test_gcs_contents_copy_uploads_generation_like_names_literally(self, sh, tmp_path):
+        """`gcloud storage rsync` stored a local `artifact#123` as the object `artifact` on blackbird
+        (the CLI reads `#<digits>` at the end of a name as a generation), so `x#1` and `x#2` would
+        land on one object. rsync skips those, and each is uploaded through the JSON API under its
+        literal name and checked against the local crc32c."""
+        outputs = tmp_path / "outputs"
+        (outputs / "sub [x]").mkdir(parents=True)
+        names = ["artifact#123", "x#1", "x#2", "#12", "sub [x]/a b#7", "hash#tag.txt", "v#1.txt", "ok.txt"]
+        for n in names:
+            (outputs / n).write_bytes(b"\x00" + n.encode())
+        sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
+        uploaded = {n for n in names if (sh.store / "b" / "run" / n).exists()}
+        assert uploaded == {"artifact#123", "x#1", "x#2", "#12", "sub [x]/a b#7"}
+        for n in uploaded:
+            assert (sh.store / "b" / "run" / n).read_bytes() == b"\x00" + n.encode()
+        assert "fake-token" not in sh.curl_record.read_text()
+
+    def test_a_generation_like_upload_that_does_not_verify_fails_the_copy(self, sh, tmp_path):
+        outputs = tmp_path / "outputs"
+        outputs.mkdir()
+        (outputs / "x#1").write_text("x")
+        sh.env["FAKE_CORRUPT"] = "1"
+        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"), check=False)
+        assert result.returncode != 0 and b"checksum mismatch" in result.stderr
+
+    def test_generation_like_names_still_upload_when_a_line_break_name_is_refused(self, sh, tmp_path):
+        outputs = tmp_path / "outputs"
+        outputs.mkdir()
+        (outputs / "x#1").write_text("x")
+        (outputs / "a\rb").write_text("y")
+        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"), check=False)
+        assert result.returncode != 0 and b"carriage returns" in result.stderr
+        assert (sh.store / "b" / "run" / "x#1").read_text() == "x"
 
     def test_gcs_contents_copy_without_such_names_succeeds_quietly(self, sh, tmp_path):
         outputs = tmp_path / "outputs"

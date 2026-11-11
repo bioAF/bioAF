@@ -251,7 +251,14 @@ def test_custom_pipeline_exit_trap_copies_outputs_and_keeps_the_exit_status(sh, 
     target = storage.build_uri("res", "projects/4/pipeline-runs/9/")
     (call,) = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
     if isinstance(storage, GcsStorageProvider):
-        assert call == ["storage", "rsync", "--recursive", "--exclude=(?s).*[\\r\\n].*", str(outputs), target]
+        assert call == [
+            "storage",
+            "rsync",
+            "--recursive",
+            "--exclude=(?s).*[\\r\\n].*|.*#[0-9]+$",
+            str(outputs),
+            target,
+        ]
     else:
         assert call == ["s3", "cp", "--recursive", str(outputs), target]
 

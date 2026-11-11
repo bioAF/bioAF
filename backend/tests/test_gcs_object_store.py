@@ -118,7 +118,7 @@ class TestCliStaging:
         )
         copy = local_adapter.cli_copy_out_contents("/outputs", "gs://b/runs/1/")
         assert copy.startswith(
-            "gcloud storage rsync --recursive '--exclude=(?s).*[\\r\\n].*' /outputs gs://b/runs/1/ && "
+            "gcloud storage rsync --recursive '--exclude=(?s).*[\\r\\n].*|.*#[0-9]+$' /outputs gs://b/runs/1/ && "
         )
         assert "/outputs/*" not in copy
 
