@@ -19,13 +19,19 @@ const openDialogs: symbol[] = [];
  * whether it should currently be listening. `onDismiss` may be an inline arrow:
  * it is read through a ref, so a changing callback identity does not
  * re-register the listener or reorder the stack.
+ *
+ * `canDismiss` false keeps the dialog on the stack but refuses the Escape: a
+ * busy confirm or a dialog that cannot be interrupted is still the one on top,
+ * so the dialog underneath must not close in its place.
  */
-export function useDismissOnEscape(open: boolean, onDismiss: () => void) {
+export function useDismissOnEscape(open: boolean, onDismiss: () => void, canDismiss: boolean = true) {
   const latest = useRef(onDismiss);
+  const allowed = useRef(canDismiss);
 
-  // Keep the ref current without making it an effect dependency below.
+  // Keep the refs current without making them effect dependencies below.
   useEffect(() => {
     latest.current = onDismiss;
+    allowed.current = canDismiss;
   });
 
   useEffect(() => {
@@ -38,7 +44,8 @@ export function useDismissOnEscape(open: boolean, onDismiss: () => void) {
       if (e.key !== "Escape") return;
       // Ignore the event unless this dialog is the one on top.
       if (openDialogs[openDialogs.length - 1] !== id) return;
-      latest.current();
+      e.preventDefault();
+      if (allowed.current) latest.current();
     };
 
     // `window`, not `document`. A real keypress bubbles from the focused

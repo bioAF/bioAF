@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -72,18 +73,11 @@ export function ConfirmDialog({
 
   const phraseSatisfied = !requirePhrase || phrase.trim() === requirePhrase;
 
-  // Escape is bound to the document, not the dialog subtree, so it works no matter where focus
-  // happens to be when the dialog opens.
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      if (!busy) onCancel();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, busy, onCancel]);
+  // Escape works wherever focus is, but only for the dialog on top: a confirm
+  // opened from inside a Modal shares the Modal's dismissal stack, so one
+  // Escape cancels the confirm and leaves the Modal open. A busy confirm
+  // refuses the Escape rather than passing it to the dialog underneath.
+  useDismissOnEscape(open, onCancel, !busy);
 
   // Keep the keyboard inside the dialog and hand focus back to whatever opened
   // it on close. The trap focuses the first control; Cancel is focused
