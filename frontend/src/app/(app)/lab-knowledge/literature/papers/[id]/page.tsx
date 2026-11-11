@@ -15,6 +15,7 @@ import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal
 import { ResearchContextCard } from "@/components/literature/ResearchContextCard";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/shared/Toast";
 import {
   advanceReadingStatus,
   cleanText,
@@ -55,6 +56,7 @@ const OPEN_ACCESS_FAILURES: Record<number, string> = {
 export default function PaperDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const toast = useToast();
   const user = getCurrentUser();
   const paperId = Number(params.id);
 
@@ -105,6 +107,7 @@ export default function PaperDetailPage() {
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissBusy, setDismissBusy] = useState(false);
+  const [dismissError, setDismissError] = useState<string | null>(null);
   const [copiedCitation, setCopiedCitation] = useState<string | null>(null);
   const [citationError, setCitationError] = useState<string | null>(null);
 
@@ -273,14 +276,20 @@ export default function PaperDetailPage() {
     }
   }
   function dismiss() {
+    setDismissError(null);
     setDismissOpen(true);
   }
   async function submitDismiss(reason: string) {
     setDismissBusy(true);
+    setDismissError(null);
     try {
       await literature.dismissPaper(paperId, reason.trim() ? reason.trim() : undefined);
       setDismissOpen(false);
       refresh();
+    } catch (e) {
+      // The prompt stays open with the reason kept, so Dismiss is the retry.
+      logError(`dismissing paper ${paperId}`, e);
+      setDismissError("The paper could not be dismissed. Try again; the technical detail is in the application logs.");
     } finally {
       setDismissBusy(false);
     }
@@ -314,6 +323,10 @@ export default function PaperDetailPage() {
     try {
       await pendingConfirm.run();
       setPendingConfirm(null);
+    } catch (e) {
+      // The confirm stays open, so its button is the retry.
+      logError(`${pendingConfirm.title.toLowerCase()} on paper ${paperId}`, e);
+      toast.error(`${pendingConfirm.title} could not be completed. Try again; the technical detail is in the application logs.`);
     } finally {
       setConfirmBusy(false);
     }
@@ -812,6 +825,7 @@ export default function PaperDetailPage() {
         confirmLabel="Dismiss"
         busyLabel="Dismissing..."
         busy={dismissBusy}
+        error={dismissError}
         onConfirm={submitDismiss}
         onCancel={() => setDismissOpen(false)}
       />

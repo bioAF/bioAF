@@ -5,7 +5,8 @@ import { NotSet } from "@/components/shared/NotSet";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { PageSizeSelect, DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
+import { DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
+import { Pagination } from "@/components/shared/Pagination";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -16,6 +17,8 @@ import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { formatRecordedTime } from "@/lib/recordedTime";
+import { formatElapsed } from "@/lib/duration";
 
 /** Matches the run detail page, which is the surface a user flips to from here. */
 const REFRESH_INTERVAL_MS = 10_000;
@@ -80,7 +83,7 @@ export default function PipelineRunsPage() {
   const loading = list.loading;
   const loadRuns = list.refresh;
 
-  // `formatDuration` read Date.now() once, at render, so an in-flight 8-hour run read
+  // The duration once read Date.now() once, at render, so an in-flight 8-hour run read
   // "3m" until the page was reloaded. It is the only elapsed-time signal on this
   // screen, so it has to be driven by a clock rather than by whenever React last
   // happened to re-render. Only ticks while something is actually in flight.
@@ -90,23 +93,6 @@ export default function PipelineRunsPage() {
     const tick = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
     return () => clearInterval(tick);
   }, [hasInFlight]);
-
-  function formatDuration(startedAt: string | null, completedAt: string | null): string {
-    if (!startedAt) return NOT_SET;
-    const start = new Date(startedAt).getTime();
-    const end = completedAt ? new Date(completedAt).getTime() : nowMs;
-    const seconds = Math.floor((end - start) / 1000);
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
-
-  function formatDateTime(dateStr: string | null): string {
-    if (!dateStr) return NOT_SET;
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " +
-      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
 
   function toggleSort(field: "id" | "status" | "pipeline_name") {
     if (sortField === field) {
@@ -226,8 +212,8 @@ export default function PipelineRunsPage() {
                   ) : <NotSet />}
                 </td>
                 <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || NOT_SET}</td>
-                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDateTime(r.started_at)}</td>
-                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDuration(r.started_at, r.completed_at)}</td>
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatRecordedTime(r.started_at, "monthDayTime")}</td>
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatElapsed(r.started_at, r.completed_at, nowMs, "compact")}</td>
                 {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : NOT_SET}</td>}
               </tr>
             ))}
@@ -246,24 +232,18 @@ export default function PipelineRunsPage() {
       {/* The size control renders whether or not there is a second page, so it
           is the same control in the same place regardless of how much data the
           list happens to hold. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
-        <PageSizeSelect
-          value={pageSize}
-          onChange={(size) => {
-            setPageSize(size);
-            // Page 12 of 25-row pages does not exist at 100 a page, so keeping
-            // the number would show an empty table for a list that is not empty.
-            setPage(1);
-          }}
-        />
-        {total > pageSize && (
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Previous</Button>
-            <span className="text-sm text-ink-subtle py-1">Page {page} of {Math.ceil(total / pageSize)}</span>
-            <Button variant="secondary" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / pageSize)}>Next</Button>
-          </div>
-        )}
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          // Page 12 of 25-row pages does not exist at 100 a page, so keeping
+          // the number would show an empty table for a list that is not empty.
+          setPage(1);
+        }}
+      />
       </>
       )}
     </main>

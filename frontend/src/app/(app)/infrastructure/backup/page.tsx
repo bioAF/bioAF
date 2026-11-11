@@ -9,6 +9,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { formatBytes } from "@/lib/bytes";
 
 interface BackupTier {
   tier: string;
@@ -57,14 +58,6 @@ interface RestoreStatus {
   started_at?: string;
   expires_at?: string;
   seconds_remaining?: number;
-}
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return "N/A";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${(bytes / 1073741824).toFixed(1)} GB`;
 }
 
 function formatMinutes(seconds: number): string {
@@ -226,7 +219,7 @@ export default function InfraBackupPage() {
         `/api/backups/trigger/${type}`,
         {}
       );
-      setActionMessage(`Backup completed: ${data.filename} (${formatBytes(data.size_bytes)})`);
+      setActionMessage(`Backup completed: ${data.filename} (${formatBytes(data.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })})`);
       await loadData();
     } catch (e) {
       setActionMessage(e instanceof Error ? e.message : "Backup failed");
@@ -452,7 +445,7 @@ export default function InfraBackupPage() {
                     </div>
                     <div className="flex justify-between">
                       <span>Size:</span>
-                      <span className="text-gray-900">{formatBytes(tier.size_bytes)}</span>
+                      <span className="text-gray-900">{formatBytes(tier.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })}</span>
                     </div>
                     {tier.retention_days && (
                       <div className="flex justify-between">
@@ -709,7 +702,7 @@ export default function InfraBackupPage() {
                       <tr key={s.filename} className="border-b hover:bg-gray-50">
                         <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{s.filename}</td>
                         <td className="px-4 py-2.5 text-gray-600">{new Date(s.date).toLocaleString()}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })}</td>
                         {canAccess("backups", "restore") && (
                           <td className="px-4 py-2.5">
                             <button
@@ -749,7 +742,7 @@ export default function InfraBackupPage() {
                     snapshots.map((s) => (
                       <tr key={s.date} className="border-b hover:bg-gray-50">
                         <td className="px-4 py-2.5 text-gray-900">{new Date(s.date).toLocaleString()}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })}</td>
                         <td className="px-4 py-2.5 text-gray-600">{s.tier}</td>
                       </tr>
                     ))
@@ -780,7 +773,7 @@ export default function InfraBackupPage() {
                     tfstateFiles.map((f) => (
                       <tr key={f.name} className="border-b hover:bg-gray-50">
                         <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{f.name}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(f.size_bytes)}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{formatBytes(f.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })}</td>
                         <td className="px-4 py-2.5 text-gray-600">
                           {f.updated ? new Date(f.updated).toLocaleString() : "N/A"}
                         </td>

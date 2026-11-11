@@ -3,6 +3,8 @@
 import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { formatBytes } from "@/lib/bytes";
+import { NOT_SET } from "@/lib/placeholders";
 
 interface ExperimentEstimate {
   experiment_id: number;
@@ -30,14 +32,6 @@ interface ProjectExportModalProps {
 }
 
 type Step = "options" | "size" | "download";
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
 
 export function ProjectExportModal({ projectId, projectName, isOpen, onClose }: ProjectExportModalProps) {
   const [step, setStep] = useState<Step>("options");
@@ -180,7 +174,7 @@ export function ProjectExportModal({ projectId, projectName, isOpen, onClose }: 
           <div className="bg-gray-50 rounded-md p-4 space-y-3">
             <div className="flex justify-between text-sm font-medium">
               <span>Total size</span>
-              <span>{formatBytes(sizeData.total_bytes)}</span>
+              <span>{formatBytes(sizeData.total_bytes, "file", { missing: NOT_SET })}</span>
             </div>
             {sizeData.experiments.length > 0 && (
               <div className="space-y-1">
@@ -188,7 +182,7 @@ export function ProjectExportModal({ projectId, projectName, isOpen, onClose }: 
                 {sizeData.experiments.map((exp) => (
                   <div key={exp.experiment_id} className="flex justify-between text-xs text-gray-600">
                     <span className="truncate max-w-xs">{exp.name}</span>
-                    <span className="shrink-0 ml-2">{formatBytes(exp.total_bytes)}</span>
+                    <span className="shrink-0 ml-2">{formatBytes(exp.total_bytes, "file", { missing: NOT_SET })}</span>
                   </div>
                 ))}
               </div>

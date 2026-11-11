@@ -3,6 +3,8 @@
 import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { formatBytes } from "@/lib/bytes";
+import { NOT_SET } from "@/lib/placeholders";
 
 interface SizeBreakdown {
   total_bytes: number;
@@ -22,14 +24,6 @@ interface DataExportModalProps {
 }
 
 type Step = "options" | "size" | "download";
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
 
 export function DataExportModal({ experimentId, experimentName, isOpen, onClose }: DataExportModalProps) {
   const [step, setStep] = useState<Step>("options");
@@ -172,12 +166,12 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
             <div className="bg-gray-50 rounded-md p-4 space-y-2">
               <div className="flex justify-between text-sm font-medium">
                 <span>Total size</span>
-                <span>{formatBytes(sizeData.total_bytes)}</span>
+                <span>{formatBytes(sizeData.total_bytes, "file", { missing: NOT_SET })}</span>
               </div>
               {Object.entries(sizeData.breakdown).map(([type, size]) => (
                 <div key={type} className="flex justify-between text-xs text-gray-600">
                   <span className="capitalize">{type}</span>
-                  <span>{formatBytes(size)}</span>
+                  <span>{formatBytes(size, "file", { missing: NOT_SET })}</span>
                 </div>
               ))}
             </div>

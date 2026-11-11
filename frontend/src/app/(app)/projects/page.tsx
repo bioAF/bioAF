@@ -1,11 +1,9 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { ErrorState } from "@/components/shared/ErrorState";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResource } from "@/hooks/useResource";
@@ -13,12 +11,18 @@ import { StaleNotice } from "@/components/shared/StaleNotice";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
+import { Field } from "@/components/ui/Field";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { Input, Select, Textarea } from "@/components/ui/Input";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
+import { ListContent } from "@/components/shared/ListContent";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 export default function ProjectsPage() {
   return (
@@ -37,7 +41,10 @@ function ProjectsPageInner() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newHypothesis, setNewHypothesis] = useState("");
-  const [creating, setCreating] = useState(false);
+  // One create at a time, including a second Enter or click that lands before
+  // the busy state renders.
+  const createGuard = useSubmitGuard();
+  const createFormId = useId();
 
   const { canAccess } = usePermissions();
   const canCreate = canAccess("projects", "create");
@@ -71,23 +78,25 @@ function ProjectsPageInner() {
     }
   }, [searchParams, canCreate]);
 
-  const handleCreate = async () => {
+  const handleCreate = (e: FormEvent<HTMLFormElement>) => {
+    // Always, before anything else: a form with no action would otherwise make
+    // the browser submit it as a GET to this page, putting the fields in the URL.
+    e.preventDefault();
     if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      await api.post("/api/projects", {
-        name: newName,
-        hypothesis: newHypothesis || null,
-      });
-      setShowCreateModal(false);
-      setNewName("");
-      setNewHypothesis("");
-      void loadProjects();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not create the project.");
-    } finally {
-      setCreating(false);
-    }
+    void createGuard.run(async () => {
+      try {
+        await api.post("/api/projects", {
+          name: newName,
+          hypothesis: newHypothesis || null,
+        });
+        setShowCreateModal(false);
+        setNewName("");
+        setNewHypothesis("");
+        void loadProjects();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not create the project.");
+      }
+    });
   };
 
   return (
@@ -108,53 +117,44 @@ function ProjectsPageInner() {
           )}
         </div>
 
-        <div className="bg-white rounded-lg shadow mb-6 p-4">
+        <Card padding="sm" className="mb-6">
           <div className="flex flex-wrap gap-4">
-            <input aria-label="Search projects"
+            <Input aria-label="Search projects"
               type="text"
+              width="auto"
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
+              className="flex-1 min-w-[200px]"
             />
-            <select aria-label="Filter by status"
+            <Select aria-label="Filter by status"
+              width="auto"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-sm"
             >
               <option value="">All Statuses</option>
               <option value="active">Active</option>
               <option value="archived">Archived</option>
               <option value="complete">Complete</option>
-            </select>
+            </Select>
           </div>
-        </div>
+        </Card>
 
         {list.stale && <StaleNotice what="Projects" onRetry={() => void loadProjects()} />}
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <LoadingSpinner size="lg" />
-          </div>
-        ) : loadError ? (
-          <ErrorState
-            message={loadError}
-            onRetry={() => {
-              void loadProjects();
-            }}
-          />
-        ) : projects.length === 0 ? (
-          <Card padding="none" className="p-12 text-center">
-            <h2 className="text-lg font-semibold text-gray-500 mb-2">No projects found</h2>
-            <p className="text-gray-500 mb-4">Create a project to organize cross-experiment analysis.</p>
-            {canCreate && (
-              <Button
-                onClick={() => setShowCreateModal(true)}>
-                New Project
-              </Button>
-            )}
-          </Card>
-        ) : (
+        <ListContent
+          loading={loading}
+          error={loadError}
+          onRetry={() => void loadProjects()}
+          empty={projects.length === 0}
+          emptyState={
+            <EmptyState
+              title="No projects found"
+              message="Create a project to organize cross-experiment analysis."
+              action={canCreate && <Button onClick={() => setShowCreateModal(true)}>New Project</Button>}
+            />
+          }
+        >
           <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -186,14 +186,14 @@ function ProjectsPageInner() {
                     <td className="px-6 py-4 text-sm text-gray-500">{p.experiment_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{p.pipeline_run_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(p.created_at).toLocaleDateString()}
+                      {formatRecordedTime(p.created_at, "date")}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </Card>
-        )}
+        </ListContent>
       </main>
 
       <Modal
@@ -207,9 +207,10 @@ function ProjectsPageInner() {
               Cancel
             </Button>
             <Button
-              onClick={handleCreate}
+              type="submit"
+              form={createFormId}
               disabled={!newName.trim()}
-              busy={creating}
+              busy={createGuard.busy}
               busyLabel="Creating..."
             >
               Create Project
@@ -217,28 +218,31 @@ function ProjectsPageInner() {
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input id="name"
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              placeholder="e.g., GBM vs. Healthy Integration Atlas"
-            />
-          </div>
-          <div>
-            <label htmlFor="hypothesis-optional" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
-            <textarea id="hypothesis-optional"
-              value={newHypothesis}
-              onChange={(e) => setNewHypothesis(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              rows={3}
-              placeholder="What are you investigating?"
-            />
-          </div>
-        </div>
+        <form id={createFormId} onSubmit={handleCreate} className="space-y-4">
+          <Field label="Name">
+            {(control) => (
+              <Input
+                {...control}
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                required
+                placeholder="e.g., GBM vs. Healthy Integration Atlas"
+              />
+            )}
+          </Field>
+          <Field label="Hypothesis (optional)">
+            {(control) => (
+              <Textarea
+                {...control}
+                value={newHypothesis}
+                onChange={(e) => setNewHypothesis(e.target.value)}
+                rows={3}
+                placeholder="What are you investigating?"
+              />
+            )}
+          </Field>
+        </form>
       </Modal>
     </>
   );

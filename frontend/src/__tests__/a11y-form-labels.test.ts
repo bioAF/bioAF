@@ -11,6 +11,11 @@ import { join } from "path";
 //   2. aria-labelledby
 //   3. an id that some <label htmlFor=...> in the same file points at
 //   4. an enclosing <label> (implicit association)
+//   5. the props a shared <Field> hands its control, spread as {...control}:
+//      Field renders <label htmlFor> for exactly that id (Field.test.tsx)
+//
+// The shared primitives <Input>, <Select> and <Textarea> are controls too and
+// are held to the same rule. Their own definition file only forwards props.
 //
 // Note the ORDER matters in the app even though it does not here: aria-label
 // OVERRIDES an enclosing label. Adding one to a control that already had a
@@ -50,6 +55,11 @@ function tagEnd(src: string, i: number): number {
   return -1;
 }
 
+const CONTROL_TAGS = new Set(["input", "select", "textarea", "Input", "Select", "Textarea"]);
+
+/** The primitives' definitions: they forward whatever name their caller gives. */
+const PRIMITIVE_DEFINITIONS = new Set([join("components", "ui", "Input.tsx")]);
+
 /** Walk every tag, tracking how deep we are inside <label> elements. */
 function scan(src: string) {
   const controls: { body: string; line: number; inLabel: boolean }[] = [];
@@ -76,7 +86,7 @@ function scan(src: string) {
       if (!selfClosing) labelDepth++;
       continue;
     }
-    if (name === "input" || name === "select" || name === "textarea") {
+    if (CONTROL_TAGS.has(name)) {
       controls.push({ body, line: src.slice(0, m.index).split("\n").length, inLabel: labelDepth > 0 });
     }
     tag.lastIndex = end + 1;
@@ -88,6 +98,7 @@ function unnamed() {
   const offenders: string[] = [];
   let total = 0;
   for (const file of tsxFiles(SRC)) {
+    if (PRIMITIVE_DEFINITIONS.has(file.slice(SRC.length + 1))) continue;
     const src = readFileSync(file, "utf8");
     const { controls, htmlForTargets } = scan(src);
     for (const { body, line, inLabel } of controls) {
@@ -95,6 +106,7 @@ function unnamed() {
       total++;
       if (/aria-label|aria-labelledby/.test(body)) continue;
       if (inLabel) continue;
+      if (/\{\.\.\.control\}/.test(body)) continue;
       const idm = /\bid=(?:["']([^"']+)["']|\{`?([^}`]+)`?\})/.exec(body);
       const id = idm ? (idm[1] || idm[2]).trim() : null;
       if (id && htmlForTargets.has(id)) continue;

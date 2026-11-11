@@ -1,6 +1,5 @@
 "use client";
 
-import { NOT_SET } from "@/lib/placeholders";
 import { NotSet } from "@/components/shared/NotSet";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -13,6 +12,7 @@ import { Modal } from "@/components/shared/Modal";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { ReportMarkdown } from "@/components/pipelines/ReportMarkdown";
 import { RunSamplesheetProvenance } from "@/components/pipelines/RunSamplesheetProvenance";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
@@ -31,6 +31,8 @@ import type {
   PipelineRunDetail,
   ReferenceDataset,
 } from "@/lib/types";
+import { formatRecordedTime } from "@/lib/recordedTime";
+import { formatElapsed } from "@/lib/duration";
 
 type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review" | "agent_review";
 
@@ -41,103 +43,6 @@ interface LogResponse {
   custom_log_pending?: boolean;
   pod_logs_available?: boolean;
   custom_log_missing?: boolean;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function inlineFormat(s: string): string {
-  return s
-    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" class="text-bioaf-600 hover:underline" target="_blank" rel="noreferrer">$1</a>',
-    );
-}
-
-// Minimal markdown -> HTML renderer for custom pipeline `report.md` artifacts.
-// Handles headings, paragraphs, fenced code blocks, unordered lists, links,
-// inline code and bold/italic. Anything fancier should be a real renderer.
-function renderMarkdown(md: string): string {
-  const lines = md.split("\n");
-  let html = "";
-  let inCode = false;
-  let codeBuf: string[] = [];
-  let inList = false;
-  let paragraph: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      html += `<p class="my-2">${inlineFormat(escapeHtml(paragraph.join(" ")))}</p>\n`;
-      paragraph = [];
-    }
-  };
-  const flushList = () => {
-    if (inList) {
-      html += "</ul>\n";
-      inList = false;
-    }
-  };
-
-  for (const line of lines) {
-    if (line.trim().startsWith("```")) {
-      if (inCode) {
-        html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
-        codeBuf = [];
-        inCode = false;
-      } else {
-        flushParagraph();
-        flushList();
-        inCode = true;
-      }
-      continue;
-    }
-    if (inCode) {
-      codeBuf.push(line);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1].length;
-      const sizes = ["text-2xl", "text-xl", "text-lg", "text-base", "text-sm", "text-xs"];
-      html += `<h${level} class="font-semibold mt-4 mb-2 ${sizes[level - 1]}">${inlineFormat(escapeHtml(heading[2]))}</h${level}>\n`;
-      continue;
-    }
-
-    const list = line.match(/^[-*]\s+(.+)$/);
-    if (list) {
-      flushParagraph();
-      if (!inList) {
-        html += '<ul class="list-disc pl-6 my-2">';
-        inList = true;
-      }
-      html += `<li>${inlineFormat(escapeHtml(list[1]))}</li>`;
-      continue;
-    }
-
-    if (line.trim() === "") {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    flushList();
-    paragraph.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-  if (inCode && codeBuf.length > 0) {
-    html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
-  }
-
-  return html;
 }
 
 function getUserRole(): string {
@@ -408,23 +313,6 @@ export default function PipelineRunDetailPage() {
     );
   }
 
-  function formatDateTime(dateStr: string | null | undefined): string {
-    if (!dateStr) return NOT_SET;
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " " +
-      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
-  }
-
-  function formatDuration(startedAt: string | null | undefined, completedAt: string | null | undefined): string {
-    if (!startedAt) return NOT_SET;
-    const start = new Date(startedAt).getTime();
-    const end = completedAt ? new Date(completedAt).getTime() : Date.now();
-    const seconds = Math.floor((end - start) / 1000);
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
-
   const isActive = ["running", "pending"].includes(run?.status ?? "");
   const customReportPath =
     isCustomRun
@@ -472,11 +360,11 @@ export default function PipelineRunDetailPage() {
 
         {/* Timing metadata */}
         <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">
-          <div><span className="text-xs text-gray-500">Started</span><p className="text-sm font-medium">{formatDateTime(run.started_at)}</p></div>
+          <div><span className="text-xs text-gray-500">Started</span><p className="text-sm font-medium">{formatRecordedTime(run.started_at, "fullWithSeconds")}</p></div>
           {run.completed_at && (
-            <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatDateTime(run.completed_at)}</p></div>
+            <div><span className="text-xs text-gray-500">Completed</span><p className="text-sm font-medium">{formatRecordedTime(run.completed_at, "fullWithSeconds")}</p></div>
           )}
-          <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatDuration(run.started_at, run.completed_at)}</p></div>
+          <div><span className="text-xs text-gray-500">Duration</span><p className="text-sm font-medium">{formatElapsed(run.started_at, run.completed_at, Date.now(), "detail")}</p></div>
           {run.progress?.retries && run.progress.retries.length > 0 && (
             <div>
               <span className="text-xs text-gray-500">Step retries</span>
@@ -835,13 +723,15 @@ export default function PipelineRunDetailPage() {
             </h2>
             {report ? (
               isCustomRun && customReportFormat === "md" ? (
-                <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }}
-                />
+                <ReportMarkdown source={report} />
               ) : (
+                // A report's scripts (charts, tabs) run in an opaque origin:
+                // without allow-same-origin they cannot read the app's storage
+                // or DOM. In-page anchors are handled by the scroll shim the
+                // backend adds to every HTML report.
                 <iframe
                   srcDoc={report}
+                  sandbox="allow-scripts"
                   className="w-full h-[600px] border rounded"
                   title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
                 />

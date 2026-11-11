@@ -136,14 +136,14 @@ describe("Experiment Detail - Files Tab", () => {
   it("renders a Files tab button", async () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
-    expect(screen.getByRole("button", { name: /files/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /files/i })).toBeInTheDocument();
   });
 
   it("fetches and displays files when Files tab is clicked", async () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
 
-    fireEvent.click(screen.getByRole("button", { name: /files/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /files/i }));
 
     await waitFor(() => {
       expect(mockGet).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("Experiment Detail - Files Tab", () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
 
-    fireEvent.click(screen.getByRole("button", { name: /files/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /files/i }));
 
     await waitFor(() => screen.getByText("sample_R1.fastq.gz"));
     expect(screen.getAllByText("fastq").length).toBeGreaterThan(0);
@@ -178,7 +178,7 @@ describe("Experiment Detail - Files Tab", () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
 
-    fireEvent.click(screen.getByRole("button", { name: /files/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /files/i }));
 
     await waitFor(() => {
       expect(screen.getByText("No files found.")).toBeInTheDocument();

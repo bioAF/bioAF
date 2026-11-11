@@ -41,6 +41,12 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { Button } from "@/components/ui/Button";
+import { formatRecordedTime } from "@/lib/recordedTime";
+import { Alert } from "@/components/shared/Alert";
+import { Card } from "@/components/ui/Card";
+import { ListContent } from "@/components/shared/ListContent";
+import { Input, Select } from "@/components/ui/Input";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -81,7 +87,6 @@ export default function WorkNodesPage() {
   const [newRepoUrl, setNewRepoUrl] = useState("");
   const [newRepoName, setNewRepoName] = useState("");
   const [repoError, setRepoError] = useState<string | null>(null);
-  const [addingRepo, setAddingRepo] = useState(false);
 
   // Launch form state
   const [launchStep, setLaunchStep] = useState(1);
@@ -104,6 +109,7 @@ export default function WorkNodesPage() {
   const [selectedMachineType, setSelectedMachineType] = useState<string>("");
   const [showAdvancedMachines, setShowAdvancedMachines] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const addRepoGuard = useSubmitGuard();
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [showConfirmLaunch, setShowConfirmLaunch] = useState(false);
   const [provisioningNotice, setProvisioningNotice] = useState<
@@ -161,7 +167,6 @@ export default function WorkNodesPage() {
 
   async function handleAddRepo() {
     if (!newRepoUrl.trim()) return;
-    setAddingRepo(true);
     setRepoError(null);
     try {
       await api.post("/api/v1/github-repos", {
@@ -173,8 +178,6 @@ export default function WorkNodesPage() {
       loadRepos();
     } catch (err) {
       setRepoError(err instanceof ApiError ? err.message : "Failed to add repo");
-    } finally {
-      setAddingRepo(false);
     }
   }
 
@@ -420,11 +423,6 @@ export default function WorkNodesPage() {
     return `${minutes}m`;
   }
 
-  function formatTimestamp(ts: string | null): string {
-    if (!ts) return "-";
-    return new Date(ts).toLocaleString();
-  }
-
   function extractSshCommand(accessUrl: string | null): string {
     if (!accessUrl) return "";
     // access_url is like ssh://1.2.3.4:22
@@ -458,26 +456,20 @@ export default function WorkNodesPage() {
       </div>
 
       {provisioningNotice && (
-        <div
-          role="status"
-          className={`mb-4 rounded-lg p-3 flex items-center justify-between gap-3 ${
-            provisioningNotice.kind === "error"
-              ? "bg-red-50 border border-red-200 text-red-800"
-              : "bg-blue-50 border border-blue-200 text-blue-800"
-          }`}
+        <Alert
+          tone={provisioningNotice.kind === "error" ? "error" : "info"}
+          className="mb-4"
+          action={
+            <Button variant="ghost" size="sm" onClick={() => setProvisioningNotice(null)}>
+              Dismiss
+            </Button>
+          }
         >
-          <div className="flex items-center gap-2 text-sm">
+          <span className="flex items-center gap-2">
             {provisioningNotice.kind === "info" && <LoadingSpinner size="sm" />}
             <span>{provisioningNotice.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setProvisioningNotice(null)}
-            className="text-xs text-gray-500 hover:text-gray-700"
-          >
-            Dismiss
-          </button>
-        </div>
+          </span>
+        </Alert>
       )}
 
       {/* Quick Start Guide */}
@@ -523,35 +515,38 @@ export default function WorkNodesPage() {
           <div className="mt-2 bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500 mb-3">Add GitHub repos to clone into your work nodes at boot. Provide the git SSH URL from GitHub.</p>
 
-            {repoError && (
-              <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">{repoError}</div>
-            )}
+            {repoError && <Alert tone="error" className="mb-3">{repoError}</Alert>}
 
             {/* Add repo form */}
             {canAccess("work_nodes", "launch") && (
-              <div className="flex gap-2 mb-3">
-                <input aria-label="Git SSH URL"
+              <form
+                aria-label="Add GitHub repo"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void addRepoGuard.run(handleAddRepo);
+                }}
+                className="flex gap-2 mb-3"
+              >
+                <Input aria-label="Git SSH URL"
                   type="text"
+                  width="auto"
                   value={newRepoUrl}
                   onChange={(e) => setNewRepoUrl(e.target.value)}
                   placeholder="git@github.com:owner/repo.git"
-                  className="flex-1 border rounded px-3 py-1.5 text-sm font-mono"
+                  className="flex-1 font-mono"
                 />
-                <input aria-label="Display name (optional)"
+                <Input aria-label="Display name (optional)"
                   type="text"
+                  width="auto"
                   value={newRepoName}
                   onChange={(e) => setNewRepoName(e.target.value)}
                   placeholder="Display name (optional)"
-                  className="w-48 border rounded px-3 py-1.5 text-sm"
+                  className="w-48"
                 />
-                <button
-                  onClick={handleAddRepo}
-                  disabled={addingRepo || !newRepoUrl.trim()}
-                  className="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {addingRepo ? "Adding..." : "Add"}
-                </button>
-              </div>
+                <Button type="submit" size="sm" disabled={!newRepoUrl.trim()} busy={addRepoGuard.busy} busyLabel="Adding...">
+                  Add
+                </Button>
+              </form>
             )}
 
             {/* Repo list */}
@@ -587,23 +582,18 @@ export default function WorkNodesPage() {
         <SessionBucketFilter value={bucket} onChange={setBucket} />
       </div>
       {nodeList.stale && <StaleNotice what="Work nodes" onRetry={() => void loadNodes()} />}
-      {nodeList.loading ? (
-        <ContentLoading />
-      ) : loadError ? (
-        <ErrorState
-          message={loadError}
-          onRetry={() => {
-            void loadNodes();
-          }}
-        />
-      ) : nodes.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <p className="text-gray-500">
-            No work nodes in this view.
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+      <ListContent
+        loading={nodeList.loading}
+        error={loadError}
+        onRetry={() => void loadNodes()}
+        empty={nodes.length === 0}
+        emptyState={
+          <Card className="text-center">
+            <p className="text-gray-500">No work nodes in this view.</p>
+          </Card>
+        }
+      >
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -637,13 +627,13 @@ export default function WorkNodesPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
-                    {node.started_at ? new Date(node.started_at).toLocaleString() : NOT_SET}
+                    {formatRecordedTime(node.started_at)}
                   </td>
                   <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
                     {node.access_url && node.status === "running" ? (
                       <button
                         onClick={() => navigator.clipboard.writeText(extractSshCommand(node.access_url))}
-                        className="text-indigo-600 hover:underline"
+                        className="text-bioaf-600 hover:underline"
                         title={extractSshCommand(node.access_url)}
                       >
                         {extractSshCommand(node.access_url)}
@@ -670,7 +660,7 @@ export default function WorkNodesPage() {
                       )}
                       <button
                         onClick={() => setViewingNode(node)}
-                        className="text-xs px-2 py-1 border border-indigo-600 text-indigo-600 rounded hover:bg-indigo-50"
+                        className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50"
                       >
                         Details
                       </button>
@@ -680,8 +670,8 @@ export default function WorkNodesPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        </Card>
+      </ListContent>
 
       {/* Detail panel */}
       {viewingNode && (
@@ -787,7 +777,7 @@ export default function WorkNodesPage() {
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">Started</span>
-              <span>{formatTimestamp(viewingNode.started_at)}</span>
+              <span>{formatRecordedTime(viewingNode.started_at, "datetime", { missing: "-" })}</span>
             </div>
             {viewingNode.status === "running" && viewingNode.started_at && (
               <div className="flex justify-between">
@@ -797,12 +787,12 @@ export default function WorkNodesPage() {
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">Last Heartbeat</span>
-              <span>{viewingNode.heartbeat_at ? formatTimestamp(viewingNode.heartbeat_at) : "-"}</span>
+              <span>{viewingNode.heartbeat_at ? formatRecordedTime(viewingNode.heartbeat_at, "datetime", { missing: "-" }) : "-"}</span>
             </div>
             {viewingNode.stopped_at && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Stopped</span>
-                <span>{formatTimestamp(viewingNode.stopped_at)}</span>
+                <span>{formatRecordedTime(viewingNode.stopped_at, "datetime", { missing: "-" })}</span>
               </div>
             )}
           </div>
@@ -827,41 +817,28 @@ export default function WorkNodesPage() {
           size="xl"
           footer={
             <>
-          {launchStep === 1 ? (
-            <button
-              type="button"
-              onClick={() => setLaunchStep(2)}
-              disabled={!scopeSelected || !selectedVersionId || !selectedMachineType}
-              className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
-            >
-              Next: Review
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => setLaunchStep(1)}
-                className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={handleLaunch}
-                disabled={launching}
-                className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Launch Work Node
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowLaunch(false)}
-            className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
-          >
-            Cancel
-          </button>
+              {launchStep === 1 ? (
+                <Button
+                  size="lg"
+                  className="flex-1"
+                  onClick={() => setLaunchStep(2)}
+                  disabled={!scopeSelected || !selectedVersionId || !selectedMachineType}
+                >
+                  Next: Review
+                </Button>
+              ) : (
+                <>
+                  <Button variant="secondary" size="lg" onClick={() => setLaunchStep(1)}>
+                    Back
+                  </Button>
+                  <Button size="lg" className="flex-1" onClick={handleLaunch} disabled={launching}>
+                    Launch Work Node
+                  </Button>
+                </>
+              )}
+              <Button variant="secondary" size="lg" onClick={() => setShowLaunch(false)}>
+                Cancel
+              </Button>
             </>
           }
         >
@@ -870,15 +847,11 @@ export default function WorkNodesPage() {
             {[1, 2].map((s) => (
               <div
                 key={s}
-                className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-indigo-600" : "bg-gray-200"}`}
+                className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-bioaf-600" : "bg-gray-200"}`}
               />
             ))}
           </div>
-          {launchError && (
-            <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
-              {launchError}
-            </div>
-          )}
+          {launchError && <Alert tone="error">{launchError}</Alert>}
 
           {launchStep === 1 && (
             <>
@@ -906,7 +879,7 @@ export default function WorkNodesPage() {
                           !available
                             ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
                             : selected
-                            ? "border-indigo-500 bg-indigo-50"
+                            ? "border-bioaf-500 bg-bioaf-50"
                             : "border-gray-200 hover:border-gray-300"
                         }`}
                       >
@@ -942,7 +915,7 @@ export default function WorkNodesPage() {
                     type="button"
                     onClick={() => setShowAdvancedMachines(!showAdvancedMachines)}
                     aria-expanded={showAdvancedMachines}
-                    className="text-xs text-indigo-600 hover:underline"
+                    className="text-xs text-bioaf-600 hover:underline"
                   >
                     Advanced: choose a specific machine type{" "}
                     {showAdvancedMachines ? "▼" : "▶"}
@@ -970,7 +943,7 @@ export default function WorkNodesPage() {
                                 onClick={() => setSelectedMachineType(mt.name)}
                                 className={`w-full text-left p-2 border rounded-lg text-xs transition-colors ${
                                   selectedMachineType === mt.name
-                                    ? "border-indigo-500 bg-indigo-50"
+                                    ? "border-bioaf-500 bg-bioaf-50"
                                     : "border-gray-200 hover:border-gray-300"
                                 }`}
                               >
@@ -994,22 +967,23 @@ export default function WorkNodesPage() {
               <section>
                 <h3 className="text-sm font-medium text-gray-700 mb-2">Select Workbench Template</h3>
                 {environments.length === 0 ? (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
+                  <Alert tone="warning">
                     No work node templates found. Create one from the{" "}
                     <a href="/environments" className="underline font-medium">
                       Workbench Templates
                     </a>{" "}
                     page with type &quot;Work Node&quot;.
-                  </div>
+                  </Alert>
                 ) : (
                   <div className="flex gap-3">
-                    <select
+                    <Select
                       aria-label="Workbench template"
                       value={selectedEnvId || ""}
                       onChange={(e) =>
                         e.target.value ? handleEnvSelect(Number(e.target.value)) : null
                       }
-                      className="border rounded px-3 py-2 text-sm flex-1"
+                      width="auto"
+                      className="flex-1"
                     >
                       <option value="">Select a template</option>
                       {environments.map((env) => (
@@ -1020,12 +994,12 @@ export default function WorkNodesPage() {
                             : " (no versions)"}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     {envDetail &&
                       envDetail.versions.filter(
                         (v) => v.status === "ready" && v.image_uri
                       ).length > 0 && (
-                        <select
+                        <Select
                           aria-label="Version"
                           value={selectedVersionId || ""}
                           onChange={(e) =>
@@ -1033,7 +1007,8 @@ export default function WorkNodesPage() {
                               e.target.value ? Number(e.target.value) : null
                             )
                           }
-                          className="border rounded px-3 py-2 text-sm flex-1"
+                          width="auto"
+                          className="flex-1"
                         >
                           {envDetail.versions
                             .filter((v) => v.status === "ready" && v.image_uri)
@@ -1042,7 +1017,7 @@ export default function WorkNodesPage() {
                                 v{v.version_number}.{v.build_number} (ready)
                               </option>
                             ))}
-                        </select>
+                        </Select>
                       )}
                   </div>
                 )}
@@ -1077,13 +1052,12 @@ export default function WorkNodesPage() {
                   </button>
                 </div>
                 {scopeType === "experiment" ? (
-                  <select
+                  <Select
                     aria-label="Select experiment"
                     value={selectedExperimentId || ""}
                     onChange={(e) =>
                       e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
                     }
-                    className="border rounded px-3 py-2 text-sm w-full"
                   >
                     <option value="">No experiment</option>
                     {experiments.map((exp) => (
@@ -1092,16 +1066,15 @@ export default function WorkNodesPage() {
                         {exp.code ? ` (${exp.code})` : ""}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 ) : (
-                  <select
+                  <Select
                     aria-label="Select project"
                     value={selectedProjectId || ""}
                     onChange={(e) =>
                       e.target.value ? handleProjectSelect(Number(e.target.value)) : null
                     }
                     disabled={projectsDenied}
-                    className="border rounded px-3 py-2 text-sm w-full disabled:bg-gray-50 disabled:text-gray-500"
                   >
                     <option value="">No project</option>
                     {projects.map((p) => (
@@ -1110,7 +1083,7 @@ export default function WorkNodesPage() {
                         {p.code ? ` (${p.code})` : ""}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 )}
                 {scopeType === "project" && projectsDenied && (
                   <p className="mt-1 text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>
@@ -1237,20 +1210,10 @@ export default function WorkNodesPage() {
           size="sm"
           footer={
             <>
-              <button
-                type="button"
-                onClick={() => setShowConfirmLaunch(false)}
-                className="px-4 py-2 border rounded-md text-sm text-gray-700 hover:bg-gray-100"
-              >
+              <Button variant="secondary" onClick={() => setShowConfirmLaunch(false)}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => performLaunch()}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700"
-              >
-                Launch anyway
-              </button>
+              </Button>
+              <Button onClick={() => performLaunch()}>Launch anyway</Button>
             </>
           }
         >

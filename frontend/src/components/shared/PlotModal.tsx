@@ -5,6 +5,8 @@ import { useEffect } from "react";
 import { api } from "@/lib/api";
 import type { FileResponse } from "@/lib/types";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { formatBytes } from "@/lib/bytes";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 interface PlotMetadata {
   experimentName?: string | null;
@@ -26,14 +28,6 @@ interface PlotModalProps {
   onClose: () => void;
 }
 
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return "-";
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
-
 function sourceLabel(sourceType: string): string {
   switch (sourceType) {
     case "pipeline":
@@ -50,16 +44,6 @@ function sourceLabel(sourceType: string): string {
     default:
       return sourceType;
   }
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
@@ -137,7 +121,7 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
                 Size
               </dt>
               <dd className="mt-0.5 text-sm text-gray-900">
-                {formatBytes(file.size_bytes)}
+                {formatBytes(file.size_bytes, "file", { missing: "-" })}
               </dd>
             </div>
           </>
@@ -198,7 +182,7 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
               Indexed
             </dt>
             <dd className="mt-0.5 text-sm text-gray-900">
-              {formatDate(metadata.indexedAt)}
+              {formatRecordedTime(metadata.indexedAt, "monthDayYearTime")}
             </dd>
           </div>
         )}

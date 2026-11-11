@@ -23,19 +23,14 @@ import type {
   ReferenceImportStatusResponse,
   ImpactSummary,
 } from "@/lib/types";
+import { formatBytes } from "@/lib/bytes";
+import { TabList, TabPanel, useTabIds } from "@/components/ui/Tabs";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
 function isNotFound(error: unknown): boolean {
   return (error as { status?: unknown } | null)?.status === 404;
-}
-
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return NOT_SET;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 type Tab = "files" | "impact" | "details" | "versions";
@@ -56,7 +51,9 @@ export default function DataReferenceDetailPage() {
   const toast = useToast();
   const [reference, setReference] = useState<ReferenceDatasetDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // Always opens on Files: unlike experiments there is no ?tab= deep link.
   const [activeTab, setActiveTab] = useState<Tab>("files");
+  const tabIds = useTabIds();
 
   const [impactFailed, setImpactFailed] = useState(false);
   const [impact, setImpact] = useState<ImpactSummary | null>(null);
@@ -361,7 +358,7 @@ export default function DataReferenceDetailPage() {
               </div>
               {importStatus.total_bytes != null && (
                 <div className="text-sm text-blue-900">
-                  {formatBytes(importStatus.bytes_downloaded)} / {formatBytes(importStatus.total_bytes)}
+                  {formatBytes(importStatus.bytes_downloaded, "reference", { missing: NOT_SET })} / {formatBytes(importStatus.total_bytes, "reference", { missing: NOT_SET })}
                 </div>
               )}
               <div className="bg-blue-100 h-2 rounded overflow-hidden">
@@ -435,274 +432,260 @@ export default function DataReferenceDetailPage() {
         </div>
       )}
 
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="flex -mb-px space-x-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`py-2 px-1 border-b-2 text-sm font-medium ${
-                activeTab === tab.key
-                  ? "border-bioaf-500 text-bioaf-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <TabList label="Reference sections" ids={tabIds} tabs={tabs} selected={activeTab} onSelect={setActiveTab} />
 
-      {activeTab === "files" && (
-        <Card padding="none" className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">MD5 Checksum</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {reference.files.map((file) => (
-                <tr key={file.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{file.filename}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || NOT_SET}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
-                    {file.md5_checksum || NOT_SET}
-                  </td>
-                </tr>
-              ))}
-              {reference.files.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
-                    No files uploaded
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      {activeTab === "versions" && (
-        <Card padding="none" className="overflow-x-auto">
-          {versionsLoading && (
-            <div className="flex justify-center py-12">
-              <LoadingSpinner size="lg" />
-            </div>
-          )}
-          {!versionsLoading && versions && versions.length > 0 && (
+      <TabPanel ids={tabIds} tabKey={activeTab}>
+        {activeTab === "files" && (
+          <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">MD5 Checksum</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {versions.map((v) => {
-                  const isCurrent = v.id === Number(id);
-                  return (
-                    <tr
-                      key={v.id}
-                      className={
-                        isCurrent
-                          ? "bg-bioaf-50"
-                          : v.status === "deprecated"
-                            ? "text-gray-500 hover:bg-gray-50"
-                            : "hover:bg-gray-50"
-                      }
-                    >
-                      <td className="px-6 py-4 text-sm font-medium">
-                        {isCurrent ? (
-                          <span>
-                            {v.version}{" "}
-                            <span className="ml-2 text-xs uppercase tracking-wide text-bioaf-600">
-                              current
-                            </span>
-                          </span>
-                        ) : (
-                          <a
-                            href={`/data/references/${v.id}`}
-                            className="text-bioaf-700 hover:underline"
-                          >
-                            {v.version}
-                          </a>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <ReferenceStatusBadge status={v.status} />
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {new Date(v.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        {v.deprecation_note ?? NOT_SET}
-                        {v.superseded_by_id && (
-                          <span> (superseded by #{v.superseded_by_id})</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {reference.files.map((file) => (
+                  <tr key={file.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{file.filename}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || NOT_SET}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes, "reference", { missing: NOT_SET })}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
+                      {file.md5_checksum || NOT_SET}
+                    </td>
+                  </tr>
+                ))}
+                {reference.files.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                      No files uploaded
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
-          )}
-          {!versionsLoading && versionsFailed && (
-            <div className="px-6 py-12" data-testid="versions-load-failed">
-              <ErrorState
-                message={loadFailureMessage("This reference's other versions")}
-                onRetry={loadVersions}
-              />
-            </div>
-          )}
-          {!versionsLoading && !versionsFailed && versions && versions.length === 0 && (
-            <div className="px-6 py-12 text-center text-gray-500">
-              No other versions of this reference exist.
-            </div>
-          )}
-        </Card>
-      )}
+          </Card>
+        )}
 
-      {activeTab === "impact" && (
-        <div>
-          {impactLoading ? (
-            <div className="flex justify-center py-12">
-              <LoadingSpinner size="lg" />
-            </div>
-          ) : impactFailed ? (
-            <div data-testid="impact-load-failed">
-              <ErrorState
-                message={loadFailureMessage("What uses this reference")}
-                onRetry={loadImpact}
-              />
-            </div>
-          ) : impact ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <Card>
-                  <p className="text-sm text-gray-500">Total Pipeline Runs</p>
-                  <p className="text-3xl font-bold mt-1">{impact.total_pipeline_runs}</p>
-                </Card>
-                <Card>
-                  <p className="text-sm text-gray-500">Total Experiments</p>
-                  <p className="text-3xl font-bold mt-1">{impact.total_experiments}</p>
-                </Card>
-              </div>
-
-              {impact.pipeline_runs.length > 0 && (
-                <Card padding="none" className="overflow-x-auto">
-                  <div className="px-6 py-4 border-b">
-                    <h3 className="font-semibold">Pipeline Runs Using This Reference</h3>
-                  </div>
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Completed</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {impact.pipeline_runs.map((run) => (
-                        <tr
-                          key={run.pipeline_run_id}
-                          className="hover:bg-gray-50 cursor-pointer"
-                          {...clickableRow(() => router.push(`/pipelines/runs/${run.pipeline_run_id}`))}
-                        >
-                          <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || NOT_SET}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.experiment_name || NOT_SET}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.status}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.review_verdict || NOT_SET}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">
-                            {run.completed_at ? new Date(run.completed_at).toLocaleDateString() : NOT_SET}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Card>
-              )}
-
-              {impact.pipeline_runs.length === 0 && (
-                <Card padding="none" className="p-12 text-center">
-                  <p className="text-gray-500">No pipeline runs are using this reference dataset.</p>
-                </Card>
-              )}
-            </div>
-          ) : (
-            <Card padding="none" className="p-12 text-center">
-              <p className="text-gray-500">Unable to load impact data.</p>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {activeTab === "details" && (
-        <Card>
-          <h2 className="text-lg font-semibold mb-4">Reference Details</h2>
-          <dl className="space-y-3">
-            <div>
-              <dt className="text-sm text-gray-500">Uploaded By</dt>
-              <dd className="text-sm">
-                {reference.uploaded_by
-                  ? reference.uploaded_by.name || reference.uploaded_by.email
-                  : NOT_SET}
-              </dd>
-            </div>
-            {reference.approved_by && (
-              <div>
-                <dt className="text-sm text-gray-500">Approved By</dt>
-                <dd className="text-sm">
-                  {reference.approved_by.name || reference.approved_by.email}
-                </dd>
+        {activeTab === "versions" && (
+          <Card padding="none" className="overflow-x-auto">
+            {versionsLoading && (
+              <div className="flex justify-center py-12">
+                <LoadingSpinner size="lg" />
               </div>
             )}
-            <div>
-              <dt className="text-sm text-gray-500">Source URL</dt>
-              <dd className="text-sm">
-                {reference.source_url ? (
-                  <a
-                    href={reference.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-bioaf-600 hover:underline"
-                  >
-                    {reference.source_url}
-                  </a>
-                ) : (
-                  NOT_SET
+            {!versionsLoading && versions && versions.length > 0 && (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {versions.map((v) => {
+                    const isCurrent = v.id === Number(id);
+                    return (
+                      <tr
+                        key={v.id}
+                        className={
+                          isCurrent
+                            ? "bg-bioaf-50"
+                            : v.status === "deprecated"
+                              ? "text-gray-500 hover:bg-gray-50"
+                              : "hover:bg-gray-50"
+                        }
+                      >
+                        <td className="px-6 py-4 text-sm font-medium">
+                          {isCurrent ? (
+                            <span>
+                              {v.version}{" "}
+                              <span className="ml-2 text-xs uppercase tracking-wide text-bioaf-600">
+                                current
+                              </span>
+                            </span>
+                          ) : (
+                            <a
+                              href={`/data/references/${v.id}`}
+                              className="text-bioaf-700 hover:underline"
+                            >
+                              {v.version}
+                            </a>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <ReferenceStatusBadge status={v.status} />
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {formatRecordedTime(v.created_at, "date")}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {v.deprecation_note ?? NOT_SET}
+                          {v.superseded_by_id && (
+                            <span> (superseded by #{v.superseded_by_id})</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {!versionsLoading && versionsFailed && (
+              <div className="px-6 py-12" data-testid="versions-load-failed">
+                <ErrorState
+                  message={loadFailureMessage("This reference's other versions")}
+                  onRetry={loadVersions}
+                />
+              </div>
+            )}
+            {!versionsLoading && !versionsFailed && versions && versions.length === 0 && (
+              <div className="px-6 py-12 text-center text-gray-500">
+                No other versions of this reference exist.
+              </div>
+            )}
+          </Card>
+        )}
+
+        {activeTab === "impact" && (
+          <div>
+            {impactLoading ? (
+              <div className="flex justify-center py-12">
+                <LoadingSpinner size="lg" />
+              </div>
+            ) : impactFailed ? (
+              <div data-testid="impact-load-failed">
+                <ErrorState
+                  message={loadFailureMessage("What uses this reference")}
+                  onRetry={loadImpact}
+                />
+              </div>
+            ) : impact ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <p className="text-sm text-gray-500">Total Pipeline Runs</p>
+                    <p className="text-3xl font-bold mt-1">{impact.total_pipeline_runs}</p>
+                  </Card>
+                  <Card>
+                    <p className="text-sm text-gray-500">Total Experiments</p>
+                    <p className="text-3xl font-bold mt-1">{impact.total_experiments}</p>
+                  </Card>
+                </div>
+
+                {impact.pipeline_runs.length > 0 && (
+                  <Card padding="none" className="overflow-x-auto">
+                    <div className="px-6 py-4 border-b">
+                      <h3 className="font-semibold">Pipeline Runs Using This Reference</h3>
+                    </div>
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Completed</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {impact.pipeline_runs.map((run) => (
+                          <tr
+                            key={run.pipeline_run_id}
+                            className="hover:bg-gray-50 cursor-pointer"
+                            {...clickableRow(() => router.push(`/pipelines/runs/${run.pipeline_run_id}`))}
+                          >
+                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || NOT_SET}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{run.experiment_name || NOT_SET}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{run.status}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{run.review_verdict || NOT_SET}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">
+                              {formatRecordedTime(run.completed_at, "date")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
                 )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-gray-500">GCS Prefix</dt>
-              <dd className="text-sm font-mono text-xs text-gray-600">{reference.gcs_prefix}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-gray-500">Total Size</dt>
-              <dd className="text-sm">{formatBytes(reference.total_size_bytes)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-gray-500">File Count</dt>
-              <dd className="text-sm">{reference.file_count ?? NOT_SET}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-gray-500">Created</dt>
-              <dd className="text-sm">{new Date(reference.created_at).toLocaleString()}</dd>
-            </div>
-          </dl>
-        </Card>
-      )}
+
+                {impact.pipeline_runs.length === 0 && (
+                  <Card padding="none" className="p-12 text-center">
+                    <p className="text-gray-500">No pipeline runs are using this reference dataset.</p>
+                  </Card>
+                )}
+              </div>
+            ) : (
+              <Card padding="none" className="p-12 text-center">
+                <p className="text-gray-500">Unable to load impact data.</p>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {activeTab === "details" && (
+          <Card>
+            <h2 className="text-lg font-semibold mb-4">Reference Details</h2>
+            <dl className="space-y-3">
+              <div>
+                <dt className="text-sm text-gray-500">Uploaded By</dt>
+                <dd className="text-sm">
+                  {reference.uploaded_by
+                    ? reference.uploaded_by.name || reference.uploaded_by.email
+                    : NOT_SET}
+                </dd>
+              </div>
+              {reference.approved_by && (
+                <div>
+                  <dt className="text-sm text-gray-500">Approved By</dt>
+                  <dd className="text-sm">
+                    {reference.approved_by.name || reference.approved_by.email}
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-sm text-gray-500">Source URL</dt>
+                <dd className="text-sm">
+                  {reference.source_url ? (
+                    <a
+                      href={reference.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-bioaf-600 hover:underline"
+                    >
+                      {reference.source_url}
+                    </a>
+                  ) : (
+                    NOT_SET
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-500">GCS Prefix</dt>
+                <dd className="text-sm font-mono text-xs text-gray-600">{reference.gcs_prefix}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-500">Total Size</dt>
+                <dd className="text-sm">{formatBytes(reference.total_size_bytes, "reference", { missing: NOT_SET })}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-500">File Count</dt>
+                <dd className="text-sm">{reference.file_count ?? NOT_SET}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-gray-500">Created</dt>
+                <dd className="text-sm">{formatRecordedTime(reference.created_at)}</dd>
+              </div>
+            </dl>
+          </Card>
+        )}
+      </TabPanel>
 
       {/* Deprecation Modal */}
       <Modal

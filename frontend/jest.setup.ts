@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom";
 import React from "react";
 
-// react-markdown and remark-gfm ship as ESM, which next/jest does not transform
-// by default. Tests don't exercise markdown rendering, so a passthrough mock is
-// sufficient and avoids a brittle transformIgnorePatterns allowlist.
+// A passthrough Markdown mock keeps page tests that only need text fast. Tests
+// that assert what the renderer does (report security) call
+// jest.unmock("react-markdown"); jest.config.js transforms its ESM packages.
 jest.mock("react-markdown", () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) =>
