@@ -57,6 +57,7 @@ export function InputDialog({
   const fieldRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const titleId = useId();
   const fieldId = useId();
+  const errorId = useId();
 
   // Reset to the seed value each time the dialog opens, and focus the field.
   useEffect(() => {
@@ -116,6 +117,8 @@ export function InputDialog({
         {multiline ? (
           <textarea
             id={fieldId}
+            aria-describedby={error ? errorId : undefined}
+            aria-invalid={error ? true : undefined}
             ref={fieldRef}
             rows={3}
             value={value}
@@ -127,6 +130,8 @@ export function InputDialog({
         ) : (
           <input
             id={fieldId}
+            aria-describedby={error ? errorId : undefined}
+            aria-invalid={error ? true : undefined}
             ref={fieldRef}
             type={type}
             value={value}
@@ -136,7 +141,11 @@ export function InputDialog({
             className={fieldClass}
           />
         )}
-        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+        {error && (
+          <p id={errorId} role="alert" className="mt-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}
