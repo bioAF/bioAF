@@ -1,7 +1,8 @@
 """CLI script to register pipeline output files for completed runs.
 
-Backfills File records for pipeline runs whose outputs exist in GCS
-but were never registered in the database.
+Backfills File records for pipeline runs whose outputs exist in storage
+but were never registered in the database. Each run is collected from its
+own authorized output location only (RunOutputLocationService).
 
 Usage:
     python -m app.cli.register_outputs              # all completed runs
@@ -19,25 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.adapters.registry import get_storage_adapter, initialize_adapters
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
-from app.platform.platform_config_service import PlatformConfigService
 from app.services.pipeline_output_service import PipelineOutputService
-
-
-async def _resolve_outdir(session: AsyncSession, run: PipelineRun) -> str:
-    """Resolve the GCS output directory for a pipeline run."""
-    # Prefer the outdir stored in parameters_json (set by K8s adapter at launch)
-    outdir = (run.parameters_json or {}).get("outdir", "")
-    if outdir:
-        return outdir
-
-    # Fall back: build the GCS URI from results_bucket_name in platform_config
-    bucket = await PlatformConfigService.get(session, "results_bucket_name")
-    if bucket is not None:
-        key = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
-        return get_storage_adapter().build_uri(bucket, key)
-
-    # Last resort: local-style path (GCS adapter will use its default bucket)
-    return f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
 
 
 async def register_outputs_for_run(
@@ -49,7 +33,11 @@ async def register_outputs_for_run(
     Returns the number of newly registered files.
     """
     storage_adapter = get_storage_adapter()
-    outdir = await _resolve_outdir(session, run)
+    try:
+        outdir = await RunOutputLocationService.authorized_uri(session, run, storage_adapter)
+    except OutputLocationRefused as e:
+        print(f"  Run {run.id}: not collected -- {e}")
+        return 0
 
     try:
         collected = await storage_adapter.collect_outputs(

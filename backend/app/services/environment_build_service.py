@@ -8,6 +8,7 @@ Uses Cloud Build REST APIs with google-auth credentials.
 from __future__ import annotations
 
 import io
+import json
 import logging
 import tarfile
 import time
@@ -369,6 +370,19 @@ def _parse_work_node_conda_name(content: str) -> str:
     return data.get("name", "bioaf")
 
 
+def _render_packer_vm_template(adapter, env_yml_uri: str) -> str:
+    """The GCE work-node Packer template with its environment.yml download filled in.
+
+    The download is the storage adapter's copy command with the URI as one quoted literal, built
+    here rather than from ``${var.environment_yml_gcs}``: Packer substitutes a variable into the
+    shell line as raw text, so an environment name reached the shell unquoted. The command is then
+    escaped as an HCL string (quotes, backslashes, and the ``${``/``%{`` template sequences).
+    """
+    command = adapter.cli_copy_in(env_yml_uri, "/tmp/environment.yml")
+    hcl = json.dumps(command)[1:-1].replace("${", "$${").replace("%{", "%%{")
+    return PACKER_VM_TEMPLATE.replace("__DOWNLOAD_ENV_YML__", hcl)
+
+
 def _safe_image_name(env_name: str) -> str:
     """Sanitize an environment name for use as an image / repository name.
 
@@ -686,10 +700,7 @@ class EnvironmentBuildService:
         # the storage adapter (the build VM has the cloud CLI installed).
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
         packer_gcs = adapter.build_uri(working_bucket, packer_path)
-        packer_template = PACKER_VM_TEMPLATE.replace(
-            "__DOWNLOAD_ENV_YML__",
-            adapter.cli_copy_in("${var.environment_yml_gcs}", "/tmp/environment.yml"),
-        )
+        packer_template = _render_packer_vm_template(adapter, env_yml_gcs)
         await adapter.write_text(packer_gcs, packer_template, content_type="text/plain")
 
         # Build image name and URI

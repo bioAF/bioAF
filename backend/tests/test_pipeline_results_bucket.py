@@ -38,7 +38,7 @@ def test_results_bucket_none_when_config_empty():
     assert _resolve_results_bucket({}) is None
 
 
-# --- _ensure_outdir: durable outdir or fail closed (no silent /data/results) ----
+# --- _durable_outdir: the run's authorized location, or fail closed (no silent /data/results) ----
 
 
 def _provider(cfg):
@@ -47,31 +47,40 @@ def _provider(cfg):
     return p
 
 
-def test_ensure_outdir_keeps_explicit_outdir():
-    spec = {"parameters": {"outdir": "gs://user/explicit"}, "experiment_id": 3, "run_id": 7}
-    out = _provider({})._ensure_outdir(spec)
-    assert out["parameters"]["outdir"] == "gs://user/explicit"
+def test_a_stated_outdir_cannot_redirect_the_run():
+    """The run's outdir is its authorized location; the renderer refuses any other (plan 17, D3)."""
+    from app.adapters.job_specs import NextflowJobSpec
+    from app.exceptions import ValidationError
+
+    spec = NextflowJobSpec(
+        run_id=7,
+        pipeline_key="k",
+        pipeline_source="src",
+        pipeline_version="1",
+        parameters={"outdir": "gs://user/explicit"},
+        sample_sheet="",
+        experiment_id=3,
+    )
+    outdir = _provider({"results_bucket_name": "bioaf-results-demo"})._durable_outdir(3, 7)
+    with pytest.raises(ValidationError):
+        KubernetesComputeProvider._build_nextflow_command(spec, outdir=outdir)
 
 
-def test_ensure_outdir_sets_path_from_explicit_results_bucket():
-    spec = {"parameters": {}, "experiment_id": 3, "run_id": 7}
-    out = _provider({"results_bucket_name": "bioaf-results-demo"})._ensure_outdir(spec)
-    assert out["parameters"]["outdir"] == "gs://bioaf-results-demo/experiments/3/pipeline-runs/7"
+def test_durable_outdir_from_explicit_results_bucket():
+    out = _provider({"results_bucket_name": "bioaf-results-demo"})._durable_outdir(3, 7)
+    assert out == "gs://bioaf-results-demo/experiments/3/pipeline-runs/7"
 
 
-def test_ensure_outdir_derives_results_bucket_from_raw():
-    spec = {"parameters": {}, "experiment_id": 3, "run_id": 7}
-    out = _provider({"raw_bucket_name": "bioaf-raw-demo"})._ensure_outdir(spec)
-    assert out["parameters"]["outdir"] == "gs://bioaf-results-demo/experiments/3/pipeline-runs/7"
+def test_durable_outdir_derives_results_bucket_from_raw():
+    out = _provider({"raw_bucket_name": "bioaf-raw-demo"})._durable_outdir(3, 7)
+    assert out == "gs://bioaf-results-demo/experiments/3/pipeline-runs/7"
 
 
-def test_ensure_outdir_fails_closed_when_no_results_bucket():
-    spec = {"parameters": {}, "experiment_id": 3, "run_id": 7}
+def test_durable_outdir_fails_closed_when_no_results_bucket():
     with pytest.raises(RuntimeError):
-        _provider({})._ensure_outdir(spec)
+        _provider({})._durable_outdir(3, 7)
 
 
-def test_ensure_outdir_does_not_mutate_input_spec():
-    spec: dict = {"parameters": {}, "experiment_id": 3, "run_id": 7}
-    _provider({"results_bucket_name": "r"})._ensure_outdir(spec)
-    assert "outdir" not in spec["parameters"]  # returns a new dict; input untouched
+def test_durable_outdir_fails_closed_without_an_experiment():
+    with pytest.raises(RuntimeError):
+        _provider({"results_bucket_name": "r"})._durable_outdir(None, 7)

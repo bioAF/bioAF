@@ -17,6 +17,8 @@ def adapter(monkeypatch):
     monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
     provider = KubernetesComputeProvider()
     provider._namespace_ready = True
+    # A results bucket, so every Nextflow run has an authorized output location.
+    provider._cluster_config = {"raw_bucket_name": "bioaf-raw-test"}
     return provider
 
 
@@ -37,10 +39,11 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 1,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "pipeline_source": "https://github.com/nf-core/scrnaseq",
             "pipeline_version": "2.7.1",
-            "parameters": {"outdir": "/data/results"},
+            "parameters": {},
             "sample_sheet": "sample,fastq_1\nS1,s1.fq.gz\n",
             "namespace": "bioaf-pipelines",
             "input_files": ["s1.fq.gz"],
@@ -59,10 +62,11 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 2,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/rnaseq",
             "pipeline_source": "https://github.com/nf-core/rnaseq",
             "pipeline_version": "3.14.0",
-            "parameters": {"outdir": "/data/results", "genome": "GRCh38"},
+            "parameters": {"genome": "GRCh38"},
             "sample_sheet": "sample,fastq_1\nS1,s1.fq.gz\n",
             "namespace": "bioaf-pipelines",
             "input_files": [],
@@ -87,6 +91,7 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 3,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "pipeline_source": "https://github.com/nf-core/scrnaseq",
             "pipeline_version": "2.7.1",
@@ -114,14 +119,15 @@ class TestNextflowCommandBuilt:
 
     @pytest.mark.asyncio
     async def test_passes_parameters_to_nextflow(self, adapter):
-        """Pipeline parameters should be passed as --key value args to nextflow."""
+        """Each pipeline parameter is one --key=value argument; outdir is the run's own location."""
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 4,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/rnaseq",
             "pipeline_source": "https://github.com/nf-core/rnaseq",
             "pipeline_version": "3.14.0",
-            "parameters": {"genome": "GRCh38", "outdir": "/data/results"},
+            "parameters": {"genome": "GRCh38"},
             "sample_sheet": "sample,fastq_1\nS1,s1.fq.gz\n",
             "namespace": "bioaf-pipelines",
             "input_files": [],
@@ -134,8 +140,8 @@ class TestNextflowCommandBuilt:
         main_container = body["spec"]["template"]["spec"]["containers"][0]
         command_str = " ".join(main_container["command"])
 
-        assert "--genome GRCh38" in command_str
-        assert "--outdir /data/results" in command_str
+        assert "--genome=GRCh38" in command_str
+        assert "--outdir=gs://bioaf-results-test/experiments/3/pipeline-runs/4" in command_str
 
     @pytest.mark.asyncio
     async def test_gcs_outdir_when_raw_bucket_configured(self, adapter):
@@ -161,7 +167,7 @@ class TestNextflowCommandBuilt:
         main_container = body["spec"]["template"]["spec"]["containers"][0]
         command_str = " ".join(main_container["command"])
 
-        assert "--outdir gs://bioaf-results-demo/experiments/3/pipeline-runs/7" in command_str
+        assert "--outdir=gs://bioaf-results-demo/experiments/3/pipeline-runs/7" in command_str
 
     @pytest.mark.asyncio
     async def test_explicit_command_overrides_nextflow_build(self, adapter):
@@ -169,6 +175,7 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 5,
+            "experiment_id": 3,
             "pipeline_name": "bioaf-system-test",
             "pipeline_source": "",
             "command": ["echo", "hello"],
@@ -193,6 +200,7 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 6,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "pipeline_source": "https://github.com/nf-core/scrnaseq",
             "pipeline_version": "2.7.1",
@@ -220,6 +228,7 @@ class TestNextflowCommandBuilt:
         mock_batch = _mock_batch_client()
         job_spec = {
             "run_id": 7,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "pipeline_source": "https://github.com/nf-core/scrnaseq",
             "pipeline_version": "2.7.1",

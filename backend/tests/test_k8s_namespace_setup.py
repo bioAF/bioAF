@@ -211,6 +211,7 @@ class TestSubmitJobBuildsPipelineRunnerEmail:
             await adapter._k8s_submit_job(
                 {
                     "run_id": 1,
+                    "experiment_id": 3,
                     "pipeline_name": "test",
                     "pipeline_source": "https://github.com/nf-core/scrnaseq",
                     "pipeline_version": "2.7.1",

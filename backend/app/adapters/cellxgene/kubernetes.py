@@ -16,6 +16,7 @@ from kubernetes.client.rest import ApiException
 from app.adapters.base import CellxgeneProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
+from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.models import CellxgeneInstance, ServiceState
 from app import runtime
 
@@ -456,24 +457,14 @@ class KubernetesCellxgeneProvider(CellxgeneProvider):
         self._namespace_ready = True
 
     def _patch_sa_annotation(self, core_v1, namespace: str, gcp_sa_email: str) -> None:
-        """Ensure the cellxgene-runner KSA carries the pod-identity binding.
-
-        Used on the upgrade path where the namespace was created before pod
-        identity was wired (no binding annotation on the existing KSA).
-        """
-        desired = self._pod_identity.pod_identity_annotations(gcp_sa_email)
-        try:
-            sa = core_v1.read_namespaced_service_account(name="bioaf-cellxgene-runner", namespace=namespace)
-            current = sa.metadata.annotations or {}
-            if desired and any(current.get(k) != v for k, v in desired.items()):
-                core_v1.patch_namespaced_service_account(
-                    name="bioaf-cellxgene-runner",
-                    namespace=namespace,
-                    body={"metadata": {"annotations": desired}},
-                )
-                logger.info("Patched pod-identity annotation on bioaf-cellxgene-runner")
-        except Exception:
-            logger.exception("Failed to patch pod-identity annotation on bioaf-cellxgene-runner")
+        """Ensure the bioaf-cellxgene-runner KSA carries the pod-identity binding (the upgrade path, where it
+        predates pod identity)."""
+        ensure_service_account_annotations(
+            core_v1,
+            namespace=namespace,
+            service_account="bioaf-cellxgene-runner",
+            desired=self._pod_identity.pod_identity_annotations(gcp_sa_email),
+        )
 
     # -- Background readiness polling --
 

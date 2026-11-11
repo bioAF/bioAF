@@ -2,7 +2,7 @@ import pytest
 
 from app.adapters.compute.kubernetes import _job_progress_from_dict, _job_status_from_dict
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.adapters.models import StoredObject
 from app.models.pipeline_run import PipelineRun
@@ -363,10 +363,13 @@ async def k8s_fetchngs_run(session, admin_user):
         k8s_job_name="bioaf-pipeline-77",
         compute_job_ref="bioaf-pipeline-77",
         k8s_namespace="bioaf-pipelines",
-        parameters_json={"outdir": "gs://bioaf-results/fetchrun", "accessions": ["SRR1", "SRR2"]},
+        parameters_json={"accessions": ["SRR1", "SRR2"]},
         started_at=datetime.now(timezone.utc),
     )
     session.add(run)
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, "results_bucket_name", "bioaf-results")
     await session.flush()
     await session.commit()
     return run
@@ -386,6 +389,7 @@ async def test_fetchngs_completion_ingests_fetched_samples(session, k8s_fetchngs
     mock_compute.get_job_progress.return_value = _job_progress_from_dict({"percent_complete": 100.0, "processes": []})
 
     mock_storage = AsyncMock()
+    mock_storage.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key}")
     mock_storage.collect_outputs.return_value = []
     mock_storage.read_text.return_value = samplesheet
 
@@ -407,8 +411,11 @@ async def test_fetchngs_completion_ingests_fetched_samples(session, k8s_fetchngs
         ).scalars()
     )
     assert external_ids == {"GSM_A", "GSM_B"}
-    # The samplesheet was read from under the run's outdir.
-    mock_storage.read_text.assert_awaited_with("gs://bioaf-results/fetchrun/samplesheet/samplesheet.csv")
+    # The samplesheet was read from under the run's own output location.
+    run = k8s_fetchngs_run
+    mock_storage.read_text.assert_awaited_with(
+        f"gs://bioaf-results/experiments/{run.experiment_id}/pipeline-runs/{run.id}/samplesheet/samplesheet.csv"
+    )
 
 
 @pytest.mark.asyncio

@@ -203,6 +203,8 @@ class WorkNodeService:
             adapter = get_work_node_adapter()
             vm_spec: dict = {
                 "session_id": compute_session.id,
+                # The session's organization, so the readiness poller can scope its update to it.
+                "organization_id": compute_session.organization_id,
                 "user_id": user_id,
                 "machine_type": machine_type,
                 "gce_machine_type": mt.get("gce_machine_type", machine_type),

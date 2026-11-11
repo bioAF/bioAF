@@ -64,8 +64,9 @@ def test_cli_auth_command_is_empty_for_nfs(nfs):
 def test_cli_copy_commands_use_plain_cp(nfs):
     copy_in = nfs.cli_copy_in("file://working/a/b.txt", "/data/b.txt")
     assert copy_in.startswith("cp ") and copy_in.endswith(" /data/b.txt")
-    copy_out = nfs.cli_copy_out("/outputs/*", "file://working/runs/1/")
-    assert copy_out.startswith("cp -r /outputs/* ")
+    # A directory's contents are copied with the explicit contents operation (plan 17, F13).
+    copy_out = nfs.cli_copy_out_contents("/outputs", "file://working/runs/1/")
+    assert copy_out.startswith("mkdir -p ") and " && cp -r /outputs/. " in copy_out
 
 
 def test_image_storage_pip_packages_empty_for_nfs(nfs):
@@ -239,21 +240,15 @@ def test_native_upload_client_unsupported(nfs):
         nfs.native_upload_client()
 
 
-# -- integration: stage inputs -> collect outputs -----------------------------
+# -- integration: collect outputs ---------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_nfs_integration_stage_and_collect(nfs, tmp_path):
-    working = str(tmp_path / "work")
-    staged = await nfs.stage_inputs([{"filename": "reads.fastq", "local_path": None}], working)
-    assert len(staged) == 1
-    # Simulate a pipeline writing an output into the working dir.
-    import os
+async def test_nfs_integration_collect(nfs, tmp_path):
+    out = "file://results/experiments/3/pipeline-runs/7"
+    await nfs.write_text(f"{out}/result.txt", "done")
 
-    with open(os.path.join(working, "result.txt"), "w") as f:
-        f.write("done")
-
-    outputs = await nfs.collect_outputs(working, {"id": 7, "experiment_id": 3})
+    outputs = await nfs.collect_outputs(out, {"id": 7, "experiment_id": 3})
     names = {o.filename for o in outputs}
     assert "result.txt" in names
     # Collected outputs are addressable storage URIs that read back.

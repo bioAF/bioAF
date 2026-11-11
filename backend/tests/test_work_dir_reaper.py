@@ -14,12 +14,14 @@ Two halves:
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
+from app.adapters.models import StoredObject
+from app.adapters.storage.gcs import GcsStorageProvider
 from app.models.pipeline_run import PipelineRun
 from app.services.work_dir_reaper import (
     WORK_DIR_RETENTION_DAYS,
@@ -77,12 +79,17 @@ async def terminal_run(session, admin_user):
 
 
 def _storage():
-    adapter = MagicMock()
+    """The real adapter's URI handling, with listing and deletion recorded.
+
+    The listing returns real ``StoredObject`` values under whatever prefix was asked for; the
+    doubles here used to expose ``.uri``, which hid that the reaper read an attribute the real
+    result does not have.
+    """
+    adapter = GcsStorageProvider(org_slug="test")
     adapter.list_objects = AsyncMock(
-        return_value=[MagicMock(uri="gs://b/nextflow-work/run-1/a"), MagicMock(uri="gs://b/nextflow-work/run-1/b")]
+        side_effect=lambda prefix, **kw: [StoredObject(filename=n, storage_uri=f"{prefix}{n}") for n in ("a", "b")]
     )
     adapter.delete = AsyncMock()
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key}")
     return adapter
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.platform.platform_config_service import PlatformConfigService
+from app.platform.run_output_layout import results_bucket_from_config
 
 
 async def get_results_bucket(session: AsyncSession) -> str | None:
@@ -15,16 +16,7 @@ async def get_results_bucket(session: AsyncSession) -> str | None:
     is populated by Terraform before results_bucket_name.
     """
     config = await PlatformConfigService.get_many(session, ["results_bucket_name", "raw_bucket_name"])
-
-    results = config.get("results_bucket_name")
-    if results and results != "null":
-        return results
-
-    raw = config.get("raw_bucket_name", "")
-    if raw and raw.startswith("bioaf-raw-"):
-        return raw.replace("bioaf-raw-", "bioaf-results-", 1)
-
-    return None
+    return results_bucket_from_config(config)
 
 
 __all__ = ["get_results_bucket"]
