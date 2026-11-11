@@ -106,6 +106,8 @@ class NotebookExecutionService:
             "project_id": project_id,
             "user_id": user_id,
             "session_id": cs.id,
+            # The session's organization, so the readiness poller can scope its update to it.
+            "organization_id": cs.organization_id,
             "notebook_json": notebook_json,
             "notebook_name": template.notebook_path.split("/")[-1],
             "parameters": params,

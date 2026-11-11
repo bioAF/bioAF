@@ -845,9 +845,8 @@ def test_input_staging_survives_a_cluster_with_no_mounted_key():
 
 
 def test_output_sync_survives_a_cluster_with_no_mounted_key():
-    """Same bug, same shape, in the EXIT trap that copies /outputs to the results bucket. Here it is
-    worse than a failure: the trap ends `|| true`, so an unguarded activation would make the sync a
-    silent no-op and the run would report success having published nothing."""
+    """Same bug, same shape, in the EXIT trap that copies /outputs to the results bucket. An unguarded
+    activation on a cluster with no key would fail the output copy, and with it the run."""
     wrapped = CustomPipelineService._build_entrypoint_wrapper(
         entrypoint_command="echo hi",
         results_bucket="bioaf-results",
@@ -855,7 +854,7 @@ def test_output_sync_survives_a_cluster_with_no_mounted_key():
         run_id=7,
     )
     assert "if [ -f" in wrapped
-    assert "/outputs/*" in wrapped
+    assert "/outputs" in wrapped
 
 
 def test_the_guard_keeps_the_activation_for_a_cluster_that_does_mount_a_key():

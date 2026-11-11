@@ -76,15 +76,6 @@ class _BareStorage(StorageProvider):
     """Concrete subclass that overrides only the pre-Phase-3 abstract methods,
     to prove the new object-store methods default to NotImplementedError."""
 
-    async def resolve_input_path(self, file_record):
-        return ""
-
-    async def resolve_output_path(self, pipeline_run, filename):
-        return ""
-
-    async def stage_inputs(self, file_records, working_dir):
-        return []
-
     async def collect_outputs(self, working_dir, pipeline_run):
         return []
 
@@ -100,3 +91,32 @@ async def test_base_default_is_unimplemented(name, args):
     provider = _BareStorage()
     with pytest.raises(NotImplementedError):
         await getattr(provider, name)(*args)
+
+
+# Retired (plan 17, decision D1): nothing in the application, SDK, CLI or scripts called the
+# pipeline staging/path methods, and probes showed they did not do what they claimed (placeholder
+# inputs, unreadable collected URIs). They are gone from the interface and every adapter rather
+# than repaired.
+RETIRED_STAGING_METHODS = (
+    "stage_inputs",
+    "resolve_input_path",
+    "resolve_output_path",
+    "generate_stage_commands",
+    "_local_stage_inputs",
+    "_gcs_stage_inputs",
+    "_stage_inputs",
+)
+
+
+def _all_storage_adapters():
+    from app.adapters.storage.gcs import GcsStorageProvider
+    from app.adapters.storage.nfs import NfsStorageProvider
+    from app.adapters.storage.s3 import S3StorageProvider
+
+    return (StorageProvider, GcsStorageProvider, S3StorageProvider, NfsStorageProvider)
+
+
+@pytest.mark.parametrize("name", RETIRED_STAGING_METHODS)
+def test_retired_staging_methods_are_gone(name):
+    for cls in _all_storage_adapters():
+        assert not hasattr(cls, name), f"{cls.__name__}.{name} was retired"

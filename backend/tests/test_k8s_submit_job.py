@@ -47,6 +47,7 @@ class TestSubmitJobCreatesK8sJob:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -96,6 +97,7 @@ class TestSubmitJobUniqueJobName:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -124,6 +126,7 @@ class TestSubmitJobUniqueJobName:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -156,6 +159,7 @@ class TestSubmitJobUniqueJobName:
         }
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "pipeline_source": "https://github.com/nf-core/scrnaseq",
             "pipeline_version": "2.7.1",
@@ -203,6 +207,7 @@ class TestSubmitJobHeadPoolTargeting:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -244,6 +249,7 @@ class TestSubmitJobAutoscalerAnnotation:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 42,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -271,6 +277,7 @@ class TestSubmitJobInitContainer:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 43,
+            "experiment_id": 3,
             "pipeline_name": "nf-core/scrnaseq",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -311,6 +318,7 @@ class TestSubmitJobInitContainer:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 44,
+            "experiment_id": 3,
             "pipeline_name": "bioaf-system-test",
             "container_image": "alpine:3.19",
             "command": ["echo", "hello"],
@@ -337,6 +345,7 @@ class TestSubmitJobUpdatesPipelineRun:
         mock_batch, mock_core = _mock_k8s_clients(adapter)
         job_spec = {
             "run_id": 45,
+            "experiment_id": 3,
             "pipeline_name": "test",
             "container_image": "alpine:3.19",
             "command": ["echo"],

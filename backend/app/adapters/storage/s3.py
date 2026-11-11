@@ -20,14 +20,15 @@ incomplete S3 provider is unreachable on a GCP install (POLICY never resolves
 import asyncio
 import logging
 import os
-import shutil
-import uuid
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage.local_fs import LocalObjectFilesystem
+from app.adapters.storage.uri import split_storage_uri
+from app.platform.run_output_layout import directory_prefix
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -48,43 +49,6 @@ _LOCAL_OBJECTS_DIR = "_objects"
 
 
 # -- Local-mode filesystem helpers (the s3:// emulation; parity with gcs.py) ---
-
-
-def _read_file_bytes(path: str) -> bytes:
-    with open(path, "rb") as f:
-        return f.read()
-
-
-def _read_file_prefix(path: str, length: int) -> bytes:
-    with open(path, "rb") as f:
-        return f.read(length)
-
-
-def _write_file_bytes(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(data)
-
-
-def _write_file_stream(path: str, file_obj) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if hasattr(file_obj, "seek"):
-        try:
-            file_obj.seek(0)
-        except (OSError, ValueError):
-            pass
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file_obj, f)
-
-
-def _stream_file_into(path: str, file_obj) -> None:
-    with open(path, "rb") as f:
-        shutil.copyfileobj(f, file_obj)
-
-
-def _copy_file(src: str, dest: str) -> None:
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    shutil.copy2(src, dest)
 
 
 def _is_not_found(error) -> bool:
@@ -198,38 +162,15 @@ class S3StorageProvider(StorageProvider):
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
 
-    async def resolve_input_path(self, file_record: dict) -> str:
-        return f"/data/inputs/{file_record.get('filename', 'unknown')}"
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """Every object under the run's output directory URI, with its canonical, readable URI.
 
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if self.is_local:
-            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-        return f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        if self.is_local:
-            return await self._local_stage_inputs(file_records, working_dir)
-        # Real S3: staging runs in an init container via the CLI, so (like the GCS
-        # adapter) return the command strings the init container executes.
-        return self.generate_stage_commands(file_records, working_dir)
-
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        if self.is_local:
-            items = await self._local_collect_outputs(working_dir, pipeline_run)
-            return [
-                StoredObject(filename=d["filename"], storage_uri=d["storage_uri"], size_bytes=d.get("size_bytes"))
-                for d in items
-            ]
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if working_dir.startswith("s3://"):
-            prefix_uri = working_dir if working_dir.endswith("/") else working_dir + "/"
-        else:
-            prefix_uri = f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/"
-        objs = await self.list_objects(prefix_uri)
-        return [o for o in objs if o.filename]
+        Discovery only: nothing is copied. The directory is listed with a trailing separator, so
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        """
+        self._parse_uri(output_uri)
+        objects = await self.list_objects(directory_prefix(output_uri))
+        return [o for o in objects if o.filename]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         d = self._local_storage_metrics() if self.is_local else await self._s3_storage_metrics()
@@ -239,47 +180,22 @@ class S3StorageProvider(StorageProvider):
             total_cost_monthly_usd=d.get("total_cost_monthly_usd", 0.0),
         )
 
-    def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate ``aws s3 cp`` commands for an init container to stage inputs.
-
-        The S3 counterpart of the GCS adapter's gsutil staging commands; reuses the
-        ``cli_copy_in`` seam token so the CLI string lives in exactly one place.
-        Reads ``storage_uri`` (the neutral field), falling back to the retained
-        ``gcs_uri`` mirror for records that predate the rename.
-        """
-        commands = []
-        for record in file_records:
-            uri = record.get("storage_uri") or record.get("gcs_uri", "")
-            filename = record.get("filename", "unknown")
-            commands.append(self.cli_copy_in(uri, f"{working_dir}/{filename}"))
-        return commands
-
     # -- URI / scheme (the s3:// counterpart of the GCS gs:// methods) ---------
 
     @staticmethod
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``s3://bucket/key`` into (bucket, key)."""
-        if not uri.startswith("s3://"):
-            raise ValidationError(f"Not a storage URI: {uri!r}")
-        parsed = urlparse(uri)
-        return parsed.netloc, parsed.path.lstrip("/")
+        return split_storage_uri(uri, "s3")
 
     def _local_bucket(self, store: StorageStore) -> str:
         return f"bioaf-{store.value}-{self._org_slug}"
 
+    def _local_fs(self) -> LocalObjectFilesystem:
+        """The local-mode object store (``s3://<bucket>/<key>`` -> LOCAL_DATA_ROOT/_objects/<bucket>/<key>)."""
+        return LocalObjectFilesystem(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR), self._parse_uri, self.build_uri)
+
     def _local_path(self, uri: str) -> str:
-        bucket, key = self._parse_uri(uri)
-        # The key can derive from user input, and local mode maps it onto a real
-        # filesystem path. Reject traversal in the key (the explicit '..'/abs check
-        # is a CodeQL-recognised path-injection barrier), then confirm the resolved
-        # real path stays under the local object root.
-        if os.path.isabs(key) or ".." in key.split("/"):
-            raise ValidationError(f"Storage key escapes the local object root: {key!r}")
-        base = os.path.realpath(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR))
-        full = os.path.realpath(os.path.join(base, bucket, key))
-        if full != base and not full.startswith(base + os.sep):
-            raise ValidationError(f"Storage path escapes the local object root: {uri!r}")
-        return full
+        return self._local_fs().path(uri)
 
     async def _get_bucket_config(self) -> dict[str, str]:
         """Read and cache the configured bucket name for each logical store."""
@@ -310,27 +226,46 @@ class S3StorageProvider(StorageProvider):
 
     # -- Container-side CLI staging (the aws-CLI counterpart of gsutil) --------
 
+    # Every operand below is one literal argument (see app.platform.shell_args): a URI must be
+    # this backend's, a local path absolute, and a caller's ShellExpr is passed through as the
+    # caller wrote it. `aws s3` has no operand pattern syntax (it filters with --include/--exclude).
+
+    def _remote(self, uri: str) -> str:
+        if not isinstance(uri, ShellExpr):
+            self._parse_uri(uri)
+        return uri
+
     def cli_auth_command(self, key_file: str) -> str:
         # S3 authenticates ambiently from the pod's instance profile / IRSA role,
         # so there is no explicit CLI auth step (mirrors the NFS no-auth case).
         return ""
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return f"aws s3 cp {uri} {local_path}"
+        return shell_join(["aws", "s3", "cp", self._remote(uri), absolute_path(local_path)])
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
-        return f"aws s3 cp --recursive {local_path} {uri}"
+        return shell_join(["aws", "s3", "cp", "--recursive", absolute_path(local_path), self._remote(uri)])
 
     def cli_copy_out_file(self, local_path: str, uri: str) -> str:
-        return f"aws s3 cp {local_path} {uri}"
+        return shell_join(["aws", "s3", "cp", absolute_path(local_path), self._remote(uri)])
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        # `aws s3 cp --recursive DIR PREFIX` copies DIR's contents under PREFIX (dotfiles too). The
+        # old `/outputs/*` glob gave `aws s3 cp` one source per entry, which it rejects above one.
+        return shell_join(["aws", "s3", "cp", "--recursive", absolute_path(local_dir), self._remote(uri)])
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the stage-in init
         # container, matching the GCS adapter's tolerant rsync.
-        return ["/bin/sh", "-c", f"aws s3 sync {remote_prefix} {local_dir} || true"]
+        sync = shell_join(["aws", "s3", "sync", self._remote(remote_prefix), absolute_path(local_dir)])
+        return ["/bin/sh", "-c", f"{sync} || true"]
 
     def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
-        return ["/bin/sh", "-c", f"aws s3 sync {local_dir} {remote_prefix}"]
+        return [
+            "/bin/sh",
+            "-c",
+            shell_join(["aws", "s3", "sync", absolute_path(local_dir), self._remote(remote_prefix)]),
+        ]
 
     def staging_image(self) -> str:
         # amazon/aws-cli ships the `aws s3` CLI for stage in/out.
@@ -426,19 +361,19 @@ class S3StorageProvider(StorageProvider):
 
     async def read_bytes(self, uri: str) -> bytes:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            return await asyncio.to_thread(_read_file_bytes, path)
+            return await asyncio.to_thread(self._local_fs().read_bytes, uri)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_read_bytes, uri, creds)
 
     async def read_prefix(self, uri: str, length: int) -> bytes:
+        # Specified on every backend before any I/O: a negative length is a caller error, and
+        # zero bytes need no request (the range used to be `bytes=0-0` for both).
+        if length < 0:
+            raise ValueError("A prefix length cannot be negative")
+        if length == 0:
+            return b""
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            return await asyncio.to_thread(_read_file_prefix, path, length)
+            return await asyncio.to_thread(self._local_fs().read_prefix, uri, length)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_read_prefix, uri, length, creds)
 
@@ -447,61 +382,52 @@ class S3StorageProvider(StorageProvider):
 
     async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         if self.is_local:
-            await asyncio.to_thread(_write_file_bytes, self._local_path(uri), data)
+            await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
         if self.is_local:
-            await asyncio.to_thread(_write_file_stream, self._local_path(uri), file_obj)
+            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds)
 
     async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
         if self.is_local:
-            await asyncio.to_thread(_copy_file, local_path, self._local_path(uri))
+            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            await asyncio.to_thread(_stream_file_into, path, file_obj)
+            await asyncio.to_thread(self._local_fs().stream_into, uri, file_obj)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_download_to_file, uri, file_obj, creds)
 
     async def download_to_filename(self, uri: str, local_path: str) -> None:
         if self.is_local:
-            src = self._local_path(uri)
-            if not os.path.exists(src):
-                raise StorageObjectNotFound(uri)
-            await asyncio.to_thread(_copy_file, src, local_path)
+            await asyncio.to_thread(self._local_fs().download_to_filename, uri, local_path)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_download_to_filename, uri, local_path, creds)
 
     async def delete(self, uri: str, *, generation: int | None = None) -> None:
         if self.is_local:
-            path = self._local_path(uri)
-            if os.path.exists(path):
-                await asyncio.to_thread(os.remove, path)
+            # The local store has no generations; a symlink is removed itself, never its target.
+            await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
-            return os.path.exists(self._local_path(uri))
+            return await asyncio.to_thread(self._local_fs().exists, uri)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_exists, uri, creds)
-
-    # -- Object-store interface (Phase 3): list/copy/move/metadata (6a.3) ------
 
     async def list_objects(
         self,
@@ -512,7 +438,10 @@ class S3StorageProvider(StorageProvider):
         max_results: int | None = None,
     ) -> list[StoredObject]:
         if self.is_local:
-            return await asyncio.to_thread(self._local_list_objects, uri_prefix, max_results)
+            # The local store has no historical versions.
+            return await asyncio.to_thread(
+                self._local_fs().list, uri_prefix, recursive=recursive, max_results=max_results
+            )
         creds = await self._get_credentials()
         return await asyncio.to_thread(
             self._s3_list_objects, uri_prefix, recursive, include_versions, max_results, creds
@@ -520,7 +449,7 @@ class S3StorageProvider(StorageProvider):
 
     async def copy(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
-            await asyncio.to_thread(self._local_copy, source_uri, dest_uri)
+            await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_copy, source_uri, dest_uri, creds)
@@ -528,7 +457,7 @@ class S3StorageProvider(StorageProvider):
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
-            await asyncio.to_thread(self._local_move, source_uri, dest_uri)
+            await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_move, source_uri, dest_uri, creds)
@@ -536,10 +465,7 @@ class S3StorageProvider(StorageProvider):
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            size = await asyncio.to_thread(os.path.getsize, path)
+            size = await asyncio.to_thread(self._local_fs().size, uri)
             return ObjectMetadata(uri=uri, size_bytes=size)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_object_metadata, uri, creds)
@@ -615,79 +541,7 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_query_bucket_stats, prefix, creds)
 
-    # -- Local-mode object-store helpers (s3:// emulation) --------------------
-
-    def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
-        bucket, key_prefix = self._parse_uri(uri_prefix)
-        bucket_root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket)
-        results: list[StoredObject] = []
-        if not os.path.isdir(bucket_root):
-            return results
-        for dirpath, _dirs, files in os.walk(bucket_root):
-            for fname in files:
-                full = os.path.join(dirpath, fname)
-                rel = os.path.relpath(full, bucket_root)
-                if key_prefix and not rel.startswith(key_prefix):
-                    continue
-                results.append(
-                    StoredObject(
-                        filename=fname,
-                        storage_uri=f"s3://{bucket}/{rel}",
-                        size_bytes=os.path.getsize(full),
-                    )
-                )
-                if max_results is not None and len(results) >= max_results:
-                    return results
-        return results
-
-    def _local_copy(self, source_uri: str, dest_uri: str) -> None:
-        src = self._local_path(source_uri)
-        if not os.path.exists(src):
-            raise StorageObjectNotFound(source_uri)
-        dest = self._local_path(dest_uri)
-        _copy_file(src, dest)
-
-    def _local_move(self, source_uri: str, dest_uri: str) -> None:
-        self._local_copy(source_uri, dest_uri)
-        os.remove(self._local_path(source_uri))
-
-    # -- Local-mode pipeline staging (parity with the GCS adapter) ------------
-
-    async def _local_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        os.makedirs(working_dir, exist_ok=True)
-        staged_paths = []
-        for record in file_records:
-            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
-            src = record.get("local_path") or record.get("storage_uri") or record.get("gcs_uri", "")
-            dest = os.path.join(working_dir, filename)
-            if src and os.path.exists(src):
-                shutil.copy2(src, dest)
-            else:
-                with open(dest, "w") as f:
-                    f.write(f"# placeholder for {filename}\n")
-            staged_paths.append(dest)
-        return staged_paths
-
-    async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
-        os.makedirs(results_dir, exist_ok=True)
-        collected = []
-        if os.path.isdir(working_dir):
-            for fname in os.listdir(working_dir):
-                src = os.path.join(working_dir, fname)
-                if os.path.isfile(src):
-                    dest = os.path.join(results_dir, fname)
-                    shutil.copy2(src, dest)
-                    collected.append(
-                        {
-                            "filename": fname,
-                            "storage_uri": f"s3://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
-                            "size_bytes": os.path.getsize(dest),
-                        }
-                    )
-        return collected
+    # -- Local-mode simulated metrics (s3:// emulation) ------------------------
 
     def _local_storage_metrics(self) -> dict:
         from app.config import settings
@@ -770,7 +624,7 @@ class S3StorageProvider(StorageProvider):
         try:
             # The HTTP range is inclusive at both ends, and S3 serves what it
             # has when the object is shorter.
-            resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key, Range=f"bytes=0-{max(length - 1, 0)}")
+            resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key, Range=f"bytes=0-{length - 1}")
         except ClientError as e:
             if _is_not_found(e):
                 raise StorageObjectNotFound(uri) from e

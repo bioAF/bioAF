@@ -1,6 +1,6 @@
 """Tests for GCS storage adapter pipeline operations (spec tests 12-15).
 
-Tests generate_stage_commands and collect_outputs for real GCS mode.
+Tests collect_outputs for real GCS mode.
 """
 
 from unittest.mock import MagicMock, patch
@@ -13,27 +13,9 @@ from app.adapters.storage.gcs import GcsStorageProvider
 @pytest.fixture
 def adapter(monkeypatch):
     monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    return GcsStorageProvider(org_slug="testorg")
-
-
-class TestGenerateStageCommands:
-    def test_produces_gsutil_commands(self, adapter):
-        """Test 12: generate_stage_commands produces correct gsutil cp commands."""
-        file_records = [
-            {"filename": "sample_R1.fastq.gz", "gcs_uri": "gs://bioaf-raw-testorg/exp1/sample_R1.fastq.gz"},
-            {"filename": "sample_R2.fastq.gz", "gcs_uri": "gs://bioaf-raw-testorg/exp1/sample_R2.fastq.gz"},
-        ]
-
-        commands = adapter.generate_stage_commands(file_records, "/data/inputs")
-
-        assert len(commands) == 2
-        assert "gsutil cp gs://bioaf-raw-testorg/exp1/sample_R1.fastq.gz /data/inputs/sample_R1.fastq.gz" in commands[0]
-        assert "gsutil cp gs://bioaf-raw-testorg/exp1/sample_R2.fastq.gz /data/inputs/sample_R2.fastq.gz" in commands[1]
-
-    def test_empty_file_records(self, adapter):
-        """generate_stage_commands returns empty list for no files."""
-        commands = adapter.generate_stage_commands([], "/data/inputs")
-        assert commands == []
+    provider = GcsStorageProvider(org_slug="testorg")
+    provider._credentials_loaded = True  # ADC; no platform_config read
+    return provider
 
 
 class TestCollectOutputsRegistersFiles:
@@ -58,13 +40,13 @@ class TestCollectOutputsRegistersFiles:
         mock_bucket.list_blobs.return_value = [mock_blob1, mock_blob2]
 
         with patch.object(adapter, "_get_gcs_client", return_value=mock_storage_client):
-            result = await adapter._gcs_collect_outputs(
+            result = await adapter.collect_outputs(
                 "gs://bioaf-results-testorg/experiments/7/pipeline-runs/42/",
                 {"id": 42, "experiment_id": 7},
             )
 
         assert len(result) == 2
-        filenames = [r["filename"] for r in result]
+        filenames = [r.filename for r in result]
         assert "test_result.json" in filenames
         assert "input_manifest.txt" in filenames
 
@@ -84,13 +66,13 @@ class TestCollectOutputsOrganizesByExperiment:
         mock_bucket.list_blobs.return_value = [mock_blob]
 
         with patch.object(adapter, "_get_gcs_client", return_value=mock_storage_client):
-            result = await adapter._gcs_collect_outputs(
+            result = await adapter.collect_outputs(
                 "gs://bioaf-results-testorg/experiments/7/pipeline-runs/42/",
                 {"id": 42, "experiment_id": 7},
             )
 
         assert len(result) == 1
-        assert "experiments/7/pipeline-runs/42/" in result[0]["gcs_uri"]
+        assert "experiments/7/pipeline-runs/42/" in result[0].storage_uri
 
 
 class TestCollectOutputsComputesChecksums:
@@ -108,11 +90,11 @@ class TestCollectOutputsComputesChecksums:
         mock_bucket.list_blobs.return_value = [mock_blob]
 
         with patch.object(adapter, "_get_gcs_client", return_value=mock_storage_client):
-            result = await adapter._gcs_collect_outputs(
+            result = await adapter.collect_outputs(
                 "gs://bioaf-results-testorg/experiments/7/pipeline-runs/42/",
                 {"id": 42, "experiment_id": 7},
             )
 
         assert len(result) == 1
-        assert result[0]["md5_hash"] == "rL0Y20zC+Fzt72VPzMSk2A=="
-        assert result[0]["size_bytes"] == 1024
+        assert result[0].md5_hash == "rL0Y20zC+Fzt72VPzMSk2A=="
+        assert result[0].size_bytes == 1024

@@ -34,7 +34,6 @@ from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.sample import Sample, sample_files
 from app.models.validation_study import VALIDATION_STUDY_TERMINAL_STATES, ValidationStudy
-from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.experiment import ExperimentCreate
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
@@ -43,6 +42,7 @@ from app.services.literature.fulltext_service import FullTextFetchService
 from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
 from app.services.result_set_normalizer import FindingSet, normalize_gene_table, normalize_interval_table
 from app.services.validation_classifier_service import classify_study
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
@@ -136,16 +136,12 @@ def _early_exit_classification(plan: ReproductionPlan) -> str | None:
 
 
 async def _resolve_outdir(session: AsyncSession, run) -> str:
-    """The run's durable results prefix, resolved the same way the pipeline monitor does."""
-    outdir = (run.parameters_json or {}).get("outdir", "")
-    if outdir:
-        return outdir
-    results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
-    if results_bucket:
-        return get_storage_adapter().build_uri(
-            results_bucket, f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
-        )
-    return f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+    """The run's authorized output location, the one the pipeline monitor collects from.
+
+    Raises ``OutputLocationRefused`` when the run records any other location: its fetched data is
+    then neither read nor attached.
+    """
+    return await RunOutputLocationService.authorized_uri(session, run, get_storage_adapter())
 
 
 async def _has_runnable_samples(session: AsyncSession, experiment_id: int) -> bool:
@@ -307,9 +303,13 @@ class ValidationDriverService:
 
         # D2: turn the fetched data into first-class samples with their FASTQ attached. Both are
         # best-effort + idempotent, so re-running (or overlapping with the monitor's ingest) is safe.
-        outdir = await _resolve_outdir(session, run)
-        await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir)
-        await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir)
+        try:
+            outdir = await _resolve_outdir(session, run)
+        except OutputLocationRefused as exc:
+            logger.warning("validation study %d: fetched data not ingested: %s", study.id, exc)
+        else:
+            await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir)
+            await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir)
 
         if not await _has_runnable_samples(session, study.experiment_id):
             study.failure_reason = "fetched data was not usable (no runnable samples with FASTQ)"

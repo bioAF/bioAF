@@ -173,13 +173,19 @@ class ValidationStudyService:
         The previous attempt's `analysis_run_id` and its Level-3 session are cleared. Left in place,
         the driver reads the FAILED run as this attempt's result and reproduces from a session that
         no longer applies.
+
+        The study row is locked from this read to the caller's commit: the fetch reaper admits a
+        cleanup under the same lock, so the two never decide on the same study at once.
         """
         study = (
             await session.execute(
-                select(ValidationStudy).where(
+                select(ValidationStudy)
+                .where(
                     ValidationStudy.id == study_id,
                     ValidationStudy.organization_id == org_id,
                 )
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
         if not study:

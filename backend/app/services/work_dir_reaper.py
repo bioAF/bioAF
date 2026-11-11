@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.registry import get_storage_adapter
 from app.models.pipeline_run import PipelineRun
+from app.platform.run_output_layout import directory_prefix, uri_within
 from app.platform.work_dir_layout import WORK_DIR_ROOT, work_dir_key
 
 logger = logging.getLogger(__name__)
@@ -68,11 +69,18 @@ class WorkDirReaper:
         reaped: list[int] = []
 
         for run in candidates:
-            prefix = storage.build_uri(raw_bucket, work_dir_key(run.id))
+            # Separator-terminated: object prefixes match literally, and `run-7` alone also
+            # matches runs 70, 71 and 700, whose work may still be live.
+            prefix = directory_prefix(storage.build_uri(raw_bucket, work_dir_key(run.id)))
             try:
                 objects = await storage.list_objects(prefix)
+                outside = [o.storage_uri for o in objects or [] if not uri_within(storage, o.storage_uri, prefix)]
+                if outside:
+                    # A listing is never trusted to have stayed inside the prefix it was asked for.
+                    logger.warning("Work dir reap refused for run %d: listing returned %s", run.id, outside[:5])
+                    continue
                 for obj in objects or []:
-                    await storage.delete(obj.uri)
+                    await storage.delete(obj.storage_uri)
             except Exception as exc:
                 # Deliberately not marked: the data still exists, so the next pass
                 # must try again rather than lose track of it.

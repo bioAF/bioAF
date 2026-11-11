@@ -7,14 +7,15 @@ Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
 import asyncio
 import logging
 import os
-import shutil
-import uuid
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage.local_fs import LocalObjectFilesystem
+from app.adapters.storage.uri import split_storage_uri
+from app.platform.run_output_layout import directory_prefix
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -55,41 +56,96 @@ _METRICS_STORES = (
 )
 
 
-def _read_file_bytes(path: str) -> bytes:
-    with open(path, "rb") as f:
-        return f.read()
+def gcs_cli_source(operand: str) -> str:
+    """A ``gcloud storage``/``gsutil`` SOURCE operand that matches only itself.
+
+    Those CLIs read ``*``, ``?`` and ``[`` in a source as a pattern, and a character class is the
+    one escape they accept (``[[]``, ``[*]``, ``[?]``; checked with cloud-sdk 593.0.0). A literal is
+    escaped here; a caller's runtime ``ShellExpr`` (a loop variable) is escaped by ``sed`` when the
+    shell evaluates it.
+    """
+    if isinstance(operand, ShellExpr):
+        return ShellExpr(f"\"$(printf '%s' {operand} | sed 's/[[*?]/[&]/g')\"")
+    return "".join(f"[{c}]" if c in "[*?" else c for c in operand)
 
 
-def _read_file_prefix(path: str, length: int) -> bytes:
-    with open(path, "rb") as f:
-        return f.read(length)
+# Downloads `gcloud`/`gsutil` cannot name, run as `sh -c BODY sh URI DEST`: a source key with
+# `[*?#` (`#123` is read as a generation) or a destination with `[*?` (refused as a wildcard). The
+# object is addressed literally through the JSON API (every byte of bucket and key percent-
+# encoded), the token reaches curl on stdin, the download lands in a temporary file beside the
+# destination, and only a matching crc32c (`gcloud storage hash`) moves it into place. Any failure
+# removes the temporary file and leaves the destination as it was.
+_VERIFIED_FETCH = r"""u=$1; d=$2
+case $u in gs://?*/?*) ;; *) echo "bioAF: not an object URI: $u" >&2; exit 1 ;; esac
+r=${u#gs://}; b=${r%%/*}; k=${r#*/}
+enc() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/../%&/g'; }
+ep=$(gcloud config get-value api_endpoint_overrides/storage 2>/dev/null)
+url="${ep:-https://storage.googleapis.com/}"; url="${url%/}/storage/v1/b/$(enc "$b")/o/$(enc "$k")"
+tok=$(gcloud auth print-access-token) || { echo "bioAF: no storage credentials for $u" >&2; exit 1; }
+api() { printf 'header = "Authorization: Bearer %s"\n' "$tok" | curl -fsS -K - "$@"; }
+want=$(api "$url?fields=crc32c" | sed -n 's/.*"crc32c" *: *"\([^"]*\)".*/\1/p')
+[ -n "$want" ] || { echo "bioAF: could not read $u" >&2; exit 1; }
+tmp=$(mktemp "${d%/*}/.bioaf-partial.XXXXXX") || exit 1
+trap 'rm -f "$tmp"' EXIT
+api -o "$tmp" "$url?alt=media" || { echo "bioAF: could not download $u" >&2; exit 1; }
+got=$(gcloud storage hash "$(printf '%s' "$tmp" | sed 's/[[*?]/[&]/g')" --skip-md5 --format='value(crc32c_hash)') || exit 1
+[ "$got" = "$want" ] || { echo "bioAF: checksum mismatch for $u" >&2; exit 1; }
+mv -f "$tmp" "$d" || exit 1
+trap - EXIT"""
 
 
-def _write_file_bytes(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(data)
+def gcs_fetch_command(uri: str, dest: str, copy: str) -> str:
+    """Download ``uri`` to ``dest``: ``copy`` (the caller's CLI copy) when the CLI can name both,
+    otherwise the verified JSON API fetch. Shared by the adapter and GCE work-node startup.
+
+    A runtime ``ShellExpr`` operand is decided by the shell when it runs.
+    """
+    fetch = shell_join(["sh", "-c", _VERIFIED_FETCH, "sh", uri, dest])
+    if isinstance(uri, ShellExpr) or isinstance(dest, ShellExpr):
+        return (
+            f"case {shell_word(uri)} in gs://*/*[][*?#]*) {fetch} ;; *) "
+            f"case {shell_word(dest)} in *[][*?]*) {fetch} ;; *) {copy} ;; esac ;; esac"
+        )
+    _, key = split_storage_uri(uri, "gs")
+    if any(c in key for c in "[*?#") or any(c in dest for c in "[*?"):
+        return fetch
+    return copy
 
 
-def _write_file_stream(path: str, file_obj) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if hasattr(file_obj, "seek"):
-        try:
-            file_obj.seek(0)
-        except (OSError, ValueError):
-            pass
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file_obj, f)
+# Uploads `gcloud` cannot name, run as `find DIR ... -exec sh -c BODY sh DIR PREFIX FILE... +`: a
+# name ending in `#<digits>` is read as a generation (`gcloud storage rsync` stored a local
+# `artifact#123` as `artifact` on blackbird). Each such file goes to PREFIX + its path relative to
+# DIR through the JSON API (bucket and key percent-encoded, token on stdin), and the crc32c the API
+# reports must equal the local file's. Every file is attempted; any failure fails the batch.
+_VERIFIED_UPLOAD = r"""d=$1; u=$2; shift 2; rc=0
+r=${u#gs://}; b=${r%%/*}; kp=${r#*/}
+enc() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/../%&/g'; }
+ep=$(gcloud config get-value api_endpoint_overrides/storage 2>/dev/null)
+base="${ep:-https://storage.googleapis.com/}"; base=${base%/}
+tok=$(gcloud auth print-access-token) || { echo "bioAF: no storage credentials for $u" >&2; exit 1; }
+for f do
+  case ${f##*#} in ''|*[!0-9]*) continue ;; esac
+  k="$kp${f#"$d"/}"
+  want=$(gcloud storage hash "$(printf '%s' "$f" | sed 's/[[*?]/[&]/g')" --skip-md5 --format='value(crc32c_hash)') || { rc=1; continue; }
+  got=$(printf 'header = "Authorization: Bearer %s"\n' "$tok" | curl -fsS -K - -X POST -H 'Content-Type: application/octet-stream' --data-binary "@$f" "$base/upload/storage/v1/b/$(enc "$b")/o?uploadType=media&name=$(enc "$k")&fields=crc32c" | sed -n 's/.*"crc32c" *: *"\([^"]*\)".*/\1/p')
+  if [ -z "$got" ] || [ "$got" != "$want" ]; then echo "bioAF: upload failed or checksum mismatch for gs://$b/$k" >&2; rc=1; fi
+done
+exit $rc"""
 
+# A Python regex for `gcloud storage rsync --exclude`: any path containing CR or LF, or ending
+# in `#<digits>` (uploaded by `_VERIFIED_UPLOAD` instead). Applied with `re.match` to the
+# relative path; the flag splits on commas, so the pattern has none.
+_RSYNC_SKIP_UNNAMEABLE = "--exclude=(?s).*[\\r\\n].*|.*#[0-9]+$"
 
-def _stream_file_into(path: str, file_obj) -> None:
-    with open(path, "rb") as f:
-        shutil.copyfileobj(f, file_obj)
-
-
-def _copy_file(src: str, dest: str) -> None:
-    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    shutil.copy2(src, dest)
+# `sh -c` body for `find ... -exec sh -c BODY sh FILE... +`: Cloud Storage refuses CR and LF in
+# an object name (HTTPError 400 on blackbird), so each such file is listed, with a backslash
+# doubled and CR/LF written as `\r`/`\n` so the list is unambiguous, and the copy fails.
+_REFUSE_LINE_BREAK_NAMES = r"""echo 'bioAF: names with line breaks or carriage returns cannot be stored in Google Cloud Storage; not copied:' >&2
+cr=$(printf '\r')
+for f do
+  printf '%s' "$f" | sed -e 's/\\/\\\\/g' -e "s/$cr/\\\\r/g" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 } END { print "" }' | sed 's/^/  /' >&2
+done
+exit 1"""
 
 
 class GcsStorageProvider(StorageProvider):
@@ -133,41 +189,15 @@ class GcsStorageProvider(StorageProvider):
     def config_backups_bucket(self) -> str:
         return f"bioaf-config-backups-{self._org_slug}"
 
-    async def resolve_input_path(self, file_record: dict) -> str:
-        if self.is_local:
-            return f"/data/inputs/{file_record.get('filename', 'unknown')}"
-        return f"/data/inputs/{file_record.get('filename', 'unknown')}"
+    async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
+        """Every object under the run's output directory URI, with its canonical, readable URI.
 
-    async def resolve_output_path(self, pipeline_run: dict, filename: str) -> str:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        if self.is_local:
-            return f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-        return f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{filename}"
-
-    async def stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        if self.is_local:
-            return await self._local_stage_inputs(file_records, working_dir)
-        return await self._gcs_stage_inputs(file_records, working_dir)
-
-    async def collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[StoredObject]:
-        items = (
-            await self._local_collect_outputs(working_dir, pipeline_run)
-            if self.is_local
-            else await self._gcs_collect_outputs(working_dir, pipeline_run)
-        )
-        return [
-            StoredObject(
-                filename=d["filename"],
-                storage_uri=d.get("gcs_uri", ""),
-                size_bytes=d.get("size_bytes"),
-                md5_hash=d.get("md5_hash"),
-                provider_details={
-                    k: v for k, v in d.items() if k not in {"filename", "gcs_uri", "size_bytes", "md5_hash"}
-                },
-            )
-            for d in items
-        ]
+        Discovery only: nothing is copied. The directory is listed with a trailing separator, so
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        """
+        self._parse_uri(output_uri)
+        objects = await self.list_objects(directory_prefix(output_uri))
+        return [o for o in objects if o.filename]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         d = self._local_storage_metrics() if self.is_local else await self._gcs_storage_metrics()
@@ -187,27 +217,17 @@ class GcsStorageProvider(StorageProvider):
     @staticmethod
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``gs://bucket/key`` into (bucket, key)."""
-        if not uri.startswith("gs://"):
-            raise ValidationError(f"Not a storage URI: {uri!r}")
-        parsed = urlparse(uri)
-        return parsed.netloc, parsed.path.lstrip("/")
+        return split_storage_uri(uri, "gs")
 
     def _local_bucket(self, store: StorageStore) -> str:
         return f"bioaf-{store.value}-{self._org_slug}"
 
+    def _local_fs(self) -> LocalObjectFilesystem:
+        """The local-mode object store (``gs://<bucket>/<key>`` -> LOCAL_DATA_ROOT/_objects/<bucket>/<key>)."""
+        return LocalObjectFilesystem(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR), self._parse_uri, self.build_uri)
+
     def _local_path(self, uri: str) -> str:
-        bucket, key = self._parse_uri(uri)
-        # The key can derive from user input, and local mode maps it onto a real
-        # filesystem path. Reject traversal in the key (the explicit '..'/abs
-        # check is a CodeQL-recognised path-injection barrier), then confirm the
-        # resolved real path stays under the local object root.
-        if os.path.isabs(key) or ".." in key.split("/"):
-            raise ValidationError(f"Storage key escapes the local object root: {key!r}")
-        base = os.path.realpath(os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR))
-        full = os.path.realpath(os.path.join(base, bucket, key))
-        if full != base and not full.startswith(base + os.sep):
-            raise ValidationError(f"Storage path escapes the local object root: {uri!r}")
-        return full
+        return self._local_fs().path(uri)
 
     async def _get_credentials(self):
         """Resolve and cache GCS credentials via a short-lived session.
@@ -262,28 +282,72 @@ class GcsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    # Every operand below is one literal argument (see app.platform.shell_args): a URI must be
+    # this backend's, a local path absolute, and a caller's ShellExpr is passed through as the
+    # caller wrote it. `gcloud storage` and `gsutil` read `*`, `?` and `[` in a SOURCE as a
+    # pattern (a literal `a[1].txt` selected `a1.txt` in cloud-sdk 593.0.0), so literal sources
+    # are written with the one escape they accept, a character class.
+
+    def _remote(self, uri: str) -> str:
+        if not isinstance(uri, ShellExpr):
+            self._parse_uri(uri)
+        return uri
+
+    @staticmethod
+    def _source(operand: str) -> str:
+        return gcs_cli_source(operand)
+
     def cli_auth_command(self, key_file: str) -> str:
         # gsutil consults ~/.boto before GOOGLE_APPLICATION_CREDENTIALS, which in
         # cloud-sdk:slim picks up the wrong identity even with the SA key mounted.
         # Activate the SA explicitly and use `gcloud storage` (cli_copy_*), which
         # honors the activated account directly.
-        return f"gcloud auth activate-service-account --key-file={key_file} --quiet"
+        return shell_join(
+            ["gcloud", "auth", "activate-service-account", f"--key-file={absolute_path(key_file)}", "--quiet"]
+        )
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return f"gcloud storage cp {uri} {local_path}"
+        # A name `gcloud storage cp` cannot represent goes through the verified JSON API fetch
+        # (plan 17 live validation L1/L2; see `_VERIFIED_FETCH`); any other keeps `cp`, whose
+        # downloads are parallel and checksummed.
+        remote = self._remote(uri)
+        dest = absolute_path(local_path)
+        return gcs_fetch_command(remote, dest, shell_join(["gcloud", "storage", "cp", self._source(remote), dest]))
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
-        return f"gcloud storage cp -r {local_path} {uri}"
+        return shell_join(["gcloud", "storage", "cp", "-r", self._source(absolute_path(local_path)), self._remote(uri)])
 
     def cli_copy_out_file(self, local_path: str, uri: str) -> str:
-        return f"gcloud storage cp {local_path} {uri}"
+        return shell_join(["gcloud", "storage", "cp", self._source(absolute_path(local_path)), self._remote(uri)])
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
+        # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
+        # S3 and NFS. rsync skips two kinds of path (checked with cloud-sdk 593.0.0 and on
+        # blackbird): a name ending in `#<digits>`, which the CLI would store under a shorter name,
+        # is uploaded literally by `_VERIFIED_UPLOAD`; a path with CR or LF cannot be an object
+        # name at all, so it is listed and the copy fails. Everything else is still copied first.
+        directory = absolute_path(local_dir).rstrip("/") or "/"
+        prefix = self._remote(uri).rstrip("/") + "/"
+        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_UNNAMEABLE, directory, prefix])
+        upload = shell_join(
+            ["find", directory, "-type", "f", "-name", "*#[0-9]*", "!", "-path", "*\n*", "!", "-path", "*\r*"]
+            + ["-exec", "sh", "-c", _VERIFIED_UPLOAD, "sh", directory, prefix, "{}", "+"]
+        )
+        refuse = shell_join(
+            ["find", directory, "(", "-path", "*\n*", "-o", "-path", "*\r*", ")", "-type", "f"]
+            + ["-exec", "sh", "-c", _REFUSE_LINE_BREAK_NAMES, "sh", "{}", "+"]
+        )
+        return f'{rsync} && {{ {upload}; up=$?; {refuse} && [ "$up" -eq 0 ]; }}'
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.
-        return ["/bin/sh", "-c", f"gsutil -m rsync -r {remote_prefix} {local_dir} || true"]
+        rsync = shell_join(["gsutil", "-m", "rsync", "-r", self._remote(remote_prefix), absolute_path(local_dir)])
+        return ["/bin/sh", "-c", f"{rsync} || true"]
 
     def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
-        return ["/bin/sh", "-c", f"gsutil -m rsync -r {local_dir} {remote_prefix}"]
+        rsync = shell_join(["gsutil", "-m", "rsync", "-r", absolute_path(local_dir), self._remote(remote_prefix)])
+        return ["/bin/sh", "-c", rsync]
 
     def staging_image(self) -> str:
         # google/cloud-sdk:slim ships gsutil + gcloud storage for stage in/out.
@@ -331,19 +395,19 @@ class GcsStorageProvider(StorageProvider):
 
     async def read_bytes(self, uri: str) -> bytes:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            return await asyncio.to_thread(_read_file_bytes, path)
+            return await asyncio.to_thread(self._local_fs().read_bytes, uri)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_read_bytes, uri, creds)
 
     async def read_prefix(self, uri: str, length: int) -> bytes:
+        # Specified on every backend before any I/O: a negative length is a caller error, and
+        # zero bytes need no request (the range used to be `bytes=0-0` for both).
+        if length < 0:
+            raise ValueError("A prefix length cannot be negative")
+        if length == 0:
+            return b""
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            return await asyncio.to_thread(_read_file_prefix, path, length)
+            return await asyncio.to_thread(self._local_fs().read_prefix, uri, length)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_read_prefix, uri, length, creds)
 
@@ -352,58 +416,50 @@ class GcsStorageProvider(StorageProvider):
 
     async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         if self.is_local:
-            await asyncio.to_thread(_write_file_bytes, self._local_path(uri), data)
+            await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
         if self.is_local:
-            await asyncio.to_thread(_write_file_stream, self._local_path(uri), file_obj)
+            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_upload_file, uri, file_obj, content_type, creds)
 
     async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
         if self.is_local:
-            dest = self._local_path(uri)
-            await asyncio.to_thread(_copy_file, local_path, dest)
+            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_upload_filename, uri, local_path, content_type, creds)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            await asyncio.to_thread(_stream_file_into, path, file_obj)
+            await asyncio.to_thread(self._local_fs().stream_into, uri, file_obj)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_download_to_file, uri, file_obj, creds)
 
     async def download_to_filename(self, uri: str, local_path: str) -> None:
         if self.is_local:
-            src = self._local_path(uri)
-            if not os.path.exists(src):
-                raise StorageObjectNotFound(uri)
-            await asyncio.to_thread(_copy_file, src, local_path)
+            await asyncio.to_thread(self._local_fs().download_to_filename, uri, local_path)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_download_to_filename, uri, local_path, creds)
 
     async def delete(self, uri: str, *, generation: int | None = None) -> None:
         if self.is_local:
-            path = self._local_path(uri)
-            if os.path.exists(path):
-                await asyncio.to_thread(os.remove, path)
+            # The local store has no generations; a symlink is removed itself, never its target.
+            await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
-            return os.path.exists(self._local_path(uri))
+            return await asyncio.to_thread(self._local_fs().exists, uri)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_exists, uri, creds)
 
@@ -416,7 +472,10 @@ class GcsStorageProvider(StorageProvider):
         max_results: int | None = None,
     ) -> list[StoredObject]:
         if self.is_local:
-            return await asyncio.to_thread(self._local_list_objects, uri_prefix, max_results)
+            # The local store has no historical versions.
+            return await asyncio.to_thread(
+                self._local_fs().list, uri_prefix, recursive=recursive, max_results=max_results
+            )
         creds = await self._get_credentials()
         return await asyncio.to_thread(
             self._gcs_list_objects, uri_prefix, recursive, include_versions, max_results, creds
@@ -424,7 +483,7 @@ class GcsStorageProvider(StorageProvider):
 
     async def copy(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
-            await asyncio.to_thread(self._local_copy, source_uri, dest_uri)
+            await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_copy, source_uri, dest_uri, creds)
@@ -432,7 +491,7 @@ class GcsStorageProvider(StorageProvider):
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
-            await asyncio.to_thread(self._local_move, source_uri, dest_uri)
+            await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_move, source_uri, dest_uri, creds)
@@ -440,10 +499,7 @@ class GcsStorageProvider(StorageProvider):
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         if self.is_local:
-            path = self._local_path(uri)
-            if not os.path.exists(path):
-                raise StorageObjectNotFound(uri)
-            size = await asyncio.to_thread(os.path.getsize, path)
+            size = await asyncio.to_thread(self._local_fs().size, uri)
             return ObjectMetadata(uri=uri, size_bytes=size)
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_object_metadata, uri, creds)
@@ -479,42 +535,6 @@ class GcsStorageProvider(StorageProvider):
             self._gcs_create_resumable_upload_url, uri, content_type, size_bytes, origin, creds
         )
 
-    # -- Local-mode object-store helpers --
-
-    def _local_list_objects(self, uri_prefix: str, max_results: int | None) -> list[StoredObject]:
-        bucket, key_prefix = self._parse_uri(uri_prefix)
-        bucket_root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket)
-        results: list[StoredObject] = []
-        if not os.path.isdir(bucket_root):
-            return results
-        for dirpath, _dirs, files in os.walk(bucket_root):
-            for fname in files:
-                full = os.path.join(dirpath, fname)
-                rel = os.path.relpath(full, bucket_root)
-                if key_prefix and not rel.startswith(key_prefix):
-                    continue
-                results.append(
-                    StoredObject(
-                        filename=fname,
-                        storage_uri=f"gs://{bucket}/{rel}",
-                        size_bytes=os.path.getsize(full),
-                    )
-                )
-                if max_results is not None and len(results) >= max_results:
-                    return results
-        return results
-
-    def _local_copy(self, source_uri: str, dest_uri: str) -> None:
-        src = self._local_path(source_uri)
-        if not os.path.exists(src):
-            raise StorageObjectNotFound(source_uri)
-        dest = self._local_path(dest_uri)
-        _copy_file(src, dest)
-
-    def _local_move(self, source_uri: str, dest_uri: str) -> None:
-        self._local_copy(source_uri, dest_uri)
-        os.remove(self._local_path(source_uri))
-
     # -- GCS-mode object-store helpers (run inside asyncio.to_thread) --
 
     def _gcs_read_bytes(self, uri: str, creds) -> bytes:
@@ -533,9 +553,9 @@ class GcsStorageProvider(StorageProvider):
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
         try:
-            # `end` is inclusive, and an object shorter than the range simply
-            # returns what it has.
-            return blob.download_as_bytes(start=0, end=max(length - 1, 0))
+            # `end` is inclusive (length >= 1, checked by read_prefix), and an object
+            # shorter than the range simply returns what it has.
+            return blob.download_as_bytes(start=0, end=length - 1)
         except NotFound as e:
             raise StorageObjectNotFound(uri) from e
 
@@ -681,45 +701,6 @@ class GcsStorageProvider(StorageProvider):
 
     # -- Local mode implementations --
 
-    async def _local_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        os.makedirs(working_dir, exist_ok=True)
-        staged_paths = []
-        for record in file_records:
-            filename = record.get("filename", f"file-{uuid.uuid4().hex[:8]}")
-            src = record.get("local_path") or record.get("gcs_uri", "")
-            dest = os.path.join(working_dir, filename)
-            if src and os.path.exists(src):
-                shutil.copy2(src, dest)
-            else:
-                # Create placeholder for local mode
-                with open(dest, "w") as f:
-                    f.write(f"# placeholder for {filename}\n")
-            staged_paths.append(dest)
-        return staged_paths
-
-    async def _local_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-        results_dir = f"{LOCAL_DATA_ROOT}/results/experiments/{experiment_id}/pipeline-runs/{run_id}"
-        os.makedirs(results_dir, exist_ok=True)
-
-        collected = []
-        if os.path.isdir(working_dir):
-            for fname in os.listdir(working_dir):
-                src = os.path.join(working_dir, fname)
-                if os.path.isfile(src):
-                    dest = os.path.join(results_dir, fname)
-                    shutil.copy2(src, dest)
-                    collected.append(
-                        {
-                            "filename": fname,
-                            "local_path": dest,
-                            "gcs_uri": f"gs://{self.results_bucket}/experiments/{experiment_id}/pipeline-runs/{run_id}/{fname}",
-                            "size_bytes": os.path.getsize(dest),
-                        }
-                    )
-        return collected
-
     def _local_storage_metrics(self) -> dict:
         from app.config import settings
 
@@ -770,18 +751,6 @@ class GcsStorageProvider(StorageProvider):
             "total_cost_monthly_usd": total_monthly,
         }
 
-    # -- GCS stage/collect helpers --
-
-    def generate_stage_commands(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate gsutil cp commands for an init container to stage input files."""
-        commands = []
-        for record in file_records:
-            gcs_uri = record.get("gcs_uri", "")
-            filename = record.get("filename", "unknown")
-            dest = f"{working_dir}/{filename}"
-            commands.append(f"gsutil cp {gcs_uri} {dest}")
-        return commands
-
     def _get_gcs_client(self, credentials=None):
         """Get a Google Cloud Storage client. Tests mock this method.
 
@@ -794,53 +763,6 @@ class GcsStorageProvider(StorageProvider):
         return storage.Client(credentials=credentials) if credentials else storage.Client()
 
     # -- GCS API implementations (production) --
-
-    async def _gcs_stage_inputs(self, file_records: list[dict], working_dir: str) -> list[str]:
-        """Generate stage commands for the init container (GCS mode).
-
-        In GCS mode, staging is handled by the init container using gsutil,
-        so we return the list of commands that the init container will execute.
-        """
-        return self.generate_stage_commands(file_records, working_dir)
-
-    async def _gcs_collect_outputs(self, working_dir: str, pipeline_run: dict) -> list[dict]:
-        """List output objects in GCS and return file records."""
-        run_id = pipeline_run.get("id", "unknown")
-        experiment_id = pipeline_run.get("experiment_id", "unknown")
-
-        # Parse bucket and prefix from working_dir URI
-        if working_dir.startswith("gs://"):
-            parts = working_dir[5:].split("/", 1)
-            bucket_name = parts[0]
-            prefix = parts[1] if len(parts) > 1 else ""
-        else:
-            bucket_name = self.results_bucket
-            prefix = f"experiments/{experiment_id}/pipeline-runs/{run_id}/"
-
-        client = self._get_gcs_client()
-        bucket = client.bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix=prefix)
-
-        collected = []
-        for blob in blobs:
-            # Extract filename from the full blob path
-            filename = blob.name.split("/")[-1]
-            if not filename:
-                continue
-
-            gcs_uri = f"gs://{bucket_name}/{blob.name}"
-            collected.append(
-                {
-                    "filename": filename,
-                    "gcs_uri": gcs_uri,
-                    "size_bytes": blob.size,
-                    "md5_hash": blob.md5_hash,
-                    "experiment_id": experiment_id,
-                    "pipeline_run_id": run_id,
-                }
-            )
-
-        return collected
 
     async def _read_storage_config(self) -> dict[str, str]:
         """Read storage_deployed + the per-store bucket-name keys.

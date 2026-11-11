@@ -1,4 +1,5 @@
 import json
+import posixpath
 import logging
 import re
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from app.models.pipeline_run import PipelineRun
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.project import Project
 from app.platform.platform_config_service import PlatformConfigService
+from app.platform.shell_args import absolute_path, safe_relative_path, shell_word
 from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
     CustomPipelineLaunchRequest,
@@ -1069,6 +1071,10 @@ class CustomPipelineService:
         auth = adapter.cli_auth_command(key_file)
         if not auth:
             return ""
+        # The key path is the adapter mount's fixed constant; checked absolute and plain so its
+        # double quotes cannot carry data.
+        if not re.fullmatch(r"/[A-Za-z0-9_./-]+", absolute_path(key_file)):
+            raise ValueError(f"Unexpected key file path {key_file!r}")
         return f'if [ -f "{key_file}" ]; then {auth}; fi'
 
     @staticmethod
@@ -1085,12 +1091,13 @@ class CustomPipelineService:
         if auth:
             commands.append(auth)
         for fs in file_specs:
-            rel = fs["relative_path"]
-            uri = fs["gcs_uri"]
-            copy = adapter.cli_copy_in(uri, f"/data/{rel}")
-            dirname = "/".join(rel.split("/")[:-1])
+            # Each URI and path is one literal argument (the adapter quotes them); a relative
+            # path that would leave /data is refused before the run exists.
+            rel = safe_relative_path(fs["relative_path"])
+            copy = adapter.cli_copy_in(fs["gcs_uri"], f"/data/{rel}")
+            dirname = posixpath.dirname(rel)
             if dirname:
-                commands.append(f"mkdir -p /data/{dirname} && {copy}")
+                commands.append(f"mkdir -p {shell_word('/data/' + dirname)} && {copy}")
             else:
                 commands.append(copy)
         return commands
@@ -1162,13 +1169,19 @@ class CustomPipelineService:
             adapter = get_storage_adapter()
             sync_target = adapter.build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
             # Stage outputs back via the backend's CLI (auth + recursive copy live
-            # on the adapter). `|| true` keeps the trap non-fatal so a sync failure
-            # doesn't mask the pipeline's real exit status, but stderr stays visible
-            # so failures show up in pod logs instead of silently dropping outputs.
+            # on the adapter). A pipeline that failed keeps its own exit status; one
+            # that succeeded but whose outputs never reached storage exits 1, so the
+            # run is not reported complete without them.
             auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
-            copy_out = adapter.cli_copy_out("/outputs/*", sync_target)
+            copy_out = adapter.cli_copy_out_contents("/outputs", sync_target)
             sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
-            trap = f"trap '{sync_cmd} || true' EXIT"
+            failed = shell_word(f"bioAF: pipeline outputs could not be copied to {sync_target}")
+            body = (
+                f"status=$?; {{ {sync_cmd}; }} || {{ echo {failed} >&2; "
+                '[ "$status" -ne 0 ] || status=1; }; exit "$status"'
+            )
+            # The trap body is one quoted word: the copy's own quoting cannot end it early.
+            trap = f"trap {shell_word(body)} EXIT"
         else:
             trap = "trap 'true' EXIT"
         return "#!/bin/sh\nset -e\n" + trap + "\n" + entrypoint_command

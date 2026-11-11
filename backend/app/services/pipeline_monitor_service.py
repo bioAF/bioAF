@@ -13,6 +13,7 @@ from app.platform.platform_config_service import PlatformConfigService
 from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
+from app.services.run_output_location_service import RunOutputLocationService
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
 from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
@@ -672,16 +673,9 @@ class PipelineMonitorService:
         # Collect output files via storage adapter
         try:
             storage_adapter = get_storage_adapter()
-            outdir = (run.parameters_json or {}).get("outdir", "")
-            if not outdir:
-                # Fall back: read results_bucket_name from platform_config
-                results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
-                if results_bucket is not None:
-                    outdir = storage_adapter.build_uri(
-                        results_bucket, f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
-                    )
-                else:
-                    outdir = f"/data/results/experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+            # The run's own location, never a stored outdir taken on trust: a value
+            # other than that location is refused before anything is listed or read.
+            outdir = await RunOutputLocationService.authorized_uri(session, run, storage_adapter)
             collected = await storage_adapter.collect_outputs(
                 outdir,
                 {"id": run.id, "experiment_id": run.experiment_id},

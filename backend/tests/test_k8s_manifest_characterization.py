@@ -90,8 +90,16 @@ SCENARIOS = {
     "nextflow_gcp_service_account_key": dict(spec=NEXTFLOW, config=GCP_CONFIG, creds=("service_account_key", SA_KEY)),
     "nextflow_gcp_workload_identity": dict(spec=NEXTFLOW, config=GCP_CONFIG, creds=("vm_default", "")),
     "nextflow_aws_irsa": dict(spec=NEXTFLOW, config=AWS_CONFIG, creds=("vm_default", ""), storage="s3"),
+    # A replayed spec may carry an outdir, but only the run's own location (plan 17, D3); any
+    # other is refused, see test_nextflow_command_safety.
     "nextflow_explicit_outdir": dict(
-        spec={**NEXTFLOW, "parameters": {**NEXTFLOW["parameters"], "outdir": "gs://elsewhere/out"}},
+        spec={
+            **NEXTFLOW,
+            "parameters": {
+                **NEXTFLOW["parameters"],
+                "outdir": "gs://bioaf-results-test/experiments/9/pipeline-runs/101/",
+            },
+        },
         config=GCP_CONFIG,
         creds=("vm_default", ""),
     ),

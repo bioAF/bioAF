@@ -16,7 +16,7 @@ def _job():
 
 def test_igenomes_ignore_added_on_aws():
     cmd = KubernetesComputeProvider._build_nextflow_command(_job(), igenomes_ignore=True)[-1]
-    assert "--igenomes_ignore true" in cmd
+    assert "--igenomes_ignore=true" in cmd
 
 
 def test_igenomes_ignore_absent_on_gcp():
@@ -30,7 +30,7 @@ def test_explicit_igenomes_param_is_not_duplicated():
     cmd = KubernetesComputeProvider._build_nextflow_command(job, igenomes_ignore=True)[-1]
     # The operator's explicit value wins; the auto default does not double-emit.
     assert cmd.count("--igenomes_ignore") == 1
-    assert "--igenomes_ignore false" in cmd
+    assert "--igenomes_ignore=false" in cmd
 
 
 # --- nextflow.config: skip nf-schema validation of igenomes_base on AWS --------

@@ -263,8 +263,10 @@ class TestTerminateSession:
         all_calls = str(mock_stream.call_args_list)
         # The output listing is the in-pod gsutil ls over the session prefix...
         assert "gsutil ls -l -r gs://bioaf-working/sessions/42/" in all_calls
-        # ...and script capture uses gsutil cp, not gcloud storage / aws s3.
-        assert "gsutil cp" in all_calls
+        # ...and script capture goes through the adapter's quoted copy (plan 17, F13), not the
+        # separate `gsutil cp` branch.
+        assert "gcloud storage cp" in all_calls
+        assert "gsutil cp" not in all_calls
         assert "aws s3" not in all_calls
 
     @pytest.mark.asyncio

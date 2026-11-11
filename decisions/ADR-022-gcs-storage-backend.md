@@ -43,6 +43,8 @@ GCS Ingest Bucket          Pipeline Container              GCS Results Bucket
 
 **Step 3: Collect outputs:** After the pipeline completes, a sidecar container (or the pipeline's own cleanup logic) uploads output files from `/data/outputs/` to the results GCS bucket. The BAL storage adapter's `collect_outputs()` method handles the upload, registers files in the metadata database, and computes checksums.
 
+**Amendment (2026-11-10):** as built, Nextflow reads inputs and writes `--outdir` directly against object storage, so no adapter staging step exists: `stage_inputs()`, `resolve_input_path()` and `resolve_output_path()` were retired, unused (see the ADR-020 amendment). `collect_outputs()` lists the run's authorized output prefix and returns canonical object URIs with their sizes and checksums; the pipeline monitor registers them.
+
 ### Bucket Structure
 
 | Bucket | Purpose | Lifecycle |
@@ -66,6 +68,8 @@ Interactive notebook sessions (Jupyter, RStudio) need persistent storage for hom
 The default is Option A. Option B is available as a per-user configuration.
 
 ### Pipeline Path Resolution
+
+*Historical: the methods sketched below were retired on 2026-11-10 (see the amendment under Step 3).*
 
 The BAL storage adapter translates between bioAF's logical file references and the actual paths used by pipeline containers:
 

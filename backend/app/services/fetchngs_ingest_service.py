@@ -71,13 +71,17 @@ def _samplesheet_uri(outdir: str) -> str | None:
     return f"{outdir.rstrip('/')}/{_SAMPLESHEET_SUBPATH}"
 
 
-def _fastq_storage_uri(outdir: str, sheet_value: str) -> str:
+def _fastq_storage_uri(outdir: str, sheet_value: str) -> str | None:
     """The durable object-store URI for one FASTQ, in the run's outdir.
 
     fetchngs's samplesheet may point fastq_1/fastq_2 at wherever it staged the download (a work dir);
     the durable copy bioAF keeps lives at ``{outdir}/fastq/{basename}``. We take the basename and
-    re-anchor it there so a downstream run reads the persisted data, not a transient work path."""
+    re-anchor it there so a downstream run reads the persisted data, not a transient work path.
+    None when the value has no usable basename (empty, ``.`` or ``..``), which would otherwise name
+    the fastq directory or the run's own directory instead of a file in it."""
     basename = sheet_value.rsplit("/", 1)[-1]
+    if basename in ("", ".", ".."):
+        return None
     return f"{outdir.rstrip('/')}/{_FASTQ_SUBDIR}/{basename}"
 
 
@@ -295,6 +299,9 @@ class FetchngsIngestService:
                         if not value:
                             continue
                         storage_uri = _fastq_storage_uri(outdir, value)
+                        if storage_uri is None:
+                            logger.warning("fetchngs run %d: unusable FASTQ path %r skipped", run.id, value)
+                            continue
                         f = existing_by_uri.get(storage_uri)
                         if f is None:
                             f = File(
