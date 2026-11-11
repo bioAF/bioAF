@@ -14,6 +14,7 @@ real ``cp`` against a temporary mount root and compare bytes.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 
 import pytest
@@ -39,6 +40,8 @@ HOSTILE_NAMES = [
 RECORDER = """#!/bin/sh
 for a in "$@"; do printf '%s\\0' "$a"; done >> "$RECORD"
 printf '\\n' >> "$RECORD"
+if [ "$1 $2" = "storage cat" ]; then printf 'from %s' "$3"; fi
+if [ "$1" = "cat" ]; then printf 'from %s' "$2"; fi
 """
 
 
@@ -78,6 +81,24 @@ def gcs_escape(name: str) -> str:
     return name.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")
 
 
+def gcs_fetch(uri: str, dest: str) -> list[str]:
+    """The recorded call that downloads ``uri`` to ``dest``: `gcloud` refuses a destination
+    containing `[`, `*` or `?` (also a local one), so those are streamed with `cat` and the shell
+    writes the file (the recorder prints `from <source>` for a `cat`)."""
+    if any(c in dest for c in "[*?"):
+        return ["storage", "cat", gcs_escape(uri)]
+    return ["storage", "cp", gcs_escape(uri), dest]
+
+
+def assert_gcs_fetched(sh, pairs) -> None:
+    calls = [c for c in sh.calls() if c[:2] in (["storage", "cp"], ["storage", "cat"])]
+    assert calls == [gcs_fetch(uri, dest) for uri, dest in pairs]
+    for uri, dest in pairs:
+        if any(c in dest for c in "[*?"):
+            with open(dest) as f:
+                assert f.read() == "from " + gcs_escape(uri), dest
+
+
 @pytest.fixture
 def sh(tmp_path):
     return Shell(tmp_path)
@@ -89,6 +110,26 @@ class TestCloudCopyCommands:
         uri, dest = f"gs://b/uploads/{name}", f"/data/x/{name}"
         sh.run(GcsStorageProvider().cli_copy_in(uri, dest))
         assert sh.calls() == [["storage", "cp", gcs_escape(uri), dest]]
+
+    @pytest.mark.parametrize("name", ["in [1].txt", "s*.txt", "q?.txt", "]x[.fq", "plain.txt"])
+    def test_gcs_copy_in_streams_to_a_destination_gcloud_would_read_as_a_pattern(self, sh, tmp_path, name):
+        """On blackbird `gcloud storage cp` refused `/data/.../in [1] ... .txt` as "contains an
+        unexpected wildcard", failing the run in staging (plan 17 live validation, L1)."""
+        sub = tmp_path / "sub [x]"
+        sub.mkdir()
+        for dest in (str(sub / name), str(tmp_path / name)):
+            uri = f"gs://b/uploads/{name}"
+            sh.run(GcsStorageProvider().cli_copy_in(uri, dest))
+        assert_gcs_fetched(
+            sh, [(f"gs://b/uploads/{name}", str(sub / name)), (f"gs://b/uploads/{name}", str(tmp_path / name))]
+        )
+
+    def test_gcs_copy_in_decides_at_runtime_for_a_runtime_destination(self, sh, tmp_path):
+        cmd = GcsStorageProvider().cli_copy_in("gs://b/u/k", ShellExpr('"$d"'))
+        for dest in (f"{tmp_path}/a[1].txt", f"{tmp_path}/plain.txt"):
+            sh.run(f"d={shlex.quote(dest)}; {cmd}")
+        assert [c[:2] for c in sh.calls()] == [["storage", "cat"], ["storage", "cp"]]
+        assert open(f"{tmp_path}/a[1].txt").read() == "from gs://b/u/k"
 
     @pytest.mark.parametrize("name", ["a[1].fq", "st*r.fq", "q?.fq", "]x[.fq"])
     def test_gcs_sources_are_escaped_against_pattern_matching(self, sh, name):
@@ -147,45 +188,28 @@ class TestCloudCopyCommands:
             ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"],
         ]
 
-    def test_gcs_contents_copy_takes_newline_names_one_file_at_a_time(self, sh, tmp_path):
-        """`gcloud storage rsync` crashes on a newline in a local name (FileNotFoundError on the
-        part before it, after uploading the rest), and a destination object may not contain
-        `[*?`. So rsync skips every path with a newline, and each such file is copied by `cp`
-        into its own directory prefix, where the basename is kept literally (checked against
-        the fake GCS server, including a trailing newline and `[1]` with a newline)."""
+    def test_gcs_contents_copy_names_what_cloud_storage_cannot_hold_and_fails(self, sh, tmp_path):
+        """Cloud Storage rejects a line break in an object name (blackbird: `HTTPError 400:
+        Disallowed unicode characters present in object name`; plan 17 live validation, L3), and
+        `gcloud storage rsync` crashes on one locally. So rsync skips those paths and copies the
+        rest, then the copy fails naming each skipped file."""
         outputs = tmp_path / "outputs"
-        (outputs / "sub [x]").mkdir(parents=True)
-        (outputs / "d\nx").mkdir()
-        files = {
-            "with\nnewline.txt": "",
-            "nl\n": "",
-            "sub [x]/a[1]\nb.txt": "sub [x]/",
-            "d\nx/f.txt": "d\nx/",
-            "ok.txt": None,
-        }
-        for rel in files:
+        (outputs / "d\nx").mkdir(parents=True)
+        for rel in ("ok.txt", "with\nnewline.txt", "d\nx/f.txt"):
             (outputs / rel).write_text(rel)
-        sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run"))
-        rsync, *copies = sh.calls()
-        assert rsync == ["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"]
-        assert sorted(copies) == sorted(
-            ["storage", "cp", gcs_escape(f"{outputs}/{rel}"), f"gs://b/run/{prefix}"]
-            for rel, prefix in files.items()
-            if prefix is not None
-        )
+        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run"), check=False)
+        assert result.returncode != 0
+        assert sh.calls() == [["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"]]
+        err = result.stderr.decode()
+        assert "line breaks cannot be stored in Google Cloud Storage" in err
+        assert f"{outputs}/with\nnewline.txt" in err and f"{outputs}/d\nx/f.txt" in err
 
-    def test_gcs_contents_copy_attempts_every_newline_file_then_fails(self, sh, tmp_path):
-        """One refused copy must not cost the others: every file is attempted, then the copy
-        fails. (Real case: a newline file under a directory named with `[*?`, whose prefix
-        `gcloud` refuses as a wildcard destination; see findings, owner review 2.)"""
+    def test_gcs_contents_copy_without_such_names_succeeds_quietly(self, sh, tmp_path):
         outputs = tmp_path / "outputs"
         outputs.mkdir()
-        for n in ("a\nb", "c\nd"):
-            (outputs / n).write_text("x")
-        (sh.bin / "gcloud").write_text(RECORDER + '[ "$2" = cp ] && exit 1\nexit 0\n')
-        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"), check=False)
-        assert result.returncode != 0
-        assert len([c for c in sh.calls() if c[:2] == ["storage", "cp"]]) == 2
+        (outputs / "ok.txt").write_text("x")
+        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
+        assert result.stderr == b""
 
     def test_sync_commands_are_argv_with_tolerant_stage_in(self, sh):
         for provider in (GcsStorageProvider(), S3StorageProvider()):

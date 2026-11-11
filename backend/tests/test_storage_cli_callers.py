@@ -18,7 +18,7 @@ import pytest
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.adapters.storage.s3 import S3StorageProvider
 from app.exceptions import ValidationError
-from tests.test_storage_cli_commands import Shell, gcs_escape
+from tests.test_storage_cli_commands import Shell, assert_gcs_fetched, gcs_escape
 
 HOSTILE = [
     "a$(touch PWNED).fq",
@@ -85,9 +85,11 @@ def test_notebook_staging_copies_each_input_literally_and_writes_the_inventory(s
     sh.run(_mapped(staging["command"][2], tmp_path, "/data"))
 
     data = tmp_path / "data"
-    copies = [c for c in sh.calls() if c[:2] in (["storage", "cp"], ["s3", "cp"])]
-    expected_source = gcs_escape if isinstance(storage, GcsStorageProvider) else (lambda u: u)
-    assert [c[-2:] for c in copies] == [[expected_source(f["gcs_uri"]), f"{data}/{f['relative_path']}"] for f in files]
+    if isinstance(storage, GcsStorageProvider):
+        assert_gcs_fetched(sh, [(f["gcs_uri"], f"{data}/{f['relative_path']}") for f in files])
+    else:
+        copies = [c for c in sh.calls() if c[:2] == ["s3", "cp"]]
+        assert [c[-2:] for c in copies] == [[f["gcs_uri"], f"{data}/{f['relative_path']}"] for f in files]
     inventory = "\n".join(
         ["# File Inventory", "", "Files mounted at session start:", ""]
         + [f"- /data/{f['relative_path']} (source: {f['gcs_uri']})" for f in files]
@@ -209,9 +211,11 @@ def test_custom_pipeline_stage_commands_are_literal(sh, tmp_path, storage):
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
         commands = CustomPipelineService._build_stage_commands(specs)
     sh.run(_mapped(" && ".join(commands), tmp_path, "/data", "/secrets"))
-    copies = [c for c in sh.calls() if c[:2] in (["storage", "cp"], ["s3", "cp"])]
-    escape = gcs_escape if isinstance(storage, GcsStorageProvider) else (lambda p: p)
-    assert [c[-2:] for c in copies] == [[escape(s["gcs_uri"]), f"{tmp_path}/data/{s['relative_path']}"] for s in specs]
+    if isinstance(storage, GcsStorageProvider):
+        assert_gcs_fetched(sh, [(s["gcs_uri"], f"{tmp_path}/data/{s['relative_path']}") for s in specs])
+    else:
+        copies = [c for c in sh.calls() if c[:2] == ["s3", "cp"]]
+        assert [c[-2:] for c in copies] == [[s["gcs_uri"], f"{tmp_path}/data/{s['relative_path']}"] for s in specs]
 
 
 def test_custom_pipeline_stage_refuses_an_escaping_relative_path():
@@ -297,6 +301,18 @@ def test_work_node_startup_stages_inputs_literally(sh, tmp_path, module, builder
     script = build({"input_files": files, "username": "u", "session_id": 1})
     staging = script[script.index("mkdir -p /data") : script.index("# 5. Create output")]
     sh.run(_mapped(staging, tmp_path, "/data"))
-    copies = [c for c in sh.calls() if "cp" in c]
-    escape = gcs_escape if module == "gce" else (lambda p: p)
-    assert [c[-2:] for c in copies] == [[escape(f["gcs_uri"]), f"{tmp_path}/data/{f['relative_path']}"] for f in files]
+    pairs = [(f["gcs_uri"], f"{tmp_path}/data/{f['relative_path']}") for f in files]
+    if module == "gce":
+        # gsutil also refuses a local destination containing `[*?` ("must match exactly 1 URL",
+        # cloud-sdk 593.0.0), so those are streamed with `gsutil cat` and the shell writes them.
+        fetches = [c for c in sh.calls() if c[:1] in (["cp"], ["cat"])]
+        assert fetches == [
+            ["cat", gcs_escape(uri)] if any(ch in dest for ch in "[*?") else ["cp", gcs_escape(uri), dest]
+            for uri, dest in pairs
+        ]
+        for uri, dest in pairs:
+            if any(ch in dest for ch in "[*?"):
+                assert open(dest).read() == "from " + gcs_escape(uri)
+    else:
+        copies = [c for c in sh.calls() if "cp" in c]
+        assert [c[-2:] for c in copies] == [[uri, dest] for uri, dest in pairs]

@@ -21,12 +21,12 @@ import asyncio
 import logging
 import os
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage.local_fs import LocalObjectFilesystem
+from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
@@ -185,10 +185,7 @@ class S3StorageProvider(StorageProvider):
     @staticmethod
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``s3://bucket/key`` into (bucket, key)."""
-        if not uri.startswith("s3://"):
-            raise ValidationError(f"Not a storage URI: {uri!r}")
-        parsed = urlparse(uri)
-        return parsed.netloc, parsed.path.lstrip("/")
+        return split_storage_uri(uri, "s3")
 
     def _local_bucket(self, store: StorageStore) -> str:
         return f"bioaf-{store.value}-{self._org_slug}"

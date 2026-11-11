@@ -168,12 +168,19 @@ def _build_startup_script(vm_spec: dict) -> str:
         ]
         for input_file in input_files:
             # Every operand is one quoted literal (a filename is data, never shell), the source is
-            # escaped against gsutil's pattern matching, and the path cannot leave /data.
+            # escaped against gsutil's pattern matching, and the path cannot leave /data. gsutil
+            # also reads `[*?` in a LOCAL destination as a pattern ("must match exactly 1 URL"),
+            # so such a file is streamed with `gsutil cat` and the shell writes it.
             rel_path = safe_relative_path(input_file["relative_path"])
             dest_path = f"/data/{rel_path}"
+            source = gcs_cli_source(input_file["gcs_uri"])
+            if any(c in dest_path for c in "[*?"):
+                fetch = f"{shell_join(['gsutil', 'cat', source])} > {shell_word(dest_path)}"
+            else:
+                fetch = shell_join(["gsutil", "cp", source, dest_path])
             lines.append(
                 f"mkdir -p {shell_word(posixpath.dirname(dest_path))} && "
-                + shell_join(["gsutil", "cp", gcs_cli_source(input_file["gcs_uri"]), dest_path])
+                + fetch
                 + f" || echo {shell_word('Warning: failed to copy ' + rel_path)}"
             )
 

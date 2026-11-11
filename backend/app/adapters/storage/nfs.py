@@ -18,12 +18,12 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage.local_fs import LocalObjectFilesystem
+from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
@@ -67,10 +67,7 @@ class NfsStorageProvider(StorageProvider):
     @staticmethod
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``file://<store>/<key>`` into (store, key)."""
-        if not uri.startswith("file://"):
-            raise ValidationError(f"Not an NFS storage URI: {uri!r}")
-        parsed = urlparse(uri)
-        return parsed.netloc, parsed.path.lstrip("/")
+        return split_storage_uri(uri, "file", label="NFS storage")
 
     def _store_root(self, store: str) -> str:
         return os.path.join(self._root, store)

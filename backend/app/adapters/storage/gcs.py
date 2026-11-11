@@ -8,14 +8,14 @@ import asyncio
 import logging
 import os
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage.local_fs import LocalObjectFilesystem
+from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
-from app.platform.shell_args import ShellExpr, absolute_path, shell_join
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -72,19 +72,11 @@ def gcs_cli_source(operand: str) -> str:
 # A Python regex for `gcloud storage rsync --exclude`: any path containing a newline.
 _RSYNC_SKIP_NEWLINES = "--exclude=(?s).*\\n.*"
 
-# `sh -c` body for `find ... -exec sh -c BODY sh DIR PREFIX FILE... +`. Each FILE goes to
-# PREFIX + its directory relative to DIR; the source is escaped like `gcs_cli_source` (the `x`
-# keeps a trailing newline through the command substitution). Every file is attempted; any failed
-# copy fails the batch. A prefix containing `[*?` is refused by gcloud as a wildcard destination,
-# so a newline-named file under such a directory fails loudly (a documented limitation).
-_COPY_NEWLINE_NAMES = """d=$1; u=$2; shift 2; rc=0
-for f do
-  rel=${f#"$d"/}
-  case $rel in */*) sub=${rel%/*}/ ;; *) sub= ;; esac
-  src=$(printf '%sx' "$f" | sed 's/[[*?]/[&]/g'); src=${src%x}
-  gcloud storage cp "$src" "$u$sub" || rc=1
-done
-exit $rc"""
+# `sh -c` body for `find ... -exec sh -c BODY sh FILE... +`: Cloud Storage refuses a line break in
+# an object name (HTTPError 400 on blackbird), so each such file is named and the copy fails.
+_REFUSE_NEWLINE_NAMES = """echo 'bioAF: names with line breaks cannot be stored in Google Cloud Storage; not copied:' >&2
+printf '  %s\\n' "$@" >&2
+exit 1"""
 
 
 class GcsStorageProvider(StorageProvider):
@@ -156,10 +148,7 @@ class GcsStorageProvider(StorageProvider):
     @staticmethod
     def _parse_uri(uri: str) -> tuple[str, str]:
         """Parse ``gs://bucket/key`` into (bucket, key)."""
-        if not uri.startswith("gs://"):
-            raise ValidationError(f"Not a storage URI: {uri!r}")
-        parsed = urlparse(uri)
-        return parsed.netloc, parsed.path.lstrip("/")
+        return split_storage_uri(uri, "gs")
 
     def _local_bucket(self, store: StorageStore) -> str:
         return f"bioaf-{store.value}-{self._org_slug}"
@@ -249,7 +238,17 @@ class GcsStorageProvider(StorageProvider):
         )
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return shell_join(["gcloud", "storage", "cp", self._source(self._remote(uri)), absolute_path(local_path)])
+        # `gcloud storage cp` refuses a destination containing `[`, `*` or `?` ("contains an
+        # unexpected wildcard"), a local one too (blackbird, plan 17 live validation L1). Such a
+        # file is streamed with `cat` and the shell writes it; any other name keeps `cp`, whose
+        # downloads are parallel. A runtime destination is decided by the shell.
+        source = self._source(self._remote(uri))
+        dest = absolute_path(local_path)
+        copy = shell_join(["gcloud", "storage", "cp", source, dest])
+        stream = f"{shell_join(['gcloud', 'storage', 'cat', source])} > {shell_word(dest)}"
+        if isinstance(dest, ShellExpr):
+            return f"case {shell_word(dest)} in *[][*?]*) {stream} ;; *) {copy} ;; esac"
+        return stream if any(c in dest for c in "[*?") else copy
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return shell_join(["gcloud", "storage", "cp", "-r", self._source(absolute_path(local_path)), self._remote(uri)])
@@ -260,19 +259,31 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
         # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
         # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
-        # S3 and NFS. But rsync crashes on a newline in a local path (it splits the name, after
-        # uploading the rest), so it skips those, and each is copied by `cp` into its directory
-        # prefix: a destination object may not contain `[*?`, while a prefix destination keeps the
-        # basename literally. Names reach the inner script as arguments, never as its text.
-        # Checked with cloud-sdk 593.0.0 against a fake GCS server (plan 17 findings).
+        # S3 and NFS. A path with a line break cannot be an object name at all (Cloud Storage
+        # refuses it, and rsync crashes on it locally), so rsync skips those, copies the rest, and
+        # the copy then fails naming each one. Checked with cloud-sdk 593.0.0 and on blackbird
+        # (plan 17 live validation).
         directory = absolute_path(local_dir).rstrip("/") or "/"
         prefix = self._remote(uri).rstrip("/") + "/"
         rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_NEWLINES, directory, prefix])
-        newline_files = shell_join(
-            ["find", directory, "-path", "*\n*", "-type", "f", "-exec", "sh", "-c", _COPY_NEWLINE_NAMES]
-            + ["sh", directory, prefix, "{}", "+"]
+        refuse = shell_join(
+            [
+                "find",
+                directory,
+                "-path",
+                "*\n*",
+                "-type",
+                "f",
+                "-exec",
+                "sh",
+                "-c",
+                _REFUSE_NEWLINE_NAMES,
+                "sh",
+                "{}",
+                "+",
+            ]
         )
-        return f"{rsync} && {newline_files}"
+        return f"{rsync} && {refuse}"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.

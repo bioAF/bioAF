@@ -21,6 +21,12 @@
 - Local and NFS installs now register pipeline outputs; previously they found
   none.
 
+### Files
+
+- Files whose names contain `?` or `#` can be downloaded, previewed and used as
+  inputs on every storage backend. Previously the part of the name from that
+  character on was dropped, so the file could not be found.
+
 ### Storage cleanup
 
 - Cleanup of failed runs' working files deletes only that run's files; a run
@@ -39,17 +45,18 @@
 
 ### Notebooks, custom pipelines and work nodes
 
-- Files whose names contain spaces, quotes, `$`, backticks, brackets, newlines
-  or other special characters are copied into notebooks, custom pipelines,
-  cellxgene and work nodes as exactly that file. Previously such a name could
-  run a command or copy a different file.
+- Files whose names contain spaces, quotes, `$`, backticks, brackets, `*`, `?`,
+  newlines or other special characters are copied into notebooks, custom
+  pipelines, cellxgene and work nodes as exactly that file. Previously such a
+  name could run a command or copy a different file, and on GCP a name with
+  `[`, `*` or `?` stopped the run before it started.
 - Custom pipelines on AWS copy all of their outputs (previously the copy failed
   when there was more than one output file).
 - Custom pipelines on GCP copy every output exactly as named, including names
-  with brackets, `*`, `?` or newlines and hidden files (previously such a name
-  could copy a different file or be skipped). Known limitation: a file whose
-  name contains a newline, inside a folder whose name contains `[`, `*` or `?`,
-  cannot be stored by the Google Cloud CLI; the run fails and says so.
+  with brackets, `*` or `?` and hidden files (previously such a name could copy
+  a different file or be skipped). Google Cloud Storage cannot hold a name with
+  a line break: such outputs are listed in the run's log, everything else is
+  copied, and the run fails.
 - A custom pipeline whose outputs could not be copied to storage now fails
   instead of being reported complete; a pipeline that already failed keeps its
   own exit status.
