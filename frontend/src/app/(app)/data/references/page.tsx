@@ -20,6 +20,7 @@ import { formatBytes } from "@/lib/bytes";
 import { Input, Select } from "@/components/ui/Input";
 import { ListContent } from "@/components/shared/ListContent";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 export default function DataReferencesPage() {
   const router = useRouter();
@@ -192,7 +193,7 @@ export default function DataReferencesPage() {
                   <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? NOT_SET}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes, "reference", { missing: NOT_SET })}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">
-                    {new Date(ref.created_at).toLocaleDateString()}
+                    {formatRecordedTime(ref.created_at, "date")}
                   </td>
                 </tr>
               ))}

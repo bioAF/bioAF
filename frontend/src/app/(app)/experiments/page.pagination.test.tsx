@@ -12,6 +12,7 @@ jest.mock("next/navigation", () => ({ useRouter: () => routerMock }));
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn() } }));
 
 import ExperimentsPage from "./page";
+import { NOT_SET } from "@/lib/placeholders";
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;
@@ -83,4 +84,15 @@ test("New Experiment is a link to the create page", async () => {
   for (const link of screen.getAllByRole("link", { name: "New Experiment" })) {
     expect(link).toHaveAttribute("href", "/experiments/new");
   }
+});
+
+test("a row with no recorded creation time shows the not-set placeholder, not 1970", async () => {
+  mockGet.mockImplementation((url: string) => {
+    if (url.startsWith("/api/projects")) return Promise.resolve({ projects: [], total: 0 });
+    return Promise.resolve({ experiments: [{ ...rows(1)[0], created_at: null }], total: 1 });
+  });
+  render(<ExperimentsPage />);
+  const row = (await screen.findByText("Exp 1")).closest("tr")!;
+  expect(row).not.toHaveTextContent("1970");
+  expect(row.lastElementChild).toHaveTextContent(NOT_SET);
 });

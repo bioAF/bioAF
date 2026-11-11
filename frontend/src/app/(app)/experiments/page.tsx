@@ -22,6 +22,7 @@ import { Input, Select } from "@/components/ui/Input";
 import { ListContent } from "@/components/shared/ListContent";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Pagination } from "@/components/shared/Pagination";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 export default function ExperimentsPage() {
   const toast = useToast();
@@ -165,7 +166,7 @@ export default function ExperimentsPage() {
                   <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || NOT_SET}</td>
                   <td className="px-6 py-4 text-sm text-ink-subtle">{exp.sample_count}</td>
                   <td className="px-6 py-4 text-sm text-ink-subtle">
-                    {new Date(exp.created_at).toLocaleDateString()}
+                    {formatRecordedTime(exp.created_at, "date")}
                   </td>
                 </tr>
               ))}

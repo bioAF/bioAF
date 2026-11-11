@@ -22,6 +22,7 @@ import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
 import { ListContent } from "@/components/shared/ListContent";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 export default function ProjectsPage() {
   return (
@@ -185,7 +186,7 @@ function ProjectsPageInner() {
                     <td className="px-6 py-4 text-sm text-gray-500">{p.experiment_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{p.pipeline_run_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(p.created_at).toLocaleDateString()}
+                      {formatRecordedTime(p.created_at, "date")}
                     </td>
                   </tr>
                 ))}

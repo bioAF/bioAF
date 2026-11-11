@@ -25,6 +25,7 @@ import type {
 } from "@/lib/types";
 import { formatBytes } from "@/lib/bytes";
 import { TabList, TabPanel, useTabIds } from "@/components/ui/Tabs";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
@@ -520,7 +521,7 @@ export default function DataReferenceDetailPage() {
                           <ReferenceStatusBadge status={v.status} />
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {new Date(v.created_at).toLocaleDateString()}
+                          {formatRecordedTime(v.created_at, "date")}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
                           {v.deprecation_note ?? NOT_SET}
@@ -605,7 +606,7 @@ export default function DataReferenceDetailPage() {
                             <td className="px-6 py-4 text-sm text-gray-500">{run.status}</td>
                             <td className="px-6 py-4 text-sm text-gray-500">{run.review_verdict || NOT_SET}</td>
                             <td className="px-6 py-4 text-sm text-gray-500">
-                              {run.completed_at ? new Date(run.completed_at).toLocaleDateString() : NOT_SET}
+                              {formatRecordedTime(run.completed_at, "date")}
                             </td>
                           </tr>
                         ))}
@@ -679,7 +680,7 @@ export default function DataReferenceDetailPage() {
               </div>
               <div>
                 <dt className="text-sm text-gray-500">Created</dt>
-                <dd className="text-sm">{new Date(reference.created_at).toLocaleString()}</dd>
+                <dd className="text-sm">{formatRecordedTime(reference.created_at)}</dd>
               </div>
             </dl>
           </Card>
