@@ -31,6 +31,11 @@
   is deleted and the study is flagged for review. An interrupted cleanup is
   finished on a later pass, and a retry in between returns to the approval
   step instead of reusing deleted data.
+- Retrying a stopped validation study and cleaning up its downloads can no
+  longer happen at the same time: a study retried while cleanup is starting
+  keeps its data, and cleanup that has begun is always finished rather than
+  undone, even when storage reports an error for a delete it may have carried
+  out.
 
 ### Notebooks, custom pipelines and work nodes
 
@@ -40,5 +45,11 @@
   run a command or copy a different file.
 - Custom pipelines on AWS copy all of their outputs (previously the copy failed
   when there was more than one output file).
+- Custom pipelines on GCP copy every output exactly as named, including names
+  with brackets, `*` or `?` and hidden files (previously such a name could copy
+  a different file or be skipped).
+- A custom pipeline whose outputs could not be copied to storage now fails
+  instead of being reported complete; a pipeline that already failed keeps its
+  own exit status.
 - On NFS storage, a session whose storage root is not mounted now reports that
   instead of appearing to save.

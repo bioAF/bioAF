@@ -229,20 +229,35 @@ def test_custom_pipeline_exit_trap_copies_outputs_and_keeps_the_exit_status(sh, 
 
     outputs = tmp_path / "outputs"
     outputs.mkdir()
-    names = ["r.csv", "a b.csv", "$(touch PWNED).csv", "-rf"]
-    for n in names:
+    for n in ["r.csv", "a b.csv", "$(touch PWNED).csv", "-rf", "g[1].csv"]:
         (outputs / n).write_text(n)
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
         wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", "res", "projects/4", 9)
     result = sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"), check=False)
     assert result.returncode == exit_code
     target = storage.build_uri("res", "projects/4/pipeline-runs/9/")
-    (call,) = [c for c in sh.calls() if c[:2] in (["storage", "cp"], ["s3", "cp"])]
-    assert call[-1] == target
+    (call,) = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
     if isinstance(storage, GcsStorageProvider):
-        assert sorted(call[3:-1]) == sorted(f"{outputs}/{n}" for n in names)
+        assert call == ["storage", "rsync", "--recursive", str(outputs), target]
     else:
-        assert call[2:] == ["--recursive", str(outputs), target]
+        assert call == ["s3", "cp", "--recursive", str(outputs), target]
+
+
+@pytest.mark.parametrize("storage", [GcsStorageProvider(), S3StorageProvider()], ids=["gcs", "s3"])
+@pytest.mark.parametrize("exit_code,expected", [(0, 1), (3, 3)])
+def test_a_failed_output_copy_fails_the_run(sh, tmp_path, storage, exit_code, expected):
+    """Outputs that never reached storage are not a completed run. A pipeline that already failed
+    keeps its own status; one that succeeded becomes a failure, with the reason on stderr."""
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    (tmp_path / "outputs").mkdir()
+    for tool in ("gcloud", "aws"):
+        (sh.bin / tool).write_text("#!/bin/sh\necho 'storage unreachable' >&2\nexit 1\n")
+    with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
+        wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", "res", "projects/4", 9)
+    result = sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"), check=False)
+    assert result.returncode == expected
+    assert b"could not be copied" in result.stderr
 
 
 # --- environment build template -------------------------------------------------------------

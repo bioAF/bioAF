@@ -129,18 +129,20 @@ class TestCloudCopyCommands:
         sh.run(f"f='/home/a b$(touch PWNED).py'; {cmd}")
         assert sh.calls() == [["storage", "cp", "/home/a b$(touch PWNED).py", "gs://b/scripts/"]]
 
-    def test_contents_copy_takes_every_entry_once_as_data(self, sh, tmp_path):
-        outputs = tmp_path / "out dir"
+    def test_contents_copy_names_the_directory_never_its_entries(self, sh, tmp_path):
+        """No glob: the CLI walks the directory itself, so an entry's name is never re-read as a
+        pattern (`gcloud storage rsync`, cloud-sdk 593.0.0 against a fake GCS server, copied
+        `a[1].txt`, `s*.txt`, `q?.txt`, dotfiles and `-dash.txt` each as itself)."""
+        outputs = tmp_path / "out [dir] $(touch PWNED)"
         outputs.mkdir()
-        names = ["plain.txt", "a b.txt", "$(touch PWNED)", "-rf", "x;y"]
-        for n in names:
+        for n in ["plain.txt", "a[1].txt", "a1.txt", "s*.txt", ".hidden", "-rf"]:
             (outputs / n).write_text(n)
         sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
         sh.run(S3StorageProvider().cli_copy_out_contents(str(outputs), "s3://b/run/"))
-        gcs_call, s3_call = sh.calls()
-        assert gcs_call[:3] == ["storage", "cp", "-r"] and gcs_call[-1] == "gs://b/run/"
-        assert sorted(gcs_call[3:-1]) == sorted(f"{outputs}/{n}" for n in names)
-        assert s3_call == ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"]
+        assert sh.calls() == [
+            ["storage", "rsync", "--recursive", str(outputs), "gs://b/run/"],
+            ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"],
+        ]
 
     def test_sync_commands_are_argv_with_tolerant_stage_in(self, sh):
         for provider in (GcsStorageProvider(), S3StorageProvider()):

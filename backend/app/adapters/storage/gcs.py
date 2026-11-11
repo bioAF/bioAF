@@ -15,7 +15,7 @@ from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.platform.run_output_layout import directory_prefix
-from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -240,11 +240,10 @@ class GcsStorageProvider(StorageProvider):
         return shell_join(["gcloud", "storage", "cp", self._source(absolute_path(local_path)), self._remote(uri)])
 
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
-        # The shell expands the glob into one literal argument per entry (dotfiles excluded, as
-        # before); gcloud then reads pattern characters in those names, which can only select
-        # other entries of the same directory. The directory part itself is quoted.
-        directory = shell_word(absolute_path(local_dir).rstrip("/") or "/")
-        return f"gcloud storage cp -r {directory}/* {shell_word(self._remote(uri))}"
+        # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
+        # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
+        # S3 and NFS. Checked with cloud-sdk 593.0.0 against a fake GCS server (plan 17 findings).
+        return shell_join(["gcloud", "storage", "rsync", "--recursive", absolute_path(local_dir), self._remote(uri)])
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.

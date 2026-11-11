@@ -1169,14 +1169,19 @@ class CustomPipelineService:
             adapter = get_storage_adapter()
             sync_target = adapter.build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
             # Stage outputs back via the backend's CLI (auth + recursive copy live
-            # on the adapter). `|| true` keeps the trap non-fatal so a sync failure
-            # doesn't mask the pipeline's real exit status, but stderr stays visible
-            # so failures show up in pod logs instead of silently dropping outputs.
+            # on the adapter). A pipeline that failed keeps its own exit status; one
+            # that succeeded but whose outputs never reached storage exits 1, so the
+            # run is not reported complete without them.
             auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
             copy_out = adapter.cli_copy_out_contents("/outputs", sync_target)
             sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
+            failed = shell_word(f"bioAF: pipeline outputs could not be copied to {sync_target}")
+            body = (
+                f"status=$?; {{ {sync_cmd}; }} || {{ echo {failed} >&2; "
+                '[ "$status" -ne 0 ] || status=1; }; exit "$status"'
+            )
             # The trap body is one quoted word: the copy's own quoting cannot end it early.
-            trap = f"trap {shell_word(sync_cmd + ' || true')} EXIT"
+            trap = f"trap {shell_word(body)} EXIT"
         else:
             trap = "trap 'true' EXIT"
         return "#!/bin/sh\nset -e\n" + trap + "\n" + entrypoint_command
