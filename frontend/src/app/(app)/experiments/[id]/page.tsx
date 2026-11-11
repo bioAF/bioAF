@@ -549,18 +549,10 @@ function ExperimentDetailPageInner() {
             const role = (user?.role_name as string) || "viewer";
             return ["admin", "comp_bio"].includes(role) ? (
               <>
-                <button
-                  onClick={() => setShowDataExport(true)}
-                  className="bg-elevated text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
-                >
+                <Button variant="secondary" onClick={() => setShowDataExport(true)}>
                   Export Data
-                </button>
-                <button
-                  onClick={() => setShowGeoExport(true)}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700"
-                >
-                  Export to GEO
-                </button>
+                </Button>
+                <Button onClick={() => setShowGeoExport(true)}>Export to GEO</Button>
               </>
             ) : null;
           })()}

@@ -66,7 +66,9 @@ export function TabList<K extends string>({
 
   return (
     <div className={`border-b border-hairline ${className}`.trim()}>
-      <div ref={listRef} role="tablist" aria-label={label} onKeyDown={onKeyDown} className="flex -mb-px space-x-8">
+      {/* Labels wrap as they always have; on a narrow screen the strip scrolls
+          sideways instead of pushing tabs off the page. */}
+      <div ref={listRef} role="tablist" aria-label={label} onKeyDown={onKeyDown} className="flex -mb-px space-x-8 overflow-x-auto">
         {tabs.map((tab) => {
           const isSelected = tab.key === selected;
           return (
@@ -79,7 +81,7 @@ export function TabList<K extends string>({
               aria-controls={isSelected ? ids.panel(tab.key) : undefined}
               tabIndex={isSelected ? 0 : -1}
               onClick={() => onSelect(tab.key)}
-              className={`whitespace-nowrap py-2 px-1 border-b-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bioaf-600 ${
+              className={`py-2 px-1 border-b-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bioaf-600 ${
                 isSelected
                   ? "border-bioaf-500 text-bioaf-600"
                   : "border-transparent text-ink-subtle hover:text-ink-muted hover:border-gray-300"
