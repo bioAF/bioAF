@@ -71,6 +71,9 @@ class Shell:
         return [line.decode().split("\0") for line in lines if line]
 
 
+GCS_NEWLINE_EXCLUDE = "--exclude=(?s).*\\n.*"
+
+
 def gcs_escape(name: str) -> str:
     return name.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")
 
@@ -140,9 +143,49 @@ class TestCloudCopyCommands:
         sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
         sh.run(S3StorageProvider().cli_copy_out_contents(str(outputs), "s3://b/run/"))
         assert sh.calls() == [
-            ["storage", "rsync", "--recursive", str(outputs), "gs://b/run/"],
+            ["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"],
             ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"],
         ]
+
+    def test_gcs_contents_copy_takes_newline_names_one_file_at_a_time(self, sh, tmp_path):
+        """`gcloud storage rsync` crashes on a newline in a local name (FileNotFoundError on the
+        part before it, after uploading the rest), and a destination object may not contain
+        `[*?`. So rsync skips every path with a newline, and each such file is copied by `cp`
+        into its own directory prefix, where the basename is kept literally (checked against
+        the fake GCS server, including a trailing newline and `[1]` with a newline)."""
+        outputs = tmp_path / "outputs"
+        (outputs / "sub [x]").mkdir(parents=True)
+        (outputs / "d\nx").mkdir()
+        files = {
+            "with\nnewline.txt": "",
+            "nl\n": "",
+            "sub [x]/a[1]\nb.txt": "sub [x]/",
+            "d\nx/f.txt": "d\nx/",
+            "ok.txt": None,
+        }
+        for rel in files:
+            (outputs / rel).write_text(rel)
+        sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run"))
+        rsync, *copies = sh.calls()
+        assert rsync == ["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"]
+        assert sorted(copies) == sorted(
+            ["storage", "cp", gcs_escape(f"{outputs}/{rel}"), f"gs://b/run/{prefix}"]
+            for rel, prefix in files.items()
+            if prefix is not None
+        )
+
+    def test_gcs_contents_copy_attempts_every_newline_file_then_fails(self, sh, tmp_path):
+        """One refused copy must not cost the others: every file is attempted, then the copy
+        fails. (Real case: a newline file under a directory named with `[*?`, whose prefix
+        `gcloud` refuses as a wildcard destination; see findings, owner review 2.)"""
+        outputs = tmp_path / "outputs"
+        outputs.mkdir()
+        for n in ("a\nb", "c\nd"):
+            (outputs / n).write_text("x")
+        (sh.bin / "gcloud").write_text(RECORDER + '[ "$2" = cp ] && exit 1\nexit 0\n')
+        result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"), check=False)
+        assert result.returncode != 0
+        assert len([c for c in sh.calls() if c[:2] == ["storage", "cp"]]) == 2
 
     def test_sync_commands_are_argv_with_tolerant_stage_in(self, sh):
         for provider in (GcsStorageProvider(), S3StorageProvider()):

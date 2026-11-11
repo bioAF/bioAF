@@ -116,9 +116,9 @@ class TestCliStaging:
         assert local_adapter.cli_copy_out("/outputs/*", "gs://b/runs/1/") == (
             "gcloud storage cp -r '/outputs/[*]' gs://b/runs/1/"
         )
-        assert local_adapter.cli_copy_out_contents("/outputs", "gs://b/runs/1/") == (
-            "gcloud storage rsync --recursive /outputs gs://b/runs/1/"
-        )
+        copy = local_adapter.cli_copy_out_contents("/outputs", "gs://b/runs/1/")
+        assert copy.startswith("gcloud storage rsync --recursive '--exclude=(?s).*\\n.*' /outputs gs://b/runs/1/ && ")
+        assert "/outputs/*" not in copy
 
     def test_image_storage_pip_packages(self, local_adapter):
         pkgs = local_adapter.image_storage_pip_packages()

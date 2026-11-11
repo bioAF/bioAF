@@ -69,6 +69,24 @@ def gcs_cli_source(operand: str) -> str:
     return "".join(f"[{c}]" if c in "[*?" else c for c in operand)
 
 
+# A Python regex for `gcloud storage rsync --exclude`: any path containing a newline.
+_RSYNC_SKIP_NEWLINES = "--exclude=(?s).*\\n.*"
+
+# `sh -c` body for `find ... -exec sh -c BODY sh DIR PREFIX FILE... +`. Each FILE goes to
+# PREFIX + its directory relative to DIR; the source is escaped like `gcs_cli_source` (the `x`
+# keeps a trailing newline through the command substitution). Every file is attempted; any failed
+# copy fails the batch. A prefix containing `[*?` is refused by gcloud as a wildcard destination,
+# so a newline-named file under such a directory fails loudly (a documented limitation).
+_COPY_NEWLINE_NAMES = """d=$1; u=$2; shift 2; rc=0
+for f do
+  rel=${f#"$d"/}
+  case $rel in */*) sub=${rel%/*}/ ;; *) sub= ;; esac
+  src=$(printf '%sx' "$f" | sed 's/[[*?]/[&]/g'); src=${src%x}
+  gcloud storage cp "$src" "$u$sub" || rc=1
+done
+exit $rc"""
+
+
 class GcsStorageProvider(StorageProvider):
     """GCS storage backend with local mode for development."""
 
@@ -242,8 +260,19 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
         # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
         # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
-        # S3 and NFS. Checked with cloud-sdk 593.0.0 against a fake GCS server (plan 17 findings).
-        return shell_join(["gcloud", "storage", "rsync", "--recursive", absolute_path(local_dir), self._remote(uri)])
+        # S3 and NFS. But rsync crashes on a newline in a local path (it splits the name, after
+        # uploading the rest), so it skips those, and each is copied by `cp` into its directory
+        # prefix: a destination object may not contain `[*?`, while a prefix destination keeps the
+        # basename literally. Names reach the inner script as arguments, never as its text.
+        # Checked with cloud-sdk 593.0.0 against a fake GCS server (plan 17 findings).
+        directory = absolute_path(local_dir).rstrip("/") or "/"
+        prefix = self._remote(uri).rstrip("/") + "/"
+        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_NEWLINES, directory, prefix])
+        newline_files = shell_join(
+            ["find", directory, "-path", "*\n*", "-type", "f", "-exec", "sh", "-c", _COPY_NEWLINE_NAMES]
+            + ["sh", directory, prefix, "{}", "+"]
+        )
+        return f"{rsync} && {newline_files}"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.

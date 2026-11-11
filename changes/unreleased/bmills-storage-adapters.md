@@ -46,8 +46,10 @@
 - Custom pipelines on AWS copy all of their outputs (previously the copy failed
   when there was more than one output file).
 - Custom pipelines on GCP copy every output exactly as named, including names
-  with brackets, `*` or `?` and hidden files (previously such a name could copy
-  a different file or be skipped).
+  with brackets, `*`, `?` or newlines and hidden files (previously such a name
+  could copy a different file or be skipped). Known limitation: a file whose
+  name contains a newline, inside a folder whose name contains `[`, `*` or `?`,
+  cannot be stored by the Google Cloud CLI; the run fails and says so.
 - A custom pipeline whose outputs could not be copied to storage now fails
   instead of being reported complete; a pipeline that already failed keeps its
   own exit status.
