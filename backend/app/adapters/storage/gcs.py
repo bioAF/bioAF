@@ -69,13 +69,60 @@ def gcs_cli_source(operand: str) -> str:
     return "".join(f"[{c}]" if c in "[*?" else c for c in operand)
 
 
-# A Python regex for `gcloud storage rsync --exclude`: any path containing a newline.
-_RSYNC_SKIP_NEWLINES = "--exclude=(?s).*\\n.*"
+# Downloads `gcloud`/`gsutil` cannot name, run as `sh -c BODY sh URI DEST`: a source key with
+# `[*?#` (`#123` is read as a generation) or a destination with `[*?` (refused as a wildcard). The
+# object is addressed literally through the JSON API (every byte of bucket and key percent-
+# encoded), the token reaches curl on stdin, the download lands in a temporary file beside the
+# destination, and only a matching crc32c (`gcloud storage hash`) moves it into place. Any failure
+# removes the temporary file and leaves the destination as it was.
+_VERIFIED_FETCH = r"""u=$1; d=$2
+case $u in gs://?*/?*) ;; *) echo "bioAF: not an object URI: $u" >&2; exit 1 ;; esac
+r=${u#gs://}; b=${r%%/*}; k=${r#*/}
+enc() { printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n' | sed 's/../%&/g'; }
+ep=$(gcloud config get-value api_endpoint_overrides/storage 2>/dev/null)
+url="${ep:-https://storage.googleapis.com/}"; url="${url%/}/storage/v1/b/$(enc "$b")/o/$(enc "$k")"
+tok=$(gcloud auth print-access-token) || { echo "bioAF: no storage credentials for $u" >&2; exit 1; }
+api() { printf 'header = "Authorization: Bearer %s"\n' "$tok" | curl -fsS -K - "$@"; }
+want=$(api "$url?fields=crc32c" | sed -n 's/.*"crc32c" *: *"\([^"]*\)".*/\1/p')
+[ -n "$want" ] || { echo "bioAF: could not read $u" >&2; exit 1; }
+tmp=$(mktemp "${d%/*}/.bioaf-partial.XXXXXX") || exit 1
+trap 'rm -f "$tmp"' EXIT
+api -o "$tmp" "$url?alt=media" || { echo "bioAF: could not download $u" >&2; exit 1; }
+got=$(gcloud storage hash "$(printf '%s' "$tmp" | sed 's/[[*?]/[&]/g')" --skip-md5 --format='value(crc32c_hash)') || exit 1
+[ "$got" = "$want" ] || { echo "bioAF: checksum mismatch for $u" >&2; exit 1; }
+mv -f "$tmp" "$d" || exit 1
+trap - EXIT"""
 
-# `sh -c` body for `find ... -exec sh -c BODY sh FILE... +`: Cloud Storage refuses a line break in
-# an object name (HTTPError 400 on blackbird), so each such file is named and the copy fails.
-_REFUSE_NEWLINE_NAMES = """echo 'bioAF: names with line breaks cannot be stored in Google Cloud Storage; not copied:' >&2
-printf '  %s\\n' "$@" >&2
+
+def gcs_fetch_command(uri: str, dest: str, copy: str) -> str:
+    """Download ``uri`` to ``dest``: ``copy`` (the caller's CLI copy) when the CLI can name both,
+    otherwise the verified JSON API fetch. Shared by the adapter and GCE work-node startup.
+
+    A runtime ``ShellExpr`` operand is decided by the shell when it runs.
+    """
+    fetch = shell_join(["sh", "-c", _VERIFIED_FETCH, "sh", uri, dest])
+    if isinstance(uri, ShellExpr) or isinstance(dest, ShellExpr):
+        return (
+            f"case {shell_word(uri)} in gs://*/*[][*?#]*) {fetch} ;; *) "
+            f"case {shell_word(dest)} in *[][*?]*) {fetch} ;; *) {copy} ;; esac ;; esac"
+        )
+    _, key = split_storage_uri(uri, "gs")
+    if any(c in key for c in "[*?#") or any(c in dest for c in "[*?"):
+        return fetch
+    return copy
+
+
+# A Python regex for `gcloud storage rsync --exclude`: any path containing CR or LF.
+_RSYNC_SKIP_LINE_BREAKS = "--exclude=(?s).*[\\r\\n].*"
+
+# `sh -c` body for `find ... -exec sh -c BODY sh FILE... +`: Cloud Storage refuses CR and LF in
+# an object name (HTTPError 400 on blackbird), so each such file is listed, with a backslash
+# doubled and CR/LF written as `\r`/`\n` so the list is unambiguous, and the copy fails.
+_REFUSE_LINE_BREAK_NAMES = r"""echo 'bioAF: names with line breaks or carriage returns cannot be stored in Google Cloud Storage; not copied:' >&2
+cr=$(printf '\r')
+for f do
+  printf '%s' "$f" | sed -e 's/\\/\\\\/g' -e "s/$cr/\\\\r/g" | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 } END { print "" }' | sed 's/^/  /' >&2
+done
 exit 1"""
 
 
@@ -238,17 +285,12 @@ class GcsStorageProvider(StorageProvider):
         )
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        # `gcloud storage cp` refuses a destination containing `[`, `*` or `?` ("contains an
-        # unexpected wildcard"), a local one too (blackbird, plan 17 live validation L1). Such a
-        # file is streamed with `cat` and the shell writes it; any other name keeps `cp`, whose
-        # downloads are parallel. A runtime destination is decided by the shell.
-        source = self._source(self._remote(uri))
+        # A name `gcloud storage cp` cannot represent goes through the verified JSON API fetch
+        # (plan 17 live validation L1/L2; see `_VERIFIED_FETCH`); any other keeps `cp`, whose
+        # downloads are parallel and checksummed.
+        remote = self._remote(uri)
         dest = absolute_path(local_path)
-        copy = shell_join(["gcloud", "storage", "cp", source, dest])
-        stream = f"{shell_join(['gcloud', 'storage', 'cat', source])} > {shell_word(dest)}"
-        if isinstance(dest, ShellExpr):
-            return f"case {shell_word(dest)} in *[][*?]*) {stream} ;; *) {copy} ;; esac"
-        return stream if any(c in dest for c in "[*?") else copy
+        return gcs_fetch_command(remote, dest, shell_join(["gcloud", "storage", "cp", self._source(remote), dest]))
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
         return shell_join(["gcloud", "storage", "cp", "-r", self._source(absolute_path(local_path)), self._remote(uri)])
@@ -259,29 +301,15 @@ class GcsStorageProvider(StorageProvider):
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
         # `rsync` walks the directory itself, so no entry name is ever an operand to be re-read as
         # a pattern (a `DIR/*` glob made `a[1].txt` select `a1.txt`). Dotfiles are included, as on
-        # S3 and NFS. A path with a line break cannot be an object name at all (Cloud Storage
-        # refuses it, and rsync crashes on it locally), so rsync skips those, copies the rest, and
-        # the copy then fails naming each one. Checked with cloud-sdk 593.0.0 and on blackbird
-        # (plan 17 live validation).
+        # S3 and NFS. A path with CR or LF cannot be an object name at all (Cloud Storage refuses
+        # it, and rsync crashes on it locally), so rsync skips those, copies the rest, and the copy
+        # then fails listing each one. Checked with cloud-sdk 593.0.0 and on blackbird.
         directory = absolute_path(local_dir).rstrip("/") or "/"
         prefix = self._remote(uri).rstrip("/") + "/"
-        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_NEWLINES, directory, prefix])
+        rsync = shell_join(["gcloud", "storage", "rsync", "--recursive", _RSYNC_SKIP_LINE_BREAKS, directory, prefix])
         refuse = shell_join(
-            [
-                "find",
-                directory,
-                "-path",
-                "*\n*",
-                "-type",
-                "f",
-                "-exec",
-                "sh",
-                "-c",
-                _REFUSE_NEWLINE_NAMES,
-                "sh",
-                "{}",
-                "+",
-            ]
+            ["find", directory, "(", "-path", "*\n*", "-o", "-path", "*\r*", ")", "-type", "f"]
+            + ["-exec", "sh", "-c", _REFUSE_LINE_BREAK_NAMES, "sh", "{}", "+"]
         )
         return f"{rsync} && {refuse}"
 

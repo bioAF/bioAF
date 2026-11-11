@@ -40,8 +40,50 @@ HOSTILE_NAMES = [
 RECORDER = """#!/bin/sh
 for a in "$@"; do printf '%s\\0' "$a"; done >> "$RECORD"
 printf '\\n' >> "$RECORD"
-if [ "$1 $2" = "storage cat" ]; then printf 'from %s' "$3"; fi
-if [ "$1" = "cat" ]; then printf 'from %s' "$2"; fi
+"""
+
+# gcloud as the verified-fetch helper uses it: a token, no endpoint override, and `storage hash`
+# answered with a stand-in digest (POSIX cksum) that the fake JSON API also reports.
+GCLOUD = (
+    RECORDER
+    + r"""case "$1 $2" in
+  "auth print-access-token") echo fake-token ;;
+  "storage hash")
+    # Like the real CLI: `[*?` in a local path is a pattern, so the path arrives escaped.
+    case $3 in *'[[]'*|*'[*]'*|*'[?]'*) ;; *[][*?]*) echo "No URLS matched" >&2; exit 1 ;; esac
+    cksum < "$(printf '%s' "$3" | sed 's/[[]\([][*?]\)[]]/\1/g')" | awk '{ print $1 }' ;;
+esac
+"""
+)
+
+# The JSON API as `curl` reaches it: objects live under $FAKE_GCS/<bucket>/<key>, the path
+# segments are percent-encoded, the token must arrive on stdin (`-K -`), never in argv.
+FAKE_CURL = """#!/usr/bin/env python3
+import os, subprocess, sys, urllib.parse
+args = sys.argv[1:]
+with open(os.environ["CURL_RECORD"], "a") as rec:
+    rec.write(repr(args) + "\\n")
+config = sys.stdin.read() if "-K" in args else ""
+if "fake-token" not in config or any("fake-token" in a for a in args):
+    sys.exit("token must come from stdin config only")
+url = args[-1]
+out = args[args.index("-o") + 1] if "-o" in args else None
+path, _, query = url.partition("?")
+bucket, key = path.split("/storage/v1/b/", 1)[1].split("/o/", 1)
+obj = os.path.join(os.environ["FAKE_GCS"], urllib.parse.unquote(bucket), urllib.parse.unquote(key))
+if not os.path.isfile(obj):
+    sys.stderr.write("curl: (22) The requested URL returned error: 404\\n")
+    sys.exit(22)
+if query == "fields=crc32c":
+    digest = subprocess.run(["cksum"], stdin=open(obj, "rb"), capture_output=True, text=True).stdout.split()[0]
+    print('{\\n  "crc32c": "%s"\\n}' % digest)
+elif query == "alt=media":
+    data = open(obj, "rb").read()
+    if os.environ.get("FAKE_CORRUPT"):
+        data += b"!"
+    open(out, "wb").write(data)
+else:
+    sys.exit("unexpected request " + url)
 """
 
 
@@ -53,15 +95,33 @@ class Shell:
         self.bin = tmp_path / "bin"
         self.bin.mkdir()
         self.record = tmp_path / "argv"
-        for tool in ("gcloud", "gsutil", "aws"):
-            (self.bin / tool).write_text(RECORDER)
+        self.curl_record = tmp_path / "curl-argv"
+        self.store = tmp_path / "fake-gcs"
+        self.store.mkdir()
+        self.env: dict[str, str] = {}
+        for tool, text in (("gcloud", GCLOUD), ("gsutil", RECORDER), ("aws", RECORDER), ("curl", FAKE_CURL)):
+            (self.bin / tool).write_text(text)
             (self.bin / tool).chmod(0o755)
         self.cwd = tmp_path / "cwd"
         self.cwd.mkdir()
 
+    def put(self, uri: str, data: bytes) -> None:
+        """An object the fake JSON API serves."""
+        bucket, key = uri.removeprefix("gs://").split("/", 1)
+        path = self.store / bucket / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
     def run(self, script: str, *, check: bool = True) -> subprocess.CompletedProcess:
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "RECORD": str(self.record), "HOME": str(self.root)}
-        result = subprocess.run(["/bin/sh", "-c", script], cwd=self.cwd, env=env, capture_output=True, timeout=10)
+        env = {
+            "PATH": f"{self.bin}:/usr/bin:/bin",
+            "RECORD": str(self.record),
+            "CURL_RECORD": str(self.curl_record),
+            "FAKE_GCS": str(self.store),
+            "HOME": str(self.root),
+            **self.env,
+        }
+        result = subprocess.run(["/bin/sh", "-c", script], cwd=self.cwd, env=env, capture_output=True, timeout=20)
         assert os.listdir(self.cwd) == [], f"side effects: {os.listdir(self.cwd)}"
         if check:
             assert result.returncode == 0, result.stderr
@@ -73,30 +133,37 @@ class Shell:
         lines = self.record.read_bytes().split(b"\0\n")
         return [line.decode().split("\0") for line in lines if line]
 
+    def copies(self) -> list[list[str]]:
+        """The CLI copy/fetch calls, without the helper's token, endpoint and hash calls."""
+        return [c for c in self.calls() if c[:2] not in (["auth", "print-access-token"], ["storage", "hash"])]
 
-GCS_NEWLINE_EXCLUDE = "--exclude=(?s).*\\n.*"
+
+GCS_LINE_BREAK_EXCLUDE = "--exclude=(?s).*[\\r\\n].*"
 
 
 def gcs_escape(name: str) -> str:
     return name.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")
 
 
-def gcs_fetch(uri: str, dest: str) -> list[str]:
-    """The recorded call that downloads ``uri`` to ``dest``: `gcloud` refuses a destination
-    containing `[`, `*` or `?` (also a local one), so those are streamed with `cat` and the shell
-    writes the file (the recorder prints `from <source>` for a `cat`)."""
-    if any(c in dest for c in "[*?"):
-        return ["storage", "cat", gcs_escape(uri)]
-    return ["storage", "cp", gcs_escape(uri), dest]
+def needs_api_fetch(uri: str, dest: str) -> bool:
+    """A name `gcloud`/`gsutil` cannot represent: a source key with `[*?#` (`#123` is read as a
+    generation) or a destination with `[*?` (refused as a wildcard)."""
+    key = uri.removeprefix("gs://").split("/", 1)[1]
+    return any(c in key for c in "[*?#") or any(c in dest for c in "[*?")
 
 
-def assert_gcs_fetched(sh, pairs) -> None:
-    calls = [c for c in sh.calls() if c[:2] in (["storage", "cp"], ["storage", "cat"])]
-    assert calls == [gcs_fetch(uri, dest) for uri, dest in pairs]
+def assert_gcs_fetched(sh, pairs, cp=("storage", "cp")) -> None:
+    """Plain names were copied by the CLI (source escaped); the rest were fetched through the
+    JSON API and hold the object's exact bytes."""
+    cp = list(cp)
+    assert [c for c in sh.copies() if c[: len(cp)] == cp] == [
+        cp + [gcs_escape(uri), dest] for uri, dest in pairs if not needs_api_fetch(uri, dest)
+    ]
     for uri, dest in pairs:
-        if any(c in dest for c in "[*?"):
-            with open(dest) as f:
-                assert f.read() == "from " + gcs_escape(uri), dest
+        if needs_api_fetch(uri, dest):
+            bucket, key = uri.removeprefix("gs://").split("/", 1)
+            with open(dest, "rb") as f:
+                assert f.read() == (sh.store / bucket / key).read_bytes(), dest
 
 
 @pytest.fixture
@@ -111,26 +178,80 @@ class TestCloudCopyCommands:
         sh.run(GcsStorageProvider().cli_copy_in(uri, dest))
         assert sh.calls() == [["storage", "cp", gcs_escape(uri), dest]]
 
-    @pytest.mark.parametrize("name", ["in [1].txt", "s*.txt", "q?.txt", "]x[.fq", "plain.txt"])
-    def test_gcs_copy_in_streams_to_a_destination_gcloud_would_read_as_a_pattern(self, sh, tmp_path, name):
-        """On blackbird `gcloud storage cp` refused `/data/.../in [1] ... .txt` as "contains an
-        unexpected wildcard", failing the run in staging (plan 17 live validation, L1)."""
-        sub = tmp_path / "sub [x]"
-        sub.mkdir()
-        for dest in (str(sub / name), str(tmp_path / name)):
-            uri = f"gs://b/uploads/{name}"
-            sh.run(GcsStorageProvider().cli_copy_in(uri, dest))
-        assert_gcs_fetched(
-            sh, [(f"gs://b/uploads/{name}", str(sub / name)), (f"gs://b/uploads/{name}", str(tmp_path / name))]
-        )
 
-    def test_gcs_copy_in_decides_at_runtime_for_a_runtime_destination(self, sh, tmp_path):
+class TestGcsVerifiedFetch:
+    """Downloads `gcloud` cannot name go through the JSON API, verified, then published.
+
+    On blackbird `gcloud storage cp` refused a local destination `.../in [1] ... .txt` ("contains an
+    unexpected wildcard", L1), the owner reproduced `artifact#123` read as generation 123, and the
+    first fix (`gcloud storage cat > dest`) had no checksum and truncated an existing destination
+    when the object was missing. The helper reads the object's crc32c, downloads into a temporary
+    file beside the destination, compares `gcloud storage hash`, and only then moves it into place.
+    """
+
+    @pytest.mark.parametrize(
+        "key,dest_name",
+        [
+            ("u/artifact#123", "artifact#123"),
+            ("u/in [1].txt", "in [1].txt"),
+            ("u/s*.txt", "s*.txt"),
+            ("u/q?.txt", "q?.txt"),
+            ("u/plain.txt", "in [x].txt"),
+            ("u/a b/#1?[x] it's $(touch PWNED).txt", "x.txt"),
+        ],
+    )
+    def test_names_the_cli_cannot_represent_arrive_exactly(self, sh, tmp_path, key, dest_name):
+        uri = f"gs://b/{key}"
+        data = b"\x00binary\xff" + key.encode()
+        sh.put(uri, data)
+        dest = tmp_path / "sub [x]" / dest_name
+        dest.parent.mkdir()
+        sh.run(GcsStorageProvider().cli_copy_in(uri, str(dest)))
+        assert dest.read_bytes() == data
+        assert [c for c in sh.copies() if c[:2] == ["storage", "cp"]] == []
+        assert os.listdir(dest.parent) == [dest_name]  # no temporary file left
+
+    def test_plain_names_keep_the_cli_copy(self, sh, tmp_path):
+        sh.run(GcsStorageProvider().cli_copy_in("gs://b/u/plain.txt", f"{tmp_path}/plain.txt"))
+        assert sh.copies() == [["storage", "cp", "gs://b/u/plain.txt", f"{tmp_path}/plain.txt"]]
+        assert not sh.curl_record.exists()
+
+    def test_a_missing_object_fails_and_leaves_the_destination_alone(self, sh, tmp_path):
+        dest = tmp_path / "in [1].txt"
+        dest.write_bytes(b"earlier contents")
+        result = sh.run(GcsStorageProvider().cli_copy_in("gs://b/u/gone#1", str(dest)), check=False)
+        assert result.returncode != 0 and b"could not read gs://b/u/gone#1" in result.stderr
+        assert dest.read_bytes() == b"earlier contents"
+        assert not [n for n in os.listdir(tmp_path) if n.startswith(".bioaf-partial")]
+
+    def test_a_checksum_mismatch_fails_and_publishes_nothing(self, sh, tmp_path):
+        sh.put("gs://b/u/in [1].txt", b"payload")
+        sh.env["FAKE_CORRUPT"] = "1"
+        dest = tmp_path / "in [1].txt"
+        dest.write_bytes(b"earlier contents")
+        result = sh.run(GcsStorageProvider().cli_copy_in("gs://b/u/in [1].txt", str(dest)), check=False)
+        assert result.returncode != 0 and b"checksum mismatch" in result.stderr
+        assert dest.read_bytes() == b"earlier contents"
+        assert not [n for n in os.listdir(tmp_path) if n.startswith(".bioaf-partial")]
+
+    def test_the_token_never_reaches_a_command_line(self, sh, tmp_path):
+        sh.put("gs://b/u/k#1", b"x")
+        sh.run(GcsStorageProvider().cli_copy_in("gs://b/u/k#1", f"{tmp_path}/k"))
+        assert "fake-token" not in sh.curl_record.read_text()
+        assert "fake-token" not in sh.record.read_text(errors="replace")
+
+    def test_a_runtime_destination_is_decided_by_the_shell(self, sh, tmp_path):
+        sh.put("gs://b/u/k", b"payload")
         cmd = GcsStorageProvider().cli_copy_in("gs://b/u/k", ShellExpr('"$d"'))
         for dest in (f"{tmp_path}/a[1].txt", f"{tmp_path}/plain.txt"):
             sh.run(f"d={shlex.quote(dest)}; {cmd}")
-        assert [c[:2] for c in sh.calls()] == [["storage", "cat"], ["storage", "cp"]]
-        assert open(f"{tmp_path}/a[1].txt").read() == "from gs://b/u/k"
+        assert open(f"{tmp_path}/a[1].txt", "rb").read() == b"payload"
+        assert [c for c in sh.copies() if c[:2] == ["storage", "cp"]] == [
+            ["storage", "cp", "gs://b/u/k", f"{tmp_path}/plain.txt"]
+        ]
 
+
+class TestCloudCopyCommandsContinued:
     @pytest.mark.parametrize("name", ["a[1].fq", "st*r.fq", "q?.fq", "]x[.fq"])
     def test_gcs_sources_are_escaped_against_pattern_matching(self, sh, name):
         sh.run(GcsStorageProvider().cli_copy_out_file(f"/outputs/{name}", "gs://b/out/"))
@@ -184,25 +305,48 @@ class TestCloudCopyCommands:
         sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run/"))
         sh.run(S3StorageProvider().cli_copy_out_contents(str(outputs), "s3://b/run/"))
         assert sh.calls() == [
-            ["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"],
+            ["storage", "rsync", "--recursive", GCS_LINE_BREAK_EXCLUDE, str(outputs), "gs://b/run/"],
             ["s3", "cp", "--recursive", str(outputs), "s3://b/run/"],
         ]
 
-    def test_gcs_contents_copy_names_what_cloud_storage_cannot_hold_and_fails(self, sh, tmp_path):
-        """Cloud Storage rejects a line break in an object name (blackbird: `HTTPError 400:
-        Disallowed unicode characters present in object name`; plan 17 live validation, L3), and
-        `gcloud storage rsync` crashes on one locally. So rsync skips those paths and copies the
-        rest, then the copy fails naming each skipped file."""
+    @pytest.mark.parametrize(
+        "bad,shown",
+        [
+            (["with\nnewline.txt"], ["with\\nnewline.txt"]),
+            (["with\rcarriage.txt"], ["with\\rcarriage.txt"]),
+            (["crlf\r\n.txt"], ["crlf\\r\\n.txt"]),
+            (["d\nx/f.txt", "c\ry/g.txt", "back\\slash\r.txt"], ["d\\nx/f.txt", "c\\ry/g.txt", "back\\\\slash\\r.txt"]),
+        ],
+        ids=["LF", "CR", "CRLF", "directories-and-backslash"],
+    )
+    def test_gcs_contents_copy_names_what_cloud_storage_cannot_hold_and_fails(self, sh, tmp_path, bad, shown):
+        """Cloud Storage refuses CR and LF in an object name (blackbird: `HTTPError 400`; L3), and
+        `gcloud storage rsync` crashes on either locally. rsync skips such paths and copies the
+        rest; the copy then fails listing each one with CR and LF written as `\\r`/`\\n` (and a
+        backslash doubled), so the list is unambiguous."""
         outputs = tmp_path / "outputs"
-        (outputs / "d\nx").mkdir(parents=True)
-        for rel in ("ok.txt", "with\nnewline.txt", "d\nx/f.txt"):
-            (outputs / rel).write_text(rel)
+        outputs.mkdir()
+        for rel in ["ok.txt", *bad]:
+            (outputs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (outputs / rel).write_text("x")
         result = sh.run(GcsStorageProvider().cli_copy_out_contents(str(outputs), "gs://b/run"), check=False)
         assert result.returncode != 0
-        assert sh.calls() == [["storage", "rsync", "--recursive", GCS_NEWLINE_EXCLUDE, str(outputs), "gs://b/run/"]]
-        err = result.stderr.decode()
-        assert "line breaks cannot be stored in Google Cloud Storage" in err
-        assert f"{outputs}/with\nnewline.txt" in err and f"{outputs}/d\nx/f.txt" in err
+        assert sh.calls() == [["storage", "rsync", "--recursive", GCS_LINE_BREAK_EXCLUDE, str(outputs), "gs://b/run/"]]
+        lines = result.stderr.decode().split("\n")
+        assert (
+            lines[0]
+            == "bioAF: names with line breaks or carriage returns cannot be stored in Google Cloud Storage; not copied:"
+        )
+        assert sorted(lines[1:-1]) == sorted(f"  {outputs}/{s}" for s in shown)
+
+    def test_the_rsync_exclusion_matches_exactly_cr_and_lf_paths(self):
+        import re
+
+        pattern = re.compile(GCS_LINE_BREAK_EXCLUDE.removeprefix("--exclude="))
+        for path in ("a\nb", "a\rb", "a\r\nb", "d\nx/f", "d\rx/f"):
+            assert pattern.fullmatch(path), repr(path)
+        for path in ("ok.txt", "sub [x]/plain.txt", "a\\nb", "tab\tname"):
+            assert not pattern.fullmatch(path), repr(path)
 
     def test_gcs_contents_copy_without_such_names_succeeds_quietly(self, sh, tmp_path):
         outputs = tmp_path / "outputs"

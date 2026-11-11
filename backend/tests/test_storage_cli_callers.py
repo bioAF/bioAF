@@ -82,6 +82,9 @@ def test_notebook_staging_copies_each_input_literally_and_writes_the_inventory(s
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
         manifest = _notebook_adapter()._build_pod_manifest(_spec(files), has_gcs_secret=has_key)
     staging = next(c for c in manifest["spec"]["initContainers"] if c["name"] == "gcs-data-sync")
+    for f in files:
+        if isinstance(storage, GcsStorageProvider):
+            sh.put(f["gcs_uri"], f["gcs_uri"].encode())
     sh.run(_mapped(staging["command"][2], tmp_path, "/data"))
 
     data = tmp_path / "data"
@@ -196,8 +199,11 @@ async def test_cellxgene_downloads_the_dataset_literally(sh, tmp_path, has_key):
         await provider.deploy(1, uri, "d")
     deployment = apps.create_namespaced_deployment.call_args.kwargs["body"]
     command = deployment.spec.template.spec.init_containers[0].command[2]
+    (tmp_path / "data").mkdir()
+    sh.put(uri, b"h5ad bytes")
     sh.run(_mapped(command, tmp_path, "/data", "/gcp"))
-    assert sh.calls()[-1] == ["storage", "cp", gcs_escape(uri), f"{tmp_path}/data/dataset.h5ad"]
+    # `[1]` in the key: the CLI would read it as a pattern, so the verified JSON API fetch is used.
+    assert_gcs_fetched(sh, [(uri, f"{tmp_path}/data/dataset.h5ad")])
 
 
 # --- custom pipeline staging and EXIT trap --------------------------------------------------
@@ -210,6 +216,9 @@ def test_custom_pipeline_stage_commands_are_literal(sh, tmp_path, storage):
     specs = [{"relative_path": f"P/E/{n}", "gcs_uri": storage.build_uri("raw", f"u/{n}")} for n in HOSTILE]
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
         commands = CustomPipelineService._build_stage_commands(specs)
+    for spec in specs:
+        if isinstance(storage, GcsStorageProvider):
+            sh.put(spec["gcs_uri"], spec["gcs_uri"].encode())
     sh.run(_mapped(" && ".join(commands), tmp_path, "/data", "/secrets"))
     if isinstance(storage, GcsStorageProvider):
         assert_gcs_fetched(sh, [(s["gcs_uri"], f"{tmp_path}/data/{s['relative_path']}") for s in specs])
@@ -242,7 +251,7 @@ def test_custom_pipeline_exit_trap_copies_outputs_and_keeps_the_exit_status(sh, 
     target = storage.build_uri("res", "projects/4/pipeline-runs/9/")
     (call,) = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
     if isinstance(storage, GcsStorageProvider):
-        assert call == ["storage", "rsync", "--recursive", "--exclude=(?s).*\\n.*", str(outputs), target]
+        assert call == ["storage", "rsync", "--recursive", "--exclude=(?s).*[\\r\\n].*", str(outputs), target]
     else:
         assert call == ["s3", "cp", "--recursive", str(outputs), target]
 
@@ -300,19 +309,15 @@ def test_work_node_startup_stages_inputs_literally(sh, tmp_path, module, builder
     files = [{"relative_path": f"P/{n}", "gcs_uri": f"{scheme}://raw/u/{n}"} for n in HOSTILE]
     script = build({"input_files": files, "username": "u", "session_id": 1})
     staging = script[script.index("mkdir -p /data") : script.index("# 5. Create output")]
+    if module == "gce":
+        for f in files:
+            sh.put(f["gcs_uri"], f["gcs_uri"].encode())
     sh.run(_mapped(staging, tmp_path, "/data"))
     pairs = [(f["gcs_uri"], f"{tmp_path}/data/{f['relative_path']}") for f in files]
     if module == "gce":
-        # gsutil also refuses a local destination containing `[*?` ("must match exactly 1 URL",
-        # cloud-sdk 593.0.0), so those are streamed with `gsutil cat` and the shell writes them.
-        fetches = [c for c in sh.calls() if c[:1] in (["cp"], ["cat"])]
-        assert fetches == [
-            ["cat", gcs_escape(uri)] if any(ch in dest for ch in "[*?") else ["cp", gcs_escape(uri), dest]
-            for uri, dest in pairs
-        ]
-        for uri, dest in pairs:
-            if any(ch in dest for ch in "[*?"):
-                assert open(dest).read() == "from " + gcs_escape(uri)
+        # Plain names keep `gsutil cp`; names gsutil cannot represent use the adapter's verified
+        # JSON API fetch (shared with notebook and custom-pipeline staging).
+        assert_gcs_fetched(sh, pairs, cp=("cp",))
     else:
         copies = [c for c in sh.calls() if "cp" in c]
         assert [c[-2:] for c in copies] == [[uri, dest] for uri, dest in pairs]

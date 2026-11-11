@@ -46,17 +46,19 @@
 ### Notebooks, custom pipelines and work nodes
 
 - Files whose names contain spaces, quotes, `$`, backticks, brackets, `*`, `?`,
-  newlines or other special characters are copied into notebooks, custom
+  `#`, newlines or other special characters are copied into notebooks, custom
   pipelines, cellxgene and work nodes as exactly that file. Previously such a
   name could run a command or copy a different file, and on GCP a name with
-  `[`, `*` or `?` stopped the run before it started.
+  `[`, `*`, `?` or `#` followed by digits stopped the run before it started.
+  On GCP, such files are checked against the stored checksum before use, and a
+  failed download leaves any existing file in place.
 - Custom pipelines on AWS copy all of their outputs (previously the copy failed
   when there was more than one output file).
 - Custom pipelines on GCP copy every output exactly as named, including names
   with brackets, `*` or `?` and hidden files (previously such a name could copy
   a different file or be skipped). Google Cloud Storage cannot hold a name with
-  a line break: such outputs are listed in the run's log, everything else is
-  copied, and the run fails.
+  a line break or carriage return: such outputs are listed in the run's log,
+  everything else is copied, and the run fails.
 - A custom pipeline whose outputs could not be copied to storage now fails
   instead of being reported complete; a pipeline that already failed keeps its
   own exit status.
