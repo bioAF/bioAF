@@ -52,7 +52,7 @@ test("the theme bootstrap is the only inner-HTML script and it is a constant", (
 
 test("every srcDoc frame is sandboxed without the app's origin", () => {
   const frames = FILES.flatMap((f) =>
-    Array.from(f.text.matchAll(/<iframe\b[^>]*>/gs)).map((m) => ({ path: f.path, tag: m[0] })),
+    Array.from(f.text.matchAll(/<iframe\b[^>]*>/g)).map((m) => ({ path: f.path, tag: m[0] })),
   ).filter((frame) => /srcDoc=/.test(frame.tag));
   expect(frames.length).toBeGreaterThan(0);
   for (const frame of frames) {

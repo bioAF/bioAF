@@ -16,6 +16,8 @@ import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { formatRecordedTime } from "@/lib/recordedTime";
+import { formatElapsed } from "@/lib/duration";
 
 /** Matches the run detail page, which is the surface a user flips to from here. */
 const REFRESH_INTERVAL_MS = 10_000;
@@ -80,7 +82,7 @@ export default function PipelineRunsPage() {
   const loading = list.loading;
   const loadRuns = list.refresh;
 
-  // `formatDuration` read Date.now() once, at render, so an in-flight 8-hour run read
+  // The duration once read Date.now() once, at render, so an in-flight 8-hour run read
   // "3m" until the page was reloaded. It is the only elapsed-time signal on this
   // screen, so it has to be driven by a clock rather than by whenever React last
   // happened to re-render. Only ticks while something is actually in flight.
@@ -90,23 +92,6 @@ export default function PipelineRunsPage() {
     const tick = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
     return () => clearInterval(tick);
   }, [hasInFlight]);
-
-  function formatDuration(startedAt: string | null, completedAt: string | null): string {
-    if (!startedAt) return NOT_SET;
-    const start = new Date(startedAt).getTime();
-    const end = completedAt ? new Date(completedAt).getTime() : nowMs;
-    const seconds = Math.floor((end - start) / 1000);
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
-
-  function formatDateTime(dateStr: string | null): string {
-    if (!dateStr) return NOT_SET;
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " +
-      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
 
   function toggleSort(field: "id" | "status" | "pipeline_name") {
     if (sortField === field) {
@@ -226,8 +211,8 @@ export default function PipelineRunsPage() {
                   ) : <NotSet />}
                 </td>
                 <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || NOT_SET}</td>
-                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDateTime(r.started_at)}</td>
-                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDuration(r.started_at, r.completed_at)}</td>
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatRecordedTime(r.started_at, "monthDayTime")}</td>
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatElapsed(r.started_at, r.completed_at, nowMs, "compact")}</td>
                 {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : NOT_SET}</td>}
               </tr>
             ))}

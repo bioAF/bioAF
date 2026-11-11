@@ -18,14 +18,7 @@ import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return NOT_SET;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+import { formatBytes } from "@/lib/bytes";
 
 export default function DataReferencesPage() {
   const router = useRouter();
@@ -206,7 +199,7 @@ export default function DataReferencesPage() {
                       <ReferenceStatusBadge status={ref.status} />
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? NOT_SET}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes, "reference", { missing: NOT_SET })}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">
                       {new Date(ref.created_at).toLocaleDateString()}
                     </td>

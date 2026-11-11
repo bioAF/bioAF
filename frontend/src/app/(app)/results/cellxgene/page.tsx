@@ -16,14 +16,7 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { Button } from "@/components/ui/Button";
-
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return "Unknown size";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+import { formatBytes } from "@/lib/bytes";
 
 function StatusBadge({ status }: { status: string }) {
   const colorClass = (() => {
@@ -158,7 +151,7 @@ function PublishForm({
                     {f.experiment_name && <span>Experiment: {f.experiment_name}</span>}
                     {f.project_name && <span>Project: {f.project_name}</span>}
                     {f.sample_names.length > 0 && <span>Samples: {f.sample_names.join(", ")}</span>}
-                    <span>{formatBytes(f.size_bytes)}</span>
+                    <span>{formatBytes(f.size_bytes, "cellxgene", { missing: "Unknown size" })}</span>
                     <span>{f.source_type === "pipeline_output" ? "Pipeline output" : f.source_type === "notebook_output" ? "Notebook output" : "Upload"}</span>
                   </div>
                 </div>
@@ -274,7 +267,7 @@ function PublicationCard({
         <div className="text-xs text-gray-500 space-y-0.5">
           {experimentName && <p>Experiment: {experimentName}</p>}
           {pub.file && (
-            <p>{pub.file.filename} ({formatBytes(pub.file.size_bytes)})</p>
+            <p>{pub.file.filename} ({formatBytes(pub.file.size_bytes, "cellxgene", { missing: "Unknown size" })})</p>
           )}
           <p>
             {pub.published_by && `Published by ${pub.published_by.name}`}

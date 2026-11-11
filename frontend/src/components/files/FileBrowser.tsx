@@ -27,14 +27,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { useResource } from "@/hooks/useResource";
 import { Card } from "@/components/ui/Card";
-
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return "-";
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
+import { formatBytes } from "@/lib/bytes";
 
 function isImageFile(ft: string) {
   return ["png", "jpg", "jpeg", "svg"].includes(ft.toLowerCase());
@@ -782,7 +775,7 @@ export function FileBrowser({
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500 align-top">{file.file_type}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(file.size_bytes)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(file.size_bytes, "file", { missing: "-" })}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 align-top">
                     {new Date(file.upload_timestamp).toLocaleString(undefined, {
                       month: "short",
@@ -832,7 +825,7 @@ export function FileBrowser({
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500 align-top">{doc.file_type || "-"}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(doc.size_bytes)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500 align-top">{formatBytes(doc.size_bytes, "file", { missing: "-" })}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 align-top">
                     {new Date(doc.updated_at).toLocaleString(undefined, {
                       month: "short",
@@ -921,7 +914,7 @@ export function FileBrowser({
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Size</dt>
-                <dd className="mt-0.5 text-sm text-gray-900">{formatBytes(viewingFile.size_bytes)}</dd>
+                <dd className="mt-0.5 text-sm text-gray-900">{formatBytes(viewingFile.size_bytes, "file", { missing: "-" })}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Uploaded</dt>

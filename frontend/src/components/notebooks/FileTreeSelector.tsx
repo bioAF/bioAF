@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FileResponse } from "@/lib/types";
+import { formatBytes } from "@/lib/bytes";
+import { NOT_SET } from "@/lib/placeholders";
 
 type FilterId = "defaults" | "h5" | "csvtsv" | "reports" | "fastq" | "bam" | "other";
 
@@ -68,14 +70,6 @@ function classify(filename: string): FilterId {
     return "csvtsv";
   }
   return "other";
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / Math.pow(1024, i);
-  return `${value.toFixed(1)} ${units[i]}`;
 }
 
 function gcsSubpath(gcsUri: string): string {
@@ -453,7 +447,7 @@ export function FileTreeSelector({
                                     </span>
                                     {file.size_bytes != null && (
                                       <span className="text-xs text-gray-500">
-                                        ({formatBytes(file.size_bytes)})
+                                        ({formatBytes(file.size_bytes, "file", { missing: NOT_SET })})
                                       </span>
                                     )}
                                     <span className="text-[10px] text-gray-500">
@@ -479,7 +473,7 @@ export function FileTreeSelector({
         <div className="mt-3 pt-3 border-t text-sm">
           <span className="text-gray-600">
             {selectedIds.size} file{selectedIds.size !== 1 ? "s" : ""} selected:{" "}
-            {formatBytes(totalSelectedSize)}
+            {formatBytes(totalSelectedSize, "file", { missing: NOT_SET })}
           </span>
           {totalSelectedSize > 10_737_418_240 && (
             <span className="ml-2 text-amber-700 font-medium">

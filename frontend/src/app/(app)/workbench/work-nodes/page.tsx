@@ -41,6 +41,7 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { Button } from "@/components/ui/Button";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -420,11 +421,6 @@ export default function WorkNodesPage() {
     return `${minutes}m`;
   }
 
-  function formatTimestamp(ts: string | null): string {
-    if (!ts) return "-";
-    return new Date(ts).toLocaleString();
-  }
-
   function extractSshCommand(accessUrl: string | null): string {
     if (!accessUrl) return "";
     // access_url is like ssh://1.2.3.4:22
@@ -787,7 +783,7 @@ export default function WorkNodesPage() {
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">Started</span>
-              <span>{formatTimestamp(viewingNode.started_at)}</span>
+              <span>{formatRecordedTime(viewingNode.started_at, "datetime", { missing: "-" })}</span>
             </div>
             {viewingNode.status === "running" && viewingNode.started_at && (
               <div className="flex justify-between">
@@ -797,12 +793,12 @@ export default function WorkNodesPage() {
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">Last Heartbeat</span>
-              <span>{viewingNode.heartbeat_at ? formatTimestamp(viewingNode.heartbeat_at) : "-"}</span>
+              <span>{viewingNode.heartbeat_at ? formatRecordedTime(viewingNode.heartbeat_at, "datetime", { missing: "-" }) : "-"}</span>
             </div>
             {viewingNode.stopped_at && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Stopped</span>
-                <span>{formatTimestamp(viewingNode.stopped_at)}</span>
+                <span>{formatRecordedTime(viewingNode.stopped_at, "datetime", { missing: "-" })}</span>
               </div>
             )}
           </div>

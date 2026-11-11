@@ -10,6 +10,8 @@ import type {
 } from "@/lib/types";
 import { predictNextVersion } from "./referenceVersioning";
 import { Button } from "@/components/ui/Button";
+import { formatBytes } from "@/lib/bytes";
+import { NOT_SET } from "@/lib/placeholders";
 
 const CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"];
 const SCOPES = ["public", "internal"];
@@ -20,13 +22,6 @@ interface FileProgress {
   uploaded: number;
   status: "pending" | "uploading" | "done" | "error";
   error?: string;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 interface UploadReferenceFormProps {
@@ -265,7 +260,7 @@ export function UploadReferenceForm({
               <div className="flex justify-between">
                 <span className="font-mono">{p.filename}</span>
                 <span className="text-gray-500">
-                  {formatBytes(p.uploaded)} / {formatBytes(p.size)},{" "}
+                  {formatBytes(p.uploaded, "reference", { missing: NOT_SET })} / {formatBytes(p.size, "reference", { missing: NOT_SET })},{" "}
                   <span
                     className={
                       p.status === "done"

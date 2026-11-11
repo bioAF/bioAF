@@ -23,19 +23,12 @@ import type {
   ReferenceImportStatusResponse,
   ImpactSummary,
 } from "@/lib/types";
+import { formatBytes } from "@/lib/bytes";
 
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
 function isNotFound(error: unknown): boolean {
   return (error as { status?: unknown } | null)?.status === 404;
-}
-
-function formatBytes(bytes: number | null): string {
-  if (bytes == null) return NOT_SET;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 type Tab = "files" | "impact" | "details" | "versions";
@@ -361,7 +354,7 @@ export default function DataReferenceDetailPage() {
               </div>
               {importStatus.total_bytes != null && (
                 <div className="text-sm text-blue-900">
-                  {formatBytes(importStatus.bytes_downloaded)} / {formatBytes(importStatus.total_bytes)}
+                  {formatBytes(importStatus.bytes_downloaded, "reference", { missing: NOT_SET })} / {formatBytes(importStatus.total_bytes, "reference", { missing: NOT_SET })}
                 </div>
               )}
               <div className="bg-blue-100 h-2 rounded overflow-hidden">
@@ -469,7 +462,7 @@ export default function DataReferenceDetailPage() {
                 <tr key={file.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{file.filename}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || NOT_SET}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes, "reference", { missing: NOT_SET })}</td>
                   <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
                     {file.md5_checksum || NOT_SET}
                   </td>
@@ -690,7 +683,7 @@ export default function DataReferenceDetailPage() {
             </div>
             <div>
               <dt className="text-sm text-gray-500">Total Size</dt>
-              <dd className="text-sm">{formatBytes(reference.total_size_bytes)}</dd>
+              <dd className="text-sm">{formatBytes(reference.total_size_bytes, "reference", { missing: NOT_SET })}</dd>
             </div>
             <div>
               <dt className="text-sm text-gray-500">File Count</dt>
