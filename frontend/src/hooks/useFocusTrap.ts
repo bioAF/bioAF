@@ -112,9 +112,22 @@ export function useFocusTrap<T extends HTMLElement>(open: boolean) {
       }
     };
 
+    // Focus can leave the dialog without the user moving it: a busy dialog
+    // disables the control that was focused, and the browser drops focus to
+    // <body>. The listener above never hears a Tab from there, so the next Tab
+    // walked the page behind the dialog. Bring it back in instead.
+    const onDocumentKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !isTopmost()) return;
+      if (container.contains(document.activeElement)) return;
+      e.preventDefault();
+      (focusable()[0] ?? container).focus();
+    };
+
     container.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onDocumentKeyDown);
     return () => {
       container.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onDocumentKeyDown);
       const i = liveTraps.indexOf(container);
       if (i !== -1) liveTraps.splice(i, 1);
 
