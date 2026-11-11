@@ -173,3 +173,19 @@ describe("Field", () => {
     expect(screen.getByLabelText("Notes").tagName).toBe("TEXTAREA");
   });
 });
+
+describe("control width", () => {
+  test("fills its container by default and sizes to content in a filter bar", () => {
+    render(
+      <>
+        <Input aria-label="full" />
+        <Select aria-label="auto" width="auto">
+          <option>x</option>
+        </Select>
+      </>,
+    );
+    expect(screen.getByLabelText("full").className).toMatch(/\bw-full\b/);
+    expect(screen.getByLabelText("auto").className).not.toMatch(/\bw-full\b/);
+    expect(screen.getByLabelText("auto")).not.toHaveAttribute("width");
+  });
+});

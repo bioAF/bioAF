@@ -47,6 +47,19 @@ const SIZES: Record<Size, string> = {
   md: "px-4 py-2 text-sm",
 };
 
+/**
+ * The button's classes, for a link that should look like an action. Navigation
+ * stays a link (href, middle-click, open in new tab); only the appearance is
+ * shared, so there is still one style authority.
+ */
+export function buttonClass({ variant = "primary", size = "md", className = "" }: {
+  variant?: Variant;
+  size?: Size;
+  className?: string;
+} = {}): string {
+  return `${BASE} ${VARIANTS[variant]} ${SIZES[size]} ${className}`.trim();
+}
+
 export function Button({
   variant = "primary",
   size = "md",
@@ -67,7 +80,7 @@ export function Button({
       disabled={blocked}
       aria-busy={busy || undefined}
       onClick={blocked ? undefined : onClick}
-      className={`${BASE} ${VARIANTS[variant]} ${SIZES[size]} ${className}`.trim()}
+      className={buttonClass({ variant, size, className })}
       {...rest}
     >
       {busy ? busyLabel ?? children : children}

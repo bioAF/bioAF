@@ -4,10 +4,8 @@ import { NOT_SET } from "@/lib/placeholders";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@/components/ui/Button";
+import { buttonClass } from "@/components/ui/Button";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { ErrorState } from "@/components/shared/ErrorState";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResource } from "@/hooks/useResource";
@@ -20,6 +18,10 @@ import type { Experiment, ExperimentListResponse, ExperimentStatus } from "@/lib
 import { clickableRow } from "@/lib/a11y";
 import { useToast } from "@/components/shared/Toast";
 import { Card } from "@/components/ui/Card";
+import { Input, Select } from "@/components/ui/Input";
+import { ListContent } from "@/components/shared/ListContent";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { Pagination } from "@/components/shared/Pagination";
 
 export default function ExperimentsPage() {
   const toast = useToast();
@@ -58,8 +60,6 @@ export default function ExperimentsPage() {
   const loading = list.loading;
   const loadError = list.error && !list.stale ? loadFailureMessage("Experiments") : null;
 
-  const totalPages = Math.ceil(total / pageSize);
-
   const statuses: ExperimentStatus[] = [
     "registered", "library_prep", "sequencing", "fastq_uploaded",
     "processing", "analysis", "complete",
@@ -74,141 +74,107 @@ export default function ExperimentsPage() {
             Every experiment registered in this instance, with its status, project and linked data.
           </p>
         </div>
-        <Link
-          href="/experiments/new"
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
-        >
+        <Link href="/experiments/new" className={buttonClass()}>
           New Experiment
         </Link>
       </div>
 
-      <div className="bg-surface rounded-lg shadow mb-6 p-4">
+      <Card padding="sm" className="mb-6">
         <div className="flex flex-wrap gap-4">
-          <input aria-label="Search experiments"
+          <Input aria-label="Search experiments"
             type="text"
+            width="auto"
             placeholder="Search experiments..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
+            className="flex-1 min-w-[200px]"
           />
-          <select aria-label="Filter by status"
+          <Select aria-label="Filter by status"
+            width="auto"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="">All Statuses</option>
             {statuses.map((s) => (
               <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
             ))}
-          </select>
-          <select aria-label="Filter by project"
+          </Select>
+          <Select aria-label="Filter by project"
+            width="auto"
             value={projectFilter}
             onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
             disabled={projectsDenied}
             title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-400"
           >
             <option value="">All Projects</option>
             {projects.map((p) => (
               <option key={p.id} value={String(p.id)}>{p.name}</option>
             ))}
-          </select>
+          </Select>
           {projectsDenied && (
             <p className="text-xs text-ink-subtle self-center">{PROJECTS_DENIED_MESSAGE}</p>
           )}
         </div>
-      </div>
+      </Card>
 
       {list.stale && <StaleNotice what="Experiments" onRetry={() => void list.refresh()} />}
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <LoadingSpinner size="lg" />
-        </div>
-      ) : loadError ? (
-        <Card padding="none">
-          <ErrorState
-            message={loadError}
-            onRetry={() => void list.refresh()}
+      <ListContent
+        loading={loading}
+        error={loadError}
+        onRetry={() => void list.refresh()}
+        empty={experiments.length === 0}
+        emptyState={
+          <EmptyState
+            title="No experiments found"
+            message="Get started by creating your first experiment."
+            action={
+              <Link href="/experiments/new" className={buttonClass()}>
+                New Experiment
+              </Link>
+            }
           />
-        </Card>
-      ) : experiments.length === 0 ? (
-        <div className="bg-surface rounded-lg shadow p-12 text-center">
-          <h2 className="text-lg font-semibold text-ink-subtle mb-2">No experiments found</h2>
-          <p className="text-ink-subtle mb-4">Get started by creating your first experiment.</p>
-          <Link
-            href="/experiments/new"
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
-          >
-            New Experiment
-          </Link>
-        </div>
-      ) : (
-        <>
-          <div className="bg-surface rounded-lg shadow overflow-x-auto">
-            <table className="min-w-full divide-y divide-hairline">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Name</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">ID</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Project</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Owner</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Samples</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Created</th>
+        }
+      >
+        <Card padding="none" className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-hairline">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Name</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">ID</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Project</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Owner</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Samples</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Created</th>
+              </tr>
+            </thead>
+            <tbody className="bg-surface divide-y divide-hairline">
+              {experiments.map((exp) => (
+                <tr
+                  key={exp.id}
+                  {...clickableRow(() => router.push(`/experiments/${exp.id}`))}
+                  className="hover:bg-surface-muted cursor-pointer"
+                >
+                  <td className="px-6 py-4 text-sm font-medium text-ink">{exp.name}</td>
+                  <td className="px-6 py-4 text-sm text-ink-subtle font-mono">{exp.external_id || exp.code || "-"}</td>
+                  <td className="px-6 py-4 text-sm text-ink-subtle">{exp.project?.name || NOT_SET}</td>
+                  <td className="px-6 py-4">
+                    <ExperimentStatusBadge status={exp.status} />
+                  </td>
+                  <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || NOT_SET}</td>
+                  <td className="px-6 py-4 text-sm text-ink-subtle">{exp.sample_count}</td>
+                  <td className="px-6 py-4 text-sm text-ink-subtle">
+                    {new Date(exp.created_at).toLocaleDateString()}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="bg-surface divide-y divide-hairline">
-                {experiments.map((exp) => (
-                  <tr
-                    key={exp.id}
-                    {...clickableRow(() => router.push(`/experiments/${exp.id}`))}
-                    className="hover:bg-surface-muted cursor-pointer"
-                  >
-                    <td className="px-6 py-4 text-sm font-medium text-ink">{exp.name}</td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle font-mono">{exp.external_id || exp.code || "-"}</td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.project?.name || NOT_SET}</td>
-                    <td className="px-6 py-4">
-                      <ExperimentStatusBadge status={exp.status} />
-                    </td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || NOT_SET}</td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.sample_count}</td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">
-                      {new Date(exp.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
+        </Card>
 
-          {totalPages > 1 && (
-            <div className="flex justify-between items-center mt-4">
-              <p className="text-sm text-ink-subtle">
-                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
+      </ListContent>
     </main>
   );
 }

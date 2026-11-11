@@ -4,8 +4,6 @@ import { NOT_SET } from "@/lib/placeholders";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { ErrorState } from "@/components/shared/ErrorState";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResource } from "@/hooks/useResource";
@@ -19,6 +17,9 @@ import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatBytes } from "@/lib/bytes";
+import { Input, Select } from "@/components/ui/Input";
+import { ListContent } from "@/components/shared/ListContent";
+import { EmptyState } from "@/components/shared/EmptyState";
 
 export default function DataReferencesPage() {
   const router = useRouter();
@@ -92,19 +93,20 @@ export default function DataReferencesPage() {
         )}
       </div>
 
-      <div className="bg-white rounded-lg shadow mb-6 p-4">
+      <Card padding="sm" className="mb-6">
         <div className="flex flex-wrap gap-4">
-          <input aria-label="Search by name"
+          <Input aria-label="Search by name"
             type="text"
+            width="auto"
             placeholder="Search by name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
+            className="flex-1 min-w-[200px]"
           />
-          <select aria-label="Filter by category"
+          <Select aria-label="Filter by category"
+            width="auto"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="">All Categories</option>
             {categories.map((c) => (
@@ -112,11 +114,11 @@ export default function DataReferencesPage() {
                 {c.charAt(0).toUpperCase() + c.slice(1)}
               </option>
             ))}
-          </select>
-          <select aria-label="Filter by scope"
+          </Select>
+          <Select aria-label="Filter by scope"
+            width="auto"
             value={scopeFilter}
             onChange={(e) => setScopeFilter(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="">All Scopes</option>
             {scopes.map((s) => (
@@ -124,11 +126,11 @@ export default function DataReferencesPage() {
                 {s.charAt(0).toUpperCase() + s.slice(1)}
               </option>
             ))}
-          </select>
-          <select aria-label="Filter by status"
+          </Select>
+          <Select aria-label="Filter by status"
+            width="auto"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="">All Statuses</option>
             {statuses.map((s) => (
@@ -136,84 +138,72 @@ export default function DataReferencesPage() {
                 {s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
-      </div>
+      </Card>
 
       {list.stale && <StaleNotice what="Reference data" onRetry={() => void list.refresh()} />}
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <LoadingSpinner size="lg" />
-        </div>
-      ) : loadError ? (
-        <Card padding="none">
-          <ErrorState
-            message={loadError}
-            onRetry={() => void list.refresh()}
+      <ListContent
+        loading={loading}
+        error={loadError}
+        onRetry={() => void list.refresh()}
+        empty={references.length === 0}
+        emptyState={
+          <EmptyState
+            title="No reference datasets found"
+            message={
+              canAdd
+                ? "Get started by adding your first reference dataset."
+                : "No reference datasets are available yet."
+            }
+            action={canAdd && <Button onClick={() => router.push("/data/references/add")}>Add Reference Data</Button>}
           />
-        </Card>
-      ) : references.length === 0 ? (
-        <Card padding="none" className="p-12 text-center">
-          <h2 className="text-lg font-semibold text-gray-500 mb-2">No reference datasets found</h2>
-          <p className="text-gray-500 mb-4">
-            {canAdd
-              ? "Get started by adding your first reference dataset."
-              : "No reference datasets are available yet."}
-          </p>
-          {canAdd && (
-            <Button
-              onClick={() => router.push("/data/references/add")}>
-              Add Reference Data
-            </Button>
-          )}
-        </Card>
-      ) : (
-        <>
-          <Card padding="none" className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Files</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+        }
+      >
+        <Card padding="none" className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scope</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Version</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Files</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {references.map((ref) => (
+                <tr
+                  key={ref.id}
+                  {...clickableRow(() => router.push(`/data/references/${ref.id}`))}
+                  className="hover:bg-gray-50 cursor-pointer"
+                >
+                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{ref.name}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500 capitalize">{ref.category}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500 capitalize">{ref.scope}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{ref.version}</td>
+                  <td className="px-6 py-4">
+                    <ReferenceStatusBadge status={ref.status} />
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? NOT_SET}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes, "reference", { missing: NOT_SET })}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">
+                    {new Date(ref.created_at).toLocaleDateString()}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {references.map((ref) => (
-                  <tr
-                    key={ref.id}
-                    {...clickableRow(() => router.push(`/data/references/${ref.id}`))}
-                    className="hover:bg-gray-50 cursor-pointer"
-                  >
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{ref.name}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500 capitalize">{ref.category}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500 capitalize">{ref.scope}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{ref.version}</td>
-                    <td className="px-6 py-4">
-                      <ReferenceStatusBadge status={ref.status} />
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? NOT_SET}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes, "reference", { missing: NOT_SET })}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      {new Date(ref.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+              ))}
+            </tbody>
+          </table>
+        </Card>
 
-          <div className="mt-4 text-sm text-gray-500">
-            {total} reference dataset{total !== 1 ? "s" : ""}
-          </div>
-        </>
-      )}
+        <div className="mt-4 text-sm text-gray-500">
+          {total} reference dataset{total !== 1 ? "s" : ""}
+        </div>
+      </ListContent>
     </main>
   );
 }

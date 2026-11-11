@@ -5,7 +5,8 @@ import { NotSet } from "@/components/shared/NotSet";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { PageSizeSelect, DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
+import { DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
+import { Pagination } from "@/components/shared/Pagination";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -231,24 +232,18 @@ export default function PipelineRunsPage() {
       {/* The size control renders whether or not there is a second page, so it
           is the same control in the same place regardless of how much data the
           list happens to hold. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
-        <PageSizeSelect
-          value={pageSize}
-          onChange={(size) => {
-            setPageSize(size);
-            // Page 12 of 25-row pages does not exist at 100 a page, so keeping
-            // the number would show an empty table for a list that is not empty.
-            setPage(1);
-          }}
-        />
-        {total > pageSize && (
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Previous</Button>
-            <span className="text-sm text-ink-subtle py-1">Page {page} of {Math.ceil(total / pageSize)}</span>
-            <Button variant="secondary" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / pageSize)}>Next</Button>
-          </div>
-        )}
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          // Page 12 of 25-row pages does not exist at 100 a page, so keeping
+          // the number would show an empty table for a list that is not empty.
+          setPage(1);
+        }}
+      />
       </>
       )}
     </main>

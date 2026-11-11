@@ -4,8 +4,6 @@ import { NOT_SET } from "@/lib/placeholders";
 import { Suspense, useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { ErrorState } from "@/components/shared/ErrorState";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useResource } from "@/hooks/useResource";
@@ -14,13 +12,15 @@ import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
-import { Input, Textarea } from "@/components/ui/Input";
+import { Input, Select, Textarea } from "@/components/ui/Input";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
+import { ListContent } from "@/components/shared/ListContent";
+import { EmptyState } from "@/components/shared/EmptyState";
 
 export default function ProjectsPage() {
   return (
@@ -120,53 +120,44 @@ function ProjectsPageInner() {
           )}
         </div>
 
-        <div className="bg-white rounded-lg shadow mb-6 p-4">
+        <Card padding="sm" className="mb-6">
           <div className="flex flex-wrap gap-4">
-            <input aria-label="Search projects"
+            <Input aria-label="Search projects"
               type="text"
+              width="auto"
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
+              className="flex-1 min-w-[200px]"
             />
-            <select aria-label="Filter by status"
+            <Select aria-label="Filter by status"
+              width="auto"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-sm"
             >
               <option value="">All Statuses</option>
               <option value="active">Active</option>
               <option value="archived">Archived</option>
               <option value="complete">Complete</option>
-            </select>
+            </Select>
           </div>
-        </div>
+        </Card>
 
         {list.stale && <StaleNotice what="Projects" onRetry={() => void loadProjects()} />}
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <LoadingSpinner size="lg" />
-          </div>
-        ) : loadError ? (
-          <ErrorState
-            message={loadError}
-            onRetry={() => {
-              void loadProjects();
-            }}
-          />
-        ) : projects.length === 0 ? (
-          <Card padding="none" className="p-12 text-center">
-            <h2 className="text-lg font-semibold text-gray-500 mb-2">No projects found</h2>
-            <p className="text-gray-500 mb-4">Create a project to organize cross-experiment analysis.</p>
-            {canCreate && (
-              <Button
-                onClick={() => setShowCreateModal(true)}>
-                New Project
-              </Button>
-            )}
-          </Card>
-        ) : (
+        <ListContent
+          loading={loading}
+          error={loadError}
+          onRetry={() => void loadProjects()}
+          empty={projects.length === 0}
+          emptyState={
+            <EmptyState
+              title="No projects found"
+              message="Create a project to organize cross-experiment analysis."
+              action={canCreate && <Button onClick={() => setShowCreateModal(true)}>New Project</Button>}
+            />
+          }
+        >
           <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -205,7 +196,7 @@ function ProjectsPageInner() {
               </tbody>
             </table>
           </Card>
-        )}
+        </ListContent>
       </main>
 
       <Modal
