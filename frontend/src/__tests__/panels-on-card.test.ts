@@ -61,10 +61,11 @@ test("the sweep is looking at the whole tree", () => {
 });
 
 /**
- * 211 before this matcher's first run, 137 after 74 were converted. Lower this
- * number when more are converted; never raise it. A new panel belongs in `Card`.
+ * 211 before this matcher's first run, 137 after 74 were converted, 130 after
+ * the list, filter and form panels moved onto Card. Lower this number when
+ * more are converted; never raise it. A new panel belongs in `Card`.
  */
-const PANEL_CEILING = 137;
+const PANEL_CEILING = 130;
 
 test("the hand-spelled panel count does not grow", () => {
   const panels = handSpelledPanels();
