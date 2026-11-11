@@ -13,6 +13,7 @@ import { Modal } from "@/components/shared/Modal";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { ReportMarkdown } from "@/components/pipelines/ReportMarkdown";
 import { RunSamplesheetProvenance } from "@/components/pipelines/RunSamplesheetProvenance";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
@@ -41,103 +42,6 @@ interface LogResponse {
   custom_log_pending?: boolean;
   pod_logs_available?: boolean;
   custom_log_missing?: boolean;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function inlineFormat(s: string): string {
-  return s
-    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" class="text-bioaf-600 hover:underline" target="_blank" rel="noreferrer">$1</a>',
-    );
-}
-
-// Minimal markdown -> HTML renderer for custom pipeline `report.md` artifacts.
-// Handles headings, paragraphs, fenced code blocks, unordered lists, links,
-// inline code and bold/italic. Anything fancier should be a real renderer.
-function renderMarkdown(md: string): string {
-  const lines = md.split("\n");
-  let html = "";
-  let inCode = false;
-  let codeBuf: string[] = [];
-  let inList = false;
-  let paragraph: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      html += `<p class="my-2">${inlineFormat(escapeHtml(paragraph.join(" ")))}</p>\n`;
-      paragraph = [];
-    }
-  };
-  const flushList = () => {
-    if (inList) {
-      html += "</ul>\n";
-      inList = false;
-    }
-  };
-
-  for (const line of lines) {
-    if (line.trim().startsWith("```")) {
-      if (inCode) {
-        html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
-        codeBuf = [];
-        inCode = false;
-      } else {
-        flushParagraph();
-        flushList();
-        inCode = true;
-      }
-      continue;
-    }
-    if (inCode) {
-      codeBuf.push(line);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1].length;
-      const sizes = ["text-2xl", "text-xl", "text-lg", "text-base", "text-sm", "text-xs"];
-      html += `<h${level} class="font-semibold mt-4 mb-2 ${sizes[level - 1]}">${inlineFormat(escapeHtml(heading[2]))}</h${level}>\n`;
-      continue;
-    }
-
-    const list = line.match(/^[-*]\s+(.+)$/);
-    if (list) {
-      flushParagraph();
-      if (!inList) {
-        html += '<ul class="list-disc pl-6 my-2">';
-        inList = true;
-      }
-      html += `<li>${inlineFormat(escapeHtml(list[1]))}</li>`;
-      continue;
-    }
-
-    if (line.trim() === "") {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    flushList();
-    paragraph.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-  if (inCode && codeBuf.length > 0) {
-    html += `<pre class="bg-gray-50 border rounded p-3 text-xs font-mono overflow-x-auto my-2">${escapeHtml(codeBuf.join("\n"))}</pre>\n`;
-  }
-
-  return html;
 }
 
 function getUserRole(): string {
@@ -835,13 +739,15 @@ export default function PipelineRunDetailPage() {
             </h2>
             {report ? (
               isCustomRun && customReportFormat === "md" ? (
-                <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(report) }}
-                />
+                <ReportMarkdown source={report} />
               ) : (
+                // A report's scripts (charts, tabs) run in an opaque origin:
+                // without allow-same-origin they cannot read the app's storage
+                // or DOM. In-page anchors are handled by the scroll shim the
+                // backend adds to every HTML report.
                 <iframe
                   srcDoc={report}
+                  sandbox="allow-scripts"
                   className="w-full h-[600px] border rounded"
                   title={isCustomRun ? "Pipeline Report" : "Nextflow Report"}
                 />

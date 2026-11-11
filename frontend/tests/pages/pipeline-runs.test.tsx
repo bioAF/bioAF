@@ -271,18 +271,12 @@ describe("Cancel Button (Test 30)", () => {
 });
 
 describe("Nextflow Report iframe", () => {
-  // The iframe must NOT carry a `sandbox` attribute. A srcdoc iframe
-  // inherits its parent's CSP per the HTML spec regardless of sandbox,
-  // so sandbox doesn't help with the Plotly `new Function` problem (the
-  // real fix is `unsafe-eval` in CSP). What sandbox *does* break: with
-  // `allow-scripts` but no `allow-same-origin`, the iframe is in a
-  // unique opaque origin while its base URL is inherited from the
-  // parent, so anchor links like `<a href="#tasks">` inside the report
-  // resolve to the parent's URL and clicking them triggers a
-  // cross-origin navigation that hits the parent's
-  // `frame-ancestors 'none'` and fails. Leaving sandbox off keeps the
-  // report's internal nav (Summary/Resources/Tasks) working.
-  test("report iframe is not sandboxed", async () => {
+  // Replaced with owner approval (plan 18 batch S): the report used to run
+  // unsandboxed, so its scripts could read the app's token from parent
+  // storage. It now runs scripts in an opaque origin. In-page anchors, the
+  // reason sandbox was once removed, are handled by the backend's scroll
+  // shim (`_IFRAME_HASH_NAV_SHIM`), which calls preventDefault on hash links.
+  test("report iframe runs scripts without the app's origin", async () => {
     const completedRun = { ...mockRunWithK8s, status: "completed" as const };
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("/references")) return Promise.resolve([]);
@@ -307,6 +301,6 @@ describe("Nextflow Report iframe", () => {
       iframe = container.querySelector("iframe");
       expect(iframe).not.toBeNull();
     });
-    expect(iframe!.hasAttribute("sandbox")).toBe(false);
+    expect(iframe!.getAttribute("sandbox")).toBe("allow-scripts");
   });
 });
