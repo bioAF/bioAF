@@ -135,7 +135,7 @@ describe("Experiment Detail - Results Tab", () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Results" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Results" }));
 
     expect(await screen.findByText("Run #42")).toBeInTheDocument();
     // The old inline custom detail (Back to list / Regenerate) is gone.
@@ -150,7 +150,7 @@ describe("Experiment Detail - Results Tab", () => {
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Results" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Results" }));
 
     // QC card carries the same context the Results > QC Dashboards page shows.
     expect(await screen.findByText(/nf-core\/scrnaseq v2\.6\.0/)).toBeInTheDocument();
@@ -166,6 +166,6 @@ describe("Experiment Detail - Results Tab", () => {
     mockCanAccess.mockReturnValue(false);
     render(<ExperimentDetailPage />);
     await waitFor(() => screen.getByText("Test Experiment"));
-    expect(screen.queryByRole("button", { name: "Results" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Results" })).not.toBeInTheDocument();
   });
 });
