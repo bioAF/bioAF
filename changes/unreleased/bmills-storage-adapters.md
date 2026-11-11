@@ -1,0 +1,44 @@
+### Pipeline launch
+
+- Pipeline parameters now reach Nextflow exactly as entered. A value containing
+  shell characters, quotes, a leading dash or text such as `--outdir` is passed
+  as that parameter's value instead of being run as a command or read as
+  another option.
+- Parameter names must start with a letter or underscore and contain only
+  letters, digits, `_`, `.` or `-`; a launch with any other name is refused at
+  review and at launch with an explanation.
+- `outdir` and `input` are set by bioAF for every run and can no longer be
+  supplied as parameters. Each run writes its outputs to its own results
+  location.
+
+### Pipeline outputs
+
+- Completed runs collect their outputs from their own results location only.
+  An older run that recorded a different output location is skipped with a
+  warning instead of collecting data from elsewhere.
+- Outputs of custom pipelines started from a project (not an experiment) are
+  now collected from where the pipeline wrote them.
+- Local and NFS installs now register pipeline outputs; previously they found
+  none.
+
+### Storage cleanup
+
+- Cleanup of failed runs' working files deletes only that run's files; a run
+  numbered 1 no longer shares a prefix with runs 10 or 100. Cleanup actually
+  runs now (it had been failing silently).
+- Cleanup of stopped validation studies checks every file it would delete
+  first. If any file lies outside the fetch run's own output location, nothing
+  is deleted and the study is flagged for review. An interrupted cleanup is
+  finished on a later pass, and a retry in between returns to the approval
+  step instead of reusing deleted data.
+
+### Notebooks, custom pipelines and work nodes
+
+- Files whose names contain spaces, quotes, `$`, backticks, brackets, newlines
+  or other special characters are copied into notebooks, custom pipelines,
+  cellxgene and work nodes as exactly that file. Previously such a name could
+  run a command or copy a different file.
+- Custom pipelines on AWS copy all of their outputs (previously the copy failed
+  when there was more than one output file).
+- On NFS storage, a session whose storage root is not mounted now reports that
+  instead of appearing to save.

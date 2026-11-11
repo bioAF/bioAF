@@ -1,6 +1,5 @@
 """Tests for the GCS storage adapter in local mode."""
 
-import os
 import tempfile
 
 import pytest

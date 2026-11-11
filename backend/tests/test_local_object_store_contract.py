@@ -325,3 +325,25 @@ def test_cloud_prefix_reads_reject_negative_and_skip_zero(monkeypatch):
         with pytest.raises(ValueError):
             asyncio.run(s3.read_prefix("s3://b/k", -1))
     s3_client.get_object.assert_not_called()
+
+
+class TestFailuresStayDistinct:
+    @pytest.mark.asyncio
+    async def test_an_object_that_vanishes_between_the_check_and_the_open_is_not_found(self, b, monkeypatch):
+        await b.s.write_bytes(b.uri("v"), b"1")
+        os.remove(b.path("v"))
+        monkeypatch.setattr(os.path, "isfile", lambda p: True)  # the check still saw it
+        with pytest.raises(StorageObjectNotFound):
+            await b.s.read_bytes(b.uri("v"))
+
+    @pytest.mark.asyncio
+    async def test_a_permission_error_is_not_reported_as_absence(self, b):
+        if os.geteuid() == 0:
+            pytest.skip("root reads files regardless of mode")
+        await b.s.write_bytes(b.uri("locked"), b"1")
+        os.chmod(b.path("locked"), 0)
+        try:
+            with pytest.raises(PermissionError):
+                await b.s.read_bytes(b.uri("locked"))
+        finally:
+            os.chmod(b.path("locked"), 0o600)
