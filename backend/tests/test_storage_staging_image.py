@@ -5,8 +5,11 @@ DB-free: the container image a backend's stage-in/stage-out init containers run
 S3 (Stage 6e) uses amazon/aws-cli; a mounted NFS backend needs only coreutils.
 """
 
+import pytest
+
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.adapters.storage.nfs import NfsStorageProvider
+from app.exceptions import ValidationError
 
 
 def test_gcs_staging_image_is_cloud_sdk():
@@ -55,6 +58,13 @@ def test_gcs_sync_commands_are_gsutil_rsync():
 
 
 def test_nfs_sync_commands_are_plain_cp():
-    nfs = NfsStorageProvider()
-    assert nfs.sync_in_command("/srv/in", "/local")[2] == "cp -r /srv/in/. /local || true"
-    assert nfs.sync_out_command("/local", "/srv/out")[2] == "cp -r /local/. /srv/out"
+    """file:// operands are mapped through the confined mount path (plan 17, F13); the root is
+    checked so an unmounted store fails instead of looking like an empty prefix."""
+    nfs = NfsStorageProvider(root="/srv")
+    sync_in = nfs.sync_in_command("file://working/in/", "/local")[2]
+    assert "if [ -d /srv/working/in ]; then cp -r /srv/working/in/. /local; fi" in sync_in
+    assert "is not mounted" in sync_in
+    sync_out = nfs.sync_out_command("/local", "file://working/out/")[2]
+    assert sync_out.endswith("mkdir -p /srv/working/out && cp -r /local/. /srv/working/out")
+    with pytest.raises(ValidationError):
+        nfs.sync_in_command("/srv/in", "/local")

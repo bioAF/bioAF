@@ -107,7 +107,16 @@ class TestCliStaging:
         assert local_adapter.cli_copy_in("gs://b/k.txt", "/data/k.txt") == "gcloud storage cp gs://b/k.txt /data/k.txt"
 
     def test_cli_copy_out_is_recursive(self, local_adapter):
+        assert (
+            local_adapter.cli_copy_out("/outputs", "gs://b/runs/1/") == "gcloud storage cp -r /outputs gs://b/runs/1/"
+        )
+
+    def test_a_literal_operand_is_never_a_glob(self, local_adapter):
+        """Plan 17 (F13): operands are data; a directory's contents are copied explicitly."""
         assert local_adapter.cli_copy_out("/outputs/*", "gs://b/runs/1/") == (
+            "gcloud storage cp -r '/outputs/[*]' gs://b/runs/1/"
+        )
+        assert local_adapter.cli_copy_out_contents("/outputs", "gs://b/runs/1/") == (
             "gcloud storage cp -r /outputs/* gs://b/runs/1/"
         )
 

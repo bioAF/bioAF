@@ -28,6 +28,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.platform.run_output_layout import directory_prefix
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -272,27 +273,46 @@ class S3StorageProvider(StorageProvider):
 
     # -- Container-side CLI staging (the aws-CLI counterpart of gsutil) --------
 
+    # Every operand below is one literal argument (see app.platform.shell_args): a URI must be
+    # this backend's, a local path absolute, and a caller's ShellExpr is passed through as the
+    # caller wrote it. `aws s3` has no operand pattern syntax (it filters with --include/--exclude).
+
+    def _remote(self, uri: str) -> str:
+        if not isinstance(uri, ShellExpr):
+            self._parse_uri(uri)
+        return uri
+
     def cli_auth_command(self, key_file: str) -> str:
         # S3 authenticates ambiently from the pod's instance profile / IRSA role,
         # so there is no explicit CLI auth step (mirrors the NFS no-auth case).
         return ""
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return f"aws s3 cp {uri} {local_path}"
+        return shell_join(["aws", "s3", "cp", self._remote(uri), absolute_path(local_path)])
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
-        return f"aws s3 cp --recursive {local_path} {uri}"
+        return shell_join(["aws", "s3", "cp", "--recursive", absolute_path(local_path), self._remote(uri)])
 
     def cli_copy_out_file(self, local_path: str, uri: str) -> str:
-        return f"aws s3 cp {local_path} {uri}"
+        return shell_join(["aws", "s3", "cp", absolute_path(local_path), self._remote(uri)])
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        # `aws s3 cp --recursive DIR PREFIX` copies DIR's contents under PREFIX (dotfiles too). The
+        # old `/outputs/*` glob gave `aws s3 cp` one source per entry, which it rejects above one.
+        return shell_join(["aws", "s3", "cp", "--recursive", absolute_path(local_dir), self._remote(uri)])
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the stage-in init
         # container, matching the GCS adapter's tolerant rsync.
-        return ["/bin/sh", "-c", f"aws s3 sync {remote_prefix} {local_dir} || true"]
+        sync = shell_join(["aws", "s3", "sync", self._remote(remote_prefix), absolute_path(local_dir)])
+        return ["/bin/sh", "-c", f"{sync} || true"]
 
     def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
-        return ["/bin/sh", "-c", f"aws s3 sync {local_dir} {remote_prefix}"]
+        return [
+            "/bin/sh",
+            "-c",
+            shell_join(["aws", "s3", "sync", absolute_path(local_dir), self._remote(remote_prefix)]),
+        ]
 
     def staging_image(self) -> str:
         # amazon/aws-cli ships the `aws s3` CLI for stage in/out.

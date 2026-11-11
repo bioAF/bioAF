@@ -15,6 +15,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.platform.run_output_layout import directory_prefix
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
@@ -90,6 +91,19 @@ def _stream_file_into(path: str, file_obj) -> None:
 def _copy_file(src: str, dest: str) -> None:
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     shutil.copy2(src, dest)
+
+
+def gcs_cli_source(operand: str) -> str:
+    """A ``gcloud storage``/``gsutil`` SOURCE operand that matches only itself.
+
+    Those CLIs read ``*``, ``?`` and ``[`` in a source as a pattern, and a character class is the
+    one escape they accept (``[[]``, ``[*]``, ``[?]``; checked with cloud-sdk 593.0.0). A literal is
+    escaped here; a caller's runtime ``ShellExpr`` (a loop variable) is escaped by ``sed`` when the
+    shell evaluates it.
+    """
+    if isinstance(operand, ShellExpr):
+        return ShellExpr(f"\"$(printf '%s' {operand} | sed 's/[[*?]/[&]/g')\"")
+    return "".join(f"[{c}]" if c in "[*?" else c for c in operand)
 
 
 class GcsStorageProvider(StorageProvider):
@@ -236,28 +250,54 @@ class GcsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    # Every operand below is one literal argument (see app.platform.shell_args): a URI must be
+    # this backend's, a local path absolute, and a caller's ShellExpr is passed through as the
+    # caller wrote it. `gcloud storage` and `gsutil` read `*`, `?` and `[` in a SOURCE as a
+    # pattern (a literal `a[1].txt` selected `a1.txt` in cloud-sdk 593.0.0), so literal sources
+    # are written with the one escape they accept, a character class.
+
+    def _remote(self, uri: str) -> str:
+        if not isinstance(uri, ShellExpr):
+            self._parse_uri(uri)
+        return uri
+
+    @staticmethod
+    def _source(operand: str) -> str:
+        return gcs_cli_source(operand)
+
     def cli_auth_command(self, key_file: str) -> str:
         # gsutil consults ~/.boto before GOOGLE_APPLICATION_CREDENTIALS, which in
         # cloud-sdk:slim picks up the wrong identity even with the SA key mounted.
         # Activate the SA explicitly and use `gcloud storage` (cli_copy_*), which
         # honors the activated account directly.
-        return f"gcloud auth activate-service-account --key-file={key_file} --quiet"
+        return shell_join(
+            ["gcloud", "auth", "activate-service-account", f"--key-file={absolute_path(key_file)}", "--quiet"]
+        )
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return f"gcloud storage cp {uri} {local_path}"
+        return shell_join(["gcloud", "storage", "cp", self._source(self._remote(uri)), absolute_path(local_path)])
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
-        return f"gcloud storage cp -r {local_path} {uri}"
+        return shell_join(["gcloud", "storage", "cp", "-r", self._source(absolute_path(local_path)), self._remote(uri)])
 
     def cli_copy_out_file(self, local_path: str, uri: str) -> str:
-        return f"gcloud storage cp {local_path} {uri}"
+        return shell_join(["gcloud", "storage", "cp", self._source(absolute_path(local_path)), self._remote(uri)])
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        # The shell expands the glob into one literal argument per entry (dotfiles excluded, as
+        # before); gcloud then reads pattern characters in those names, which can only select
+        # other entries of the same directory. The directory part itself is quoted.
+        directory = shell_word(absolute_path(local_dir).rstrip("/") or "/")
+        return f"gcloud storage cp -r {directory}/* {shell_word(self._remote(uri))}"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # `|| true` so a missing/empty prefix does not fail the init container.
-        return ["/bin/sh", "-c", f"gsutil -m rsync -r {remote_prefix} {local_dir} || true"]
+        rsync = shell_join(["gsutil", "-m", "rsync", "-r", self._remote(remote_prefix), absolute_path(local_dir)])
+        return ["/bin/sh", "-c", f"{rsync} || true"]
 
     def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
-        return ["/bin/sh", "-c", f"gsutil -m rsync -r {local_dir} {remote_prefix}"]
+        rsync = shell_join(["gsutil", "-m", "rsync", "-r", absolute_path(local_dir), self._remote(remote_prefix)])
+        return ["/bin/sh", "-c", rsync]
 
     def staging_image(self) -> str:
         # google/cloud-sdk:slim ships gsutil + gcloud storage for stage in/out.

@@ -25,6 +25,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
 from app.platform.run_output_layout import directory_prefix
+from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
@@ -187,22 +188,56 @@ class NfsStorageProvider(StorageProvider):
     def parse_uri(self, uri: str) -> tuple[str, str]:
         return self._parse_uri(uri)
 
+    # A mounted filesystem copies with plain `cp`. Every remote operand is a `file://` URI mapped
+    # through the confined `_path()` (so traversal is refused before a command exists), then
+    # quoted with the local operands as literal arguments. A URI ending in `/` names a directory.
+
+    def _operand(self, uri: str) -> str:
+        if isinstance(uri, ShellExpr):
+            raise ValidationError("An NFS operand must be a file:// URI the adapter can map")
+        path = self._path(uri)
+        return path + "/" if uri.endswith("/") else path
+
+    def _mounted_or_fail(self) -> str:
+        root = shell_word(os.path.realpath(self._root))
+        message = shell_word(f"NFS root {self._root} is not mounted here")
+        return f"if [ ! -d {root} ]; then echo {message} >&2; exit 1; fi"
+
     def cli_auth_command(self, key_file: str) -> str:
         # NFS is a mounted filesystem; no CLI authentication step is needed.
         return ""
 
     def cli_copy_in(self, uri: str, local_path: str) -> str:
-        return f"cp {self._path(uri)} {local_path}"
+        return shell_join(["cp", self._operand(uri), absolute_path(local_path)])
 
     def cli_copy_out(self, local_path: str, uri: str) -> str:
-        return f"cp -r {local_path} {self._path(uri)}"
+        dest = self._operand(uri)
+        return f"mkdir -p {shell_word(os.path.dirname(dest.rstrip('/')))} && " + shell_join(
+            ["cp", "-r", absolute_path(local_path), dest]
+        )
+
+    def cli_copy_out_file(self, local_path: str, uri: str) -> str:
+        dest = self._operand(uri)
+        parent = dest.rstrip("/") if dest.endswith("/") else os.path.dirname(dest)
+        return f"mkdir -p {shell_word(parent)} && " + shell_join(["cp", absolute_path(local_path), dest])
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        # `DIR/.` is the directory's contents (dotfiles included), not a glob.
+        dest = self._operand(uri).rstrip("/")
+        source = shell_word(absolute_path(local_dir).rstrip("/") or "/")
+        return f"mkdir -p {shell_word(dest)} && cp -r {source}/. {shell_word(dest)}/"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
-        # A mounted filesystem mirrors a directory with plain recursive copy.
-        return ["/bin/sh", "-c", f"cp -r {remote_prefix}/. {local_dir} || true"]
+        # A missing prefix (nothing saved yet) is tolerated; an unmounted root is not, because
+        # reporting success there would claim data was restored when the store was never visible.
+        src = shell_word(self._operand(remote_prefix).rstrip("/"))
+        dest = shell_word(absolute_path(local_dir))
+        return ["/bin/sh", "-c", f"{self._mounted_or_fail()}; if [ -d {src} ]; then cp -r {src}/. {dest}; fi"]
 
     def sync_out_command(self, local_dir: str, remote_prefix: str) -> list[str]:
-        return ["/bin/sh", "-c", f"cp -r {local_dir}/. {remote_prefix}"]
+        src = shell_word(absolute_path(local_dir).rstrip("/") or "/")
+        dest = shell_word(self._operand(remote_prefix).rstrip("/"))
+        return ["/bin/sh", "-c", f"{self._mounted_or_fail()}; mkdir -p {dest} && cp -r {src}/. {dest}"]
 
     def staging_image(self) -> str:
         # A mounted filesystem stages by plain `cp`, so it needs only a tiny

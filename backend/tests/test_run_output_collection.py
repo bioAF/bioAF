@@ -129,9 +129,7 @@ async def run(session, admin_user):
 
 
 async def _registered(session, run_id):
-    return list(
-        (await session.execute(select(File).where(File.source_pipeline_run_id == run_id))).scalars().all()
-    )
+    return list((await session.execute(select(File).where(File.source_pipeline_run_id == run_id))).scalars().all())
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ Supports local/mock mode for development and real GCE API for production.
 import asyncio
 import logging
 import os
+import posixpath
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +21,8 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.exceptions import ValidationError
+from app.adapters.storage.gcs import gcs_cli_source
+from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app import runtime
 
@@ -72,6 +75,16 @@ def _termination_result_from_dict(d: dict) -> TerminationResult:
             "stopped_at": d.get("stopped_at"),
         },
     )
+
+
+# The loop variable `find -exec sh -c '...' sh {} +` binds each found name to.
+_EACH_FILE = ShellExpr('"$f"')
+
+
+def _capture_each(scripts_prefix: str) -> str:
+    """The per-file copy `find -exec sh -c` runs: each found name is an argument, never re-parsed."""
+    copy = shell_join(["gsutil", "cp", gcs_cli_source(_EACH_FILE), scripts_prefix])
+    return f"for f do {copy}; done"
 
 
 def _build_startup_script(vm_spec: dict) -> str:
@@ -153,14 +166,14 @@ def _build_startup_script(vm_spec: dict) -> str:
             "mkdir -p /data",
         ]
         for input_file in input_files:
-            rel_path = input_file["relative_path"]
-            gcs_uri = input_file["gcs_uri"]
+            # Every operand is one quoted literal (a filename is data, never shell), the source is
+            # escaped against gsutil's pattern matching, and the path cannot leave /data.
+            rel_path = safe_relative_path(input_file["relative_path"])
             dest_path = f"/data/{rel_path}"
-            dest_dir = "/".join(dest_path.split("/")[:-1])
             lines.append(
-                f"mkdir -p '{dest_dir}' && "
-                f"gsutil cp '{gcs_uri}' '{dest_path}' || "
-                f"echo 'Warning: failed to copy {rel_path}'"
+                f"mkdir -p {shell_word(posixpath.dirname(dest_path))} && "
+                + shell_join(["gsutil", "cp", gcs_cli_source(input_file["gcs_uri"]), dest_path])
+                + f" || echo {shell_word('Warning: failed to copy ' + rel_path)}"
             )
 
     # 5. Create output and scratch directories
@@ -202,8 +215,7 @@ def _build_startup_script(vm_spec: dict) -> str:
             f"find /home -maxdepth 4 "
             r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
             f"-type f "
-            f'| while read f; do gsutil cp "$f" '
-            f'{gcs_scripts_prefix}"$(basename "$f")"; done',
+            f"-exec sh -c {shell_word(_capture_each(gcs_scripts_prefix))} sh {{}} +",
             "SYNCEOF",
             "chmod +x /usr/local/bin/bioaf-shutdown-sync.sh",
             "",
@@ -773,8 +785,7 @@ class GceVmInstance(VmInstance):
                     f"find /home -maxdepth 4 "
                     r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
                     f"-type f "
-                    f'| while read f; do gsutil cp "$f" '
-                    f'{gcs_scripts_prefix}"$(basename "$f")"; done'
+                    f"-exec sh -c {shell_word(_capture_each(gcs_scripts_prefix))} sh {{}} +"
                 )
                 try:
                     import asyncssh

@@ -22,6 +22,7 @@ providers); no explicit credentials object is threaded.
 import asyncio
 import logging
 import os
+import posixpath
 import uuid
 from datetime import datetime, timezone
 
@@ -35,6 +36,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.exceptions import ValidationError
+from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.work_nodes.ec2")
@@ -52,6 +54,16 @@ _EC2_STATE_MAP = {
     "stopped": "stopped",
     "terminated": "stopped",
 }
+
+
+# The loop variable `find -exec sh -c '...' sh {} +` binds each found name to.
+_EACH_FILE = ShellExpr('"$f"')
+
+
+def _capture_each(scripts_prefix: str) -> str:
+    """The per-file copy `find -exec sh -c` runs: each found name is an argument, never re-parsed."""
+    copy = shell_join(["aws", "s3", "cp", _EACH_FILE, scripts_prefix])
+    return f"for f do {copy}; done"
 
 
 def _build_ec2_startup_script(vm_spec: dict) -> str:
@@ -149,14 +161,14 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             "mkdir -p /data",
         ]
         for input_file in input_files:
-            rel_path = input_file["relative_path"]
-            object_uri = input_file["gcs_uri"]  # value is the file's storage_uri (s3:// on AWS)
+            # Every operand is one quoted literal (a filename is data, never shell), and the path
+            # cannot leave /data. The value is the file's storage_uri (s3:// on AWS).
+            rel_path = safe_relative_path(input_file["relative_path"])
             dest_path = f"/data/{rel_path}"
-            dest_dir = "/".join(dest_path.split("/")[:-1])
             lines.append(
-                f"mkdir -p '{dest_dir}' && "
-                f"aws s3 cp '{object_uri}' '{dest_path}' || "
-                f"echo 'Warning: failed to copy {rel_path}'"
+                f"mkdir -p {shell_word(posixpath.dirname(dest_path))} && "
+                + shell_join(["aws", "s3", "cp", input_file["gcs_uri"], dest_path])
+                + f" || echo {shell_word('Warning: failed to copy ' + rel_path)}"
             )
 
     # 5. Create output and scratch directories
@@ -198,8 +210,7 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             f"find /home -maxdepth 4 "
             r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
             f"-type f "
-            f'| while read f; do aws s3 cp "$f" '
-            f'{s3_scripts_prefix}"$(basename "$f")"; done',
+            f"-exec sh -c {shell_word(_capture_each(s3_scripts_prefix))} sh {{}} +",
             "SYNCEOF",
             "chmod +x /usr/local/bin/bioaf-shutdown-sync.sh",
             "",
@@ -608,8 +619,7 @@ class Ec2VmInstance(VmInstance):
                     f"find /home -maxdepth 4 "
                     r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
                     f"-type f "
-                    f'| while read f; do aws s3 cp "$f" '
-                    f'{s3_scripts_prefix}"$(basename "$f")"; done'
+                    f"-exec sh -c {shell_word(_capture_each(s3_scripts_prefix))} sh {{}} +"
                 )
                 try:
                     import asyncssh

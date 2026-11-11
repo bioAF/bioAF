@@ -245,6 +245,12 @@ class StorageProvider(ABC):
     # ``aws s3``: the cloud-specific CLI tokens live here in adapters/, selected by
     # the storage backend. GCS -> ``gcloud storage`` / ``gcloud auth ...``; S3 ->
     # ``aws s3``; NFS -> plain ``cp`` (a mounted filesystem, no CLI auth).
+    #
+    # Operands are data: each URI or path a caller passes becomes exactly one
+    # literal argument (``app.platform.shell_args``), so a filename can never run a
+    # command, become an option, or (on GCS) select other objects as a pattern. A
+    # URI must be this backend's scheme and a local path absolute. A caller that
+    # needs a runtime value (a loop variable) passes a ``ShellExpr`` it wrote itself.
 
     def cli_auth_command(self, key_file: str) -> str:
         """Shell command to authenticate this backend's CLI from a mounted key file.
@@ -269,6 +275,15 @@ class StorageProvider(ABC):
         The single-file counterpart of ``cli_copy_in`` (and the non-recursive
         sibling of ``cli_copy_out``). GCS -> ``gcloud storage cp``; S3 -> ``aws s3
         cp``. Used to capture individual session script/output files.
+        """
+        raise NotImplementedError
+
+    def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
+        """Shell command to copy the CONTENTS of directory ``local_dir`` under prefix ``uri``.
+
+        The counterpart of ``cli_copy_out`` that does not nest the directory itself (what a
+        ``dir/*`` glob used to mean in callers). GCS -> ``gcloud storage cp -r dir/*``; S3 ->
+        ``aws s3 cp --recursive dir``; NFS -> ``cp -r dir/.``.
         """
         raise NotImplementedError
 
