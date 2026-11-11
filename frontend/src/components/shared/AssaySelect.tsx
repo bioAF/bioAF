@@ -1,5 +1,6 @@
 "use client";
 
+import type { AriaAttributes } from "react";
 import { SAMPLE_ASSAY_OPTIONS } from "@/lib/types";
 
 interface AssaySelectProps {
@@ -8,6 +9,9 @@ interface AssaySelectProps {
   placeholder?: string;
   className?: string;
   id?: string;
+  "aria-describedby"?: string;
+  /** From a Field with an error. */
+  "aria-invalid"?: AriaAttributes["aria-invalid"];
 }
 
 // A dropdown over the fixed, system-wide assay vocabulary (SAMPLE_ASSAYS). Unlike
@@ -20,11 +24,16 @@ export function AssaySelect({
   placeholder = "Assay...",
   className = "border rounded px-3 py-2 text-sm",
   id,
+  "aria-describedby": describedBy,
+  "aria-invalid": invalid,
 }: AssaySelectProps) {
+  // With an id a visible label names the select, and aria-label would override it.
   return (
     <select
       id={id}
-      aria-label="Assay"
+      aria-describedby={describedBy}
+      aria-invalid={invalid}
+      aria-label={id ? undefined : "Assay"}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       className={className}

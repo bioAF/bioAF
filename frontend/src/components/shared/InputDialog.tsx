@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface InputDialogProps {
   open: boolean;
@@ -56,6 +57,7 @@ export function InputDialog({
   const fieldRef = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const titleId = useId();
   const fieldId = useId();
+  const errorId = useId();
 
   // Reset to the seed value each time the dialog opens, and focus the field.
   useEffect(() => {
@@ -70,6 +72,9 @@ export function InputDialog({
   // Above the early return: hooks must run on every render, and this
   // component bails out with `return null` when closed.
   const trapRef = useFocusTrap<HTMLDivElement>(open);
+  // On the shared dismissal stack, so Escape closes this prompt and not a
+  // Modal it was opened from; while busy it refuses Escape instead.
+  useDismissOnEscape(open, onCancel, !busy, trapRef);
 
   if (!open) return null;
 
@@ -80,15 +85,11 @@ export function InputDialog({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      if (!busy) onCancel();
-    } else if (e.key === "Enter" && !multiline) {
+    if (e.key === "Enter" && !multiline) {
       e.preventDefault();
       submit();
     }
   };
-
 
   const fieldClass =
     "w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-bioaf-500 focus:outline-none focus:ring-1 focus:ring-bioaf-500";
@@ -116,6 +117,8 @@ export function InputDialog({
         {multiline ? (
           <textarea
             id={fieldId}
+            aria-describedby={error ? errorId : undefined}
+            aria-invalid={error ? true : undefined}
             ref={fieldRef}
             rows={3}
             value={value}
@@ -127,6 +130,8 @@ export function InputDialog({
         ) : (
           <input
             id={fieldId}
+            aria-describedby={error ? errorId : undefined}
+            aria-invalid={error ? true : undefined}
             ref={fieldRef}
             type={type}
             value={value}
@@ -136,7 +141,11 @@ export function InputDialog({
             className={fieldClass}
           />
         )}
-        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+        {error && (
+          <p id={errorId} role="alert" className="mt-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}

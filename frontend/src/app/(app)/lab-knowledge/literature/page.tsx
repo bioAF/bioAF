@@ -193,6 +193,12 @@ export default function LiteratureLibraryPage() {
       setConfirmingBulkDismiss(false);
       setSelectedIds(new Set());
       refresh();
+    } catch (e) {
+      // The confirm and the selection stay, so its Dismiss button is the retry.
+      logError(`dismissing papers ${ids.join(", ")}`, e);
+      toast.error(
+        `The ${ids.length === 1 ? "paper" : "papers"} could not be dismissed. Try again; the technical detail is in the application logs.`,
+      );
     } finally {
       setDismissBusy(false);
     }

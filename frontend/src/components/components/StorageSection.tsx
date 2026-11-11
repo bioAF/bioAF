@@ -9,6 +9,8 @@ import { AutoIngestControls } from "./AutoIngestControls";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
 import { Button } from "@/components/ui/Button";
+import { formatBytes } from "@/lib/bytes";
+import { NOT_SET } from "@/lib/placeholders";
 
 interface BucketMetrics {
   bucket_name: string;
@@ -31,14 +33,6 @@ interface StorageSectionProps {
   pubsubConfigured?: boolean;
   onDeploy: () => void;
   onUpdateStorage?: () => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / Math.pow(1024, i);
-  return `${value.toFixed(value < 10 ? 2 : 1)} ${units[i]}`;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -144,7 +138,7 @@ function BucketCard({
         {bucket.purpose.replace("_", " ")}
       </p>
       <div className="flex gap-4 text-xs text-gray-500">
-        <span>{formatBytes(bucket.size_bytes)}</span>
+        <span>{formatBytes(bucket.size_bytes, "storage", { missing: NOT_SET })}</span>
         <span>{bucket.object_count} objects</span>
         <span>{bucket.storage_class}</span>
       </div>

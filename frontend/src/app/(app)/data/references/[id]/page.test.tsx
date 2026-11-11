@@ -100,7 +100,7 @@ describe("Reference Detail: versioning UX", () => {
     });
 
     render(<DataReferenceDetailPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /versions/i }));
+    fireEvent.click(await screen.findByRole("tab", { name: /versions/i }));
 
     await waitFor(() => {
       const calls = mockGet.mock.calls.map((c) => c[0]);

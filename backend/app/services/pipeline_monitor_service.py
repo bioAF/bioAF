@@ -923,10 +923,16 @@ class PipelineMonitorService:
             return ""
 
         if run.custom_pipeline_version_id is not None:
-            report_uri = (run.output_files_json or {}).get("report_path")
+            output_meta = run.output_files_json or {}
+            report_uri = output_meta.get("report_path")
             if not report_uri:
                 return ""
             content = await _read_gcs_text(report_uri)
+            # Markdown is rendered as Markdown, not inside the iframe, so the
+            # HTML transforms would only add visible script source. A missing
+            # format is a legacy HTML report, matching the frontend.
+            if output_meta.get("report_format") == "md":
+                return content or ""
             return _prepare_report_for_iframe(content or "")
 
         try:

@@ -522,3 +522,69 @@ async def test_get_run_logs_completed_gcs_read_failure_falls_back(session, admin
     assert result["stdout"] == "pod fallback stdout"
     assert result["log_source"] == "pod"
     assert result["custom_log_missing"] is True
+
+
+# --- Report delivery is format-specific ---
+
+_MD_REPORT = '# Results\n\nSee [tasks](#tasks).\n\n</body>\n<link rel="icon" href="https://x.example/f.png">\n'
+_HTML_REPORT = (
+    '<html><head><link rel="icon" href="https://www.nextflow.io/img/favicon.png"></head>'
+    "<body><a href='#tasks'>Tasks</a></body></html>"
+)
+
+
+async def _deliver_custom_report(session, admin_user, env_version, output_files: dict, content: str) -> str:
+    run, _ = await _make_custom_run(session, admin_user, env_version)
+    run.output_files_json = output_files
+    await session.commit()
+    with patch(
+        "app.services.pipeline_monitor_service._read_gcs_text",
+        AsyncMock(return_value=content),
+    ):
+        return await PipelineMonitorService.get_run_report(session, run.id)
+
+
+@pytest.mark.asyncio
+async def test_custom_markdown_report_is_returned_unchanged(session, admin_user, env_version):
+    """A Markdown report is not an HTML document: the iframe shim and favicon
+    rewriting must not be applied to it, or the shim's script source shows up
+    in the rendered report."""
+    out = await _deliver_custom_report(
+        session,
+        admin_user,
+        env_version,
+        {"report_path": "gs://results/r/report/report.md", "report_format": "md"},
+        _MD_REPORT,
+    )
+    assert out == _MD_REPORT
+
+
+@pytest.mark.asyncio
+async def test_custom_html_report_is_prepared_for_the_iframe(session, admin_user, env_version):
+    out = await _deliver_custom_report(
+        session,
+        admin_user,
+        env_version,
+        {"report_path": "gs://results/r/report/report.html", "report_format": "html"},
+        _HTML_REPORT,
+    )
+    assert "nextflow.io" not in out
+    assert "<script>" in out
+    assert out.rfind("<script") < out.rfind("</body>")
+    assert "<a href='#tasks'>Tasks</a>" in out
+
+
+@pytest.mark.asyncio
+async def test_custom_report_without_format_keeps_html_preparation(session, admin_user, env_version):
+    """Legacy runs collected before report_format existed are rendered by the
+    frontend as HTML (anything that is not explicitly "md"), so the backend
+    keeps preparing them for the iframe."""
+    out = await _deliver_custom_report(
+        session,
+        admin_user,
+        env_version,
+        {"report_path": "gs://results/r/report/report.html"},
+        _HTML_REPORT,
+    )
+    assert "nextflow.io" not in out
+    assert "<script>" in out
