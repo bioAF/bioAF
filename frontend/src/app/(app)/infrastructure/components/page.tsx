@@ -20,6 +20,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { isPermissionDenied } from "@/lib/projectOptions";
 import { useResource } from "@/hooks/useResource";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { Button } from "@/components/ui/Button";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
@@ -140,7 +141,9 @@ export default function InfraComponentsPage() {
   const stackStatus = stack.data ?? null;
   const componentsData = components.data ?? null;
   const clusterConfig = cluster.data ?? null;
-  const loading = [tf, runList, stack, components, cluster, cloud].some((r) => r.loading);
+  // Recent operations and the cluster configuration report their own reads in their sections, so
+  // neither holds the page back nor takes it down.
+  const loading = [tf, stack, components, cloud].some((r) => r.loading);
   // What the page decides from (deployed or not, initialized or not) could not be read: say so,
   // rather than offer a deployment or an initialization on an unknown state.
   const statusUnreadable = [tf, stack, components].some((r) => r.data === undefined && r.error != null);
@@ -510,6 +513,12 @@ export default function InfraComponentsPage() {
                 <ClusterStatusCard
                   stackStatus={stackStatus}
                   clusterConfig={clusterConfig}
+                  configRead={{
+                    loading: cluster.loading,
+                    failed: cluster.data === undefined && cluster.error != null,
+                    stale: cluster.stale,
+                    retry: () => void cluster.refresh(),
+                  }}
                   onApplied={() => setShowDeployModal(true)}
                 />
 
@@ -537,11 +546,25 @@ export default function InfraComponentsPage() {
               <OrphanedResourcesCard />
             </div>
 
-            {/* Run History */}
-            <div className="mt-10">
-              <h2 className="text-xl font-semibold mb-4">Recent Operations</h2>
-              <TerraformRunHistory runs={runs} />
-            </div>
+            {/* Run History: an empty history is said only after a successful empty answer. */}
+            <section className="mt-10" aria-labelledby="recent-operations-heading">
+              <h2 id="recent-operations-heading" className="text-xl font-semibold mb-4">Recent Operations</h2>
+              {runList.loading ? (
+                <LoadingSpinner label="Loading recent operations" />
+              ) : runList.data === undefined && runList.error != null ? (
+                <ErrorState
+                  message={loadFailureMessage("Terraform operations")}
+                  onRetry={() => void runList.refresh()}
+                />
+              ) : (
+                <>
+                  {runList.stale && (
+                    <StaleNotice what="Terraform operations" onRetry={() => void runList.refresh()} />
+                  )}
+                  <TerraformRunHistory runs={runs} />
+                </>
+              )}
+            </section>
           </>
         )}
       </main>

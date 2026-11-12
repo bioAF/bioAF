@@ -5,7 +5,10 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import { api } from "@/lib/api";
-import { logError } from "@/lib/errorReporting";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { StaleNotice } from "@/components/shared/StaleNotice";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
 import {
   INTERACTIVE_MACHINE_OPTIONS,
@@ -24,10 +27,16 @@ import type { ClusterConfig, StackStatus } from "./infrastructureTypes";
 export function ClusterStatusCard({
   stackStatus,
   clusterConfig,
+  configRead,
   onApplied,
 }: {
   stackStatus: StackStatus | null;
   clusterConfig: ClusterConfig | null;
+  /**
+   * The page's configuration read. Retry re-reads only the configuration; the edits not yet
+   * applied are this card's and survive it.
+   */
+  configRead: { loading: boolean; failed: boolean; stale: boolean; retry: () => void };
   /** The redeploy started; the page shows its progress. */
   onApplied: () => void;
 }) {
@@ -173,9 +182,20 @@ export function ClusterStatusCard({
         </div>
 
         {/* Configuration Panel */}
-        {showConfigPanel && clusterConfig && (
+        {showConfigPanel && configRead.loading && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <LoadingSpinner label="Loading the cluster configuration" />
+          </div>
+        )}
+        {showConfigPanel && !configRead.loading && configRead.failed && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <ErrorState message={loadFailureMessage("Cluster configuration")} onRetry={configRead.retry} />
+          </div>
+        )}
+        {showConfigPanel && !configRead.loading && clusterConfig && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <h4 className="text-sm font-medium mb-3">Cluster Configuration</h4>
+            {configRead.stale && <StaleNotice what="Cluster configuration" onRetry={configRead.retry} />}
 
             {configError && (
               <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
