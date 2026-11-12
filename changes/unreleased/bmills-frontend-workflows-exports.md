@@ -30,6 +30,9 @@
 - A work node that is still provisioning no longer blocks launching another.
   Each launch keeps its own progress or error message.
 - A recreated session or work node keeps its saved template version.
+- The notebook image (used by JupyterHub and RStudio) builds again. Every build
+  since 2026-08-31 failed about 40 minutes in, while checking the single-cell
+  file reader, so JupyterHub and RStudio showed "build failed".
 
 ### Custom pipelines
 
