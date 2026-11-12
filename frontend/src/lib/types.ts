@@ -180,7 +180,8 @@ export interface PipelineRunSummary {
   created_at: string | null;
 }
 
-export interface ExperimentSummary {
+/** An experiment as the project detail API lists it (backend `schemas/project.py:ExperimentSummary`). */
+export interface ProjectExperimentSummary {
   id: number;
   name: string;
   status: string;
@@ -190,7 +191,7 @@ export interface ExperimentSummary {
 
 export interface ProjectDetailResponse extends Project {
   samples: ProjectSampleGroup[];
-  experiments: ExperimentSummary[];
+  experiments: ProjectExperimentSummary[];
   pipeline_runs: PipelineRunSummary[];
 }
 
@@ -522,7 +523,8 @@ export type SessionStatus = "pending" | "starting" | "running" | "idle" | "stopp
 export type SessionType = "jupyter" | "rstudio";
 export type ResourceProfile = "small" | "medium" | "large" | "xlarge" | "2xlarge";
 
-export interface ExperimentSummary {
+/** A link to an experiment: only its id and name, as session and run responses emit it. */
+export interface ExperimentReference {
   id: number;
   name: string;
 }
@@ -540,7 +542,7 @@ export interface NotebookSession {
   id: number;
   session_type: SessionType;
   user: UserSummary | null;
-  experiment: ExperimentSummary | null;
+  experiment: ExperimentReference | null;
   project: ProjectSummary | null;
   resource_profile: ResourceProfile;
   cpu_cores: number;
@@ -910,7 +912,7 @@ export interface PipelineRun {
   pipeline_key: string | null;
   pipeline_name: string;
   pipeline_version: string | null;
-  experiment: ExperimentSummary | null;
+  experiment: ExperimentReference | null;
   submitted_by: UserSummary | null;
   status: PipelineRunStatus;
   parameters: Record<string, unknown> | null;
@@ -1431,25 +1433,6 @@ export interface SearchResult {
   type_counts: Record<string, number>;
 }
 
-export interface ProvenanceNode {
-  entity_type: string;
-  entity_id: number;
-  label: string;
-  timestamp: string | null;
-  children: number[];
-  metadata: Record<string, unknown>;
-}
-
-export interface ProvenanceChain {
-  experiment: ProvenanceNode;
-  samples: ProvenanceNode[];
-  fastq_uploads: ProvenanceNode[];
-  pipeline_runs: ProvenanceNode[];
-  outputs: ProvenanceNode[];
-  cellxgene_publications: ProvenanceNode[];
-  qc_dashboards: ProvenanceNode[];
-}
-
 // Phase 6: GitOps + Package Management
 
 export interface GitOpsRepoStatus {
@@ -1631,19 +1614,34 @@ export interface ControlledVocabularyFieldsResponse {
   fields: string[];
 }
 
+/** A sample's QC verdict within a review: its own vocabulary, not a run-review verdict. */
+export type SampleVerdict = "pass" | "warning" | "fail";
+
 export interface SampleVerdictEntry {
-  sample_id: number;
-  verdict: ReviewVerdict;
-  notes: string | null;
+  verdict: SampleVerdict;
+  notes?: string | null;
 }
 
+/** POST /api/pipeline-runs/{id}/reviews. Sample verdicts are keyed by sample id. */
+export interface PipelineRunReviewCreate {
+  verdict: ReviewVerdict;
+  notes?: string | null;
+  sample_verdicts?: Record<string, SampleVerdictEntry> | null;
+  recommended_exclusions?: number[] | null;
+}
+
+/**
+ * A review as the review API emits it. `verdict` is an open string on the wire; the badge
+ * labels unknown values. `reviewer` is nullable in the declared schema (a stored review always
+ * has one today), and `sample_verdicts_json` is the stored dictionary, not validated data.
+ */
 export interface PipelineRunReview {
   id: number;
   pipeline_run_id: number;
-  reviewer: UserSummary;
-  verdict: ReviewVerdict;
+  reviewer: UserSummary | null;
+  verdict: string;
   notes: string | null;
-  sample_verdicts: SampleVerdictEntry[] | null;
+  sample_verdicts_json: Record<string, unknown> | null;
   recommended_exclusions: number[] | null;
   is_active: boolean;
   reviewed_at: string;
@@ -1652,7 +1650,6 @@ export interface PipelineRunReview {
 
 export interface PipelineRunReviewListResponse {
   reviews: PipelineRunReview[];
-  total: number;
 }
 
 // Reference Data types (Phase 9)
