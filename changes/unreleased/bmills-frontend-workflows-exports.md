@@ -30,6 +30,9 @@
 - A work node that is still provisioning no longer blocks launching another.
   Each launch keeps its own progress or error message.
 - A recreated session or work node keeps its saved template version.
+- Launch Session, Recreate and the launch buttons need notebooks launch. Without
+  it they stay visible, disabled, with the reason, and your sessions are still
+  listed.
 - The notebook image (used by JupyterHub and RStudio) builds again. Every build
   since 2026-08-31 failed about 40 minutes in, while checking the single-cell
   file reader, so JupyterHub and RStudio showed "build failed".
@@ -62,6 +65,9 @@
   They previously needed only view access.
 - If the infrastructure status cannot be read, the Components page says so
   with Retry instead of offering to deploy.
+- Opening the Components page without infrastructure view, for example by its
+  address, says your role does not include that permission instead of
+  reporting a loading failure with Retry.
 - Recent operations and the cluster configuration each say when they could
   not be loaded, with Retry. A failed refresh keeps what was shown and says
   it may be out of date, and retrying the cluster configuration keeps your
