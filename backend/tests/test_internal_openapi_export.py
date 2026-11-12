@@ -57,6 +57,51 @@ def test_two_clean_exports_are_byte_identical_and_match_the_checked_in_artifact(
     assert first == ARTIFACT.read_bytes(), "run `python -m app.cli.export_openapi` and commit the artifact"
 
 
+# Settings that would break or change an export if they leaked in: a non-integer port fails
+# Settings validation, the others would change settings the export pins.
+_HOSTILE = {
+    "BIOAF_SMTP_PORT": "not-a-port",
+    "BIOAF_ENVIRONMENT": "development",
+    "BIOAF_ENCRYPTION_KEYS": "not-a-fernet-key",
+    "BIOAF_JWT_EXPIRY_HOURS": "soon",
+    "BIOAF_DEBUG": "maybe",
+}
+
+
+def _run_cli(cwd: Path, env: dict, out: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "app.cli.export_openapi", "--output", str(out)],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_inherited_bioaf_settings_cannot_break_or_change_the_export(tmp_path):
+    out = tmp_path / "schema.json"
+    result = _run_cli(BACKEND, {**_clean_env(), **_HOSTILE}, out)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert out.read_bytes() == ARTIFACT.read_bytes()
+
+
+def test_a_dotenv_in_the_working_directory_cannot_break_or_change_the_export(tmp_path):
+    workdir = tmp_path / "elsewhere"
+    workdir.mkdir()
+    (workdir / ".env").write_text("".join(f"{k}={v}\n" for k, v in _HOSTILE.items()))
+    out = tmp_path / "schema.json"
+    result = _run_cli(workdir, {**_clean_env(), "PYTHONPATH": str(BACKEND)}, out)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert out.read_bytes() == ARTIFACT.read_bytes()
+
+
+def test_a_relative_output_path_is_relative_to_where_the_command_ran(tmp_path):
+    result = _run_cli(tmp_path, {**_clean_env(), "PYTHONPATH": str(BACKEND)}, Path("nested/schema.json"))
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert (tmp_path / "nested" / "schema.json").read_bytes() == ARTIFACT.read_bytes()
+
+
 def test_the_export_does_not_start_the_app_open_a_connection_or_use_the_network(monkeypatch):
     import app.main as main_module
     from sqlalchemy.ext.asyncio import AsyncEngine
