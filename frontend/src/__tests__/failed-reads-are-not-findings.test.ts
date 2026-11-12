@@ -59,14 +59,19 @@ describe("an empty collection reached from a rejection is not rendered as a find
       /setVersionsFailed\(true\)/,
     ],
     [
+      "the shared launch file read (notebooks and work nodes)",
+      "components/launch/useLaunchSelection.ts",
+      /failed: files\.data === undefined && files\.error != null/,
+    ],
+    [
       "the notebook launch file picker",
       "app/(app)/notebooks/page.tsx",
-      /setExperimentFilesFailed\(true\)/,
+      /failed: experimentFilesFailed \} = selection\.files/,
     ],
     [
       "the work-node launch file picker",
-      "app/(app)/workbench/work-nodes/page.tsx",
-      /setExperimentFilesFailed\(true\)/,
+      "components/workNodes/WorkNodeLaunchDialog.tsx",
+      /failed: experimentFilesFailed \} = selection\.files/,
     ],
     [
       "the custom-pipeline launch file picker",

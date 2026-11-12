@@ -26,6 +26,10 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
+// Launching needs notebooks launch.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   removeToken: jest.fn(),

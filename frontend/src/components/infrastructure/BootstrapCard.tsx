@@ -1,6 +1,7 @@
 "use client";
 
 import { useStackOptions } from "@/hooks/useStackOptions";
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import { storageDisplay } from "@/lib/storageDisplay";
 import { Button } from "@/components/ui/Button";
 
@@ -15,6 +16,8 @@ export function BootstrapCard({
   gcpCredentialsConfigured,
   onBootstrapStart,
 }: BootstrapCardProps) {
+  // Initializing runs terraform/bootstrap, which needs infrastructure create.
+  const createReason = useInfrastructureActions().reason("create");
   // Provider-appropriate labels + settings route; defaults to GCP so a GCP
   // install renders unchanged.
   const { cloudProvider, kubernetesOption } = useStackOptions();
@@ -52,7 +55,8 @@ export function BootstrapCard({
 
       <Button
         data-testid="bootstrap-btn"
-        disabled={!gcpCredentialsConfigured}
+        disabled={!gcpCredentialsConfigured || createReason !== null}
+        title={createReason ?? undefined}
         onClick={onBootstrapStart}>
         Initialize Infrastructure
       </Button>

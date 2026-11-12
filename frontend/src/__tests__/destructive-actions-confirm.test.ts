@@ -76,7 +76,7 @@ const MUST_CONFIRM: Gated[] = [
     what: "turns off every AI feature for the whole organisation",
   },
   {
-    file: "app/(app)/infrastructure/components/page.tsx",
+    file: "app/(app)/infrastructure/components/AddOnComponentsSection.tsx",
     handler: "async function handleComponentToggle",
     what: "tears down a deployed add-on with running sessions on it (enabling already confirmed; disabling did not)",
   },

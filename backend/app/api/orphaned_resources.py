@@ -103,7 +103,7 @@ async def cleanup_all_orphaned_resources(
 )
 async def cleanup_orphaned_resource(
     resource_id: int,
-    current_user: dict = require_permission("infrastructure", "view"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> OrphanedResourceResponse:
     """Trigger cleanup of an orphaned resource (deletes from GCP)."""
@@ -119,7 +119,7 @@ async def cleanup_orphaned_resource(
 )
 async def dismiss_orphaned_resource(
     resource_id: int,
-    current_user: dict = require_permission("infrastructure", "view"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> OrphanedResourceResponse:
     """Mark an orphaned resource as manually resolved."""

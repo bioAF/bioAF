@@ -6,6 +6,10 @@ jest.mock("next/navigation", () => ({
 }));
 
 // Mock auth
+// Launching needs notebooks launch.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
 }));

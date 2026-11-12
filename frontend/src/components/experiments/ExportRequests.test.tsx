@@ -14,6 +14,7 @@ import { GeoExportModal } from "./GeoExportModal";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { getToken } from "@/lib/auth";
 import { startSession } from "@/lib/session";
+import { capabilitiesCache, MINIMAL_CAPABILITIES } from "@/hooks/capabilitiesCache";
 
 const realFetch = global.fetch;
 const realEnv = process.env.NEXT_PUBLIC_API_URL;
@@ -111,6 +112,7 @@ describe.each(MODALS)("the $name export modal", ({ base, fallback, render: open 
       [`${base}/estimate`, { json: ESTIMATE }],
       [`${base}/data`, { json: { signed_url: "https://storage.example.com/x?sig=1", expires_in_hours: 24 } }],
     ]);
+    capabilitiesCache.value = { ...MINIMAL_CAPABILITIES, signed_url_upload: true };
     await toSizeStep();
     fireEvent.click(screen.getByRole("button", { name: "Get Download Link" }));
 

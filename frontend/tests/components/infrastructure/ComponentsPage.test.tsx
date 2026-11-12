@@ -50,6 +50,12 @@ jest.mock("@/hooks/useCapabilities", () => ({
   }),
 }));
 
+// Infrastructure actions need their permissions; these tests are about the page's flows, so the
+// role has every one of them.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
+
 // Mock router - return stable reference to avoid infinite useEffect loops
 const mockPush = jest.fn();
 const mockRouter = { push: mockPush };

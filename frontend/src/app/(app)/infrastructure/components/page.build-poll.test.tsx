@@ -22,6 +22,10 @@ jest.mock("@/lib/auth", () => ({
 jest.mock("@/hooks/useCapabilities", () => ({
   useCapabilities: () => ({ has: () => true, capabilities: {}, loading: false }),
 }));
+// The page mounts once infrastructure view is confirmed.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 const mockRouter = { push: jest.fn() };
 jest.mock("next/navigation", () => ({
   useRouter: () => mockRouter,

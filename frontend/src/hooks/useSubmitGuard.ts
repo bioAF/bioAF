@@ -8,22 +8,36 @@ import { useCallback, useRef, useState } from "react";
  * before that render submit again. The ref is checked and set synchronously,
  * before the first await, and released in `finally` so a failure can be
  * retried.
+ *
+ * Each accepted run owns the guard until it settles. `reset` ends that
+ * ownership when the feature's dialog, entity, or session ends: the guard and
+ * `busy` are released at once, and the old attempt settling later cannot
+ * release a newer one. Reset does not cancel the work itself; aborting requests
+ * and ignoring their late results stays with the feature.
  */
 export function useSubmitGuard() {
-  const inFlight = useRef(false);
+  const owner = useRef<object | null>(null);
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async (work: () => Promise<void>) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+    if (owner.current) return;
+    const attempt = {};
+    owner.current = attempt;
     setBusy(true);
     try {
       await work();
     } finally {
-      inFlight.current = false;
-      setBusy(false);
+      if (owner.current === attempt) {
+        owner.current = null;
+        setBusy(false);
+      }
     }
   }, []);
 
-  return { busy, run };
+  const reset = useCallback(() => {
+    owner.current = null;
+    setBusy(false);
+  }, []);
+
+  return { busy, run, reset };
 }

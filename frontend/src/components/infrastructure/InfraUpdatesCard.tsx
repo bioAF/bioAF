@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import { Button } from "@/components/ui/Button";
 import {
   infrastructure,
@@ -33,8 +34,12 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<CheckUpdatesResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Checking plans (and may start an apply); applying applies. Both need infrastructure deploy.
+  const actions = useInfrastructureActions();
+  const deployReason = actions.reason("deploy");
 
   async function check() {
+    if (!actions.allowed("deploy")) return;
     setPhase("checking");
     setError(null);
     setResult(null);
@@ -56,7 +61,7 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
   }
 
   async function applyAdditive() {
-    if (!result) return;
+    if (!result || !actions.allowed("deploy")) return;
     setPhase("checking");
     setError(null);
     try {
@@ -85,7 +90,8 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
         </div>
         <Button size="sm" className="ml-4 shrink-0"
           onClick={check}
-          disabled={phase === "checking"}>
+          disabled={phase === "checking" || deployReason !== null}
+          title={deployReason ?? undefined}>
           {phase === "checking" ? "Checking..." : "Check for Infrastructure Updates"}
         </Button>
       </div>
@@ -161,7 +167,9 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
             </button>
             {result.has_additive && (
               <Button size="sm"
-                onClick={applyAdditive}>
+                onClick={applyAdditive}
+                disabled={deployReason !== null}
+                title={deployReason ?? undefined}>
                 Apply additive changes only
               </Button>
             )}

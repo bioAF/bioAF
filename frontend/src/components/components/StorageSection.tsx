@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useStackOptions } from "@/hooks/useStackOptions";
@@ -172,6 +173,8 @@ function DeployStorageCard({
   onDeploy: () => void;
   storage: StorageDisplay;
 }) {
+  // Deploying storage starts the stack deployment, which needs infrastructure deploy.
+  const deployReason = useInfrastructureActions().reason("deploy");
   return (
     <div className="bg-white rounded-lg border-2 border-dashed border-gray-300 p-6 text-center">
       <h3 className="text-lg font-semibold text-gray-700 mb-2">
@@ -195,7 +198,8 @@ function DeployStorageCard({
       )}
       <Button
         onClick={onDeploy}
-        disabled={!terraformInitialized}>
+        disabled={!terraformInitialized || deployReason !== null}
+        title={deployReason ?? undefined}>
         Deploy Storage
       </Button>
     </div>
