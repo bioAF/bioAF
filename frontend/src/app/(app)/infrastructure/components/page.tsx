@@ -16,6 +16,11 @@ import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay } from "@/lib/storageDisplay";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { isPermissionDenied } from "@/lib/projectOptions";
+import { useResource } from "@/hooks/useResource";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { StaleNotice } from "@/components/shared/StaleNotice";
 import { Button } from "@/components/ui/Button";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import { ClusterStatusCard } from "./ClusterStatusCard";
@@ -30,13 +35,6 @@ export default function InfraComponentsPage() {
   const isAws = cloudProvider === "aws";
   const k8sStackLabel = kubernetesOption?.label ?? "Kubernetes + GCS";
   const storageLabel = storageDisplay(kubernetesOption?.storage_backend).label;
-  const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [tfStatus, setTfStatus] = useState<TerraformStatus | null>(null);
-  const [runs, setRuns] = useState<TerraformRun[]>([]);
-  const [stackStatus, setStackStatus] = useState<StackStatus | null>(null);
-  const [componentsData, setComponentsData] = useState<ComponentsData | null>(null);
-  const [clusterConfig, setClusterConfig] = useState<ClusterConfig | null>(null);
   const toast = useToast();
   // Each mutation needs its endpoint's permission (configure / deploy / create); reading needs view.
   const actions = useInfrastructureActions();
@@ -87,44 +85,69 @@ export default function InfraComponentsPage() {
     }
   }, [deployStarted, deployProgress.active, deployProgress.status]);
 
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, isAws]);
+  // The page's reads, each on its own lifecycle: a failure is told apart from an empty answer, a
+  // refresh keeps the last answer while it runs, and nothing settles into the page after it closes.
+  // Terraform status needs change_status, which some roles that can view this page lack; that
+  // refusal is expected and leaves the rest of the page as it is.
+  const logRead = (what: string) => (e: unknown) => logError(`loading ${what}`, e);
+  const tf = useResource<TerraformStatus>(
+    "infra:terraform-status",
+    (signal) => api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status", { signal }),
+    { expected: isPermissionDenied, onError: logRead("the Terraform status") },
+  );
+  const runList = useResource<{ runs: TerraformRun[] }>(
+    "infra:terraform-runs",
+    (signal) => api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs", { signal }),
+    { onError: logRead("the Terraform runs") },
+  );
+  const stack = useResource<StackStatus>(
+    "infra:stack-status",
+    (signal) => api.get<StackStatus>("/api/v1/infrastructure/stack/status", { signal }),
+    { onError: logRead("the stack status") },
+  );
+  const components = useResource<ComponentsData>(
+    "infra:stack-components",
+    (signal) => api.get<ComponentsData>("/api/v1/infrastructure/stack/components", { signal }),
+    { onError: logRead("the stack components") },
+  );
+  const cluster = useResource<ClusterConfig>(
+    "infra:cluster-config",
+    (signal) => api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config", { signal }),
+    { onError: logRead("the cluster configuration") },
+  );
+  // The compute region comes from the install's cloud settings: gcp_region on GCP, aws_region on
+  // AWS. EKS is regional (it spans AZs automatically), so an AWS install has no zone concept.
+  const cloudSettingsPath = isAws ? "/api/v1/settings/aws" : "/api/v1/settings/gcp";
+  const cloud = useResource<{ gcp_region?: string; gcp_zone?: string; aws_region?: string }>(
+    `infra:cloud-settings:${cloudSettingsPath}`,
+    (signal) => api.get(cloudSettingsPath, { signal }),
+    {
+      onSuccess: (cfg) => {
+        const region = isAws ? cfg.aws_region : cfg.gcp_region;
+        if (region) {
+          setDefaultRegion(region);
+          setDeployRegion(region);
+        }
+        if (!isAws && cfg.gcp_zone) {
+          setDefaultZone(cfg.gcp_zone);
+          setDeployZone(cfg.gcp_zone);
+        }
+      },
+    },
+  );
+  const tfStatus = tf.data ?? null;
+  const runs = runList.data?.runs ?? [];
+  const stackStatus = stack.data ?? null;
+  const componentsData = components.data ?? null;
+  const clusterConfig = cluster.data ?? null;
+  const loading = [tf, runList, stack, components, cluster, cloud].some((r) => r.loading);
+  // What the page decides from (deployed or not, initialized or not) could not be read: say so,
+  // rather than offer a deployment or an initialization on an unknown state.
+  const statusUnreadable = [tf, stack, components].some((r) => r.data === undefined && r.error != null);
+  const statusStale = [tf, stack, components].some((r) => r.stale);
 
-  async function loadData() {
-    // The compute region comes from the install's cloud settings: gcp_region on
-    // GCP, aws_region on AWS. EKS is regional (it spans AZs automatically), so an
-    // AWS install has no zone concept; only GCP reads gcp_zone.
-    const cloudSettingsPath = isAws ? "/api/v1/settings/aws" : "/api/v1/settings/gcp";
-    // Fetch all data in parallel so the page renders once with complete state
-    const [tfResult, runsResult, ssResult, cdResult, ccResult, cloudResult] = await Promise.allSettled([
-      api.get<TerraformStatus>("/api/v1/infrastructure/terraform/status"),
-      api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs"),
-      api.get<StackStatus>("/api/v1/infrastructure/stack/status"),
-      api.get<ComponentsData>("/api/v1/infrastructure/stack/components"),
-      api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config"),
-      api.get<{ gcp_region?: string; gcp_zone?: string; aws_region?: string }>(cloudSettingsPath),
-    ]);
-
-    if (tfResult.status === "fulfilled") setTfStatus(tfResult.value);
-    if (runsResult.status === "fulfilled") setRuns(runsResult.value.runs);
-    if (ssResult.status === "fulfilled") setStackStatus(ssResult.value);
-    if (cdResult.status === "fulfilled") setComponentsData(cdResult.value);
-    if (ccResult.status === "fulfilled") setClusterConfig(ccResult.value);
-    if (cloudResult.status === "fulfilled") {
-      const cfg = cloudResult.value;
-      const region = isAws ? cfg.aws_region : cfg.gcp_region;
-      if (region) {
-        setDefaultRegion(region);
-        setDeployRegion(region);
-      }
-      if (!isAws && cfg.gcp_zone) {
-        setDefaultZone(cfg.gcp_zone);
-        setDeployZone(cfg.gcp_zone);
-      }
-    }
-    setLoading(false);
+  function reloadAll() {
+    for (const r of [tf, runList, stack, components, cluster, cloud]) void r.refresh();
   }
 
   // Auto-open recovery modal when orphaned clusters exist and compute is not deployed
@@ -184,12 +207,12 @@ export default function InfraComponentsPage() {
     setShowDeployModal(false);
     setDeployStarted(false);
     setTerminalStatus(null);
-    setRefreshKey((k) => k + 1);
+    reloadAll();
   }
 
   function handleRecoveryComplete() {
     setShowRecoveryModal(false);
-    setRefreshKey((k) => k + 1);
+    reloadAll();
   }
 
   async function handleStartFresh() {
@@ -219,7 +242,7 @@ export default function InfraComponentsPage() {
       setShowAbortConfirm(false);
       setShowDeployModal(false);
       setDeployStarted(false);
-      setRefreshKey((k) => k + 1);
+      reloadAll();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Abort failed";
       toast.error(message);
@@ -256,21 +279,21 @@ export default function InfraComponentsPage() {
 
   function handleBootstrapComplete() {
     setShowBootstrapModal(false);
-    setRefreshKey((k) => k + 1);
+    reloadAll();
   }
 
   function handleTeardownComplete() {
     setShowTeardownProgress(false);
     setDeployStarted(false);
     setTerminalStatus(null);
-    setRefreshKey((k) => k + 1);
+    reloadAll();
   }
 
   function handleDestroyStorageComplete() {
     setShowDestroyStorageProgress(false);
     setDeployStarted(false);
     setTerminalStatus(null);
-    setRefreshKey((k) => k + 1);
+    reloadAll();
   }
 
   async function handleAbandonRun() {
@@ -279,7 +302,7 @@ export default function InfraComponentsPage() {
     try {
       await api.post(`/api/v1/infrastructure/terraform/abandon/${tfStatus.active_run_id}`);
       setShowAbandonModal(false);
-      setRefreshKey((k) => k + 1);
+      reloadAll();
     } catch (e) {
       const message = e instanceof Error ? e.message : "Abandon failed";
       toast.error(message);
@@ -306,8 +329,11 @@ export default function InfraComponentsPage() {
               <p className="mt-3 text-sm text-gray-500">Loading infrastructure status...</p>
             </div>
           </div>
+        ) : statusUnreadable ? (
+          <ErrorState message={loadFailureMessage("Infrastructure status")} onRetry={reloadAll} />
         ) : (
           <>
+            {statusStale && <StaleNotice what="Infrastructure status" onRetry={reloadAll} />}
             {/* Stuck Terraform run banner */}
             {tfStatus?.active_run_id && (
               <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
@@ -349,7 +375,7 @@ export default function InfraComponentsPage() {
             {/* Check for infrastructure updates: re-plan deployed modules and
                 apply additive changes (e.g. a newly added storage bucket). */}
             {tfInitialized && (isDeployed || stackStatus?.storage_deployed) && (
-              <InfraUpdatesCard onApplyStarted={() => setRefreshKey((k) => k + 1)} />
+              <InfraUpdatesCard onApplyStarted={() => reloadAll()} />
             )}
 
             {/* Storage destroy section: compute is down but storage is still provisioned */}
@@ -489,7 +515,7 @@ export default function InfraComponentsPage() {
 
                 <AddOnComponentsSection
                   componentsData={componentsData}
-                  onChanged={() => setRefreshKey((k) => k + 1)}
+                  onChanged={() => reloadAll()}
                 />
 
                 {/* Storage Section */}
@@ -500,7 +526,7 @@ export default function InfraComponentsPage() {
                     terraformInitialized={tfInitialized}
                     pubsubConfigured={stackStatus?.pubsub_configured ?? false}
                     onDeploy={handleStartDeploy}
-                    onUpdateStorage={() => setRefreshKey((k) => k + 1)}
+                    onUpdateStorage={() => reloadAll()}
                   />
                 </div>
               </>
