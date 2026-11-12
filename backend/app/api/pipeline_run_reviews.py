@@ -45,6 +45,7 @@ async def create_review(
 ):
     """Submit a review for a pipeline run."""
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"])
 
     # Convert sample_verdicts from Pydantic models to dicts
     sample_verdicts_dict = None
@@ -54,6 +55,7 @@ async def create_review(
     review = await PipelineReviewService.create_review(
         session=session,
         pipeline_run_id=run_id,
+        org_id=org_id,
         reviewer_user_id=user_id,
         verdict=body.verdict,
         notes=body.notes,
@@ -63,7 +65,7 @@ async def create_review(
     await session.commit()
 
     # Reload with reviewer relationship
-    review = await PipelineReviewService.get_active_review(session, run_id)
+    review = await PipelineReviewService.get_active_review(session, run_id, org_id=org_id)
     return _review_response(review)
 
 
@@ -74,7 +76,7 @@ async def list_reviews(
     session: AsyncSession = Depends(get_session),
 ):
     """List all reviews for a pipeline run, newest first."""
-    reviews = await PipelineReviewService.list_reviews(session, run_id)
+    reviews = await PipelineReviewService.list_reviews(session, run_id, org_id=int(current_user["org_id"]))
     return PipelineRunReviewListResponse(reviews=[_review_response(r) for r in reviews])
 
 
@@ -92,7 +94,7 @@ async def get_active_review(
     run, which buries real failures in noise. Absence is reported as a null body
     so the caller can still tell "not reviewed" from "could not be read".
     """
-    review = await PipelineReviewService.get_active_review(session, run_id)
+    review = await PipelineReviewService.get_active_review(session, run_id, org_id=int(current_user["org_id"]))
     if not review:
         return None
     return _review_response(review)
