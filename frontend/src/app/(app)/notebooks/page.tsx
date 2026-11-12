@@ -22,10 +22,6 @@ import type {
   ExperimentListResponse,
   EnvironmentResponse,
   EnvironmentListResponse,
-  EnvironmentDetailResponse,
-  FileResponse,
-  FileListResponse,
-  Sample,
   Project,
 } from "@/lib/types";
 import { RESOURCE_PROFILES } from "@/lib/types";
@@ -42,6 +38,8 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { isPermissionDenied, loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { useLaunchSelection } from "@/components/launch/useLaunchSelection";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -73,7 +71,8 @@ export default function NotebooksPage() {
 
   // Launch modal state
   const [showLaunchModal, setShowLaunchModal] = useState(false);
-  const [launching, setLaunching] = useState(false);
+  const launchGuard = useSubmitGuard();
+  const launching = launchGuard.busy;
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
   const [profileAvailability, setProfileAvailability] = useState<Record<string, boolean>>({});
@@ -82,22 +81,23 @@ export default function NotebooksPage() {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsDenied, setProjectsDenied] = useState(false);
-  const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
-  const [selectedExperiment, setSelectedExperiment] = useState<number | null>(null);
-  const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
-  const [selectedEnvId, setSelectedEnvId] = useState<number | null>(null);
-  const [selectedEnvDetail, setSelectedEnvDetail] = useState<EnvironmentDetailResponse | null>(null);
-  const [selectedVersionImageUri, setSelectedVersionImageUri] = useState<string | null>(null);
-  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  // The image of a template chosen without reading its versions (the page's default); a
+  // template the user picks takes its image from the chosen version instead.
+  const [presetImageUri, setPresetImageUri] = useState<string | null>(null);
+  const selection = useLaunchSelection({ templateError: "Could not change the template." });
+  const {
+    scope: scopeType,
+    experimentId: selectedExperiment,
+    projectId: selectedProject,
+    environmentId: selectedEnvId,
+    versionId: selectedVersionId,
+    templateDetail: selectedEnvDetail,
+    fileIds: selectedFileIds,
+  } = selection;
   const [stoppingSessions, setStoppingSessions] = useState<Set<number>>(new Set());
   const [provenance, setProvenance] = useState<SessionProvenance | null>(null);
-  const [showFileSelector, setShowFileSelector] = useState(false);
-  const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
-  const [experimentFilesFailed, setExperimentFilesFailed] = useState(false);
-  const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
-  const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
-  const [activeBranchCount, setActiveBranchCount] = useState(0);
+  const { files: experimentFiles, sampleNames, failed: experimentFilesFailed } = selection.files;
   const [showGuide, setShowGuide] = useState(false);
   const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
@@ -201,8 +201,8 @@ export default function NotebooksPage() {
         (e) => e.latest_version?.status === "ready" && e.latest_version?.image_uri
       );
       if (withReady && withReady.latest_version) {
-        setSelectedEnvId(withReady.id);
-        setSelectedVersionImageUri(withReady.latest_version.image_uri);
+        selection.presetEnvironment(withReady.id, null);
+        setPresetImageUri(withReady.latest_version.image_uri);
       }
     } catch (e) {
       logError("loading environments", e);
@@ -210,127 +210,66 @@ export default function NotebooksPage() {
     }
   }
 
-  async function handleEnvChange(envId: number) {
-    setSelectedEnvId(envId);
-    setSelectedVersionImageUri(null);
-    setSelectedVersionId(null);
-    try {
-      const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${envId}`);
-      setSelectedEnvDetail(detail);
-      const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
-      if (readyVersion) {
-        setSelectedVersionImageUri(readyVersion.image_uri);
-        setSelectedVersionId(readyVersion.id);
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change the template.");
-    }
+  function handleEnvChange(envId: number) {
+    setPresetImageUri(null);
+    selection.chooseEnvironment(envId);
   }
 
   function openLaunchModal() {
+    // A new opening keeps the previous choices; only the file selection and any launch
+    // still settling from an earlier opening are left behind.
+    selection.begin({ keep: true });
+    launchGuard.reset();
     setShowLaunchModal(true);
     setLaunchError(null);
-    setSelectedFileIds([]);
-    setExperimentFiles([]);
-    setSampleNames({});
-    setShowFileSelector(false);
-    setActiveBranchCount(0);
   }
 
-  async function handleRecreateSession(source: NotebookSession) {
+  function closeLaunchModal() {
+    selection.end();
+    setShowLaunchModal(false);
+  }
+
+  function handleRecreateSession(source: NotebookSession) {
     const prefill = prefillFromNotebookSession(source);
+    // Resolve the environment that owns this version so the selector names it.
+    const owner = prefill.environment_version_id
+      ? environments.find((env) => env.latest_version?.id === prefill.environment_version_id)
+      : undefined;
+    selection.begin({
+      prefill: {
+        scope: prefill.scope_type,
+        experimentId: prefill.experiment_id,
+        projectId: prefill.project_id,
+        environmentId: owner?.id ?? null,
+        versionId: prefill.environment_version_id,
+        fileIds: prefill.input_file_ids,
+      },
+    });
+    launchGuard.reset();
     setLaunchError(null);
     setPendingLaunch(prefill.session_type);
     setSelectedProfile(prefill.resource_profile);
-    setScopeType(prefill.scope_type);
-    setSelectedExperiment(prefill.experiment_id);
-    setSelectedProject(prefill.project_id);
-    if (prefill.environment_version_id) {
-      // Try to resolve the environment that owns this version so the
-      // environment selector renders the right name.
-      for (const env of environments) {
-        if (env.latest_version?.id === prefill.environment_version_id) {
-          setSelectedEnvId(env.id);
-          break;
-        }
-      }
-      setSelectedVersionId(prefill.environment_version_id);
-    }
-    setSelectedFileIds(prefill.input_file_ids);
-    if (prefill.scope_type === "experiment" && prefill.experiment_id) {
-      try {
-        await loadFilesForExperiment(prefill.experiment_id);
-        // loadFilesForExperiment clears selectedFileIds; restore the snapshot.
-        setSelectedFileIds(prefill.input_file_ids);
-      } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not recreate the session.");
-    }
-    }
     setShowLaunchModal(true);
     setViewingSession(null);
   }
 
-  async function loadFilesForExperiment(experimentId: number) {
-    try {
-      const data = await api.get<FileListResponse>(
-        `/api/experiments/${experimentId}/files?page_size=500`
-      );
-      setExperimentFiles(data.files);
-      setSelectedFileIds([]);
-
-      const sampleIds = new Set<number>();
-      for (const file of data.files) {
-        for (const sid of file.sample_ids || []) {
-          sampleIds.add(sid);
-        }
-      }
-      if (sampleIds.size > 0) {
-        try {
-          const samplesData = await api.get<{ samples: Sample[] }>(
-            `/api/experiments/${experimentId}/samples?page_size=500`
-          );
-          const names: Record<number, string> = {};
-          for (const s of samplesData.samples) {
-            names[s.id] = s.external_id || `Sample ${s.id}`;
-          }
-          setSampleNames(names);
-        } catch {
-          setSampleNames({});
-        }
-      } else {
-        setSampleNames({});
-      }
-
-      // Check active branches
-      const active = sessions.filter(
-        (s) =>
-          s.experiment?.id === experimentId &&
-          ["running", "starting", "idle"].includes(s.status) &&
-          s.git_branch_name
-      );
-      setActiveBranchCount(active.length);
-      setExperimentFilesFailed(false);
-    } catch (e) {
-      // "No files found for this experiment." is a claim about the experiment,
-      // read inside a launch picker. A failed request must not make it.
-      logError(`loading the files for experiment ${experimentId}`, e);
-      setExperimentFiles([]);
-      setExperimentFilesFailed(true);
-    }
-  }
+  // Sessions already working on this experiment's notebook branch, once its files are known.
+  const activeBranchCount =
+    scopeType === "experiment" && selectedExperiment && selection.files.loaded
+      ? sessions.filter(
+          (s) =>
+            s.experiment?.id === selectedExperiment &&
+            ["running", "starting", "idle"].includes(s.status) &&
+            s.git_branch_name,
+        ).length
+      : 0;
 
   function handleExperimentChange(expId: number | null) {
-    setSelectedExperiment(expId);
-    setSelectedFileIds([]);
-    setExperimentFiles([]);
-    setShowFileSelector(false);
-    setActiveBranchCount(0);
-    if (expId) {
-      loadFilesForExperiment(expId);
-    }
+    selection.selectExperiment(expId);
   }
 
   function handleLaunch(sessionType: SessionType) {
+    if (launching) return;
     if (selectedFileIds.length === 0) {
       setPendingLaunch(sessionType);
       return;
@@ -338,27 +277,37 @@ export default function NotebooksPage() {
     void performLaunch(sessionType);
   }
 
-  async function performLaunch(sessionType: SessionType) {
-    setPendingLaunch(null);
-    setLaunching(true);
-    setLaunchError(null);
-    try {
-      const req: SessionLaunchRequest = {
-        session_type: sessionType,
-        resource_profile: selectedProfile,
-        experiment_id: scopeType === "experiment" ? selectedExperiment : undefined,
-        image_uri: selectedVersionImageUri,
-        input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
-        environment_version_id: selectedVersionId,
-      };
-      await api.post("/api/v1/notebooks/sessions", req);
-      setShowLaunchModal(false);
-      void loadSessions();
-    } catch (err) {
-      setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
-    } finally {
-      setLaunching(false);
-    }
+  const selectedVersion = selectedEnvDetail?.versions.find((v) => v.id === selectedVersionId);
+  const imageUri = selection.resolveVersions ? (selectedVersion?.image_uri ?? null) : presetImageUri;
+
+  /**
+   * One launch per press, through the confirmation too. The outcome belongs to the opening that
+   * sent it: a failure that settles after the dialog closed is not shown in a later opening, and
+   * the list is refreshed either way.
+   */
+  function performLaunch(sessionType: SessionType) {
+    const opening = selection.opening;
+    return launchGuard.run(async () => {
+      setPendingLaunch(null);
+      setLaunchError(null);
+      try {
+        const req: SessionLaunchRequest = {
+          session_type: sessionType,
+          resource_profile: selectedProfile,
+          experiment_id: scopeType === "experiment" ? selectedExperiment : undefined,
+          image_uri: imageUri,
+          input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
+          environment_version_id: selectedVersionId,
+        };
+        await api.post("/api/v1/notebooks/sessions", req);
+        if (selection.isCurrent(opening)) closeLaunchModal();
+        void loadSessions();
+      } catch (err) {
+        if (selection.isCurrent(opening)) {
+          setLaunchError(err instanceof Error ? err.message : "Failed to launch session");
+        }
+      }
+    });
   }
 
   async function handleStop(sessionId: number) {
@@ -741,7 +690,7 @@ export default function NotebooksPage() {
       <Modal
         open={showLaunchModal}
         title="Launch Notebook Session"
-        onClose={() => setShowLaunchModal(false)}
+        onClose={closeLaunchModal}
         size="md"
         footer={
           <>
@@ -764,7 +713,7 @@ export default function NotebooksPage() {
             </button>
           )}
           <button
-            onClick={() => setShowLaunchModal(false)}
+            onClick={closeLaunchModal}
             className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
           >
             Cancel
@@ -773,7 +722,7 @@ export default function NotebooksPage() {
         }
       >
         <div className="p-6 border-b flex items-center justify-between shrink-0">
-          <button onClick={() => setShowLaunchModal(false)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
+          <button onClick={closeLaunchModal} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
         </div>
         <div className="p-6 space-y-5 overflow-y-auto flex-1">
           {/* Resource Profile */}
@@ -856,12 +805,7 @@ export default function NotebooksPage() {
                 <select
                   aria-label="Template version"
                   value={selectedVersionId || ""}
-                  onChange={(e) => {
-                    const vid = e.target.value ? Number(e.target.value) : null;
-                    setSelectedVersionId(vid);
-                    const v = selectedEnvDetail?.versions.find((ver) => ver.id === vid);
-                    setSelectedVersionImageUri(v?.image_uri || null);
-                  }}
+                  onChange={(e) => selection.selectVersion(e.target.value ? Number(e.target.value) : null)}
                   className="border rounded px-3 py-2 text-sm flex-1"
                 >
                   {selectedEnvDetail.versions
@@ -881,13 +825,13 @@ export default function NotebooksPage() {
             <label className="text-sm text-gray-500 mb-2 block">Link to (optional)</label>
             <div className="flex gap-2 mb-2">
               <button
-                onClick={() => { setScopeType("experiment"); setSelectedProject(null); }}
+                onClick={() => selection.setScope("experiment")}
                 className={`px-3 py-1.5 text-sm rounded ${scopeType === "experiment" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
               >
                 Experiment
               </button>
               <button
-                onClick={() => { setScopeType("project"); setSelectedExperiment(null); setExperimentFiles([]); setSelectedFileIds([]); }}
+                onClick={() => selection.setScope("project")}
                 className={`px-3 py-1.5 text-sm rounded ${scopeType === "project" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
               >
                 Project
@@ -909,7 +853,7 @@ export default function NotebooksPage() {
               <select
                 aria-label="Project"
                 value={selectedProject || ""}
-                onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => selection.selectProject(e.target.value ? Number(e.target.value) : null)}
                 disabled={projectsDenied}
                 className="border rounded px-3 py-2 text-sm w-full disabled:bg-gray-50 disabled:text-gray-400"
               >
@@ -934,15 +878,16 @@ export default function NotebooksPage() {
                 >
                   {loadFailureMessage("This experiment's files")}
                 </p>
-              ) : experimentFiles.length === 0 ? (
+              ) : !selection.files.loaded ? null : experimentFiles.length === 0 ? (
                 <p className="text-xs text-gray-500">
                   No files found for this experiment.
                 </p>
               ) : (
                 <FileTreeSelector
+                  key={`${selection.opening}:${selectedExperiment}`}
                   files={experimentFiles}
                   sampleNames={sampleNames}
-                  onSelectionChange={setSelectedFileIds}
+                  onSelectionChange={selection.setFileIds}
                 />
               )}
             </div>

@@ -3,7 +3,7 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
@@ -30,16 +30,12 @@ import type {
   ExperimentListResponse,
   EnvironmentResponse,
   EnvironmentListResponse,
-  EnvironmentDetailResponse,
   GitHubRepo,
   GitHubRepoListResponse,
-  FileResponse,
-  FileListResponse,
 } from "@/lib/types";
 import { statusBadgeClass } from "@/lib/statusStyles";
 
 import { clickableRow } from "@/lib/a11y";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { Button } from "@/components/ui/Button";
 import { formatRecordedTime } from "@/lib/recordedTime";
 import { Alert } from "@/components/shared/Alert";
@@ -47,6 +43,13 @@ import { Card } from "@/components/ui/Card";
 import { ListContent } from "@/components/shared/ListContent";
 import { Input, Select } from "@/components/ui/Input";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
+import { useLaunchSelection } from "@/components/launch/useLaunchSelection";
+
+interface ProvisioningNotice {
+  id: number;
+  kind: "info" | "error";
+  message: string;
+}
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -77,9 +80,7 @@ export default function WorkNodesPage() {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const loading = !loadedOnce;
   const [showLaunch, setShowLaunch] = useState(false);
-  useDismissOnEscape(showLaunch, () => { setShowLaunch(false); });
   const [viewingNode, setViewingNode] = useState<WorkNode | null>(null);
-  useDismissOnEscape(viewingNode !== null, () => { setViewingNode(null); });
 
   // GitHub repos state
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
@@ -93,28 +94,32 @@ export default function WorkNodesPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsDenied, setProjectsDenied] = useState(false);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
-  const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(null);
-  const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
-  const [experimentFilesFailed, setExperimentFilesFailed] = useState(false);
-  const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
-  const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
-  const [selectedEnvId, setSelectedEnvId] = useState<number | null>(null);
-  const [envDetail, setEnvDetail] = useState<EnvironmentDetailResponse | null>(null);
-  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
+  const selection = useLaunchSelection({ templateError: "Could not select that template." });
+  const {
+    scope: scopeType,
+    experimentId: selectedExperimentId,
+    projectId: selectedProjectId,
+    environmentId: selectedEnvId,
+    versionId: selectedVersionId,
+    templateDetail: envDetail,
+    fileIds: selectedFileIds,
+  } = selection;
+  const { files: experimentFiles, sampleNames, failed: experimentFilesFailed } = selection.files;
   const [selectedRepoIds, setSelectedRepoIds] = useState<number[]>([]);
   const [machineTypes, setMachineTypes] = useState<MachineType[]>([]);
   const [selectedMachineType, setSelectedMachineType] = useState<string>("");
   const [showAdvancedMachines, setShowAdvancedMachines] = useState(false);
-  const [launching, setLaunching] = useState(false);
+  // Guards one opening's launch, through the confirmation. A new opening releases it: a node
+  // still provisioning from an earlier launch does not block the next one.
+  const launchGuard = useSubmitGuard();
   const addRepoGuard = useSubmitGuard();
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [showConfirmLaunch, setShowConfirmLaunch] = useState(false);
-  const [provisioningNotice, setProvisioningNotice] = useState<
-    null | { kind: "info" | "error"; message: string }
-  >(null);
+  // One notice per launch sent, kept on the page after the dialog closes until it settles (or,
+  // for a failure, until dismissed). Each launch only ever changes its own notice.
+  const [notices, setNotices] = useState<ProvisioningNotice[]>([]);
+  const launchCount = useRef(0);
   const [stoppingNodes, setStoppingNodes] = useState<Set<number>>(new Set());
   const [showGuide, setShowGuide] = useState(false);
 
@@ -208,17 +213,10 @@ export default function WorkNodesPage() {
   }
 
   async function openLaunchDialog() {
+    selection.begin();
+    launchGuard.reset();
     setShowLaunch(true);
     setLaunchStep(1);
-    setScopeType("experiment");
-    setSelectedProjectId(null);
-    setSelectedExperimentId(null);
-    setExperimentFiles([]);
-    setSampleNames({});
-    setSelectedFileIds([]);
-    setSelectedEnvId(null);
-    setEnvDetail(null);
-    setSelectedVersionId(null);
     setSelectedRepoIds([]);
     setSelectedMachineType("");
     setShowAdvancedMachines(false);
@@ -232,28 +230,33 @@ export default function WorkNodesPage() {
     }
   }
 
+  function closeLaunchDialog() {
+    selection.end();
+    setShowLaunch(false);
+  }
+
   async function handleRecreateWorkNode(source: WorkNode) {
     const prefill = prefillFromWorkNode(source);
+    // Resolve the environment that owns this version so the selector renders the right card.
+    const owner = prefill.environment_version_id
+      ? environments.find((env) => env.latest_version?.id === prefill.environment_version_id)
+      : undefined;
+    selection.begin({
+      prefill: {
+        scope: "project",
+        experimentId: null,
+        projectId: prefill.project_id,
+        environmentId: owner?.id ?? null,
+        versionId: prefill.environment_version_id,
+        fileIds: prefill.input_file_ids,
+      },
+    });
+    launchGuard.reset();
     setLaunchError(null);
     setShowLaunch(true);
     setLaunchStep(1);
-    setScopeType("project");
-    setSelectedExperimentId(null);
-    setSelectedProjectId(prefill.project_id);
     setSelectedMachineType(prefill.machine_type ?? "");
-    setSelectedFileIds(prefill.input_file_ids);
     setSelectedRepoIds(prefill.github_repo_ids);
-    if (prefill.environment_version_id) {
-      // Try to resolve the environment that owns this version so the env
-      // selector renders the right card.
-      for (const env of environments) {
-        if (env.latest_version?.id === prefill.environment_version_id) {
-          setSelectedEnvId(env.id);
-          break;
-        }
-      }
-      setSelectedVersionId(prefill.environment_version_id);
-    }
     setViewingNode(null);
     // Ensure the reference data is loaded even if the user hasn't opened the
     // launch dialog yet this session.
@@ -261,77 +264,27 @@ export default function WorkNodesPage() {
       try {
         await loadLaunchOptions();
       } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not recreate the work node.");
-    }
+        toast.error(e instanceof Error ? e.message : "Could not recreate the work node.");
+      }
     }
   }
 
   function handleScopeChange(scope: "experiment" | "project") {
-    setScopeType(scope);
-    setSelectedProjectId(null);
-    setSelectedExperimentId(null);
-    setExperimentFiles([]);
-    setSampleNames({});
-    setSelectedFileIds([]);
+    selection.setScope(scope);
   }
 
   function handleProjectSelect(projectId: number) {
-    setSelectedProjectId(projectId);
+    selection.selectProject(projectId);
   }
 
-  async function handleExperimentSelect(experimentId: number) {
+  function handleExperimentSelect(experimentId: number) {
+    // A standalone experiment has no project; the node is then tied to the experiment alone.
     const exp = experiments.find((e) => e.id === experimentId);
-    setSelectedExperimentId(experimentId);
-    setSelectedProjectId(exp?.project?.id ?? null);
-    setSelectedFileIds([]);
-    try {
-      const data = await api.get<FileListResponse>(
-        `/api/experiments/${experimentId}/files?page_size=500`
-      );
-      setExperimentFiles(data.files);
-
-      // Resolve sample names
-      const sampleIds = new Set<number>();
-      for (const file of data.files) {
-        for (const sid of file.sample_ids || []) {
-          sampleIds.add(sid);
-        }
-      }
-      if (sampleIds.size > 0) {
-        try {
-          const samplesData = await api.get<{ samples: { id: number; external_id: string }[] }>(
-            `/api/experiments/${experimentId}/samples?page_size=500`
-          );
-          const names: Record<number, string> = {};
-          for (const s of samplesData.samples) {
-            names[s.id] = s.external_id || `Sample ${s.id}`;
-          }
-          setSampleNames(names);
-        } catch {
-          setSampleNames({});
-        }
-      } else {
-        setSampleNames({});
-      }
-      setExperimentFilesFailed(false);
-    } catch (e) {
-      // Same claim, same launch picker, different page.
-      logError(`loading the files for experiment ${experimentId}`, e);
-      setExperimentFiles([]);
-      setExperimentFilesFailed(true);
-    }
+    selection.selectExperiment(experimentId, exp?.project?.id ?? null);
   }
 
-  async function handleEnvSelect(envId: number) {
-    setSelectedEnvId(envId);
-    try {
-      const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${envId}`);
-      setEnvDetail(detail);
-      const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
-      if (readyVersion) setSelectedVersionId(readyVersion.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not select that template.");
-    }
+  function handleEnvSelect(envId: number) {
+    selection.chooseEnvironment(envId);
   }
 
   function toggleRepo(repoId: number) {
@@ -346,7 +299,7 @@ export default function WorkNodesPage() {
   const scopeSelected = scopeType === "experiment" ? !!selectedExperimentId : !!selectedProjectId;
 
   function handleLaunch() {
-    if (!scopeSelected || !selectedVersionId || !selectedMachineType) return;
+    if (!scopeSelected || !selectedVersionId || !selectedMachineType || launchGuard.busy) return;
     const missingFiles = selectedFileIds.length === 0;
     const missingRepos = repos.length > 0 && selectedRepoIds.length === 0;
     if (missingFiles || missingRepos) {
@@ -356,36 +309,40 @@ export default function WorkNodesPage() {
     void performLaunch();
   }
 
-  async function performLaunch() {
-    if (!scopeSelected || !selectedVersionId || !selectedMachineType) return;
-    setShowConfirmLaunch(false);
-    setLaunching(true);
-    setLaunchError(null);
-    const req: WorkNodeLaunchRequest = {
-      // project_id may be null for a standalone experiment; experiment_id ties
-      // the node (and its outputs) to the experiment, like notebook sessions.
-      project_id: selectedProjectId ?? undefined,
-      experiment_id: scopeType === "experiment" ? (selectedExperimentId ?? undefined) : undefined,
-      environment_version_id: selectedVersionId,
-      machine_type: selectedMachineType,
-      input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
-      github_repo_ids: selectedRepoIds.length > 0 ? selectedRepoIds : undefined,
-    };
-    setShowLaunch(false);
-    setProvisioningNotice({
-      kind: "info",
-      message: "Provisioning work node... this can take 1-3 minutes.",
+  /**
+   * Sends the launch and closes the dialog at once: provisioning takes minutes and is watched
+   * from the page, not the dialog. Closing the dialog never cancels a launch already sent.
+   */
+  function performLaunch() {
+    return launchGuard.run(async () => {
+      if (!scopeSelected || !selectedVersionId || !selectedMachineType) return;
+      setShowConfirmLaunch(false);
+      setLaunchError(null);
+      const req: WorkNodeLaunchRequest = {
+        // project_id may be null for a standalone experiment; experiment_id ties
+        // the node (and its outputs) to the experiment, like notebook sessions.
+        project_id: selectedProjectId ?? undefined,
+        experiment_id: scopeType === "experiment" ? (selectedExperimentId ?? undefined) : undefined,
+        environment_version_id: selectedVersionId,
+        machine_type: selectedMachineType,
+        input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
+        github_repo_ids: selectedRepoIds.length > 0 ? selectedRepoIds : undefined,
+      };
+      closeLaunchDialog();
+      const id = ++launchCount.current;
+      setNotices((prev) => [
+        ...prev,
+        { id, kind: "info", message: "Provisioning work node... this can take 1-3 minutes." },
+      ]);
+      try {
+        await api.post("/api/v1/work-nodes/sessions", req);
+        setNotices((prev) => prev.filter((n) => n.id !== id));
+        void loadNodes();
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : "Launch failed";
+        setNotices((prev) => prev.map((n) => (n.id === id ? { ...n, kind: "error", message } : n)));
+      }
     });
-    try {
-      await api.post("/api/v1/work-nodes/sessions", req);
-      setProvisioningNotice(null);
-      loadNodes();
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Launch failed";
-      setProvisioningNotice({ kind: "error", message });
-    } finally {
-      setLaunching(false);
-    }
   }
 
   async function handleStop(nodeId: number) {
@@ -455,22 +412,27 @@ export default function WorkNodesPage() {
         )}
       </div>
 
-      {provisioningNotice && (
+      {notices.map((notice) => (
         <Alert
-          tone={provisioningNotice.kind === "error" ? "error" : "info"}
+          key={notice.id}
+          tone={notice.kind === "error" ? "error" : "info"}
           className="mb-4"
           action={
-            <Button variant="ghost" size="sm" onClick={() => setProvisioningNotice(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setNotices((prev) => prev.filter((n) => n.id !== notice.id))}
+            >
               Dismiss
             </Button>
           }
         >
           <span className="flex items-center gap-2">
-            {provisioningNotice.kind === "info" && <LoadingSpinner size="sm" />}
-            <span>{provisioningNotice.message}</span>
+            {notice.kind === "info" && <LoadingSpinner size="sm" />}
+            <span>{notice.message}</span>
           </span>
         </Alert>
-      )}
+      ))}
 
       {/* Quick Start Guide */}
       <div className="mb-6">
@@ -813,7 +775,7 @@ export default function WorkNodesPage() {
         <Modal
           open
           title="Launch Work Node"
-          onClose={() => setShowLaunch(false)}
+          onClose={closeLaunchDialog}
           size="xl"
           footer={
             <>
@@ -831,12 +793,12 @@ export default function WorkNodesPage() {
                   <Button variant="secondary" size="lg" onClick={() => setLaunchStep(1)}>
                     Back
                   </Button>
-                  <Button size="lg" className="flex-1" onClick={handleLaunch} disabled={launching}>
+                  <Button size="lg" className="flex-1" onClick={handleLaunch} disabled={launchGuard.busy}>
                     Launch Work Node
                   </Button>
                 </>
               )}
-              <Button variant="secondary" size="lg" onClick={() => setShowLaunch(false)}>
+              <Button variant="secondary" size="lg" onClick={closeLaunchDialog}>
                 Cancel
               </Button>
             </>
@@ -1003,9 +965,7 @@ export default function WorkNodesPage() {
                           aria-label="Version"
                           value={selectedVersionId || ""}
                           onChange={(e) =>
-                            setSelectedVersionId(
-                              e.target.value ? Number(e.target.value) : null
-                            )
+                            selection.selectVersion(e.target.value ? Number(e.target.value) : null)
                           }
                           width="auto"
                           className="flex-1"
@@ -1100,15 +1060,16 @@ export default function WorkNodesPage() {
                     >
                       {loadFailureMessage("This experiment's files")}
                     </p>
-                  ) : experimentFiles.length === 0 ? (
+                  ) : !selection.files.loaded ? null : experimentFiles.length === 0 ? (
                     <p className="text-xs text-gray-500">
                       No files found for this experiment.
                     </p>
                   ) : (
                     <FileTreeSelector
+                      key={`${selection.opening}:${selectedExperimentId}`}
                       files={experimentFiles}
                       sampleNames={sampleNames}
-                      onSelectionChange={setSelectedFileIds}
+                      onSelectionChange={selection.setFileIds}
                     />
                   )}
                 </section>
@@ -1213,7 +1174,7 @@ export default function WorkNodesPage() {
               <Button variant="secondary" onClick={() => setShowConfirmLaunch(false)}>
                 Cancel
               </Button>
-              <Button onClick={() => performLaunch()}>Launch anyway</Button>
+              <Button onClick={() => void performLaunch()}>Launch anyway</Button>
             </>
           }
         >
