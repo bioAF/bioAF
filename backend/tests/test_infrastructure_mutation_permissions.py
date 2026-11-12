@@ -126,7 +126,9 @@ async def test_orphan_action_without_deploy_is_refused_before_anything_changes(
 
 
 async def test_deploy_holder_can_dismiss_an_orphan(client: AsyncClient, session, orphan, deploy_headers):
-    response = await client.post(f"/api/v1/infrastructure/orphaned-resources/{orphan.id}/dismiss", headers=deploy_headers)
+    response = await client.post(
+        f"/api/v1/infrastructure/orphaned-resources/{orphan.id}/dismiss", headers=deploy_headers
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "dismissed"
 
