@@ -125,6 +125,10 @@ jobs:
       - name: Mypy type check
         run: mypy . --ignore-missing-imports
 
+      # The checked-in internal OpenAPI artifact must match the API; offline, writes nothing.
+      - name: Internal OpenAPI schema is current
+        run: python -m app.cli.export_openapi --check
+
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
