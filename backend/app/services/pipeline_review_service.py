@@ -22,6 +22,8 @@ logger = logging.getLogger("bioaf.pipeline_review")
 # One message for every bad sample reference, so a caller cannot tell a sample in another
 # Organization from one that does not exist.
 _BAD_SAMPLE_REFERENCE = "Sample verdicts must reference samples in this pipeline run"
+# samples.id is a PostgreSQL integer; a larger key cannot name a sample and must not reach the query.
+_MAX_SAMPLE_ID = 2**31 - 1
 
 
 async def _scoped_run(session: AsyncSession, pipeline_run_id: int, org_id: int) -> PipelineRun:
@@ -68,7 +70,7 @@ async def _verdict_samples(
             sample_id = int(key)
         except (TypeError, ValueError):
             raise UnprocessableError(_BAD_SAMPLE_REFERENCE) from None
-        if str(sample_id) != key or sample_id in ids:
+        if str(sample_id) != key or sample_id in ids or not 0 < sample_id <= _MAX_SAMPLE_ID:
             raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
         ids.add(sample_id)
     result = await session.execute(

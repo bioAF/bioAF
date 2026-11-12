@@ -262,6 +262,22 @@ async def test_a_bad_sample_reference_is_a_generic_422_with_no_side_effects(
     assert spawned == []
 
 
+@pytest.mark.parametrize("key", ["99999999999", "-1", "0", "1.0", "", " 1", "01"])
+@pytest.mark.asyncio
+async def test_an_out_of_range_or_non_canonical_sample_key_is_the_same_generic_422(
+    client, session, comp_bio_token, world, spawned, key
+):
+    before = await _snapshot(session, world)
+    response = await client.post(
+        f"/api/pipeline-runs/{world.run}/reviews",
+        json={"verdict": "approved", "sample_verdicts": {key: {"verdict": "fail"}}},
+        headers=_bearer(comp_bio_token),
+    )
+    assert response.status_code == 422, response.text
+    assert await _snapshot(session, world) == before
+    assert spawned == []
+
+
 @pytest.mark.asyncio
 async def test_missing_and_foreign_sample_references_answer_identically(client, comp_bio_token, world):
     bodies = []
