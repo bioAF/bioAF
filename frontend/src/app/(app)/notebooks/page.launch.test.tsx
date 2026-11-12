@@ -8,6 +8,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@/testing/renderWithProviders";
 
 jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+// Launching needs notebooks launch.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 jest.mock("@/lib/auth", () => ({ isAuthenticated: () => true }));
 
 const mockGet = jest.fn();

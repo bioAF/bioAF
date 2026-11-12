@@ -40,6 +40,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { useLaunchSelection } from "@/components/launch/useLaunchSelection";
+import { usePermissionGate } from "@/hooks/useInfrastructureActions";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -73,6 +74,9 @@ export default function NotebooksPage() {
   const [showLaunchModal, setShowLaunchModal] = useState(false);
   const launchGuard = useSubmitGuard();
   const launching = launchGuard.busy;
+  // Launching needs notebooks launch (the server refuses it otherwise); viewing sessions needs view.
+  const launchPermission = usePermissionGate<"launch">("notebooks");
+  const launchGate = launchPermission.gate("launch");
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<ResourceProfile>("small");
   const [profileAvailability, setProfileAvailability] = useState<Record<string, boolean>>({});
@@ -216,6 +220,7 @@ export default function NotebooksPage() {
   }
 
   function openLaunchModal() {
+    if (!launchPermission.allowed("launch")) return;
     // A new opening keeps the previous choices; only the file selection and any launch
     // still settling from an earlier opening are left behind.
     selection.begin({ keep: true });
@@ -230,6 +235,7 @@ export default function NotebooksPage() {
   }
 
   function handleRecreateSession(source: NotebookSession) {
+    if (!launchPermission.allowed("launch")) return;
     const prefill = prefillFromNotebookSession(source);
     // Resolve the environment that owns this version so the selector names it.
     const owner = prefill.environment_version_id
@@ -269,7 +275,7 @@ export default function NotebooksPage() {
   }
 
   function handleLaunch(sessionType: SessionType) {
-    if (launching) return;
+    if (launching || !launchPermission.allowed("launch")) return;
     if (selectedFileIds.length === 0) {
       setPendingLaunch(sessionType);
       return;
@@ -286,6 +292,8 @@ export default function NotebooksPage() {
    * the list is refreshed either way.
    */
   function performLaunch(sessionType: SessionType) {
+    // Read again: the grant may have changed while the confirmation was open.
+    if (!launchPermission.stillAllowed("launch")) return;
     const opening = selection.opening;
     return launchGuard.run(async () => {
       setPendingLaunch(null);
@@ -344,7 +352,7 @@ export default function NotebooksPage() {
           </p>
         </div>
         <Button
-          onClick={openLaunchModal}>
+          onClick={openLaunchModal} {...launchGate}>
           Launch Session
         </Button>
       </div>
@@ -501,7 +509,8 @@ export default function NotebooksPage() {
                       )}
                       <button
                         onClick={() => handleRecreateSession(s)}
-                        className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50"
+                        {...launchGate}
+                        className="text-xs px-2 py-1 border border-green-600 text-green-700 rounded hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Recreate
                       </button>
@@ -697,7 +706,8 @@ export default function NotebooksPage() {
           {rstudioEnabled && (
             <button
               onClick={() => handleLaunch("rstudio")}
-              disabled={launching}
+              disabled={launching || launchGate.disabled}
+              title={launchGate.title}
               className="bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >
               {launching ? "Launching..." : "Launch RStudio"}
@@ -706,7 +716,8 @@ export default function NotebooksPage() {
           {jupyterEnabled && (
             <button
               onClick={() => handleLaunch("jupyter")}
-              disabled={launching}
+              disabled={launching || launchGate.disabled}
+              title={launchGate.title}
               className="bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >
               {launching ? "Launching..." : "Launch Jupyter"}
@@ -939,7 +950,7 @@ export default function NotebooksPage() {
                 Cancel
               </button>
               <Button
-                onClick={() => performLaunch(pendingLaunch)}>
+                onClick={() => performLaunch(pendingLaunch)} {...launchGate}>
                 Launch anyway
               </Button>
             </>

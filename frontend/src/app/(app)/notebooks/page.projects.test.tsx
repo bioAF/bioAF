@@ -11,6 +11,10 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/notebooks",
 }));
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn(), post: jest.fn() } }));
+// Launching needs notebooks launch.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 jest.mock("@/lib/auth", () => ({
   getToken: () => "fake-token",
   removeToken: jest.fn(),
