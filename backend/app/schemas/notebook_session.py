@@ -3,21 +3,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.entity_reference import ExperimentReference, ProjectSummary
 from app.schemas.user_summary import UserSummary
 
-
-class ExperimentSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
-
-
-class ProjectSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
+# The old name for the shared experiment link, kept for existing imports.
+ExperimentSummary = ExperimentReference
 
 
 class SessionLaunchRequest(BaseModel):
