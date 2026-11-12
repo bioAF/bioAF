@@ -19,7 +19,7 @@ from mypy import api as mypy_api
 BACKEND = Path(__file__).resolve().parents[1]
 PYPROJECT = BACKEND / "pyproject.toml"
 
-GATED = ["app.services.file_type_utils", "app.services.qc.template_helpers"]
+GATED = ["app.services.file_type_utils", "app.services.qc.template_helpers", "app.services.samplesheet_inputs"]
 ENABLED = {"assignment", "arg-type", "attr-defined", "union-attr", "return-value", "var-annotated", "dict-item"}
 
 # Each probe is appended to the gated module; the expected code is what mypy must report.

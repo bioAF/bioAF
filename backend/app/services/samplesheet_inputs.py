@@ -23,6 +23,9 @@ the rest of           declared ``sample_field`` bindings
 ``input_files``       reads, file columns, missing-file decisions, provenance
 ==================== =========================================================
 
+The records are fully typed. ``from_file``, ``from_sample`` and ``require_sheet_samples`` take
+dynamic ORM or caller objects (``Any``) and are the only conversion points.
+
 Building one does no I/O. ``from_sample`` reads attributes the caller has
 already loaded, and never the sample's own ``files`` relationship.
 """
@@ -77,7 +80,8 @@ class SheetSampleInput:
     """One selected sample, with the files it may feed this run, in the order given."""
 
     id: int
-    uuid: Any
+    # Read only as identity text (str() of it); never narrowed here.
+    uuid: object
     external_id: str | None
     prep_notes: str | None
     donor_source: str | None
