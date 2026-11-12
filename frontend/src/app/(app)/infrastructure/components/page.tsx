@@ -2,7 +2,7 @@
 
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
@@ -11,130 +11,18 @@ import { TerraformRunHistory } from "@/components/infrastructure/TerraformRunHis
 import { OrphanedResourcesCard } from "@/components/infrastructure/OrphanedResourcesCard";
 import { DeployRecoveryModal } from "@/components/infrastructure/DeployRecoveryModal";
 import { InfraUpdatesCard } from "@/components/infrastructure/InfraUpdatesCard";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useDeploymentProgress } from "@/hooks/useDeploymentProgress";
-import { useCapabilities } from "@/hooks/useCapabilities";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay } from "@/lib/storageDisplay";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
-import { logError } from "@/lib/errorReporting";
-import { useResource } from "@/hooks/useResource";
-import { invalidateComponentCache } from "@/hooks/useComponents";
-import { useConfirm } from "@/hooks/useConfirm";
-import { notebookSupportForMachine } from "@/lib/notebookCapacity";
-import { DISK_TYPE_OPTIONS, describeDiskFor } from "./clusterDiskOptions";
-import {
-  applyIsBlocked,
-  describePoolCapacity,
-  describeVerdict,
-  type QuotaVerdict,
-} from "./clusterQuotaVerdict";
 import { Button } from "@/components/ui/Button";
-import {
-  INTERACTIVE_MACHINE_OPTIONS,
-  PIPELINE_MACHINE_OPTIONS,
-  formatMachineOptionLabel,
-} from "@/lib/clusterMachineOptions";
-
-interface TerraformStatus {
-  terraform_initialized: boolean;
-  terraform_state_bucket: string;
-  gcp_credentials_configured: boolean;
-  active_run_id: number | null;
-  active_run_status: string | null;
-}
-
-interface TerraformRun {
-  id: number;
-  action: string;
-  module_name: string | null;
-  status: string;
-  resources_planned: number | null;
-  resources_completed: number;
-  triggered_by_user_id: number;
-  started_at: string;
-  completed_at: string | null;
-  error_message: string | null;
-  plan_json: object | null;
-  terraform_state_url: string | null;
-}
-
-interface NodePoolInfo {
-  name: string;
-  machine_type: string;
-  min_nodes: number;
-  max_nodes: number;
-  current_nodes: number;
-  spot: boolean;
-  status: string;
-}
-
-interface ClusterInfo {
-  cluster_name: string;
-  status: string;
-  node_count: number;
-  pipeline_pool: NodePoolInfo;
-  interactive_pool: NodePoolInfo;
-}
-
-interface StackStatus {
-  compute_stack: string | null;
-  compute_deployed: boolean;
-  storage_deployed: boolean;
-  pubsub_configured: boolean;
-  cluster: ClusterInfo | null;
-  has_orphaned_clusters: boolean;
-}
-
-interface ComponentDef {
-  key: string;
-  name: string;
-  category: string;
-  description: string;
-  cost_estimate: string;
-  dependencies: string[];
-  status: string;
-  configurable: boolean;
-}
-
-interface ComponentsData {
-  compute_stack: string | null;
-  compute_deployed: boolean;
-  storage_deployed: boolean;
-  components: ComponentDef[];
-}
-
-interface ClusterConfig {
-  k8s_pipeline_machine_type: string;
-  k8s_pipeline_max_nodes: number;
-  k8s_pipeline_use_spot: boolean;
-  k8s_pipeline_disk_size_gb: number;
-  k8s_pipeline_disk_type: string;
-  k8s_interactive_machine_type: string;
-  k8s_interactive_max_nodes: number;
-  // What the CURRENT pool can build. Terraform reporting success and GKE reporting
-  // RUNNING were both true of a pool with zero capacity; this is what tells them apart.
-  pipeline_pool_quota?: QuotaVerdict | null;
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  pipeline_orchestration: "Pipeline Orchestration",
-  analysis: "Analysis",
-  visualization: "Visualization",
-  search: "Search",
-};
-
-const CATEGORY_ORDER = [
-  "pipeline_orchestration",
-  "analysis",
-  "visualization",
-  "search",
-];
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { ClusterStatusCard } from "./ClusterStatusCard";
+import { AddOnComponentsSection } from "./AddOnComponentsSection";
+import type { ComponentsData, StackStatus, TerraformRun, TerraformStatus, ClusterConfig } from "./infrastructureTypes";
 
 export default function InfraComponentsPage() {
-  const confirm = useConfirm();
-  const { has } = useCapabilities();
   // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
   // to GCP defaults so a GCP install renders unchanged.
   const { kubernetesOption, cloudProvider } = useStackOptions();
@@ -149,6 +37,11 @@ export default function InfraComponentsPage() {
   const [componentsData, setComponentsData] = useState<ComponentsData | null>(null);
   const [clusterConfig, setClusterConfig] = useState<ClusterConfig | null>(null);
   const toast = useToast();
+  // Each mutation needs its endpoint's permission (configure / deploy / create); reading needs view.
+  const actions = useInfrastructureActions();
+  const configureGate = actions.gate("configure");
+  const deployGate = actions.gate("deploy");
+  const createGate = actions.gate("create");
   const [showBootstrapModal, setShowBootstrapModal] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [deployStarted, setDeployStarted] = useState(false);
@@ -161,15 +54,6 @@ export default function InfraComponentsPage() {
   const [showDestroyStorageProgress, setShowDestroyStorageProgress] = useState(false);
   const [destroyStorageChecked, setDestroyStorageChecked] = useState(false);
   const [destroyStoragePhrase, setDestroyStoragePhrase] = useState("");
-  const [showConfigPanel, setShowConfigPanel] = useState(false);
-  const [showSpotTooltip, setShowSpotTooltip] = useState(false);
-  const [configEdits, setConfigEdits] = useState<Partial<ClusterConfig>>({});
-  const [quotaVerdict, setQuotaVerdict] = useState<QuotaVerdict | null>(null);
-  const [configSaving, setConfigSaving] = useState(false);
-  const [showRedeployConfirm, setShowRedeployConfirm] = useState(false);
-  const [configError, setConfigError] = useState("");
-  const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
-  const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
@@ -257,74 +141,10 @@ export default function InfraComponentsPage() {
     setShowRecoveryModal(true);
   }, [stackStatus, deployProgress.active, recoveryCheckedOnLoad]);
 
-  // Fetch build status when any component is provisioning or build_failed
-  const buildRelatedComponents = componentsData?.components.filter(
-    (c) => c.status === "provisioning" || c.status === "build_failed",
-  ) ?? [];
-  const hasBuildRelated = buildRelatedComponents.length > 0;
-
-  // Map component keys to their build status endpoints
-  const notebookKeys = new Set(["rstudio", "jupyterhub"]);
-  const cellxgeneKeys = new Set(["cellxgene"]);
-
-  // Which build-status endpoints apply; the read is keyed by them, so a page-data reload that
-  // leaves them (and the components' statuses) unchanged does not start a new read. That matters: a finished build asks for a
-  // page-data reload, and when the reload re-triggered this read, a build that had already
-  // finished (or failed) reloaded the page in a tight loop.
-  const buildEndpoints: { type: string; url: string }[] = [];
-  if (buildRelatedComponents.some((c) => notebookKeys.has(c.key))) {
-    buildEndpoints.push({ type: "notebook", url: "/api/v1/infrastructure/notebook-image/build-status" });
-  }
-  if (buildRelatedComponents.some((c) => cellxgeneKeys.has(c.key))) {
-    buildEndpoints.push({ type: "cellxgene", url: "/api/v1/infrastructure/cellxgene-image/build-status" });
-  }
-  // The related components' statuses are part of the key, so a Retry Build (failed ->
-  // provisioning) reads at once, while a reload that changes nothing does not.
-  const buildKey = hasBuildRelated
-    ? `build-status:${buildEndpoints.map((ep) => ep.type).join(",")}:${buildRelatedComponents
-        .map((c) => `${c.key}=${c.status}`)
-        .join(",")}`
-    : null;
-  const buildEndpointsRef = useRef(buildEndpoints);
-  buildEndpointsRef.current = buildEndpoints;
-  const isProvisioning = componentsData?.components.some((c) => c.status === "provisioning") ?? false;
-
-  // Polls every 15 s, after the previous read settles, while a component is provisioning; a
-  // build_failed component alone is read once. A failed read keeps the last statuses.
-  const buildPoll = useResource(
-    buildKey,
-    useCallback(async (signal: AbortSignal) => {
-      const results: Record<string, { build_id: string | null; build_status: string | null; image_uri: string | null }> = {};
-      for (const ep of buildEndpointsRef.current) {
-        results[ep.type] = await api.get<{
-          build_id: string | null;
-          build_status: string | null;
-          image_uri: string | null;
-        }>(ep.url, { signal });
-      }
-      return results;
-    }, []),
-    {
-      poll: isProvisioning ? 15000 : false,
-      onSuccess: (results) => {
-        const anyFinished = Object.values(results).some(
-          (status) => status.build_status && !["WORKING", "QUEUED"].includes(status.build_status),
-        );
-        if (anyFinished) {
-          setRefreshKey((k) => k + 1);
-        }
-      },
-      onError: (e) => logError("reading image build status", e),
-    },
-  );
-
-  // The statuses shown are the latest answer for the current build key (none when nothing builds).
-  const buildStatusMap = buildPoll.data ?? {};
-
   const [deployLoading, setDeployLoading] = useState(false);
 
   function handleStartDeploy() {
-    if (deployLoading) return;
+    if (deployLoading || !actions.allowed("deploy")) return;
 
     // Check for orphaned clusters before deploying to prevent duplicates
     if (stackStatus?.has_orphaned_clusters) {
@@ -340,6 +160,7 @@ export default function InfraComponentsPage() {
 
   async function handleConfirmDeploy() {
     setShowDeployConfirm(false);
+    if (!actions.stillAllowed("deploy")) return;
     setDeployLoading(true);
     try {
       const body: Record<string, string> = { stack_type: "kubernetes" };
@@ -376,6 +197,7 @@ export default function InfraComponentsPage() {
 
   async function handleStartFresh() {
     setShowRecoveryModal(false);
+    if (!actions.stillAllowed("deploy")) return;
     // Orphans were cleaned by the modal, now start fresh deploy
     setDeployLoading(true);
     try {
@@ -393,7 +215,7 @@ export default function InfraComponentsPage() {
   }
 
   async function handleAbortDeploy() {
-    if (!deployProgress.run_id) return;
+    if (!deployProgress.run_id || !actions.stillAllowed("create")) return;
     setAbortLoading(true);
     try {
       await api.post(`/api/v1/infrastructure/terraform/abandon/${deployProgress.run_id}`);
@@ -429,7 +251,7 @@ export default function InfraComponentsPage() {
   }
 
   async function handleAbandonRun() {
-    if (!tfStatus?.active_run_id) return;
+    if (!tfStatus?.active_run_id || !actions.stillAllowed("create")) return;
     setAbandonLoading(true);
     try {
       await api.post(`/api/v1/infrastructure/terraform/abandon/${tfStatus.active_run_id}`);
@@ -440,196 +262,6 @@ export default function InfraComponentsPage() {
       toast.error(message);
     } finally {
       setAbandonLoading(false);
-    }
-  }
-
-  // Components that have a built image
-  const imageComponents = new Set(["rstudio", "jupyterhub", "cellxgene"]);
-
-  async function handleComponentToggle(componentKey: string, rebuildChoice?: boolean) {
-    setComponentErrors((prev) => ({ ...prev, [componentKey]: "" }));
-
-    // When re-enabling an image component, check if it already has a
-    // successful build and ask the user whether to rebuild.
-    const comp = componentsData?.components.find((c) => c.key === componentKey);
-    const isEnabling = comp && comp.status === "disabled";
-    let forceRebuild = rebuildChoice ?? false;
-
-    if (rebuildChoice === undefined && isEnabling && imageComponents.has(componentKey)) {
-      // Check if there's already a successful image for this component
-      const buildType = cellxgeneKeys.has(componentKey) ? "cellxgene" : "notebook";
-      const statusUrl = buildType === "cellxgene"
-        ? "/api/v1/infrastructure/cellxgene-image/build-status"
-        : "/api/v1/infrastructure/notebook-image/build-status";
-      try {
-        const status = await api.get<{
-          build_id: string | null;
-          build_status: string | null;
-          image_uri: string | null;
-        }>(statusUrl);
-        if (status.image_uri) {
-          // Hand off to the dialog and stop here. It re-enters this function with
-          // an explicit choice, so dismissing it genuinely does nothing.
-          setPendingRebuild(componentKey);
-          return;
-        }
-      } catch {
-        // No existing build -- proceed normally
-      }
-    }
-
-    // Disabling had no gate while ENABLING opens a three-way dialog above. The
-    // asymmetry ran the wrong way: re-enabling is recoverable, tearing down a
-    // deployed add-on takes any sessions running on it with it.
-    if (comp && comp.status === "enabled") {
-      const ok = await confirm({
-        title: `Disable ${comp.name}?`,
-        message: (
-          <>
-            <p>
-              This tears down the deployed {comp.name} component.{" "}
-              <span className="font-medium">Any sessions currently running on it stop</span>, and
-              unsaved work in them is lost.
-            </p>
-            <p>
-              Files in storage are not affected, and you can enable it again later, though that
-              means provisioning it from scratch.
-            </p>
-          </>
-        ),
-        confirmLabel: "Disable",
-        variant: "danger",
-      });
-      if (!ok) return;
-    }
-
-    setTogglingComponent(componentKey);
-    try {
-      const url = forceRebuild
-        ? `/api/v1/infrastructure/stack/components/${componentKey}/toggle?force_rebuild=true`
-        : `/api/v1/infrastructure/stack/components/${componentKey}/toggle`;
-      await api.post(url);
-      invalidateComponentCache();
-      setRefreshKey((k) => k + 1);
-    } catch (e) {
-      logError(`toggling the ${componentKey} component`, e);
-      // A 4xx here is a validation message the backend wrote FOR the admin, e.g.
-      // "Dependency not met: kubernetes_cluster must be enabled first". That is
-      // already the plain sentence, and it names the fix. Replacing it with the
-      // generic house sentence threw away the only useful part, so the rule is
-      // scoped: show the server's reason when it gave one, otherwise say nothing
-      // technical.
-      const status = (e as { status?: number } | null)?.status;
-      const reason = status && status >= 400 && status < 500 && e instanceof Error ? e.message : null;
-      setComponentErrors((prev) => ({
-        ...prev,
-        [componentKey]:
-          reason ?? "That change could not be applied. The technical detail is in the application logs.",
-      }));
-    } finally {
-      setTogglingComponent(null);
-    }
-  }
-
-  const [pendingRebuild, setPendingRebuild] = useState<string | null>(null);
-
-  const [cancellingBuild, setCancellingBuild] = useState(false);
-
-  async function handleCancelBuild() {
-    setCancellingBuild(true);
-    try {
-      await api.post("/api/v1/infrastructure/notebook-image/cancel");
-      setRefreshKey((k) => k + 1);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Cancel failed";
-      toast.error(message);
-    } finally {
-      setCancellingBuild(false);
-    }
-  }
-
-  async function handleRetryBuild(componentKey: string) {
-    setTogglingComponent(componentKey);
-    try {
-      // Disable then re-enable to trigger a fresh build
-      await api.post(`/api/v1/infrastructure/stack/components/${componentKey}/toggle`);
-      await api.post(`/api/v1/infrastructure/stack/components/${componentKey}/toggle`);
-      invalidateComponentCache();
-      setRefreshKey((k) => k + 1);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Retry failed";
-      setComponentErrors((prev) => ({ ...prev, [componentKey]: message }));
-    } finally {
-      setTogglingComponent(null);
-    }
-  }
-
-  /**
-   * Price the pending edits against the region's live quota.
-   *
-   * Debounced because it runs on every keystroke in the disk-size field, and it is a cloud
-   * round-trip. With no pending edits the panel falls back to the verdict for the CURRENT pool,
-   * which is what the capacity line reports.
-   *
-   * A failed preflight clears the verdict rather than blocking: the whole design fails open, and
-   * an operator must never be stopped by a call that did not answer.
-   */
-  useEffect(() => {
-    if (!showConfigPanel) return;
-    if (Object.keys(configEdits).length === 0) {
-      setQuotaVerdict(clusterConfig?.pipeline_pool_quota ?? null);
-      return;
-    }
-
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const verdict = await api.post<QuotaVerdict>(
-          "/api/v1/infrastructure/cluster/config/preflight",
-          configEdits,
-        );
-        if (!cancelled) setQuotaVerdict(verdict);
-      } catch (e) {
-        logError("cluster config quota preflight", e);
-        if (!cancelled) setQuotaVerdict(null);
-      }
-    }, 400);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [configEdits, showConfigPanel, clusterConfig]);
-
-  /**
-   * True when the pending edits change something in a pool's `node_config`,
-   * which is what forces GKE to recreate the pool: the machine type, or the
-   * node disk's size or type. Scaling max_nodes or flipping spot does not
-   * destroy running work, so the confirmation must not claim it does.
-   */
-  function redeployRecreatesAPool(): boolean {
-    return (
-      configEdits.k8s_pipeline_machine_type !== undefined ||
-      // A disk change recreates the node pool, exactly like a machine-type change.
-      configEdits.k8s_pipeline_disk_size_gb !== undefined ||
-      configEdits.k8s_pipeline_disk_type !== undefined ||
-      configEdits.k8s_interactive_machine_type !== undefined
-    );
-  }
-
-  async function handleApplyClusterConfig() {
-    setShowRedeployConfirm(false);
-    setConfigError("");
-    setConfigSaving(true);
-    try {
-      await api.post("/api/v1/infrastructure/cluster/config", configEdits);
-      setConfigEdits({});
-      setShowConfigPanel(false);
-      setShowDeployModal(true);
-    } catch (e) {
-      setConfigError(e instanceof Error ? e.message : "Failed to apply changes");
-    } finally {
-      setConfigSaving(false);
     }
   }
 
@@ -670,6 +302,7 @@ export default function InfraComponentsPage() {
                   </div>
                   <button
                     onClick={() => setShowAbandonModal(true)}
+                    {...createGate}
                     className="ml-4 shrink-0 px-3 py-1.5 text-sm text-amber-800 bg-amber-200 hover:bg-amber-300 rounded font-medium"
                   >
                     Abandon
@@ -711,6 +344,7 @@ export default function InfraComponentsPage() {
                       setDestroyStoragePhrase("");
                       setShowDestroyStorageModal(true);
                     }}
+                    {...configureGate}
                     className="ml-4 shrink-0 text-sm text-red-600 hover:text-red-800 font-medium"
                   >
                     Destroy Storage
@@ -760,6 +394,7 @@ export default function InfraComponentsPage() {
                           </Button>
                           <button
                             onClick={() => setShowAbortConfirm(true)}
+                            {...createGate}
                             className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
                           >
                             Abort
@@ -775,7 +410,8 @@ export default function InfraComponentsPage() {
                         )}
                         <Button
                           onClick={handleStartDeploy}
-                          disabled={deployLoading}>
+                          disabled={deployLoading || !actions.allowed("deploy")}
+                          title={deployGate.title}>
                           {deployLoading ? "Starting..." : "Deploy"}
                         </Button>
                       </>
@@ -815,475 +451,23 @@ export default function InfraComponentsPage() {
                       setTeardownChecked(false);
                       setShowTeardownModal(true);
                     }}
+                    {...configureGate}
                     className="ml-auto text-sm text-red-600 hover:text-red-800"
                   >
                     Teardown
                   </button>
                 </div>
 
-                {/* Cluster Status Card */}
-                {stackStatus?.cluster && (
-                  <div className="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <h3 className="font-semibold">Cluster Status</h3>
-                        <span className="text-sm text-gray-600">
-                          {stackStatus.cluster.cluster_name}
-                        </span>
-                        <span className="w-2 h-2 bg-green-500 rounded-full" />
-                      </div>
-                      <button
-                        onClick={() => setShowConfigPanel(!showConfigPanel)}
-                        className="text-sm text-bioaf-600 hover:text-bioaf-700"
-                      >
-                        Configure
-                      </button>
-                    </div>
+                <ClusterStatusCard
+                  stackStatus={stackStatus}
+                  clusterConfig={clusterConfig}
+                  onApplied={() => setShowDeployModal(true)}
+                />
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Pipeline Pool */}
-                      <div className="bg-gray-50 rounded p-4">
-                        <h4 className="text-sm font-medium mb-2">Pipeline Pool</h4>
-                        <div className="text-xs text-gray-600 space-y-1">
-                          <p>Name: {stackStatus.cluster.pipeline_pool.name}</p>
-                          <p>Machine Type: {stackStatus.cluster.pipeline_pool.machine_type}</p>
-                          <p>Max Nodes: {stackStatus.cluster.pipeline_pool.max_nodes}</p>
-                          <p>Current: {stackStatus.cluster.pipeline_pool.current_nodes}</p>
-                          <p>Spot: {stackStatus.cluster.pipeline_pool.spot ? "Yes" : "No"}</p>
-                        </div>
-                      </div>
-
-                      {/* Interactive Pool */}
-                      <div className="bg-gray-50 rounded p-4">
-                        <h4 className="text-sm font-medium mb-2">Interactive Pool</h4>
-                        <div className="text-xs text-gray-600 space-y-1">
-                          <p>Name: {stackStatus.cluster.interactive_pool.name}</p>
-                          {(() => {
-                            const mt = stackStatus.cluster.interactive_pool.machine_type;
-                            const support = notebookSupportForMachine(mt);
-                            return (
-                              <>
-                                <p>
-                                  Machine Type: {support.topLabel ? `${support.topLabel} (${mt})` : mt}
-                                </p>
-                                {support.supportSentence && (
-                                  <p className="text-gray-500">{support.supportSentence}</p>
-                                )}
-                              </>
-                            );
-                          })()}
-                          <p>Max Nodes: {stackStatus.cluster.interactive_pool.max_nodes}</p>
-                          <p>Current: {stackStatus.cluster.interactive_pool.current_nodes}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Configuration Panel */}
-                    {showConfigPanel && clusterConfig && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <h4 className="text-sm font-medium mb-3">Cluster Configuration</h4>
-
-                        {configError && (
-                          <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
-                            {configError}
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {/* Pipeline Nodes column */}
-                          <div className="space-y-3">
-                            <h5 className="text-sm font-medium text-gray-700">Pipeline Nodes</h5>
-                            <p data-testid="pipeline-pool-capacity" className="text-xs text-gray-500">
-                              {describePoolCapacity(
-                                clusterConfig.pipeline_pool_quota,
-                                clusterConfig.k8s_pipeline_max_nodes,
-                              )}
-                            </p>
-                            <div>
-                              <label htmlFor="machine-size" className="text-xs text-gray-500">Machine Size</label>
-                              <select id="machine-size"
-                                value={configEdits.k8s_pipeline_machine_type ?? clusterConfig.k8s_pipeline_machine_type}
-                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_machine_type: e.target.value })}
-                                className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
-                                disabled={configSaving}
-                              >
-                                {PIPELINE_MACHINE_OPTIONS.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {formatMachineOptionLabel(opt)}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            {has("autoscaling") && (
-                            <div>
-                              <label htmlFor="max-nodes" className="text-xs text-gray-500">Max Nodes</label>
-                              <input id="max-nodes"
-                                type="number"
-                                value={configEdits.k8s_pipeline_max_nodes ?? clusterConfig.k8s_pipeline_max_nodes}
-                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_max_nodes: Number(e.target.value) })}
-                                className="w-full border rounded px-2 py-1 text-sm mt-1"
-                                disabled={configSaving}
-                              />
-                            </div>
-                            )}
-                            <div>
-                              <label htmlFor="pipeline-disk-size" className="text-xs text-gray-500">
-                                Node Disk (GB)
-                              </label>
-                              <input id="pipeline-disk-size"
-                                type="number"
-                                min={50}
-                                max={1000}
-                                value={configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb}
-                                onChange={(e) =>
-                                  setConfigEdits({ ...configEdits, k8s_pipeline_disk_size_gb: Number(e.target.value) })
-                                }
-                                className="w-full border rounded px-2 py-1 text-sm mt-1"
-                                disabled={configSaving}
-                              />
-                              <p className="mt-1 text-xs text-gray-500">
-                                {describeDiskFor(
-                                  configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb,
-                                )}
-                              </p>
-                            </div>
-                            <div>
-                              <label htmlFor="pipeline-disk-type" className="text-xs text-gray-500">
-                                Node Disk Type
-                              </label>
-                              <select id="pipeline-disk-type"
-                                value={configEdits.k8s_pipeline_disk_type ?? clusterConfig.k8s_pipeline_disk_type}
-                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_disk_type: e.target.value })}
-                                className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
-                                disabled={configSaving}
-                              >
-                                {DISK_TYPE_OPTIONS.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            {has("spot_retry") && (
-                            <div className="flex items-center gap-2">
-                              <label className="text-xs text-gray-500">Spot Instances</label>
-                              <div className="relative">
-                                <button
-                                  type="button"
-                                  onClick={() => setShowSpotTooltip(!showSpotTooltip)}
-                                  className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-gray-500 text-[10px] leading-none hover:border-gray-600 hover:text-gray-600"
-                                >
-                                  i
-                                </button>
-                                {showSpotTooltip && (
-                                  <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10 w-72 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg">
-                                    Spot instances cost 60-70% less than standard VMs but can be reclaimed by Google Cloud with 30 seconds notice. bioAF automatically retries interrupted pipeline tasks without re-requesting additional resources. Recommended for most workloads. Disable only if your pipelines cannot tolerate any interruption.
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); setShowSpotTooltip(false); }}
-                                      className="absolute top-1 right-2 text-gray-500 hover:text-white"
-                                    >
-                                      x
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                disabled={configSaving}
-                                onClick={() => {
-                                  const current = configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot;
-                                  setConfigEdits({ ...configEdits, k8s_pipeline_use_spot: !current });
-                                }}
-                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                                  (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
-                                    ? "bg-bioaf-600"
-                                    : "bg-gray-300"
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                    (configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot)
-                                      ? "translate-x-4.5"
-                                      : "translate-x-0.5"
-                                  }`}
-                                />
-                              </button>
-                              <span className="text-xs text-gray-600">
-                                {(configEdits.k8s_pipeline_use_spot ?? clusterConfig.k8s_pipeline_use_spot) ? "On" : "Off"}
-                              </span>
-                            </div>
-                            )}
-                          </div>
-
-                          {/* Interactive Nodes column */}
-                          <div className="space-y-3">
-                            <h5 className="text-sm font-medium text-gray-700">Interactive Nodes</h5>
-                            <div>
-                              <label htmlFor="machine-size-2" className="text-xs text-gray-500">Machine Size</label>
-                              <select id="machine-size-2"
-                                value={configEdits.k8s_interactive_machine_type ?? clusterConfig.k8s_interactive_machine_type}
-                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_machine_type: e.target.value })}
-                                className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
-                                disabled={configSaving}
-                              >
-                                {INTERACTIVE_MACHINE_OPTIONS.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {formatMachineOptionLabel(opt)}
-                                  </option>
-                                ))}
-                              </select>
-                              {(() => {
-                                const selected =
-                                  configEdits.k8s_interactive_machine_type ??
-                                  clusterConfig.k8s_interactive_machine_type;
-                                const sentence = notebookSupportForMachine(selected).supportSentence;
-                                return sentence ? (
-                                  <p className="text-xs text-gray-500 mt-1">{sentence}</p>
-                                ) : null;
-                              })()}
-                            </div>
-                            {has("autoscaling") && (
-                            <div>
-                              <label htmlFor="max-nodes-2" className="text-xs text-gray-500">Max Nodes</label>
-                              <input id="max-nodes-2"
-                                type="number"
-                                value={configEdits.k8s_interactive_max_nodes ?? clusterConfig.k8s_interactive_max_nodes}
-                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_max_nodes: Number(e.target.value) })}
-                                className="w-full border rounded px-2 py-1 text-sm mt-1"
-                                disabled={configSaving}
-                              />
-                            </div>
-                            )}
-                          </div>
-                        </div>
-                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-4">
-                          Applying these changes redeploys the cluster immediately. Replacing a
-                          machine type recreates its node pool, which stops pipelines and notebooks
-                          running on it.
-                        </p>
-                        {(() => {
-                          // What this region's quota allows for the pending edits. A config that
-                          // could not build one node is refused here rather than accepted, applied,
-                          // reported RUNNING, and discovered as a run whose pods never schedule.
-                          const display = describeVerdict(quotaVerdict);
-                          if (!display) return null;
-                          const tone =
-                            display.tone === "error"
-                              ? "text-red-700 bg-red-50 border-red-200"
-                              : display.tone === "warning"
-                                ? "text-amber-700 bg-amber-50 border-amber-200"
-                                : "text-gray-600 bg-gray-50 border-gray-200";
-                          return (
-                            <p
-                              data-testid="cluster-quota-verdict"
-                              className={`text-xs border rounded px-3 py-2 mt-2 ${tone}`}
-                            >
-                              {display.text}
-                            </p>
-                          );
-                        })()}
-                        <div className="flex gap-2 mt-4">
-                          <button
-                            disabled={
-                              configSaving ||
-                              Object.keys(configEdits).length === 0 ||
-                              applyIsBlocked(quotaVerdict)
-                            }
-                            onClick={() => setShowRedeployConfirm(true)}
-                            className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-                          >
-                            {configSaving ? "Applying..." : "Apply and redeploy"}
-                          </button>
-                          <button
-                            disabled={configSaving}
-                            onClick={() => {
-                              setShowConfigPanel(false);
-                              setConfigEdits({});
-                              setConfigError("");
-                            }}
-                            className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Add-on Components */}
-                {componentsData && componentsData.components.length > 0 && (
-                  <div className="space-y-6 mb-8">
-                    {CATEGORY_ORDER.filter((cat) =>
-                      componentsData.components.some((c) => c.category === cat)
-                    ).map((category) => (
-                      <div key={category}>
-                        <h2 className="text-lg font-semibold mb-3">
-                          {CATEGORY_LABELS[category] ?? category}
-                        </h2>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {componentsData.components
-                            .filter((c) => c.category === category)
-                            .map((comp) => comp.status === "coming_soon" ? (
-                              <div
-                                key={comp.key}
-                                className="bg-white rounded-lg shadow p-5 border border-gray-200 opacity-60"
-                              >
-                                <div className="flex items-start justify-between mb-2">
-                                  <h3 className="font-semibold text-sm text-gray-500">{comp.name}</h3>
-                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
-                                    Coming Soon
-                                  </span>
-                                </div>
-                                <p className="text-xs text-gray-500">{comp.description}</p>
-                              </div>
-                            ) : (
-                              <div
-                                key={comp.key}
-                                className="bg-white rounded-lg shadow p-5 border border-gray-200"
-                              >
-                                {(() => {
-                                  // Resolve the right build status for this component
-                                  const buildType = cellxgeneKeys.has(comp.key) ? "cellxgene" : "notebook";
-                                  const buildStatus = buildStatusMap[buildType] ?? null;
-                                  return (<>
-                                <div className="flex items-start justify-between mb-2">
-                                  <h3 className="font-semibold text-sm">{comp.name}</h3>
-                                  {(() => {
-                                    const buildFailed = comp.status === "build_failed" ||
-                                      (comp.status === "provisioning" && buildStatus && ["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? ""));
-                                    return (
-                                      <span
-                                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                          comp.status === "enabled"
-                                            ? "bg-green-100 text-green-700"
-                                            : buildFailed
-                                              ? "bg-red-100 text-red-700"
-                                              : comp.status === "provisioning"
-                                                ? "bg-amber-100 text-amber-700"
-                                                : comp.status === "queued_for_infra"
-                                                  ? "bg-blue-100 text-blue-700"
-                                                  : "bg-gray-100 text-gray-600"
-                                        }`}
-                                      >
-                                        {comp.status === "enabled"
-                                          ? "Enabled"
-                                          : buildFailed
-                                            ? "Build Failed"
-                                            : comp.status === "provisioning"
-                                              ? "Building Image..."
-                                              : comp.status === "queued_for_infra"
-                                                ? "Queued"
-                                                : "Disabled"}
-                                      </span>
-                                    );
-                                  })()}
-                                </div>
-                                <p className="text-xs text-gray-600 mb-3">{comp.description}</p>
-                                {comp.dependencies.length > 0 && (
-                                  <p className="text-xs text-gray-500 mb-2">
-                                    Requires: {comp.dependencies.join(", ")}
-                                  </p>
-                                )}
-                                {/* No answer yet: the building panel below needs one, so a failed first read is said here. */}
-                                {comp.status === "provisioning" && !buildStatus && buildPoll.error !== null && (
-                                  <p data-testid="build-status-load-failed" role="status" className="text-xs text-red-600 mb-2">
-                                    Image build status is unavailable. bioAF will keep checking.
-                                  </p>
-                                )}
-                                {/* Show building panel only when actually building (not when build already failed) */}
-                                {comp.status === "provisioning" && buildStatus && !["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? "") && (
-                                  <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2">
-                                    <p className="text-xs font-medium text-amber-800">
-                                      Building image...
-                                    </p>
-                                    <p className="text-xs text-amber-700 mt-0.5">
-                                      Status: {buildStatus.build_status ?? "Starting"}
-                                      {buildStatus.build_id && (
-                                        <span className="text-amber-400 ml-1">
-                                          ({buildStatus.build_id.slice(0, 8)})
-                                        </span>
-                                      )}
-                                    </p>
-                                    <p className="text-xs text-amber-500 mt-0.5">
-                                      This one-time setup can take up to an hour. You can leave this page.
-                                    </p>
-                                    {buildPoll.error !== null && (
-                                      <p data-testid="build-status-unavailable" role="status" className="text-xs text-red-600 mt-0.5">
-                                        Build status could not be refreshed. bioAF keeps checking.
-                                      </p>
-                                    )}
-                                    <button
-                                      onClick={handleCancelBuild}
-                                      disabled={cancellingBuild}
-                                      className="mt-1 text-xs text-red-600 hover:text-red-800 font-medium"
-                                    >
-                                      {cancellingBuild ? "Cancelling..." : "Cancel Build"}
-                                    </button>
-                                  </div>
-                                )}
-                                {/* Show failure panel for build_failed OR provisioning-but-actually-failed */}
-                                {(comp.status === "build_failed" || (comp.status === "provisioning" && buildStatus && ["FAILURE", "CANCELLED", "TIMEOUT"].includes(buildStatus.build_status ?? ""))) && (
-                                  <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
-                                    <p className="text-xs font-medium text-red-800">
-                                      Image build failed
-                                    </p>
-                                    {buildStatus?.build_id && (
-                                      <p className="text-xs text-red-600 mt-0.5">
-                                        Build: {buildStatus.build_id.slice(0, 8)} -- {buildStatus.build_status}
-                                      </p>
-                                    )}
-                                    <button
-                                      onClick={() => handleRetryBuild(comp.key)}
-                                      disabled={togglingComponent === comp.key}
-                                      className="mt-1 text-xs text-bioaf-600 hover:text-bioaf-700 font-medium"
-                                    >
-                                      {togglingComponent === comp.key ? "Retrying..." : "Retry Build"}
-                                    </button>
-                                  </div>
-                                )}
-                                <div className="flex items-center justify-end mt-3">
-                                  <button
-                                    onClick={() => handleComponentToggle(comp.key)}
-                                    disabled={comp.status === "provisioning" || comp.status === "build_failed" || togglingComponent === comp.key}
-                                    className={`px-3 py-1 text-xs rounded font-medium ${
-                                      togglingComponent === comp.key
-                                        ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                        : comp.status === "enabled"
-                                          ? "bg-red-50 text-red-700 hover:bg-red-100"
-                                          : comp.status === "provisioning"
-                                            ? "bg-amber-100 text-amber-700 cursor-not-allowed"
-                                            : comp.status === "build_failed"
-                                              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                                              : "bg-bioaf-600 text-white hover:bg-bioaf-700"
-                                    }`}
-                                  >
-                                    {togglingComponent === comp.key
-                                      ? "Updating..."
-                                      : comp.status === "enabled"
-                                        ? "Disable"
-                                        : comp.status === "provisioning"
-                                          ? "Building..."
-                                          : comp.status === "build_failed"
-                                            ? "Failed"
-                                            : "Enable"}
-                                  </button>
-                                </div>
-                                {componentErrors[comp.key] && (
-                                  <p className="text-xs text-red-600 mt-2">
-                                    {componentErrors[comp.key]}
-                                  </p>
-                                )}
-                                </>);
-                                })()}
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <AddOnComponentsSection
+                  componentsData={componentsData}
+                  onChanged={() => setRefreshKey((k) => k + 1)}
+                />
 
                 {/* Storage Section */}
                 <div className="mt-8">
@@ -1367,7 +551,8 @@ export default function InfraComponentsPage() {
           </button>
           <Button
             onClick={handleConfirmDeploy}
-            disabled={deployLoading}>
+            disabled={deployLoading || !actions.allowed("deploy")}
+            title={deployGate.title}>
             {deployLoading ? "Starting..." : "Deploy"}
           </Button>
           </>
@@ -1473,9 +658,11 @@ export default function InfraComponentsPage() {
             Cancel
           </button>
           <Button variant="danger"
-            disabled={!teardownChecked}
+            disabled={!teardownChecked || !actions.allowed("configure")}
+            title={configureGate.title}
             onClick={async () => {
               setShowTeardownModal(false);
+              if (!actions.stillAllowed("configure")) return;
               try {
                 await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
                 setDeployStarted(true);
@@ -1544,9 +731,11 @@ export default function InfraComponentsPage() {
             Cancel
           </button>
           <Button variant="danger"
-            disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE}
+            disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE || !actions.allowed("configure")}
+            title={configureGate.title}
             onClick={async () => {
               setShowDestroyStorageModal(false);
+              if (!actions.stillAllowed("configure")) return;
               try {
                 await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
                 setDeployStarted(true);
@@ -1637,7 +826,8 @@ export default function InfraComponentsPage() {
           </button>
           <Button variant="danger"
             onClick={handleAbortDeploy}
-            disabled={abortLoading}>
+            disabled={abortLoading || !actions.allowed("create")}
+            title={createGate.title}>
             {abortLoading ? "Aborting..." : "Abort Deployment"}
           </Button>
           </>
@@ -1673,7 +863,8 @@ export default function InfraComponentsPage() {
           </button>
           <button
             onClick={handleAbandonRun}
-            disabled={abandonLoading}
+            disabled={abandonLoading || !actions.allowed("create")}
+            title={createGate.title}
             className="px-4 py-2 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
           >
             {abandonLoading ? "Abandoning..." : "Abandon Operation"}
@@ -1700,70 +891,6 @@ export default function InfraComponentsPage() {
         </p>
 
       </Modal>
-      {/* Gate on the cluster redeploy. This is client-side only: the endpoint
-          still plans and auto-applies in one request, so the two-step
-          awaiting_confirmation flow that e4ed8f9 removed stays removed. */}
-      <ConfirmDialog
-        open={showRedeployConfirm}
-        variant={redeployRecreatesAPool() ? "danger" : "default"}
-        title={
-          redeployRecreatesAPool()
-            ? "Replace the machine type and redeploy?"
-            : "Redeploy the cluster now?"
-        }
-        message={
-          redeployRecreatesAPool() ? (
-            <>
-              <p>
-                Replacing a machine type recreates its node pool. Pipelines and
-                notebooks running on that pool stop immediately and are not
-                resumed.
-              </p>
-              <p>Nothing changes if you cancel.</p>
-            </>
-          ) : (
-            <>
-              <p>
-                Applying these changes redeploys the cluster now. The node pools
-                are kept, so work already running continues.
-              </p>
-              <p>Nothing changes if you cancel.</p>
-            </>
-          )
-        }
-        confirmLabel="Redeploy"
-        busy={configSaving}
-        onConfirm={handleApplyClusterConfig}
-        onCancel={() => setShowRedeployConfirm(false)}
-      />
-      <ConfirmDialog
-        open={pendingRebuild !== null}
-        title="Rebuild the image?"
-        message={
-          <>
-            <p>
-              An image for this component already exists. You can rebuild it with the
-              latest definition, or enable the component using the image that is
-              already there.
-            </p>
-            <p>Rebuilding takes several minutes. Nothing happens if you cancel.</p>
-          </>
-        }
-        confirmLabel="Rebuild"
-        secondaryLabel="Use existing image"
-        cancelLabel="Cancel"
-        onConfirm={() => {
-          const key = pendingRebuild;
-          setPendingRebuild(null);
-          if (key) handleComponentToggle(key, true);
-        }}
-        onSecondary={() => {
-          const key = pendingRebuild;
-          setPendingRebuild(null);
-          if (key) handleComponentToggle(key, false);
-        }}
-        onCancel={() => setPendingRebuild(null)}
-      />
     </>
   );
 }
