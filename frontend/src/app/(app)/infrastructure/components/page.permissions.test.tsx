@@ -167,12 +167,15 @@ describe("a deployed stack", () => {
     ["loading", () => (mockPermissions.loading = true), /Checking your permissions/],
     ["unreadable", () => (mockPermissions.failed = true), /could not be confirmed/],
   ])("%s permissions allow nothing", async (_label, setup, reason) => {
+    // Infrastructure view is unconfirmed, so the page shows why and mounts no control at all.
     grant("configure", "deploy", "create");
     setup();
     serve({ deployed: true, activeRun: true });
     await renderPage();
-    expectGated(screen.getByRole("button", { name: "Teardown" }), reason);
-    expectGated(screen.getByRole("button", { name: "Abandon" }), reason);
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Teardown" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Abandon" })).not.toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 });
 

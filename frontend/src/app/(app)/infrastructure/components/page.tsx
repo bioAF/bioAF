@@ -19,17 +19,60 @@ import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { isPermissionDenied } from "@/lib/projectOptions";
 import { useResource } from "@/hooks/useResource";
+import { Alert } from "@/components/shared/Alert";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { Button } from "@/components/ui/Button";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { usePermissions } from "@/hooks/usePermissions";
 import { ClusterStatusCard } from "./ClusterStatusCard";
 import { AddOnComponentsSection } from "./AddOnComponentsSection";
 import { AbandonRunDialog, AbortDeploymentDialog, DestroyStorageDialog, TeardownDialog } from "./StackActionDialogs";
 import type { ComponentsData, StackStatus, TerraformRun, TerraformStatus, ClusterConfig } from "./infrastructureTypes";
 
+const VIEW_DENIED = "Your role does not include infrastructure view permission, so the infrastructure status is not shown.";
+
+function PageHeader() {
+  return (
+    <>
+      <h1 className="text-2xl font-bold mb-1">Components</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        The optional services that make up this installation, and whether each one is enabled and healthy.
+      </p>
+    </>
+  );
+}
+
+/** Why the page shows nothing: an explanation, never a Retry, since retrying cannot grant access. */
+function AccessNotice({ message }: { message: string }) {
+  return (
+    <Alert tone="info">{message}</Alert>
+  );
+}
+
+/**
+ * The navigation hides this page from a role without infrastructure view, but its URL still opens
+ * it. Nothing that reads infrastructure mounts until view is confirmed.
+ */
 export default function InfraComponentsPage() {
+  const { canAccess, loading, failed } = usePermissions();
+  if (!loading && !failed && canAccess("infrastructure", "view")) return <InfraComponentsContent />;
+  return (
+    <main className="flex-1 overflow-y-auto p-6">
+      <PageHeader />
+      {loading ? (
+        <LoadingSpinner label="Checking your permissions." />
+      ) : failed ? (
+        <AccessNotice message="Your permissions could not be confirmed, so the infrastructure status is not shown." />
+      ) : (
+        <AccessNotice message={VIEW_DENIED} />
+      )}
+    </main>
+  );
+}
+
+function InfraComponentsContent() {
   // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
   // to GCP defaults so a GCP install renders unchanged.
   const { kubernetesOption, cloudProvider } = useStackOptions();
@@ -89,7 +132,8 @@ export default function InfraComponentsPage() {
   // The page's reads, each on its own lifecycle: a failure is told apart from an empty answer, a
   // refresh keeps the last answer while it runs, and nothing settles into the page after it closes.
   // Terraform status needs change_status, which some roles that can view this page lack; that
-  // refusal is expected and leaves the rest of the page as it is.
+  // refusal is expected and leaves the rest of the page as it is. Every other read needs view, so
+  // its 403 means view was withdrawn: the page says so instead of offering a Retry.
   const logRead = (what: string) => (e: unknown) => logError(`loading ${what}`, e);
   const tf = useResource<TerraformStatus>(
     "infra:terraform-status",
@@ -99,22 +143,22 @@ export default function InfraComponentsPage() {
   const runList = useResource<{ runs: TerraformRun[] }>(
     "infra:terraform-runs",
     (signal) => api.get<{ runs: TerraformRun[] }>("/api/v1/infrastructure/terraform/runs", { signal }),
-    { onError: logRead("the Terraform runs") },
+    { expected: isPermissionDenied, onError: logRead("the Terraform runs") },
   );
   const stack = useResource<StackStatus>(
     "infra:stack-status",
     (signal) => api.get<StackStatus>("/api/v1/infrastructure/stack/status", { signal }),
-    { onError: logRead("the stack status") },
+    { expected: isPermissionDenied, onError: logRead("the stack status") },
   );
   const components = useResource<ComponentsData>(
     "infra:stack-components",
     (signal) => api.get<ComponentsData>("/api/v1/infrastructure/stack/components", { signal }),
-    { onError: logRead("the stack components") },
+    { expected: isPermissionDenied, onError: logRead("the stack components") },
   );
   const cluster = useResource<ClusterConfig>(
     "infra:cluster-config",
     (signal) => api.get<ClusterConfig>("/api/v1/infrastructure/cluster/config", { signal }),
-    { onError: logRead("the cluster configuration") },
+    { expected: isPermissionDenied, onError: logRead("the cluster configuration") },
   );
   // The compute region comes from the install's cloud settings: gcp_region on GCP, aws_region on
   // AWS. EKS is regional (it spans AZs automatically), so an AWS install has no zone concept.
@@ -123,6 +167,7 @@ export default function InfraComponentsPage() {
     `infra:cloud-settings:${cloudSettingsPath}`,
     (signal) => api.get(cloudSettingsPath, { signal }),
     {
+      expected: isPermissionDenied,
       onSuccess: (cfg) => {
         const region = isAws ? cfg.aws_region : cfg.gcp_region;
         if (region) {
@@ -148,6 +193,7 @@ export default function InfraComponentsPage() {
   // rather than offer a deployment or an initialization on an unknown state.
   const statusUnreadable = [tf, stack, components].some((r) => r.data === undefined && r.error != null);
   const statusStale = [tf, stack, components].some((r) => r.stale);
+  const viewDenied = [runList, stack, components, cluster, cloud].some((r) => r.denied);
 
   function reloadAll() {
     for (const r of [tf, runList, stack, components, cluster, cloud]) void r.refresh();
@@ -320,10 +366,7 @@ export default function InfraComponentsPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-        <h1 className="text-2xl font-bold mb-1">Components</h1>
-        <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
-          The optional services that make up this installation, and whether each one is enabled and healthy.
-        </p>
+        <PageHeader />
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -332,6 +375,8 @@ export default function InfraComponentsPage() {
               <p className="mt-3 text-sm text-gray-500">Loading infrastructure status...</p>
             </div>
           </div>
+        ) : viewDenied ? (
+          <AccessNotice message={VIEW_DENIED} />
         ) : statusUnreadable ? (
           <ErrorState message={loadFailureMessage("Infrastructure status")} onRetry={reloadAll} />
         ) : (
