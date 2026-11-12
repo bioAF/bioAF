@@ -1,7 +1,7 @@
 // Pipeline catalog, custom pipelines, runs and run reviews.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
-import type { components } from "../../../contracts/internal-api";
+import type { paths } from "../../../contracts/internal-api";
 import type { ExperimentReference } from "./experiments";
 import type { UserSummary } from "./identity";
 
@@ -508,8 +508,8 @@ export type ReviewVerdict = "approved" | "approved_with_caveats" | "rejected" | 
 /** A sample's QC verdict within a review: its own vocabulary, not a run-review verdict. */
 export type SampleVerdict = "pass" | "warning" | "fail";
 
-type GeneratedSampleVerdictEntry = components["schemas"]["SampleVerdictEntry"];
-type GeneratedReviewCreate = components["schemas"]["PipelineRunReviewCreate"];
+type GeneratedReviewCreate = paths["/api/pipeline-runs/{run_id}/reviews"]["post"]["requestBody"]["content"]["application/json"];
+type GeneratedSampleVerdictEntry = NonNullable<GeneratedReviewCreate["sample_verdicts"]>[string];
 
 /** One sample's verdict in a review request: the generated entry with the verdict values the backend accepts. */
 export type SampleVerdictEntry = Omit<GeneratedSampleVerdictEntry, "verdict"> & { verdict: SampleVerdict };
@@ -529,9 +529,10 @@ export type PipelineRunReviewCreate = Omit<GeneratedReviewCreate, "verdict" | "s
  * always has one today), `sample_verdicts_json` is the stored dictionary, not validated data,
  * and `recommended_exclusions` is an untyped list in the schema.
  */
-export type PipelineRunReview = components["schemas"]["PipelineRunReviewResponse"];
+export type PipelineRunReview = PipelineRunReviewListResponse["reviews"][number];
 
-export type PipelineRunReviewListResponse = components["schemas"]["PipelineRunReviewListResponse"];
+/** GET /api/pipeline-runs/{run_id}/reviews, bound to the operation; the active read and create are held equal in type-contracts. */
+export type PipelineRunReviewListResponse = paths["/api/pipeline-runs/{run_id}/reviews"]["get"]["responses"][200]["content"]["application/json"];
 
 /** One value a scientist stated, with the authorship the run keeps. A value
  *  that did not change keeps its original author, so re-saving a design does

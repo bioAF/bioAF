@@ -1,7 +1,7 @@
 // Notebook sessions, environments, packages, analysis snapshots and work nodes.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
-import type { components } from "../../../contracts/internal-api";
+import type { paths } from "../../../contracts/internal-api";
 import type { ExperimentReference, ProjectSummary } from "./experiments";
 import type { UserSummary } from "./identity";
 
@@ -25,9 +25,14 @@ export const RESOURCE_PROFILES: Record<ResourceProfile, { cpu: number; memory: n
  * and `resource_profile` are open strings on the wire; narrow them explicitly (see
  * `lib/sessionRecreate.ts`) rather than asserting the unions above.
  */
-export type NotebookSession = components["schemas"]["SessionResponse"];
+export type NotebookSession = SessionListResponse["sessions"][number];
 
-export type SessionListResponse = components["schemas"]["SessionListResponse"];
+/**
+ * GET /api/v1/notebooks/sessions, which the notebooks page reads. Bound to the operation, not the
+ * component, so a change to what this route answers fails compilation. The other session routes
+ * consumers call are held equal to it in `type-contracts/operation-bindings.ts`.
+ */
+export type SessionListResponse = paths["/api/v1/notebooks/sessions"]["get"]["responses"][200]["content"]["application/json"];
 
 export interface SessionLaunchRequest {
   session_type: SessionType;

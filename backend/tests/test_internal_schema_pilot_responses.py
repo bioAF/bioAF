@@ -13,6 +13,7 @@ accepts (verdicts, statuses), and ``metadata``/``sample_verdicts_json`` are unco
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -155,18 +156,48 @@ async def test_project_detail_and_provenance_graph_match_the_schema(client, admi
     assert problems == []
 
 
+# Both route families stay, each with its own response builder: the notebooks page reads
+# /api/v1/notebooks (with a bucket), the experiment activity tab reads /api/notebooks.
+FAMILIES = ["/api/v1/notebooks", "/api/notebooks"]
+
+
+@pytest.mark.parametrize("family", FAMILIES)
 @pytest.mark.parametrize("which", ["linked", "unlinked"])
 @pytest.mark.asyncio
-async def test_notebook_session_detail_and_list_match_the_schema(client, admin_token, world, which):
-    detail = await client.get(f"/api/notebooks/sessions/{world[which]}", headers=_bearer(admin_token))
-    listing = await client.get("/api/notebooks/sessions", headers=_bearer(admin_token))
-    assert detail.status_code == listing.status_code == 200
+async def test_notebook_session_detail_and_list_match_the_schema(client, admin_token, world, family, which):
+    detail = await client.get(f"{family}/sessions/{world[which]}", headers=_bearer(admin_token))
+    assert detail.status_code == 200
     body = detail.json()
     assert (body["experiment"] is None) is (which == "unlinked")
     assert body["user"]["email"]
-    problems = _problems(body, _response_schema("/api/notebooks/sessions/{session_id}", "get", "200"), "session")
-    problems += _problems(listing.json(), _response_schema("/api/notebooks/sessions", "get", "200"), "sessions")
+    problems = _problems(body, _response_schema(f"{family}/sessions/{{session_id}}", "get", "200"), "session")
+    queries = ["", "?bucket=active", "?bucket=recent", "?bucket=all"] if family == "/api/v1/notebooks" else [""]
+    for query in queries:
+        listing = await client.get(f"{family}/sessions{query}", headers=_bearer(admin_token))
+        assert listing.status_code == 200, query
+        problems += _problems(listing.json(), _response_schema(f"{family}/sessions", "get", "200"), f"list{query}")
+    assert {
+        s["id"] for s in (await client.get(f"{family}/sessions", headers=_bearer(admin_token))).json()["sessions"]
+    } >= {
+        world["linked"],
+        world["unlinked"],
+    }
     assert problems == []
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+@pytest.mark.asyncio
+async def test_stopping_a_session_answers_the_schema(client, admin_token, world, family):
+    with (
+        patch("app.services.notebook_service.get_notebook_adapter", MagicMock()),
+        patch("app.api.notebook_sessions.get_notebook_adapter", MagicMock()),
+    ):
+        stopped = await client.post(f"{family}/sessions/{world['linked']}/stop", headers=_bearer(admin_token))
+    assert stopped.status_code == 200, stopped.text
+    assert (
+        _problems(stopped.json(), _response_schema(f"{family}/sessions/{{session_id}}/stop", "post", "200"), "stop")
+        == []
+    )
 
 
 @pytest.mark.asyncio

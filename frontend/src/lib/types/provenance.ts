@@ -1,12 +1,12 @@
 // The provenance graph.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
-import type { components } from "../../../contracts/internal-api";
+import type { paths } from "../../../contracts/internal-api";
 
 /** A node of the project provenance graph. Generated transport. */
-export type ProvenanceNode = components["schemas"]["ProvenanceNode"];
+export type ProvenanceNode = ProvenanceDAG["nodes"][number];
 
-export type ProvenanceEdge = components["schemas"]["ProvenanceEdge"];
+export type ProvenanceEdge = ProvenanceDAG["edges"][number];
 
 /** GET /api/projects/{id}/provenance. Generated transport. */
-export type ProvenanceDAG = components["schemas"]["ProvenanceDAG"];
+export type ProvenanceDAG = paths["/api/projects/{project_id}/provenance"]["get"]["responses"][200]["content"]["application/json"];

@@ -1,7 +1,8 @@
 // Projects, experiments, samples, batches, vocabularies and sample-sheet import.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
-import type { components } from "../../../contracts/internal-api";
+import type { paths } from "../../../contracts/internal-api";
+import type { SessionListResponse } from "./sessions";
 import type { UserSummary } from "./identity";
 
 export type ExperimentStatus =
@@ -37,29 +38,27 @@ export type SampleStatus =
   | "analysis_complete";
 
 /** A link to a project: id and name. Generated transport. */
-export type ProjectSummary = components["schemas"]["ProjectSummary"];
+export type ProjectSummary = NonNullable<SessionListResponse["sessions"][number]["project"]>;
 
 /** A project as the project API emits it. Generated transport; `status` is an open string. */
-export type Project = components["schemas"]["ProjectResponse"];
+export type Project = ProjectListResponse["projects"][number];
 
 /** A sample row in project detail. Generated transport; `qc_status` is an open string. */
-export type ProjectSampleResponse = components["schemas"]["ProjectSampleResponse"];
+export type ProjectSampleResponse = ProjectSampleGroup["samples"][number];
 
-export type ProjectSampleGroup = components["schemas"]["ProjectSampleGroup"];
+export type ProjectSampleGroup = ProjectDetailResponse["samples"][number];
 
 /** A run as project detail lists it. Generated transport. */
-export type PipelineRunSummary = components["schemas"]["PipelineRunSummary"];
+export type PipelineRunSummary = ProjectDetailResponse["pipeline_runs"][number];
 
 /** An experiment as the project detail API lists it (backend `schemas/project.py:ExperimentSummary`). Generated transport. */
-export type ProjectExperimentSummary = components["schemas"]["ExperimentSummary"];
+export type ProjectExperimentSummary = ProjectDetailResponse["experiments"][number];
 
 /** GET /api/projects/{id}. Generated transport. */
-export type ProjectDetailResponse = components["schemas"]["ProjectDetailResponse"];
+export type ProjectDetailResponse = paths["/api/projects/{project_id}"]["get"]["responses"][200]["content"]["application/json"];
 
-export interface ProjectListResponse {
-  projects: Project[];
-  total: number;
-}
+/** GET /api/projects. Generated transport, bound to the operation. */
+export type ProjectListResponse = paths["/api/projects"]["get"]["responses"][200]["content"]["application/json"];
 
 export interface Experiment {
   id: number;
@@ -343,7 +342,7 @@ export interface TemplateCreateRequest {
 }
 
 /** A link to an experiment: only its id and name, as session and run responses emit it. Generated transport. */
-export type ExperimentReference = components["schemas"]["ExperimentReference"];
+export type ExperimentReference = NonNullable<SessionListResponse["sessions"][number]["experiment"]>;
 
 export interface ControlledVocabularyValue {
   id: number;

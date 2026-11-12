@@ -1,7 +1,7 @@
 // Users, roles, permissions and the audit log.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
-import type { components } from "../../../contracts/internal-api";
+import type { SessionListResponse } from "./sessions";
 
 export interface User {
   id: number;
@@ -43,7 +43,7 @@ export interface LoginResponse {
 }
 
 /** A user as other records reference them. Generated transport (internal schema). */
-export type UserSummary = components["schemas"]["UserSummary"];
+export type UserSummary = NonNullable<SessionListResponse["sessions"][number]["user"]>;
 
 export interface AuditLogEntry {
   id: number;
