@@ -1,2233 +1,265 @@
-export interface User {
-  id: number;
-  email: string;
-  name: string | null;
-  role_id: number;
-  role_name: string;
-  status: "active" | "invited" | "deactivated";
-  organization_id: number;
-  last_login: string | null;
-  session_credentials_configured: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PermissionEntry {
-  resource: string;
-  action: string;
-}
-
-export interface Role {
-  id: number;
-  name: string;
-  description: string | null;
-  organization_id: number;
-  is_system: boolean;
-  permissions: PermissionEntry[];
-  created_at: string | null;
-}
-
-export interface RoleListResponse {
-  roles: Role[];
-  total: number;
-}
-
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-}
-
-export interface BootstrapStatus {
-  setup_complete: boolean;
-  smtp_configured?: boolean; // only present for authenticated callers
-  has_setup_code: boolean;
-  has_admin: boolean;
-  // Active BAL provider capabilities; only present for authenticated callers.
-  // See useCapabilities() and the backend ProviderCapabilities model.
-  capabilities?: Partial<Record<string, boolean>>;
-}
-
-export interface ComponentState {
-  key: string;
-  name: string;
-  description: string;
-  category: string;
-  enabled: boolean;
-  status: string;
-  config: Record<string, unknown>;
-  dependencies: string[];
-  estimated_monthly_cost: string;
-  updated_at: string | null;
-}
-
-export interface TerraformRun {
-  id: number;
-  triggered_by_user_id: number;
-  action: string;
-  component_key: string | null;
-  plan_summary: {
-    add: Array<{ type: string; name: string; address: string }>;
-    change: Array<{ type: string; name: string; address: string }>;
-    destroy: Array<{ type: string; name: string; address: string }>;
-    add_count: number;
-    change_count: number;
-    destroy_count: number;
-  } | null;
-  status: string;
-  started_at: string;
-  completed_at: string | null;
-  error_message: string | null;
-}
-
-export interface HealthStatus {
-  status: "healthy" | "degraded" | "unhealthy";
-  services: Record<string, { status: string; error?: string }>;
-}
-
-export interface NavItem {
-  label: string;
-  href: string;
-  icon: string;
-  active: boolean;
-  phase?: string;
-  adminOnly?: boolean;
-}
-
-// Phase 2: Experiment Tracking
-
-export type ExperimentStatus =
-  | "registered"
-  | "library_prep"
-  | "sequencing"
-  | "fastq_uploaded"
-  | "processing"
-  | "pipeline_complete"
-  | "reviewed"
-  | "analysis"
-  | "complete";
-
-export type QCStatus = "pass" | "warning" | "fail";
-
-// Optional, first-class assay (controlled system vocabulary; mirrors the backend
-// SAMPLE_ASSAYS in app/models/sample.py). When set it is the authoritative signal for
-// pipeline recommendation; when null, the assay is inferred from the free-text fields.
-export type AssayValue = "bulk_rna" | "scrna" | "other";
-
-export const SAMPLE_ASSAY_OPTIONS: { value: AssayValue; label: string }[] = [
-  { value: "bulk_rna", label: "Bulk RNA-seq" },
-  { value: "scrna", label: "Single-cell RNA-seq" },
-  { value: "other", label: "Other" },
-];
-
-export type SampleStatus =
-  | "registered"
-  | "library_prepped"
-  | "sequenced"
-  | "fastq_uploaded"
-  | "pipeline_complete"
-  | "analysis_complete";
-
-export interface UserSummary {
-  id: number;
-  name: string | null;
-  email: string;
-}
-
-export interface ProjectSummary {
-  id: number;
-  name: string;
-}
-
-export interface Project {
-  id: number;
-  name: string;
-  code: string | null;
-  external_id: string | null;
-  description: string | null;
-  hypothesis: string | null;
-  status: string | null;
-  owner_user_id: number | null;
-  owner_name: string | null;
-  sample_count: number;
-  experiment_count: number;
-  pipeline_run_count: number;
-  snapshot_count: number;
-  created_at: string;
-}
-
-export interface ProjectSampleResponse {
-  sample_id: number;
-  external_id: string | null;
-  organism: string | null;
-  tissue_type: string | null;
-  qc_status: QCStatus | null;
-  added_by: string | null;
-  added_at: string | null;
-  notes: string | null;
-}
-
-export interface ProjectSampleGroup {
-  experiment_id: number;
-  experiment_name: string;
-  samples: ProjectSampleResponse[];
-}
-
-export interface PipelineRunSummary {
-  id: number;
-  pipeline_name: string;
-  pipeline_version: string | null;
-  status: string;
-  created_at: string | null;
-}
-
-/** An experiment as the project detail API lists it (backend `schemas/project.py:ExperimentSummary`). */
-export interface ProjectExperimentSummary {
-  id: number;
-  name: string;
-  status: string;
-  sample_count: number;
-  created_at: string | null;
-}
-
-export interface ProjectDetailResponse extends Project {
-  samples: ProjectSampleGroup[];
-  experiments: ProjectExperimentSummary[];
-  pipeline_runs: PipelineRunSummary[];
-}
-
-export interface ProjectListResponse {
-  projects: Project[];
-  total: number;
-}
-
-export interface ProvenanceNode {
-  id: string;
-  type: "experiment" | "sample" | "pipeline_run" | "snapshot" | "reference" | "file" | "project";
-  label: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface ProvenanceEdge {
-  source: string;
-  target: string;
-  relationship: string;
-}
-
-export interface ProvenanceDAG {
-  nodes: ProvenanceNode[];
-  edges: ProvenanceEdge[];
-}
-
-export interface Experiment {
-  id: number;
-  name: string;
-  code: string | null;
-  external_id: string | null;
-  project: ProjectSummary | null;
-  template_id: number | null;
-  template_name: string | null;
-  hypothesis: string | null;
-  description: string | null;
-  status: ExperimentStatus;
-  start_date: string | null;
-  expected_sample_count: number | null;
-  owner: UserSummary | null;
-  sample_count: number;
-  batch_count: number;
-  design_type: string | null;
-  naming_profile_id: number | null;
-  template_naming_profile_id: number | null;
-  effective_naming_profile_id: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ExperimentUpdateRequest {
-  name?: string | null;
-  hypothesis?: string | null;
-  description?: string | null;
-  start_date?: string | null;
-  expected_sample_count?: number | null;
-  design_type?: string | null;
-  field_defaults?: FieldDefaultValue[];
-  custom_fields?: CustomFieldValue[];
-  naming_profile_id?: number | null;
-}
-
-export interface ExperimentListResponse {
-  experiments: Experiment[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface CustomFieldValue {
-  field_name: string;
-  field_value: string;
-  field_type: string;
-  is_required?: boolean;
-}
-
-export interface CustomFieldResponse {
-  id: number;
-  field_name: string;
-  field_value: string | null;
-  field_type: string;
-  is_required: boolean;
-}
-
-export interface SampleBrief {
-  id: number;
-  external_id: string | null;
-  organism: string | null;
-  tissue_type: string | null;
-  molecule_type: string | null;
-  library_prep_method: string | null;
-  library_layout: string | null;
-  chemistry_version: string | null;
-  qc_status: QCStatus | null;
-  status: SampleStatus;
-  created_at: string;
-}
-
-export interface SampleBatchBrief {
-  id: number;
-  name: string;
-  sample_count: number;
-  created_at: string | null;
-}
-
-export interface FieldDefaultValue {
-  field_name: string;
-  default_value: string | null;
-  is_required: boolean | null;
-}
-
-export interface FieldDefaultResponse {
-  id: number;
-  field_name: string;
-  default_value: string | null;
-  is_required: boolean | null;
-}
-
-export interface ExperimentDetail extends Experiment {
-  samples: SampleBrief[];
-  sample_batches: SampleBatchBrief[];
-  custom_fields: CustomFieldResponse[];
-  field_defaults: FieldDefaultResponse[];
-  audit_trail_count: number;
-}
-
-export interface SampleBatchSummary {
-  id: number;
-  name: string;
-}
-
-export interface SampleCustomFieldValue {
-  field_name: string;
-  field_value: string;
-}
-
-export interface SampleCustomFieldResponse {
-  id: number;
-  field_name: string;
-  field_value: string | null;
-}
-
-export interface Sample {
-  id: number;
-  external_id: string | null;
-  /** The source label migration 080 replaced with external_id (the experiment held it twice); else null. */
-  relabeled_from?: string | null;
-  organism: string | null;
-  tissue_type: string | null;
-  donor_source: string | null;
-  treatment_condition: string | null;
-  chemistry_version: string | null;
-  sample_batch: SampleBatchSummary | null;
-  sequencing_batch: { id: number; code: string } | null;
-  sequencing_batch_position: number | null;
-  viability_pct: number | null;
-  cell_count: number | null;
-  prep_notes: string | null;
-  molecule_type: string | null;
-  library_prep_method: string | null;
-  library_layout: string | null;
-  assay: string | null;
-  qc_status: QCStatus | null;
-  qc_notes: string | null;
-  file_count: number;
-  status: SampleStatus;
-  created_at: string;
-  updated_at: string;
-  custom_fields: SampleCustomFieldResponse[];
-}
-
-export interface SampleBatch {
-  id: number;
-  name: string;
-  prep_date: string | null;
-  operator: UserSummary | null;
-  notes: string | null;
-  sample_count: number;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export type SequencingBatchStatus = "pending" | "ingesting" | "complete" | "partial_complete" | "failed";
-
-export interface SequencingBatch {
-  id: number;
-  organization_id: number;
-  name: string;
-  code: string;
-  status: SequencingBatchStatus;
-  instrument_model: string | null;
-  instrument_platform: string | null;
-  quality_score_encoding: string | null;
-  sequencer_run_id: string | null;
-  manifest_received_at: string | null;
-  expected_file_count: number | null;
-  ingested_file_count: number;
-  notes: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface ManifestEntry {
-  id: number;
-  expected_filename: string;
-  expected_md5: string;
-  resolved_sample_id: number | null;
-  resolved_experiment_id: number | null;
-  resolved_project_id: number | null;
-  file_id: number | null;
-  status: "pending" | "verified" | "checksum_mismatch" | "missing" | "failed";
-  last_check_at: string | null;
-  retry_count: number;
-  error_message: string | null;
-  created_at: string | null;
-}
-
-export interface SequencingBatchDetail extends SequencingBatch {
-  manifest_entries: ManifestEntry[];
-}
-
-export interface ExperimentTemplate {
-  id: number;
-  name: string;
-  description: string | null;
-  required_fields_json: Record<string, unknown> | null;
-  custom_fields_schema_json: Record<string, unknown> | null;
-  naming_profile_id: number | null;
-  created_by: UserSummary | null;
-  created_at: string;
-}
-
-export interface AuditLogEntry {
-  id: number;
-  timestamp: string;
-  user: UserSummary | null;
-  entity_type: string;
-  entity_id: number;
-  action: string;
-  details: Record<string, unknown> | null;
-  previous_value: Record<string, unknown> | null;
-}
-
-export interface AuditLogResponse {
-  entries: AuditLogEntry[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface ExperimentCreateRequest {
-  name: string;
-  project_id?: number | null;
-  template_id?: number | null;
-  hypothesis?: string | null;
-  description?: string | null;
-  start_date?: string | null;
-  expected_sample_count?: number | null;
-  custom_fields?: CustomFieldValue[];
-  field_defaults?: FieldDefaultValue[];
-  design_type?: string | null;
-  column_aliases?: Record<string, string>;
-  naming_profile_id?: number | null;
-}
-
-export interface SampleCreateRequest {
-  external_id?: string | null;
-  organism?: string | null;
-  tissue_type?: string | null;
-  donor_source?: string | null;
-  treatment_condition?: string | null;
-  chemistry_version?: string | null;
-  sample_batch_code?: string | null;
-  sequencing_batch_code?: string | null;
-  viability_pct?: number | null;
-  cell_count?: number | null;
-  prep_notes?: string | null;
-  molecule_type?: string | null;
-  library_prep_method?: string | null;
-  library_layout?: string | null;
-  assay?: string | null;
-  qc_status?: string | null;
-  qc_notes?: string | null;
-  custom_fields?: SampleCustomFieldValue[];
-}
-
-export interface SampleUpdateRequest {
-  external_id?: string | null;
-  organism?: string | null;
-  tissue_type?: string | null;
-  donor_source?: string | null;
-  treatment_condition?: string | null;
-  chemistry_version?: string | null;
-  sample_batch_code?: string | null;
-  sequencing_batch_code?: string | null;
-  viability_pct?: number | null;
-  cell_count?: number | null;
-  prep_notes?: string | null;
-  molecule_type?: string | null;
-  library_prep_method?: string | null;
-  library_layout?: string | null;
-  assay?: string | null;
-  custom_fields?: SampleCustomFieldValue[];
-}
-
-export interface SampleBulkUpdateRequest {
-  sample_ids: number[];
-  update: SampleUpdateRequest;
-}
-
-export interface SampleBatchCreateRequest {
-  name: string;
-  prep_date?: string | null;
-  operator_user_id?: number | null;
-  notes?: string | null;
-}
-
-export interface TemplateCreateRequest {
-  name: string;
-  description?: string | null;
-  required_fields_json?: Record<string, unknown> | null;
-  custom_fields_schema_json?: Record<string, unknown> | null;
-  naming_profile_id?: number | null;
-}
-
-// Notebook sessions
-
-export type SessionStatus = "pending" | "starting" | "running" | "idle" | "stopping" | "stopped" | "failed";
-export type SessionType = "jupyter" | "rstudio";
-export type ResourceProfile = "small" | "medium" | "large" | "xlarge" | "2xlarge";
-
-/** A link to an experiment: only its id and name, as session and run responses emit it. */
-export interface ExperimentReference {
-  id: number;
-  name: string;
-}
-
-// Keep in sync with RESOURCE_PROFILES in backend/app/services/notebook_service.py.
-export const RESOURCE_PROFILES: Record<ResourceProfile, { cpu: number; memory: number }> = {
-  small: { cpu: 2, memory: 8 },
-  medium: { cpu: 4, memory: 16 },
-  large: { cpu: 8, memory: 32 },
-  xlarge: { cpu: 16, memory: 64 },
-  "2xlarge": { cpu: 16, memory: 128 },
-};
-
-export interface NotebookSession {
-  id: number;
-  session_type: SessionType;
-  user: UserSummary | null;
-  experiment: ExperimentReference | null;
-  project: ProjectSummary | null;
-  resource_profile: ResourceProfile;
-  cpu_cores: number;
-  memory_gb: number;
-  requested_disk_gb: number | null;
-  status: SessionStatus;
-  failure_reason: string | null;
-  failure_message: string | null;
-  idle_since: string | null;
-  proxy_url: string | null;
-  started_at: string | null;
-  stopped_at: string | null;
-  created_at: string;
-  git_branch_name: string | null;
-  git_commit_hash: string | null;
-  environment_version_id: number | null;
-  input_file_ids: number[] | null;
-}
-
-export interface SessionListResponse {
-  sessions: NotebookSession[];
-  total: number;
-}
-
-export interface SessionLaunchRequest {
-  session_type: SessionType;
-  resource_profile: ResourceProfile;
-  experiment_id?: number | null;
-  image_uri?: string | null;
-  input_file_ids?: number[];
-  environment_version_id?: number | null;
-}
-
-export interface SessionProvenance {
-  session_id: number;
-  session_type: string;
-  status: string;
-  user: UserSummary | null;
-  project_id: number | null;
-  experiment_id: number | null;
-  environment: {
-    environment_id: number;
-    environment_name: string;
-    version_id: number;
-    version_number: number;
-    build_number: number;
-    image_uri: string | null;
-    definition_format: string;
-  } | null;
-  input_files: {
-    id: number;
-    filename: string;
-    gcs_uri: string;
-    storage_uri: string;
-    file_type: string;
-    size_bytes: number | null;
-  }[];
-  output_files: {
-    id: number;
-    filename: string;
-    gcs_uri: string;
-    storage_uri: string;
-    file_type: string;
-    size_bytes: number | null;
-  }[];
-  gcs_output_prefix: string | null;
-  started_at: string | null;
-  stopped_at: string | null;
-}
-
-// Pipeline orchestration
-
-export type PipelineRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
-export type PipelineProcessStatus = "pending" | "running" | "completed" | "failed" | "cached";
-
-export interface ParameterGroup {
-  title?: string;
-  properties?: Record<string, {
-    type?: string;
-    description?: string;
-    default?: unknown;
-    enum?: string[];
-    hidden?: boolean;
-    help_text?: string;
-    format?: string;
-    minimum?: number;
-    maximum?: number;
-    fa_icon?: string;
-  }>;
-  required?: string[];
-}
-
-export interface ParameterSchema {
-  /** JSON Schema 2020-12 renamed `definitions` to `$defs`, and the current
-   *  nf-core template emits `$defs`. Both spellings are in the catalog today
-   *  (13 `$defs` vs 7 `definitions` across the 20 most popular pipelines), so
-   *  any reader must accept either. */
-  $defs?: Record<string, ParameterGroup>;
-  definitions?: Record<string, ParameterGroup>;
-}
-
-export interface PipelineCatalog {
-  id: number;
-  pipeline_key: string;
-  name: string;
-  description: string | null;
-  source_type: string;
-  source_url: string | null;
-  version: string | null;
-  parameter_schema: ParameterSchema | null;
-  /** Required samplesheet columns the user must answer at launch, from the
-   *  pipeline's assets/schema_input.json. Distinct from parameter_schema, which
-   *  carries nextflow_schema.json's pipeline parameters. A samplesheet column
-   *  such as instrument_platform appears in neither the params nor any other
-   *  form, which is why this exists. */
-  samplesheet_inputs: SamplesheetInputSpec[];
-  default_params: Record<string, unknown> | null;
-  is_builtin: boolean;
-  enabled: boolean;
-  custom_pipeline_id: number | null;
-  created_by_username: string | null;
-  latest_version_number: number | null;
-}
-
-/** One samplesheet column collected at launch. Only columns whose value is
- *  constant across the run appear, so a single answer fills every row.
- *  `allowed_values` comes from the pipeline's own schema; empty means free text. */
-export interface SamplesheetInputSpec {
-  name: string;
-  parameter: string;
-  required: boolean;
-  allowed_values: string[];
-}
-
-/** One column the entry grid must collect PER SAMPLE, from the preflight.
- *  Derived from the same computation as the launch block, so the questions
- *  asked and the refusal given cannot disagree. */
-export interface PerSampleInputSpec {
-  name: string;
-  required: boolean;
-  is_file: boolean;
-  /** The Sample field this column corresponds to, when it is one. Set means the
-   *  value is a fact about the sample rather than a pipeline parameter, which is
-   *  what decides whether the pipeline's vocabulary may constrain it. */
-  sample_field: string | null;
-  allowed_values: string[];
-  /** True only for a pipeline PARAMETER with an enum. A field recorded on the
-   *  sample is never fenced by a pipeline's list: XX/XY/NA is sarek's input
-   *  constraint, not a vocabulary for sex. */
-  constrained: boolean;
-  description: string | null;
-  format_hint: string | null;
-  required_by: string | null;
-  reason: string | null;
-  samples: { id: number; external_id: string | null }[];
-}
-
-/** A saved design offered to this launch, and what it does not cover.
- *  Never applied on bioAF's own initiative: a grouping that was right for six
- *  samples may be wrong for twelve, and a prefilled value looks plausible
- *  precisely because it was correct last time. */
-export interface SamplesheetPrefill {
-  /** Which rung it came from, or null when nothing applies. Naming it is what
-   *  keeps an inherited organisation-wide binding from looking identical to one
-   *  somebody set for this experiment. */
-  scope: "experiment" | "project" | "organization" | null;
-  values: Record<string, Record<string, string>>;
-  bindings: Record<string, string>;
-  /** The columns declared for a pipeline that publishes no contract of its own.
-   *  Absent or empty means nothing was declared, which keeps today's standard
-   *  sheet. Optional because a client must not require a field a backend
-   *  deployed before this existed does not send. */
-  columns?: DeclaredColumn[];
-  samples_without_values: number[];
-}
-
-/** Where a declared column's value comes from. A column with no binding at all
- *  is asked per sample in the entry grid: a co-assembly grouping or a
- *  differential contrast is a design decision no binding can derive. */
-export type BindingSource = "read" | "sample_field" | "file_type" | "custom_field" | "literal";
-
-/** One column of a samplesheet a SCIENTIST declared, for a pipeline that
- *  publishes none. Same {name, type, required} shape the experiment field
- *  editor uses, plus the binding an intake field does not have. */
-export interface DeclaredColumn {
-  name: string;
-  type: string;
-  required: boolean;
-  binding?: { source: BindingSource; key: string };
-}
-
-/** The sheet a launch would submit, and what it leaves out. */
-export interface SamplesheetPreview {
-  columns: string[];
-  /** Each row names the sample it belongs to, so a wrongly-resolved cell is
-   *  corrected against a sample rather than against a position. */
-  rows: { sample_id: number | null; external_id: string | null; values: string[] }[];
-  csv: string;
-  /** Values the pipeline's own vocabulary could not express, dropped from the
-   *  sheet. Invisible otherwise: the column is simply absent, which reads as
-   *  "this pipeline does not ask for it". */
-  omissions: {
-    column: string;
-    sample_id: number | null;
-    external_id: string | null;
-    value: string;
-    reason: string;
-    allowed_values: string[];
-  }[];
-}
-
-/** Whether a launch would succeed, asked before anything is created. Mirrors
- *  the domain error the launch itself would raise, so the dialog shows the same
- *  explanation while the user can still act on it. */
-export interface PipelineRunPreflight {
-  can_launch: boolean;
-  code: string | null;
-  reason: string | null;
-  details: {
-    required_inputs?: string[];
-    // The samples carrying no input file at all, for the `samples_missing_files`
-    // verdict. A different kind of gap from `missing_columns`: no value typed
-    // into a grid resolves it, so the block offers to drop them instead.
-    samples_without_files?: { id: number; external_id: string | null }[];
-    missing_columns?: Record<
-      string,
-      {
-        sample_field: string | null;
-        allowed_values: string[];
-        samples: {
-          id: number;
-          external_id: string | null;
-          // The value the pipeline objected to, and a spelling it would accept.
-          // bioAF recommends rather than substitutes: the scientist decides what
-          // the field says, so the suggestion is offered, never applied.
-          value?: string | null;
-          suggestion?: string | null;
-        }[];
-        // Why this column is being reported: "missing", "required_by",
-        // "not_accepted", "invalid_characters", "collision", "not_unique",
-        // "no_matching_file" or "empty_in_row". Each needs different words,
-        // because "missing" sends someone who just typed a value to look for the
-        // wrong problem, and "empty_in_row" sends them to look for a field when
-        // what is absent is a FILE: the sample has reads, and one of the rows
-        // about to be emitted for it does not.
-        reason?: string | null;
-        // The schema's own regex, so a scientist who would rather choose their
-        // own spelling than take the suggestion can see the rule.
-        pattern?: string | null;
-        // Set when the pipeline requires this column only because another one is
-        // filled (mag: short reads oblige a platform). Without it the notice
-        // reports a column the schema's own required list does not mention.
-        required_by?: string | null;
-        // The other columns this one must be unique WITHIN, when the schema
-        // declares a uniqueness rule. mag pairs `run` with `sample`.
-        unique_with?: string[] | null;
-        // What would actually let the run through, where typing a value would
-        // not. Absent for the ordinary case, where bioAF has no value and the
-        // scientist may well have one, so the entry grid asks.
-        //
-        // "merge_reads": the rows came off ONE sequencing run and differ only by
-        // lane, so any value separating them is a lane wearing a run's name.
-        // "one_row_per_sample": the rule is on the sample's own name alone
-        // (ampliseq), so the only field on offer is the one they must not
-        // change. A column carrying either is left OUT of the entry grid, and
-        // this is what says why.
-        remedy?: "merge_reads" | "one_row_per_sample" | null;
-        // The sequencing runs that contribute more than one row, for a block
-        // that has to name them. Only populated for "merge_reads". `source`
-        // separates "flow cell HLK3VDSX7" from "run SRR111", which are different
-        // claims and only one is true of any given row.
-        repeated?: { run: string; source: "flowcell" | "accession"; lanes: string[] }[] | null;
-      }
-    >;
-  };
-  /** The sheet this run would submit, rendered as a table by the review step. */
-  samplesheet?: SamplesheetPreview;
-  /** The columns an entry grid must collect. */
-  per_sample_inputs?: PerSampleInputSpec[];
-  /** What a saved design would contribute, offered rather than applied. */
-  prefill?: SamplesheetPrefill;
-  /** Whether this pipeline's sheet is one a scientist declares, and the
-   *  vocabulary to bind its columns against. */
-  declaration?: {
-    /** True only when the pipeline publishes no contract AND no tailored
-     *  generator owns it. Declaring columns for either would collect an answer
-     *  bioAF then ignores. */
-    declarable: boolean;
-    /** The file types these samples actually carry. */
-    file_types: string[];
-    custom_fields: string[];
-  };
-}
-
-export interface PipelineCatalogListResponse {
-  pipelines: PipelineCatalog[];
-  total: number;
-}
-
-export interface RegistryPipeline {
-  name: string;
-  full_name: string;
-  description: string | null;
-  topics: string[];
-  stars: number | null;
-  latest_release: string | null;
-  archived: boolean;
-  installed: boolean;
-  installed_version: string | null;
-  update_available: boolean;
-}
-
-export interface RegistryListResponse {
-  pipelines: RegistryPipeline[];
-  total: number;
-  last_refreshed_at: string | null;
-}
-
-export interface RegistryVersion {
-  tag_name: string;
-  published_at: string | null;
-  has_schema: boolean;
-}
-
-export interface RegistryVersionsResponse {
-  name: string;
-  versions: RegistryVersion[];
-}
-
-export interface RegistryRefreshResponse {
-  fetched: number;
-  archived: number;
-  error: string | null;
-  last_refreshed_at: string | null;
-}
-
-export interface PipelineProcessRetry {
-  name: string;
-  attempts: number;
-}
-
-export interface PipelineProgress {
-  total_processes: number;
-  completed: number;
-  running: number;
-  failed: number;
-  cached: number;
-  percent_complete: number;
-  retries?: PipelineProcessRetry[];
-}
-
-export interface PipelineProcess {
-  id: number;
-  process_name: string;
-  task_id: string | null;
-  status: PipelineProcessStatus;
-  exit_code: number | null;
-  cpu_usage: number | null;
-  memory_peak_gb: number | null;
-  duration_seconds: number | null;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface PipelineRun {
-  id: number;
-  pipeline_key: string | null;
-  pipeline_name: string;
-  pipeline_version: string | null;
-  experiment: ExperimentReference | null;
-  submitted_by: UserSummary | null;
-  status: PipelineRunStatus;
-  parameters: Record<string, unknown> | null;
-  input_files: Record<string, unknown> | null;
-  output_files: Record<string, unknown> | null;
-  progress: PipelineProgress | null;
-  cost_estimate: number | null;
-  error_message: string | null;
-  failure_reason: "oom" | "preemption_exhausted" | "task_error" | null;
-  work_dir: string | null;
-  slurm_job_id: string | null;
-  // Backend-neutral compute handle + provider-specifics disclosure (BAL Phase 4).
-  compute_job_ref: string | null;
-  provider_metadata: Record<string, unknown> | null;
-  actual_cost: number | null;
-  reference_genome: string | null;
-  alignment_algorithm: string | null;
-  resume_from_run_id: number | null;
-  review_verdict: ReviewVerdict | null;
-  custom_pipeline_version_id: number | null;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string | null;
-}
-
-export interface PipelineRunDetail extends PipelineRun {
-  processes: PipelineProcess[];
-  samples: Array<{
-    id: number;
-    external_id: string | null;
-    organism: string | null;
-  }>;
-  /** The exact sheet handed to Nextflow. Null for runs launched before the
-   *  snapshot existed; nothing is reconstructed in its place. */
-  samplesheet_csv?: string | null;
-  /** The same sheet with a bioaf_sample_uid column beside it, for checking by
-   *  eye which asset each row stood for. Never what was submitted. */
-  samplesheet_snapshot_csv?: string | null;
-  /** The stated design that produced it, stamped with who set each value. */
-  samplesheet_design?: RunSamplesheetDesign | null;
-}
-
-export interface PipelineRunListResponse {
-  runs: PipelineRun[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface PipelineRunLaunchRequest {
-  pipeline_key: string;
-  experiment_id: number;
-  sample_ids?: number[] | null;
-  parameters: Record<string, unknown>;
-  /** What the scientist stated per sample, keyed by sample id then column. A
-   *  first-class field rather than a key inside `parameters`, which is emitted
-   *  verbatim onto the Nextflow command line. */
-  sample_values?: Record<string, Record<string, string>>;
-  resume_from_run_id?: number | null;
-  reference_genome?: string | null;
-  alignment_algorithm?: string | null;
-  drop_samples_without_files?: boolean;
-  /** The samplesheet columns declared on screen, for a pipeline that publishes
-   *  no contract. Omitted entirely when the editor has not been read yet, which
-   *  is not the same as an empty list: absent means "whatever is saved", `[]`
-   *  means the scientist cleared it and wants the generic sheet. Sending it does
-   *  NOT save it; that is the separate "Save for next time" button. */
-  columns?: DeclaredColumn[];
-}
-
-export interface PipelineRunCompareResponse {
-  runs: PipelineRun[];
-  parameter_diffs: Record<string, Record<string, unknown>>;
-}
-
-export interface PipelineAddRequest {
-  name: string;
-  source_url: string;
-  version?: string | null;
-  description?: string | null;
-}
-
-// Custom Pipelines
-
-export type CustomPipelineCodeSource = "github_repo" | "code_blob" | "inline";
-export type CustomPipelineVariableType = "string" | "number" | "boolean" | "reference";
-export type ReferenceParameterCategory =
-  | "genome"
-  | "annotation"
-  | "index"
-  | "atlas"
-  | "markers"
-  | "other"
-  | "any";
-export type CustomPipelineVersionStatus = "active" | "deprecated";
-export type CustomPipelineVersionTrigger = "user" | "environment_cascade";
-
-export interface CustomPipelineVariable {
-  id: number;
-  variable_name: string;
-  default_value: string | null;
-  variable_type: CustomPipelineVariableType;
-  reference_category?: ReferenceParameterCategory | null;
-  is_required: boolean;
-}
-
-export interface CustomPipelineVariableDefinition {
-  variable_name: string;
-  default_value: string | null;
-  variable_type: CustomPipelineVariableType;
-  reference_category?: ReferenceParameterCategory | null;
-  is_required: boolean;
-}
-
-export interface CustomPipelineVersion {
-  id: number;
-  version_number: number;
-  code_source_type: CustomPipelineCodeSource;
-  github_repo_id: number | null;
-  code_content: string | null;
-  entrypoint_command: string;
-  environment_version_id: number;
-  cpu_request: string;
-  memory_request: string;
-  log_file_path: string | null;
-  version_trigger: CustomPipelineVersionTrigger;
-  status: CustomPipelineVersionStatus;
-  created_by_user_id: number;
-  created_at: string | null;
-  variables: CustomPipelineVariable[];
-  qc_template: string | null;
-  qc_config_json: Record<string, unknown> | null;
-}
-
-export interface CustomPipeline {
-  id: number;
-  name: string;
-  description: string | null;
-  pipeline_key: string;
-  created_by_user_id: number;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface CustomPipelineDetail extends CustomPipeline {
-  versions: CustomPipelineVersion[];
-}
-
-export interface CustomPipelineCreateRequest {
-  name: string;
-  description?: string | null;
-}
-
-export interface CustomPipelineUpdateRequest {
-  name?: string | null;
-  description?: string | null;
-}
-
-export interface CustomPipelineEnvironmentSummary {
-  environment_id: number;
-  environment_name: string;
-  version_id: number;
-  version_number: number;
-  build_number: number;
-  image_uri: string | null;
-}
-
-export interface CustomPipelineRunOverview {
-  pipeline_id: number;
-  pipeline_name: string;
-  pipeline_key: string;
-  version_id: number;
-  version_number: number;
-  code_source_type: CustomPipelineCodeSource;
-  github_repo_id: number | null;
-  entrypoint_command: string;
-  cpu_request: string;
-  memory_request: string;
-  log_file_path: string | null;
-  environment: CustomPipelineEnvironmentSummary | null;
-  variables: CustomPipelineVariable[];
-}
-
-export interface CustomPipelineVersionCreateRequest {
-  code_source_type: CustomPipelineCodeSource;
-  code_content?: string | null;
-  github_repo_id?: number | null;
-  entrypoint_command: string;
-  environment_version_id: number;
-  cpu_request?: string;
-  memory_request?: string;
-  log_file_path?: string | null;
-  variables: CustomPipelineVariableDefinition[];
-  qc_template?: string | null;
-  qc_config_json?: Record<string, unknown> | null;
-}
-
-// Phase 5: Data Management + Visualization
-
-export interface PipelineRunRef {
-  id: number;
-  pipeline_name: string;
-  launcher: UserSummary | null;
-}
-
-export interface ComputeSessionRef {
-  id: number;
-  // "work_node" for SSH/GCE sessions; "notebook" for in-browser sessions
-  kind: "work_node" | "notebook" | string;
-  // For notebooks only: "rstudio" or "jupyter"; null for work nodes
-  notebook_type: "rstudio" | "jupyter" | string | null;
-  launcher: UserSummary | null;
-}
-
-export interface FileProvenance {
-  project_id: number | null;
-  project_name: string | null;
-  experiment_id: number | null;
-  experiment_name: string | null;
-  sample_labels: string[];
-  pipeline_run: PipelineRunRef | null;
-  compute_session: ComputeSessionRef | null;
-  creator: UserSummary | null;
-}
-
-export interface FileResponse {
-  id: number;
-  filename: string;
-  gcs_uri: string;
-  storage_uri: string;
-  size_bytes: number | null;
-  md5_checksum: string | null;
-  file_type: string;
-  tags: string[];
-  uploader: UserSummary | null;
-  project_id: number | null;
-  experiment_id: number | null;
-  sample_ids: number[];
-  source_type: string;
-  source_pipeline_run_id: number | null;
-  source_notebook_session_id: number | null;
-  storage_deleted: boolean;
-  is_global?: boolean;
-  upload_timestamp: string;
-  created_at: string;
-  provenance?: FileProvenance | null;
-}
-
-export interface FileListResponse {
-  files: FileResponse[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface FileUploadInitiateResponse {
-  upload_id: string;
-  signed_url: string;
-  gcs_uri: string;
-  storage_uri: string;
-}
-
-export interface DatasetExperimentSummary {
-  experiment_id: number;
-  experiment_name: string;
-  status: string;
-  organism: string | null;
-  tissue: string | null;
-  molecule_type: string | null;
-  instrument_model: string | null;
-  review_status: string | null;
-  sample_count: number;
-  file_count: number;
-  total_size_bytes: number;
-  pipeline_run_count: number;
-  has_qc_dashboard: boolean;
-  has_cellxgene: boolean;
-  owner: UserSummary | null;
-  created_at: string;
-}
-
-export interface DatasetSearchResult {
-  experiments: DatasetExperimentSummary[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface DocumentResponse {
-  id: number;
-  title: string | null;
-  file: FileResponse | null;
-  has_extracted_text: boolean;
-  linked_experiment_id: number | null;
-  linked_sample_id: number | null;
-  linked_pipeline_run_id: number | null;
-  created_at: string;
-}
-
-export interface DocumentSearchResponse {
-  documents: DocumentResponse[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface BucketStats {
-  bucket_name: string;
-  total_bytes: number;
-  object_count: number;
-  by_storage_class: Record<string, number>;
-  cost_estimate_monthly: number;
-}
-
-export interface LifecyclePolicyStatus {
-  bucket_name: string;
-  rules: Record<string, unknown>[];
-  enabled: boolean;
-}
-
-export interface StorageDashboard {
-  buckets: BucketStats[];
-  total_bytes: number;
-  total_cost_estimate_monthly: number;
-  lifecycle_policies: LifecyclePolicyStatus[];
-  last_updated: string;
-}
-
-export interface CellxgenePublishableFile {
-  id: number;
-  filename: string;
-  gcs_uri: string;
-  storage_uri: string;
-  size_bytes: number | null;
-  file_type: string;
-  project_name: string | null;
-  experiment_name: string | null;
-  sample_names: string[];
-  source_type: string;
-  cellxgene_ready: boolean;
-  cellxgene_status: string;
-  created_at: string;
-}
-
-export interface CellxgeneFileInspection {
-  embeddings: string[];
-  cell_count: number;
-  gene_count: number;
-  cellxgene_ready: boolean;
-  missing: string | null;
-}
-
-export interface CellxgenePublicationResponse {
-  id: number;
-  dataset_name: string;
-  stable_url: string | null;
-  access_url: string | null;
-  status: string;
-  file: FileResponse | null;
-  experiment_id: number | null;
-  published_by: UserSummary | null;
-  published_at: string | null;
-  created_at: string;
-}
-
-export interface QCMetrics {
-  cell_count: number | null;
-  median_reads_per_cell: number | null;
-  median_genes_per_cell: number | null;
-  median_umi_per_cell: number | null;
-  mito_pct_median: number | null;
-  doublet_score_median: number | null;
-  saturation: number | null;
-  // Sequencing metrics
-  number_of_reads: number | null;
-  valid_barcodes: number | null;
-  q30_bases_barcode: number | null;
-  q30_bases_rna_read: number | null;
-  // Mapping metrics
-  reads_mapped_genome: number | null;
-  reads_mapped_genome_unique: number | null;
-  // Mean values and totals
-  mean_reads_per_cell: number | null;
-  mean_umi_per_cell: number | null;
-  mean_genes_per_cell: number | null;
-  total_genes_detected: number | null;
-  umis_in_cells: number | null;
-  // Bulk/FastQC metrics
-  total_sequences: number | null;
-  percent_duplicates: number | null;
-  percent_gc: number | null;
-  avg_sequence_length: number | null;
-  total_samples: number | null;
-  quality_rating: string;
-  // Chart data for interactive rendering
-  barcode_rank_data: [number, number][] | null;
-  chart_data: {
-    star_alignment?: { name: string; value: number }[];
-    base_quality?: [number, number][];
-    gc_content?: { sample: [number, number][]; theoretical?: [number, number][] };
-    duplication?: [number, number][];
-  } | null;
-}
-
-export interface QCPlot {
-  plot_type: string;
-  title: string;
-  file_id: number;
-  download_url?: string | null;
-}
-
-export interface QCMetricSpec {
-  label: string;
-  format?: string;
-  thresholds?: { good?: string; warn?: string };
-}
-
-export interface QCSection {
-  id: string;
-  title?: string | null;
-  layout?: string | null;
-  metrics: string[];
-}
-
-export interface QCChartSpec {
-  type: string;
-  metric_key?: string | null;
-  title?: string | null;
-}
-
-export interface QCPlotSpec {
-  file_glob: string;
-  title: string;
-  type: string;
-}
-
-export interface QCDashboardConfig {
-  template: string;
-  sections: QCSection[];
-  metrics: Record<string, QCMetricSpec>;
-  charts: QCChartSpec[];
-  plots: QCPlotSpec[];
-}
-
-export interface QCDashboardResponse {
-  id: number;
-  pipeline_run_id: number;
-  experiment_id: number | null;
-  pipeline_name: string | null;
-  pipeline_version: string | null;
-  project_name: string | null;
-  experiment_name: string | null;
-  metrics: QCMetrics;
-  raw_metrics: Record<string, unknown>;
-  qc_config: QCDashboardConfig;
-  summary_text: string;
-  plots: QCPlot[];
-  status: string;
-  generated_at: string | null;
-  created_at: string;
-}
-
-export interface QCDashboardSummary {
-  id: number;
-  pipeline_run_id: number;
-  quality_rating: string;
-  cell_count: number | null;
-  status: string;
-  generated_at: string | null;
-  project_name: string | null;
-  experiment_name: string | null;
-  pipeline_name: string | null;
-  pipeline_version: string | null;
-  sample_external_ids: string[];
-}
-
-export interface PlotArchiveResponse {
-  id: number;
-  title: string | null;
-  file: FileResponse | null;
-  experiment_id: number | null;
-  experiment_name: string | null;
-  project_name: string | null;
-  pipeline_run_id: number | null;
-  pipeline_run_name: string | null;
-  notebook_session_id: number | null;
-  notebook_session_type: string | null;
-  source_type: string | null;
-  tags: string[];
-  thumbnail_url: string | null;
-  indexed_at: string;
-}
-
-export interface PlotArchiveListResponse {
-  plots: PlotArchiveResponse[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface SearchHit {
-  entity_type: string;
-  entity_id: number;
-  title: string;
-  snippet: string | null;
-  /** Server-computed in-app destination for this hit. */
-  url: string;
-  experiment_id: number | null;
-  relevance_score: number | null;
-}
-
-export interface SearchResult {
-  results: SearchHit[];
-  total: number;
-  page: number;
-  page_size: number;
-  /** Per-type match counts for the searched types, for the type filter. */
-  type_counts: Record<string, number>;
-}
-
-// Phase 6: GitOps + Package Management
-
-export interface GitOpsRepoStatus {
-  initialized: boolean;
-  repo_url: string | null;
-  repo_name: string | null;
-  last_commit_sha: string | null;
-  last_commit_at: string | null;
-  status: string;
-}
-
-export interface GitCommit {
-  sha: string;
-  message: string;
-  author: string;
-  timestamp: string;
-  files_changed: number | null;
-}
-
-export interface GitCommitDetail extends GitCommit {
-  diff: string;
-  files: string[];
-}
-
-export interface GitCommitListResponse {
-  commits: GitCommit[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-export interface PackageSearchResult {
-  name: string;
-  version: string;
-  description: string | null;
-  source: string;
-  channel: string | null;
-  homepage: string | null;
-}
-
-export interface PackageSearchResponse {
-  results: PackageSearchResult[];
-  total: number;
-  query: string;
-}
-
-export interface DependencyNode {
-  name: string;
-  version: string;
-  source: string;
-  action: string;
-}
-
-export interface DependencyTree {
-  package: string;
-  version: string;
-  dependencies: DependencyNode[];
-  total_new_packages: number;
-  estimated_disk_bytes: number | null;
-}
-
-/** @deprecated Legacy type from pre-ADR-033 package tracking */
-export interface InstalledPackage {
-  name: string;
-  version: string | null;
-  source: string;
-  pinned: boolean;
-  installed_at: string;
-}
-
-// --- Versioned Environments (ADR-033) ---
-
-export interface EnvironmentVersionSummary {
-  id: number;
-  version_number: number;
-  build_number: number;
-  status: "draft" | "building" | "ready" | "failed";
-  definition_format: "dockerfile" | "conda";
-  image_uri: string | null;
-  created_at: string | null;
-}
-
-export interface EnvironmentResponse {
-  id: number;
-  name: string;
-  description: string | null;
-  visibility: "team" | "organization";
-  environment_type: "notebook" | "work_node" | "pipeline";
-  version_count: number;
-  latest_version: EnvironmentVersionSummary | null;
-  created_by: UserSummary | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface EnvironmentListResponse {
-  environments: EnvironmentResponse[];
-  total: number;
-}
-
-export interface EnvironmentDetailResponse {
-  id: number;
-  name: string;
-  description: string | null;
-  visibility: "team" | "organization";
-  environment_type: "notebook" | "work_node" | "pipeline";
-  versions: EnvironmentVersionSummary[];
-  created_by: UserSummary | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface EnvironmentVersionResponse {
-  id: number;
-  environment_id: number;
-  version_number: number;
-  status: "draft" | "building" | "ready" | "failed";
-  definition_format: "dockerfile" | "conda";
-  definition_content: string;
-  build_id: string | null;
-  image_uri: string | null;
-  created_by: UserSummary | null;
-  created_at: string | null;
-}
-
-export interface BuildLogsResponse {
-  build_id: string | null;
-  status: string;
-  logs_url: string | null;
-}
-
-export interface EnvironmentCreateRequest {
-  name: string;
-  description?: string;
-  visibility?: "team" | "organization";
-  environment_type?: "notebook" | "work_node" | "pipeline";
-}
-
-export interface VersionCreateRequest {
-  definition_format: "dockerfile" | "conda";
-  definition_content: string;
-}
-
-export interface TemplateNotebookResponse {
-  id: number;
-  name: string;
-  description: string | null;
-  category: string | null;
-  compatible_with: string | null;
-  parameters: Record<string, unknown>;
-  is_builtin: boolean;
-  created_at: string;
-}
-
-export interface TemplateNotebookListResponse {
-  notebooks: TemplateNotebookResponse[];
-  total: number;
-}
-
-// Phase 8: MINSEQE Metadata + Pipeline Reviews
-
-export type ReviewVerdict = "approved" | "approved_with_caveats" | "rejected" | "revision_requested";
-
-export interface ControlledVocabularyValue {
-  id: number;
-  value: string;
-  display_label: string | null;
-  display_order: number;
-  is_default: boolean;
-  is_active: boolean;
-}
-
-export interface ControlledVocabularyResponse {
-  field_name: string;
-  values: ControlledVocabularyValue[];
-}
-
-export interface ControlledVocabularyFieldsResponse {
-  fields: string[];
-}
-
-/** A sample's QC verdict within a review: its own vocabulary, not a run-review verdict. */
-export type SampleVerdict = "pass" | "warning" | "fail";
-
-export interface SampleVerdictEntry {
-  verdict: SampleVerdict;
-  notes?: string | null;
-}
-
-/** POST /api/pipeline-runs/{id}/reviews. Sample verdicts are keyed by sample id. */
-export interface PipelineRunReviewCreate {
-  verdict: ReviewVerdict;
-  notes?: string | null;
-  sample_verdicts?: Record<string, SampleVerdictEntry> | null;
-  recommended_exclusions?: number[] | null;
-}
-
-/**
- * A review as the review API emits it. `verdict` is an open string on the wire; the badge
- * labels unknown values. `reviewer` is nullable in the declared schema (a stored review always
- * has one today), and `sample_verdicts_json` is the stored dictionary, not validated data.
- */
-export interface PipelineRunReview {
-  id: number;
-  pipeline_run_id: number;
-  reviewer: UserSummary | null;
-  verdict: string;
-  notes: string | null;
-  sample_verdicts_json: Record<string, unknown> | null;
-  recommended_exclusions: number[] | null;
-  is_active: boolean;
-  reviewed_at: string;
-  created_at: string;
-}
-
-export interface PipelineRunReviewListResponse {
-  reviews: PipelineRunReview[];
-}
-
-// Reference Data types (Phase 9)
-export interface ReferenceDataset {
-  id: number;
-  organization_id: number;
-  name: string;
-  category: string;
-  scope: string;
-  version: string;
-  source_url: string | null;
-  gcs_prefix: string;
-  total_size_bytes: number | null;
-  file_count: number | null;
-  status: "uploading" | "active" | "deprecated" | "pending_approval" | "failed";
-  deprecation_note: string | null;
-  superseded_by_id: number | null;
-  created_at: string;
-}
-
-export interface ReferenceDatasetFile {
-  id: number;
-  filename: string;
-  gcs_uri: string;
-  storage_uri: string;
-  size_bytes: number | null;
-  md5_checksum: string | null;
-  file_type: string | null;
-  created_at: string;
-}
-
-export interface ReferenceDatasetDetail extends ReferenceDataset {
-  files: ReferenceDatasetFile[];
-  uploaded_by: { id: number; name: string | null; email: string } | null;
-  approved_by: { id: number; name: string | null; email: string } | null;
-}
-
-export interface ReferenceDatasetListResponse {
-  references: ReferenceDataset[];
-  total: number;
-}
-
-export interface ImpactPipelineRun {
-  pipeline_run_id: number;
-  pipeline_name: string;
-  pipeline_version: string | null;
-  experiment_id: number | null;
-  experiment_name: string | null;
-  status: string;
-  review_verdict: string | null;
-  completed_at: string | null;
-}
-
-export interface ImpactSummary {
-  reference_dataset_id: number;
-  total_pipeline_runs: number;
-  total_experiments: number;
-  pipeline_runs: ImpactPipelineRun[];
-}
-
-export interface ReferenceUploadFileSpec {
-  filename: string;
-  size_bytes: number;
-  content_type?: string;
-  md5_checksum?: string;
-}
-
-export interface ReferenceUploadInitRequest {
-  name: string;
-  category: string;
-  scope: string;
-  version: string;
-  source_url?: string;
-  description?: string;
-  files: ReferenceUploadFileSpec[];
-}
-
-export interface ReferenceUploadSlot {
-  filename: string;
-  session_url: string;
-  expires_at: string;
-}
-
-export interface ReferenceUploadInitResponse {
-  reference_id: number;
-  gcs_prefix: string;
-  uploads: ReferenceUploadSlot[];
-}
-
-export interface ReferenceImportRequest {
-  name: string;
-  category: string;
-  scope: string;
-  version: string;
-  source_url: string;
-  source_md5_url?: string;
-  auth_header?: string;
-  extract: "none" | "gzip" | "tar" | "tar.gz";
-  expected_files?: string[];
-  description?: string;
-}
-
-export interface ReferenceImportStartResponse {
-  reference_id: number;
-  import_job_id: string;
-  status: string;
-}
-
-export interface ReferenceImportStatusResponse {
-  reference_id: number;
-  status: string;
-  progress_pct: number | null;
-  bytes_downloaded: number | null;
-  total_bytes: number | null;
-  error_message: string | null;
-  import_job_id: string | null;
-  updated_at: string | null;
-}
-
-export interface GeoValidationField {
-  geo_column: string;
-  status: "complete" | "populated_unvalidated" | "missing_required" | "missing_recommended";
-  value: string | null;
-  message: string | null;
-}
-
-export interface GeoSampleValidation {
-  sample_id: number;
-  sample_name: string;
-  fields: GeoValidationField[];
-}
-
-export interface GeoValidationSummary {
-  total_fields: number;
-  complete: number;
-  populated_unvalidated: number;
-  missing_required: number;
-  missing_recommended: number;
-}
-
-export interface GeoValidationReport {
-  experiment_id: number;
-  pipeline_run_id: number | null;
-  series_fields: GeoValidationField[];
-  sample_validations: GeoSampleValidation[];
-  protocol_fields: GeoValidationField[];
-  summary: GeoValidationSummary;
-}
-
-// Analysis Snapshots
-
-export interface AnalysisSnapshot {
-  id: number;
-  experiment_id: number | null;
-  project_id: number | null;
-  notebook_session_id: number | null;
-  user_id: number;
-  user_name: string;
-  label: string;
-  notes: string | null;
-  object_type: string;
-  cell_count: number | null;
-  gene_count: number | null;
-  cluster_count: number | null;
-  starred: boolean;
-  figure_url: string | null;
-  created_at: string;
-}
-
-export interface AnalysisSnapshotDetail extends AnalysisSnapshot {
-  parameters_json: Record<string, unknown> | null;
-  embeddings_json: Record<string, { n_components: number }> | null;
-  clusterings_json: Record<string, { n_clusters: number; distribution: Record<string, number> }> | null;
-  layers_json: string[] | null;
-  metadata_columns_json: string[] | null;
-  command_log_json: Array<{ name: string; params: Record<string, unknown> }> | null;
-  checkpoint_url: string | null;
-}
-
-export interface ParameterDiff {
-  parameter_path: string;
-  values: Record<number, unknown>;
-  changed: boolean;
-}
-
-export interface EmbeddingDiff {
-  embedding_name: string;
-  dimensions: Record<number, number | null>;
-  present_in: number[];
-}
-
-export interface ClusteringDiff {
-  clustering_name: string;
-  n_clusters: Record<number, number>;
-  distributions: Record<number, Record<string, number>>;
-  present_in: number[];
-}
-
-export interface CommandDiff {
-  command_name: string;
-  present_in: number[];
-  params_differ: boolean;
-  params: Record<number, Record<string, unknown>> | null;
-}
-
-export interface CellCountPoint {
-  snapshot_id: number;
-  label: string;
-  cell_count: number;
-  created_at: string;
-}
-
-export interface SnapshotComparison {
-  snapshots: AnalysisSnapshotDetail[];
-  parameter_diff: ParameterDiff[];
-  embedding_diff: EmbeddingDiff[];
-  clustering_diff: ClusteringDiff[];
-  command_log_diff: CommandDiff[] | null;
-  cell_count_series: CellCountPoint[];
-}
-
-// Phase 13: Auto-Ingest, Naming Profiles, Pipeline Triggers
+// Compatibility barrel for the frontend's shared types.
 //
-// Naming Profiles were redesigned (see local/Naming Profiles/redesign-plan.md).
-// The closed enum of field names is gone; profiles now carry an optional
-// experiment_template_id and a list of segments shaped by the new
-// SegmentDefinition.
+// Declarations live in domain modules under `./types/`. This file only re-exports them, so
+// existing `@/lib/types` imports keep working. It is the only barrel: there is no
+// `./types/index.ts`, because `@/lib/types` must keep resolving to this file.
 
-export type SegmentFieldType = "string" | "number" | "date";
-export type SegmentDateFormat = "YYYYMMDD" | "YYYY-MM-DD" | "YYMMDD";
-export type NamingProfileDelimiter = "_" | "-";
+export type {
+  AuditLogEntry,
+  AuditLogResponse,
+  LoginResponse,
+  PermissionEntry,
+  Role,
+  RoleListResponse,
+  User,
+  UserSummary,
+} from "./types/identity";
 
-export interface SegmentDefinition {
-  position: number;
-  identifier: string | null;
-  field_name: string;
-  field_type: SegmentFieldType;
-  padding: number | null;
-  date_format: SegmentDateFormat | null;
-  is_system_chip: boolean;
-}
+export type {
+  BootstrapStatus,
+  ComponentState,
+  HealthStatus,
+  NavItem,
+  SearchHit,
+  SearchResult,
+  TerraformRun,
+} from "./types/platform";
 
-export interface NamingProfile {
-  id: number;
-  organization_id: number;
-  name: string;
-  description: string | null;
-  delimiter: NamingProfileDelimiter;
-  strip_extension: boolean;
-  segments: SegmentDefinition[];
-  experiment_template_id: number | null;
-  status: "active" | "inactive" | "deprecated";
-  created_by: number;
-  created_at: string;
-  updated_at: string;
-}
+export { SAMPLE_ASSAY_OPTIONS } from "./types/experiments";
+export type {
+  AssayValue,
+  ControlledVocabularyFieldsResponse,
+  ControlledVocabularyResponse,
+  ControlledVocabularyValue,
+  CustomFieldResponse,
+  CustomFieldValue,
+  Experiment,
+  ExperimentCreateRequest,
+  ExperimentDetail,
+  ExperimentListResponse,
+  ExperimentReference,
+  ExperimentStatus,
+  ExperimentTemplate,
+  ExperimentUpdateRequest,
+  FieldDefaultResponse,
+  FieldDefaultValue,
+  ManifestEntry,
+  PipelineRunSummary,
+  Project,
+  ProjectDetailResponse,
+  ProjectExperimentSummary,
+  ProjectListResponse,
+  ProjectSampleGroup,
+  ProjectSampleResponse,
+  ProjectSummary,
+  QCStatus,
+  ReaderSACreateResponse,
+  ReaderSAStatus,
+  Sample,
+  SampleBatch,
+  SampleBatchBrief,
+  SampleBatchCreateRequest,
+  SampleBatchSummary,
+  SampleBrief,
+  SampleBulkUpdateRequest,
+  SampleCreateRequest,
+  SampleCustomFieldResponse,
+  SampleCustomFieldValue,
+  SampleStatus,
+  SampleUpdateRequest,
+  SequencingBatch,
+  SequencingBatchDetail,
+  SequencingBatchStatus,
+  SheetPreviewResponse,
+  SheetRecognizedColumn,
+  TemplateCreateRequest,
+  VocabularyResponse,
+  VocabularyValue,
+} from "./types/experiments";
 
-export interface NamingProfileTestResult {
-  filename: string;
-  parsed: Record<string, string>;
-  unrecognized: string[];
-  warnings: string[];
-}
+export { RESOURCE_PROFILES } from "./types/sessions";
+export type {
+  AnalysisSnapshot,
+  AnalysisSnapshotDetail,
+  BuildLogsResponse,
+  CellCountPoint,
+  ClusteringDiff,
+  CommandDiff,
+  DataMount,
+  DependencyNode,
+  DependencyTree,
+  EmbeddingDiff,
+  EnvironmentCreateRequest,
+  EnvironmentDetailResponse,
+  EnvironmentListResponse,
+  EnvironmentResponse,
+  EnvironmentVersionResponse,
+  EnvironmentVersionSummary,
+  GitCommit,
+  GitCommitDetail,
+  GitCommitListResponse,
+  GitHubRepo,
+  GitHubRepoListResponse,
+  GitOpsRepoStatus,
+  InstalledPackage,
+  MachineType,
+  NotebookSession,
+  PackageSearchResponse,
+  PackageSearchResult,
+  ParameterDiff,
+  ResourceProfile,
+  SessionLaunchRequest,
+  SessionListResponse,
+  SessionProvenance,
+  SessionStatus,
+  SessionType,
+  SnapshotComparison,
+  TemplateNotebookListResponse,
+  TemplateNotebookResponse,
+  VersionCreateRequest,
+  WorkNode,
+  WorkNodeLaunchRequest,
+  WorkNodeListResponse,
+} from "./types/sessions";
 
-export interface IngestEvent {
-  id: number;
-  file_id: number | null;
-  source_bucket: string;
-  source_path: string;
-  naming_profile_id: number | null;
-  parsed_project_code: string | null;
-  parsed_experiment_code: string | null;
-  parsed_sample_id: string | null;
-  resolved_project_id: number | null;
-  resolved_experiment_id: number | null;
-  resolved_sample_id: number | null;
-  auto_created_entities: Record<string, number[]>;
-  ingest_status: "cataloged" | "unmatched" | "multiple_matches" | "duplicate" | "failed";
-  created_at: string;
-}
+export type {
+  BindingSource,
+  CustomPipeline,
+  CustomPipelineCodeSource,
+  CustomPipelineCreateRequest,
+  CustomPipelineDetail,
+  CustomPipelineEnvironmentSummary,
+  CustomPipelineRunOverview,
+  CustomPipelineUpdateRequest,
+  CustomPipelineVariable,
+  CustomPipelineVariableDefinition,
+  CustomPipelineVariableType,
+  CustomPipelineVersion,
+  CustomPipelineVersionCreateRequest,
+  CustomPipelineVersionStatus,
+  CustomPipelineVersionTrigger,
+  DeclaredColumn,
+  ParameterGroup,
+  ParameterSchema,
+  PerSampleInputSpec,
+  PipelineAddRequest,
+  PipelineCatalog,
+  PipelineCatalogListResponse,
+  PipelineProcess,
+  PipelineProcessRetry,
+  PipelineProcessStatus,
+  PipelineProgress,
+  PipelineRun,
+  PipelineRunCompareResponse,
+  PipelineRunDetail,
+  PipelineRunLaunchRequest,
+  PipelineRunListResponse,
+  PipelineRunPreflight,
+  PipelineRunReview,
+  PipelineRunReviewCreate,
+  PipelineRunReviewListResponse,
+  PipelineRunStatus,
+  ReferenceParameterCategory,
+  RegistryListResponse,
+  RegistryPipeline,
+  RegistryRefreshResponse,
+  RegistryVersion,
+  RegistryVersionsResponse,
+  ReviewVerdict,
+  RunSamplesheetDesign,
+  SampleVerdict,
+  SampleVerdictEntry,
+  SamplesheetInputSpec,
+  SamplesheetPrefill,
+  SamplesheetPreview,
+  StatedValue,
+} from "./types/pipelines";
 
-export interface UnclaimedEntity {
-  entity_type: "project" | "experiment" | "sample";
-  entity_id: number;
-  name: string;
-  created_at: string;
-}
+export type {
+  BucketStats,
+  CellxgeneFileInspection,
+  CellxgenePublicationResponse,
+  CellxgenePublishableFile,
+  ComputeSessionRef,
+  DatasetExperimentSummary,
+  DatasetSearchResult,
+  DocumentResponse,
+  DocumentSearchResponse,
+  FileListResponse,
+  FileProvenance,
+  FileResponse,
+  FileUploadInitiateResponse,
+  GeoSampleValidation,
+  GeoValidationField,
+  GeoValidationReport,
+  GeoValidationSummary,
+  LifecyclePolicyStatus,
+  PipelineRunRef,
+  StorageDashboard,
+} from "./types/files";
 
-export interface PipelineTrigger {
-  id: number;
-  pipeline_id: number;
-  organization_id: number;
-  trigger_mode: "manual" | "event_driven" | "scheduled";
-  event_config: Record<string, unknown> | null;
-  schedule_config: Record<string, unknown> | null;
-  parameter_defaults: Record<string, unknown> | null;
-  budget_config: Record<string, unknown>;
-  enabled: boolean;
-  created_by: number;
-  created_at: string;
-  updated_at: string;
-}
+export type {
+  ImpactPipelineRun,
+  ImpactSummary,
+  PlotArchiveListResponse,
+  PlotArchiveResponse,
+  QCChartSpec,
+  QCDashboardConfig,
+  QCDashboardResponse,
+  QCDashboardSummary,
+  QCMetricSpec,
+  QCMetrics,
+  QCPlot,
+  QCPlotSpec,
+  QCSection,
+  ReferenceDataset,
+  ReferenceDatasetDetail,
+  ReferenceDatasetFile,
+  ReferenceDatasetListResponse,
+  ReferenceImportRequest,
+  ReferenceImportStartResponse,
+  ReferenceImportStatusResponse,
+  ReferenceUploadFileSpec,
+  ReferenceUploadInitRequest,
+  ReferenceUploadInitResponse,
+  ReferenceUploadSlot,
+} from "./types/qc";
 
-export interface TriggerEvaluation {
-  id: number;
-  trigger_id: number;
-  evaluation_type: string;
-  matched_files: number[];
-  budget_check_result: Record<string, unknown> | null;
-  result: "submitted" | "queued" | "skipped" | "no_files" | "error";
-  pipeline_run_id: number | null;
-  created_at: string;
-}
+export type {
+  AutoRunConfig,
+  AutoRunConfigCreate,
+  AutoRunConfigUpdate,
+  BudgetStatus,
+  CostEstimate,
+  IngestEvent,
+  NamingProfile,
+  NamingProfileDelimiter,
+  NamingProfileTestResult,
+  PendingAutoRun,
+  PipelineTrigger,
+  SegmentDateFormat,
+  SegmentDefinition,
+  SegmentFieldType,
+  TriggerEvaluation,
+  UnclaimedEntity,
+} from "./types/ingest";
 
-export interface BudgetStatus {
-  monthly_budget: number;
-  current_spend: number;
-  remaining: number;
-  utilization_pct: number;
-}
+export type {
+  AssistantAvailability,
+  AssistantConfirmResponse,
+  AssistantConversationListResponse,
+  AssistantConversationResponse,
+  AssistantConversationSummary,
+  AssistantConversationTranscript,
+  AssistantMessageResponse,
+  AssistantPlanStep,
+  AssistantTranscriptMessage,
+  AssistantTranscriptPlan,
+  AssistantTurnStatus,
+} from "./types/assistant";
 
-export interface CostEstimate {
-  estimated_cost: number;
-  confidence_interval_pct: number;
-  historical_run_count: number;
-  budget_check: Record<string, unknown>;
-}
-
-// Experiment Auto-Run
-
-export interface AutoRunConfig {
-  id: number;
-  experiment_id: number;
-  pipeline_key: string;
-  parameters: Record<string, unknown> | null;
-  reference_genome: string | null;
-  alignment_algorithm: string | null;
-  delay_minutes: number;
-  enabled: boolean;
-  configured_by_user_id: number;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface AutoRunConfigCreate {
-  pipeline_key: string;
-  parameters?: Record<string, unknown>;
-  reference_genome?: string | null;
-  alignment_algorithm?: string | null;
-  delay_minutes?: number;
-}
-
-export interface AutoRunConfigUpdate {
-  parameters?: Record<string, unknown>;
-  reference_genome?: string | null;
-  alignment_algorithm?: string | null;
-  delay_minutes?: number;
-  enabled?: boolean;
-}
-
-export interface PendingAutoRun {
-  id: number;
-  auto_run_config_id: number;
-  experiment_id: number;
-  sample_id: number;
-  sample_completed_at: string;
-  scheduled_at: string;
-  status: "waiting" | "launched" | "cancelled";
-  pipeline_run_id: number | null;
-  cancelled_reason: string | null;
-  created_at: string | null;
-}
-
-export interface VocabularyValue {
-  id: number;
-  value: string;
-  display_label: string | null;
-  display_order: number;
-  is_default: boolean;
-  is_active: boolean;
-}
-
-export interface VocabularyResponse {
-  field_name: string;
-  values: VocabularyValue[];
-}
-
-// Work Nodes (ADR-034, ADR-043)
-
-export interface WorkNode {
-  id: number;
-  session_type: string;
-  user: UserSummary | null;
-  project_id: number | null;
-  project: ProjectSummary | null;
-  environment_version_id: number | null;
-  machine_type: string | null;
-  input_file_ids: number[] | null;
-  resource_profile: string;
-  cpu_cores: number;
-  memory_gb: number;
-  requested_disk_gb: number | null;
-  status: string;
-  failure_reason: string | null;
-  failure_message: string | null;
-  access_url: string | null;
-  gce_instance_name: string | null;
-  gce_zone: string | null;
-  github_repo_ids: number[] | null;
-  heartbeat_at: string | null;
-  started_at: string | null;
-  stopped_at: string | null;
-  created_at: string;
-}
-
-export interface WorkNodeListResponse {
-  sessions: WorkNode[];
-  total: number;
-}
-
-export interface WorkNodeLaunchRequest {
-  project_id?: number;
-  experiment_id?: number;
-  environment_version_id: number;
-  machine_type: string;
-  input_file_ids?: number[];
-  github_repo_ids?: number[];
-}
-
-export interface GitHubRepo {
-  id: number;
-  git_ssh_url: string;
-  display_name: string;
-  created_at: string;
-}
-
-export interface GitHubRepoListResponse {
-  repos: GitHubRepo[];
-  total: number;
-}
-
-export interface MachineType {
-  name: string;
-  category: string;
-  cpu: number;
-  memory_gb: number;
-  gpu: string | null;
-  description: string;
-}
-
-export interface DataMount {
-  path: string;
-  label: string;
-  description: string;
-}
-
-// Google Sheets import
-export interface SheetRecognizedColumn {
-  header: string;
-  mapped_to: string;
-  defaultable: boolean;
-}
-
-export interface SheetPreviewResponse {
-  spreadsheet_id: string;
-  sheet_name: string;
-  columns: string[];
-  recognized_columns: SheetRecognizedColumn[];
-  unknown_columns: string[];
-}
-
-export interface ReaderSAStatus {
-  exists: boolean;
-  email: string | null;
-}
-
-export interface ReaderSACreateResponse {
-  email: string;
-  message: string;
-  warning: string | null;
-}
-
-// ---- Assistant (ai_pipeline_run) ----
-
-export interface AssistantAvailability {
-  enabled: boolean;
-  reason?: string | null;
-}
-
-export interface AssistantConversationResponse {
-  id: number;
-  status: string;
-  provider: string | null;
-  model: string | null;
-}
-
-export interface AssistantPlanStep {
-  tool: string;
-  args: Record<string, unknown>;
-  // read_only | mutating | spend - drives the cost warning on the confirm card.
-  consequence_class?: string;
-  // Set on a confirmed plan's steps: the output of a step that ran, or why it did not.
-  result?: Record<string, unknown>;
-  outcome?: "failed" | "not_run";
-}
-
-export type AssistantTurnStatus =
-  | "answered"
-  | "awaiting_confirmation"
-  | "step_cap_exceeded"
-  | "unavailable";
-
-export interface AssistantMessageResponse {
-  status: AssistantTurnStatus;
-  text: string | null;
-  action_plan_id: number | null;
-  plan_steps: AssistantPlanStep[] | null;
-  reason: string | null;
-}
-
-export interface AssistantConfirmResponse {
-  status: string;
-  plan_id: number;
-  executed: boolean;
-  result: Record<string, unknown> | null;
-  // Set when a confirmed launch actually started a run (org launch toggle on); else null.
-  run_id?: number | null;
-}
-
-export interface AssistantConversationSummary {
-  id: number;
-  title: string | null;
-  preview: string | null;
-  status: string;
-  message_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AssistantConversationListResponse {
-  conversations: AssistantConversationSummary[];
-  total: number;
-}
-
-export interface AssistantTranscriptMessage {
-  id: number;
-  role: string;
-  content: string | null;
-  tool_calls: AssistantPlanStep[] | null;
-  created_at: string;
-}
-
-export interface AssistantTranscriptPlan {
-  id: number;
-  steps: AssistantPlanStep[] | null;
-  status: string;
-  created_at: string;
-}
-
-export interface AssistantConversationTranscript {
-  id: number;
-  title: string | null;
-  messages: AssistantTranscriptMessage[];
-  plans: AssistantTranscriptPlan[];
-}
-
-/** One value a scientist stated, with the authorship the run keeps. A value
- *  that did not change keeps its original author, so re-saving a design does
- *  not quietly reassign who said what. */
-export interface StatedValue {
-  value: string;
-  set_by: string | null;
-  set_at: string | null;
-}
-
-/** The design a run used, snapshotted at launch. A mapping edited afterwards
- *  must not rewrite the history of a run that already used it. */
-export interface RunSamplesheetDesign {
-  values: Record<string, Record<string, StatedValue>>;
-  bindings: Record<string, StatedValue>;
-}
+export type {
+  ProvenanceDAG,
+  ProvenanceEdge,
+  ProvenanceNode,
+} from "./types/provenance";
