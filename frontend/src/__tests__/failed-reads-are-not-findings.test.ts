@@ -70,7 +70,7 @@ describe("an empty collection reached from a rejection is not rendered as a find
     ],
     [
       "the work-node launch file picker",
-      "app/(app)/workbench/work-nodes/page.tsx",
+      "components/workNodes/WorkNodeLaunchDialog.tsx",
       /failed: experimentFilesFailed \} = selection\.files/,
     ],
     [
