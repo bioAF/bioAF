@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +24,8 @@ logger = logging.getLogger("bioaf.pipeline_review")
 _BAD_SAMPLE_REFERENCE = "Sample verdicts must reference samples in this pipeline run"
 # samples.id is a PostgreSQL integer; a larger key cannot name a sample and must not reach the query.
 _MAX_SAMPLE_ID = 2**31 - 1
+# Ids per membership query; well under asyncpg's 32,767 bind parameters.
+_ID_QUERY_CHUNK = 1000
 
 
 async def _scoped_run(session: AsyncSession, pipeline_run_id: int, org_id: int) -> PipelineRun:
@@ -73,17 +75,28 @@ async def _verdict_samples(
         if str(sample_id) != key or sample_id in ids or not 0 < sample_id <= _MAX_SAMPLE_ID:
             raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
         ids.add(sample_id)
-    result = await session.execute(
-        select(Sample)
-        .join(PipelineRunSample, PipelineRunSample.sample_id == Sample.id)
-        .join(Experiment, Experiment.id == Sample.experiment_id)
-        .where(
-            Sample.id.in_(ids),
-            PipelineRunSample.pipeline_run_id == run.id,
-            Experiment.organization_id == org_id,
-        )
+    # A run cannot have more verdict-able samples than members, so a larger payload is refused
+    # before any id reaches a query. Within that bound, ids are resolved in chunks so no single
+    # IN list exceeds the driver's bind-parameter limit.
+    members = await session.scalar(
+        select(func.count()).select_from(PipelineRunSample).where(PipelineRunSample.pipeline_run_id == run.id)
     )
-    samples = {sample.id: sample for sample in result.scalars().unique()}
+    if len(ids) > (members or 0):
+        raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
+    ordered = sorted(ids)
+    samples: dict[int, Sample] = {}
+    for start in range(0, len(ordered), _ID_QUERY_CHUNK):
+        result = await session.execute(
+            select(Sample)
+            .join(PipelineRunSample, PipelineRunSample.sample_id == Sample.id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(
+                Sample.id.in_(ordered[start : start + _ID_QUERY_CHUNK]),
+                PipelineRunSample.pipeline_run_id == run.id,
+                Experiment.organization_id == org_id,
+            )
+        )
+        samples.update((sample.id, sample) for sample in result.scalars().unique())
     if set(samples) != ids:
         raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
     return samples

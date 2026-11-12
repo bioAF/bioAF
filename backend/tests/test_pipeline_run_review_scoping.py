@@ -279,6 +279,68 @@ async def test_an_out_of_range_or_non_canonical_sample_key_is_the_same_generic_4
 
 
 @pytest.mark.asyncio
+async def test_a_payload_larger_than_one_query_can_carry_is_the_generic_422(
+    client, session, comp_bio_token, world, spawned
+):
+    # 32,768 ids is one more than asyncpg's bind-parameter limit for a single IN list.
+    verdicts = {str(world.member)} | {str(i) for i in range(1_000_000, 1_032_767)}
+    assert len(verdicts) == 32_768
+    before = await _snapshot(session, world)
+    response = await client.post(
+        f"/api/pipeline-runs/{world.run}/reviews",
+        json={"verdict": "approved", "sample_verdicts": {k: {"verdict": "fail"} for k in verdicts}},
+        headers=_bearer(comp_bio_token),
+    )
+    assert response.status_code == 422, response.text[:300]
+    assert await _snapshot(session, world) == before
+    assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_members_are_resolved_across_bounded_queries(
+    client, session, comp_bio_token, world, spawned, monkeypatch
+):
+    """With one id per query, every member still resolves and a bad id in a later query still rejects all."""
+    monkeypatch.setattr("app.services.pipeline_review_service._ID_QUERY_CHUNK", 1)
+    two = await _run(
+        session,
+        world.org_id,
+        await session.get(Experiment, world.experiment),
+        [await session.get(Sample, world.member), await session.get(Sample, world.non_member)],
+    )
+    await session.commit()
+    two_id = two.id
+    before = await _snapshot(session, world)
+    rejected = await client.post(
+        f"/api/pipeline-runs/{two_id}/reviews",
+        json={
+            "verdict": "approved",
+            "sample_verdicts": {
+                str(world.member): {"verdict": "fail"},
+                str(world.non_member): {"verdict": "fail"},
+                str(world.foreign_sample): {"verdict": "fail"},
+            },
+        },
+        headers=_bearer(comp_bio_token),
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert await _snapshot(session, world) == before
+
+    accepted = await client.post(
+        f"/api/pipeline-runs/{two_id}/reviews",
+        json={
+            "verdict": "approved",
+            "sample_verdicts": {str(world.member): {"verdict": "fail"}, str(world.non_member): {"verdict": "warning"}},
+        },
+        headers=_bearer(comp_bio_token),
+    )
+    assert accepted.status_code == 201, accepted.text
+    session.expire_all()
+    assert (await session.get(Sample, world.member)).qc_status == "fail"
+    assert (await session.get(Sample, world.non_member)).qc_status == "warning"
+
+
+@pytest.mark.asyncio
 async def test_missing_and_foreign_sample_references_answer_identically(client, comp_bio_token, world):
     bodies = []
     for sample_id in (world.foreign_sample, 999_999):
