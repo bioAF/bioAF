@@ -8,4 +8,6 @@ class UserSummary(BaseModel):
     name: str | None = None
     email: str
 
-    model_config = {"from_attributes": True}
+    # Every field is always emitted, so the response schema marks defaulted fields required too
+    # (frontend transport types are generated from it). Runtime validation is unchanged.
+    model_config = {"json_schema_serialization_defaults_required": True, "from_attributes": True}

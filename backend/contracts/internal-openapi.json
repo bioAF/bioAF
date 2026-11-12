@@ -7509,7 +7509,9 @@
         "required": [
           "id",
           "name",
-          "status"
+          "status",
+          "sample_count",
+          "created_at"
         ],
         "title": "ExperimentSummary",
         "type": "object"
@@ -14068,6 +14070,7 @@
         "required": [
           "id",
           "pipeline_run_id",
+          "reviewer",
           "verdict",
           "notes",
           "sample_verdicts_json",
@@ -14120,7 +14123,9 @@
         "required": [
           "id",
           "pipeline_name",
-          "status"
+          "pipeline_version",
+          "status",
+          "created_at"
         ],
         "title": "PipelineRunSummary",
         "type": "object"
@@ -14590,7 +14595,21 @@
         "required": [
           "id",
           "name",
-          "created_at"
+          "code",
+          "external_id",
+          "description",
+          "hypothesis",
+          "status",
+          "owner_user_id",
+          "owner_name",
+          "sample_count",
+          "experiment_count",
+          "pipeline_run_count",
+          "snapshot_count",
+          "created_at",
+          "samples",
+          "experiments",
+          "pipeline_runs"
         ],
         "title": "ProjectDetailResponse",
         "type": "object"
@@ -14732,6 +14751,17 @@
         "required": [
           "id",
           "name",
+          "code",
+          "external_id",
+          "description",
+          "hypothesis",
+          "status",
+          "owner_user_id",
+          "owner_name",
+          "sample_count",
+          "experiment_count",
+          "pipeline_run_count",
+          "snapshot_count",
           "created_at"
         ],
         "title": "ProjectResponse",
@@ -14849,7 +14879,14 @@
           }
         },
         "required": [
-          "sample_id"
+          "sample_id",
+          "external_id",
+          "organism",
+          "tissue_type",
+          "qc_status",
+          "added_by",
+          "added_at",
+          "notes"
         ],
         "title": "ProjectSampleResponse",
         "type": "object"
@@ -15034,7 +15071,8 @@
         "required": [
           "id",
           "type",
-          "label"
+          "label",
+          "metadata"
         ],
         "title": "ProvenanceNode",
         "type": "object"
@@ -21869,11 +21907,26 @@
         "required": [
           "id",
           "session_type",
+          "user",
+          "experiment",
+          "project",
           "resource_profile",
           "cpu_cores",
           "memory_gb",
+          "requested_disk_gb",
           "status",
-          "created_at"
+          "failure_reason",
+          "failure_message",
+          "idle_since",
+          "proxy_url",
+          "started_at",
+          "stopped_at",
+          "created_at",
+          "git_branch_name",
+          "git_commit_hash",
+          "environment_version_id",
+          "input_file_ids",
+          "provider_metadata"
         ],
         "title": "SessionResponse",
         "type": "object"
@@ -24890,6 +24943,7 @@
         },
         "required": [
           "id",
+          "name",
           "email"
         ],
         "title": "UserSummary",

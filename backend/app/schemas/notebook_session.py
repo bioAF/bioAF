@@ -42,7 +42,7 @@ class SessionResponse(BaseModel):
     # Backend-neutral provider-details disclosure (BAL Phase 4).
     provider_metadata: dict | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"json_schema_serialization_defaults_required": True, "from_attributes": True}
 
 
 class SessionListResponse(BaseModel):

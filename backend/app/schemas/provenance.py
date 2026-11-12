@@ -9,6 +9,8 @@ class ProvenanceNode(BaseModel):
     label: str
     metadata: dict = {}
 
+    model_config = {"json_schema_serialization_defaults_required": True}
+
 
 class ProvenanceEdge(BaseModel):
     source: str
