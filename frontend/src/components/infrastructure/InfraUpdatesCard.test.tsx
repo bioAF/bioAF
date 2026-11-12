@@ -11,6 +11,12 @@ jest.mock("@/lib/infrastructure", () => ({
 }));
 
 import { infrastructure } from "@/lib/infrastructure";
+
+// These controls need infrastructure/pipelines permissions; the suite is about their behavior, so
+// the role has every permission.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
 const checkUpdates = infrastructure.checkUpdates as jest.Mock;
 const applyUpdates = infrastructure.applyUpdates as jest.Mock;
 

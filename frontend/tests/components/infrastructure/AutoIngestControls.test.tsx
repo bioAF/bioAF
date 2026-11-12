@@ -1,6 +1,12 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AutoIngestControls } from "@/components/components/AutoIngestControls";
 
+// These controls need infrastructure/pipelines permissions; the suite is about their behavior, so
+// the role has every permission.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
+
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();
 jest.mock("@/lib/api", () => ({

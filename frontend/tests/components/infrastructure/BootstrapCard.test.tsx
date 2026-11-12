@@ -9,6 +9,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
 
+// These controls need infrastructure/pipelines permissions; the suite is about their behavior, so
+// the role has every permission.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
+
 // ---------------------------------------------------------------------------
 // Test 30: Shows Initialize button when GCP configured + not initialized
 // ---------------------------------------------------------------------------

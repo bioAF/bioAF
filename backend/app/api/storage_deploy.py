@@ -99,7 +99,7 @@ async def deploy_storage_module(session: AsyncSession, user_id: int) -> dict:
     response_model=StorageDeployResponse,
 )
 async def deploy_storage(
-    current_user: dict = require_permission("infrastructure", "view"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> StorageDeployResponse:
     """Deploy GCS storage buckets via Terraform."""
@@ -128,7 +128,7 @@ async def deploy_storage(
     response_model=StorageDeployResponse,
 )
 async def update_storage(
-    current_user: dict = require_permission("infrastructure", "view"),
+    current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
 ) -> StorageDeployResponse:
     """Re-apply the storage module to update infrastructure (e.g. add Pub/Sub).

@@ -6,6 +6,7 @@ import { logError } from "@/lib/errorReporting";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useToast } from "@/components/shared/Toast";
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 
 interface OrphanedResource {
   id: number;
@@ -44,6 +45,9 @@ export function OrphanedResourcesCard() {
   const [resources, setResources] = useState<OrphanedResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<number | null>(null);
+  // Clean-up and dismiss change or delete cloud resources: `deploy`, like cleaning up all of them.
+  const actions = useInfrastructureActions();
+  const actionReason = actions.reason("deploy");
 
   const fetchResources = useCallback(async () => {
     try {
@@ -70,6 +74,7 @@ export function OrphanedResourcesCard() {
   }, [fetchResources]);
 
   const handleCleanup = async (id: number) => {
+    if (!actions.allowed("deploy")) return;
     const resource = resources.find((r) => r.id === id);
     const label = resource ? RESOURCE_LABELS[resource.resource_type] ?? resource.resource_type : "resource";
     const destroysData = resource ? DESTROYS_DATA.has(resource.resource_type) : false;
@@ -103,6 +108,8 @@ export function OrphanedResourcesCard() {
       requirePhrase: destroysData ? "delete my data" : undefined,
     });
     if (!ok) return;
+    // Permission is checked again: it may have changed while the confirmation was open.
+    if (!actions.stillAllowed("deploy")) return;
 
     setActionInProgress(id);
     try {
@@ -118,6 +125,7 @@ export function OrphanedResourcesCard() {
   };
 
   const handleDismiss = async (id: number) => {
+    if (!actions.allowed("deploy")) return;
     setActionInProgress(id);
     try {
       await api.post(`/api/v1/infrastructure/orphaned-resources/${id}/dismiss`);
@@ -140,6 +148,7 @@ export function OrphanedResourcesCard() {
         These cloud resources were left behind by a failed deployment and may still
         be accruing costs. Clean them up or dismiss if already handled.
       </p>
+      {actionReason && <p className="text-xs text-amber-800 mb-3">{actionReason}</p>}
       <div className="space-y-2">
         {resources.map((r) => (
           <div
@@ -174,14 +183,16 @@ export function OrphanedResourcesCard() {
             <div className="flex gap-2 ml-3 flex-shrink-0">
               <button
                 onClick={() => handleCleanup(r.id)}
-                disabled={actionInProgress !== null}
+                disabled={actionInProgress !== null || actionReason !== null}
+                title={actionReason ?? undefined}
                 className="px-3 py-1.5 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionInProgress === r.id ? "Cleaning..." : "Clean Up"}
               </button>
               <button
                 onClick={() => handleDismiss(r.id)}
-                disabled={actionInProgress !== null}
+                disabled={actionInProgress !== null || actionReason !== null}
+                title={actionReason ?? undefined}
                 className="px-3 py-1.5 text-xs font-medium rounded bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Dismiss

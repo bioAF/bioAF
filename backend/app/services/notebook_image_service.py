@@ -109,6 +109,12 @@ RUN R -e "install.packages('hdf5r', configure.args='--with-hdf5=/usr/bin/h5cc')"
 # presto (fast Wilcoxon for Seurat FindMarkers) ships only from GitHub; pinned to a commit
 RUN R -e "remotes::install_github('immunogenomics/presto', ref='${PRESTO_REF}', upgrade='never')"
 
+# BASILISK_USE_SYSTEM_DIR puts basilisk environments in the R library rather than a per-user cache, so
+# the jovyan user finds the one built here instead of building its own. It must be set BEFORE
+# zellkonverter is installed: in this mode basilisk builds a client's environment only at the client's
+# install and refuses to build it later, so setting it afterwards failed the prewarm below.
+ENV BASILISK_USE_SYSTEM_DIR=1
+
 # R / Bioconductor: pinned release, single-cell, bulk DE, enrichment, annotation
 RUN R -e "BiocManager::install(version='${BIOC_VERSION}', update=FALSE, ask=FALSE); BiocManager::install(c('SingleCellExperiment','scater','scran','scuttle','glmGamPoi','batchelor','DropletUtils','SingleR','celldex','zellkonverter','DESeq2','edgeR','limma','clusterProfiler','fgsea','ComplexHeatmap','EnhancedVolcano','org.Hs.eg.db','org.Mm.eg.db','AnnotationDbi'), update=FALSE, ask=FALSE)"
 
@@ -125,14 +131,12 @@ RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCel
 # run paid a full conda solve inside its own pod -- uncached, and an undeclared hard dependency on
 # conda-forge being reachable from the cluster.
 #
-# BASILISK_USE_SYSTEM_DIR puts the environment in the R library rather than a per-user cache, so the
-# jovyan user finds the one built here instead of building its own.
+# The environment itself is built when zellkonverter installs (BASILISK_USE_SYSTEM_DIR, above).
 #
 # Reading a real file is also the only thing that proves the reader WORKS, which package presence
 # never did. The h5ad written here mirrors what `mtx_to_h5ad_star.py` emits (obs["sample"], a
 # `count` layer, symbols in var["gene_symbol"], Ensembl ids as the index) so a shape change upstream
 # fails the build rather than a study.
-ENV BASILISK_USE_SYSTEM_DIR=1
 RUN python -c "\
 import anndata as ad, numpy as np; \
 from scipy.sparse import csr_matrix; \

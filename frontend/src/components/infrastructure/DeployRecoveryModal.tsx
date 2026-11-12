@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Button } from "@/components/ui/Button";
+import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,6 +59,9 @@ export function DeployRecoveryModal({
   const [dead, setDead] = useState<RecoveryItem[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Resuming adopts a resource; starting fresh deletes them all. Both need `deploy`.
+  const actions = useInfrastructureActions();
+  const actionReason = actions.reason("deploy");
 
   const runCheck = useCallback(async () => {
     setState("loading");
@@ -84,8 +88,12 @@ export function DeployRecoveryModal({
         // Nothing to recover or wait on -- close and allow normal flow
         setState("none");
       }
-    } catch {
-      setError("Could not check deployment status. Try again in a moment.");
+    } catch (err) {
+      setError(
+        (err as { status?: number } | null)?.status === 403
+          ? "Your role cannot check or recover deployments. Ask someone with infrastructure deploy permission."
+          : "Could not check deployment status. Try again in a moment.",
+      );
       setState("none");
     }
   }, []);
@@ -97,7 +105,7 @@ export function DeployRecoveryModal({
   }, [open, runCheck]);
 
   const handleRecover = async () => {
-    if (recoverable.length === 0) return;
+    if (recoverable.length === 0 || !actions.allowed("deploy")) return;
     setActionLoading(true);
     setError(null);
     try {
@@ -120,6 +128,7 @@ export function DeployRecoveryModal({
     // successfully". Worse, this is the secondary, white, left-hand button --
     // the position users scan as the cautious choice. Nothing said it deletes
     // anything.
+    if (!actions.allowed("deploy")) return;
     const count = dead.length + recoverable.length + provisioning.length;
     const ok = await confirm({
       title: "Delete the previous deployment and start over?",
@@ -141,6 +150,8 @@ export function DeployRecoveryModal({
       variant: "danger",
     });
     if (!ok) return;
+    // Permission is checked again: it may have changed while the confirmation was open.
+    if (!actions.stillAllowed("deploy")) return;
 
     setActionLoading(true);
     setError(null);
@@ -209,18 +220,21 @@ export function DeployRecoveryModal({
                 {error}
               </p>
             )}
+            {actionReason && <p className="text-xs text-gray-600 mb-4">{actionReason}</p>}
           </div>
           <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
             <button
               onClick={handleStartFresh}
-              disabled={actionLoading}
+              disabled={actionLoading || actionReason !== null}
+              title={actionReason ?? undefined}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Start Fresh
             </button>
             <Button
               onClick={handleRecover}
-              disabled={actionLoading}>
+              disabled={actionLoading || actionReason !== null}
+              title={actionReason ?? undefined}>
               {actionLoading ? "Recovering..." : "Resume Deployment"}
             </Button>
           </div>

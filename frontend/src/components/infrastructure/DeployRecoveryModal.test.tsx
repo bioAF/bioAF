@@ -15,6 +15,11 @@ jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
 }));
 
+// Recovery actions need infrastructure deploy; this suite is about the dialog's flow, so the role has it.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
+
 import { api } from "@/lib/api";
 
 const mockGet = api.get as jest.Mock;

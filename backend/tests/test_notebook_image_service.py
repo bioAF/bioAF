@@ -118,6 +118,17 @@ def test_dockerfile_prewarms_zellkonverters_python_environment():
     assert "BASILISK_USE_SYSTEM_DIR" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_sets_basilisk_system_dir_before_installing_zellkonverter():
+    """With BASILISK_USE_SYSTEM_DIR set, basilisk only builds a client's environment when the client
+    package is INSTALLED, and refuses to build it lazily. Setting it after zellkonverter was installed
+    left no environment for the prewarm `readH5AD` to use, so every image build failed there:
+    "environment 'zellkonverterAnnDataEnv-0.10.9' should have been created during 'zellkonverter'
+    installation" (Cloud Build 363fbd97 on the demo, 2026-11-11, 39 minutes in)."""
+    env_at = DOCKERFILE_CONTENT.index("ENV BASILISK_USE_SYSTEM_DIR=1")
+    install_at = DOCKERFILE_CONTENT.index("'zellkonverter'")
+    assert env_at < install_at
+
+
 def test_dockerfile_builds_hdf5r_against_system_hdf5():
     """hdf5r must link the system HDF5 (libhdf5-dev, on the runtime linker path),
     not the base image's conda HDF5 (libhdf5_hl.so.310, which is not). Building it
