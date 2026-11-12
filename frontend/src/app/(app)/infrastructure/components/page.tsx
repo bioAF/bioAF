@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/Button";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
 import { ClusterStatusCard } from "./ClusterStatusCard";
 import { AddOnComponentsSection } from "./AddOnComponentsSection";
+import { AbandonRunDialog, AbortDeploymentDialog, DestroyStorageDialog, TeardownDialog } from "./StackActionDialogs";
 import type { ComponentsData, StackStatus, TerraformRun, TerraformStatus, ClusterConfig } from "./infrastructureTypes";
 
 export default function InfraComponentsPage() {
@@ -49,11 +50,8 @@ export default function InfraComponentsPage() {
   const [abortLoading, setAbortLoading] = useState(false);
   const [showTeardownModal, setShowTeardownModal] = useState(false);
   const [showTeardownProgress, setShowTeardownProgress] = useState(false);
-  const [teardownChecked, setTeardownChecked] = useState(false);
   const [showDestroyStorageModal, setShowDestroyStorageModal] = useState(false);
   const [showDestroyStorageProgress, setShowDestroyStorageProgress] = useState(false);
-  const [destroyStorageChecked, setDestroyStorageChecked] = useState(false);
-  const [destroyStoragePhrase, setDestroyStoragePhrase] = useState("");
   const [showAbandonModal, setShowAbandonModal] = useState(false);
   const [abandonLoading, setAbandonLoading] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
@@ -65,7 +63,6 @@ export default function InfraComponentsPage() {
   const [useSpecificZone, setUseSpecificZone] = useState(false);
   const [recoveryCheckedOnLoad, setRecoveryCheckedOnLoad] = useState(false);
 
-  const DESTROY_STORAGE_PHRASE = "delete my data";
 
   // Always poll for deployment progress on this page. This catches
   // in-progress deploys on page load (e.g. after a refresh).
@@ -231,6 +228,32 @@ export default function InfraComponentsPage() {
     }
   }
 
+  async function handleTeardown() {
+    setShowTeardownModal(false);
+    if (!actions.stillAllowed("configure")) return;
+    try {
+      await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
+      setDeployStarted(true);
+      setShowTeardownProgress(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Teardown failed to start";
+      toast.error(msg);
+    }
+  }
+
+  async function handleDestroyStorage() {
+    setShowDestroyStorageModal(false);
+    if (!actions.stillAllowed("configure")) return;
+    try {
+      await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
+      setDeployStarted(true);
+      setShowDestroyStorageProgress(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
+      toast.error(msg);
+    }
+  }
+
   function handleBootstrapComplete() {
     setShowBootstrapModal(false);
     setRefreshKey((k) => k + 1);
@@ -340,8 +363,6 @@ export default function InfraComponentsPage() {
                   </div>
                   <button
                     onClick={() => {
-                      setDestroyStorageChecked(false);
-                      setDestroyStoragePhrase("");
                       setShowDestroyStorageModal(true);
                     }}
                     {...configureGate}
@@ -448,7 +469,6 @@ export default function InfraComponentsPage() {
                   </span>
                   <button
                     onClick={() => {
-                      setTeardownChecked(false);
                       setShowTeardownModal(true);
                     }}
                     {...configureGate}
@@ -643,57 +663,12 @@ export default function InfraComponentsPage() {
 
       </Modal>
 
-      {/* Teardown Confirmation Modal */}
-      <Modal
+      <TeardownDialog
         open={showTeardownModal}
-        title="Teardown Compute Stack"
-        onClose={() => setShowTeardownModal(false)}
-        size="md"
-        footer={
-          <>
-          <button
-            onClick={() => setShowTeardownModal(false)}
-            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <Button variant="danger"
-            disabled={!teardownChecked || !actions.allowed("configure")}
-            title={configureGate.title}
-            onClick={async () => {
-              setShowTeardownModal(false);
-              if (!actions.stillAllowed("configure")) return;
-              try {
-                await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
-                setDeployStarted(true);
-                setShowTeardownProgress(true);
-              } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : "Teardown failed to start";
-                toast.error(msg);
-              }
-            }}>
-            Teardown
-          </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-gray-600 mb-4">
-          This will destroy the Kubernetes cluster and all node pools. Active pipeline
-          runs and notebook sessions will be terminated. Storage buckets and your data
-          will NOT be affected.
-        </p>
-        <label className="flex items-start gap-2 mb-4 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={teardownChecked}
-            onChange={(e) => setTeardownChecked(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span className="text-sm text-gray-700">
-            I understand this will terminate all running workloads
-          </span>
-        </label>
-      </Modal>
+        reason={configureGate.title}
+        onCancel={() => setShowTeardownModal(false)}
+        onConfirm={() => void handleTeardown()}
+      />
 
       {/* Teardown Progress Modal */}
       {showTeardownProgress && (
@@ -716,78 +691,13 @@ export default function InfraComponentsPage() {
         />
       )}
 
-      {/* Destroy Storage Confirmation Modal */}
-      <Modal
+      <DestroyStorageDialog
         open={showDestroyStorageModal}
-        title="Destroy Storage Infrastructure"
-        onClose={() => setShowDestroyStorageModal(false)}
-        size="md"
-        footer={
-          <>
-          <button
-            onClick={() => setShowDestroyStorageModal(false)}
-            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <Button variant="danger"
-            disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE || !actions.allowed("configure")}
-            title={configureGate.title}
-            onClick={async () => {
-              setShowDestroyStorageModal(false);
-              if (!actions.stillAllowed("configure")) return;
-              try {
-                await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
-                setDeployStarted(true);
-                setShowDestroyStorageProgress(true);
-              } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
-                toast.error(msg);
-              }
-            }}>
-            Destroy Storage
-          </Button>
-          </>
-        }
-      >
-
-        <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-          <p className="text-sm font-medium text-red-800 mb-1">
-            All data will be permanently deleted
-          </p>
-          <p className="text-xs text-red-700">
-            This will permanently destroy all {storageLabel} buckets and their
-            contents, including raw sample data, processed pipeline outputs, and
-            results. This action cannot be undone.
-          </p>
-        </div>
-
-        <label className="flex items-start gap-2 mb-4 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={destroyStorageChecked}
-            onChange={(e) => setDestroyStorageChecked(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span className="text-sm text-gray-700">
-            I understand all files stored in {storageLabel} will be permanently lost
-          </span>
-        </label>
-
-        <div className="mb-4">
-          <label htmlFor="type-delete-my-data-to-confirm" className="text-xs text-gray-500 block mb-1">
-            Type <span className="font-mono font-medium text-gray-700">delete my data</span> to confirm
-          </label>
-          <input id="type-delete-my-data-to-confirm"
-            type="text"
-            value={destroyStoragePhrase}
-            onChange={(e) => setDestroyStoragePhrase(e.target.value)}
-            placeholder="delete my data"
-            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-          />
-        </div>
-
-      </Modal>
+        storageLabel={storageLabel}
+        reason={configureGate.title}
+        onCancel={() => setShowDestroyStorageModal(false)}
+        onConfirm={() => void handleDestroyStorage()}
+      />
 
       {/* Destroy Storage Progress Modal */}
       {showDestroyStorageProgress && (
@@ -810,87 +720,23 @@ export default function InfraComponentsPage() {
         />
       )}
 
-      {/* Abort Deployment Confirmation Modal */}
-      <Modal
+      <AbortDeploymentDialog
         open={showAbortConfirm}
-        title="Abort Deployment"
-        onClose={() => setShowAbortConfirm(false)}
-        size="md"
-        footer={
-          <>
-          <button
-            onClick={() => setShowAbortConfirm(false)}
-            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-          >
-            Continue Deploying
-          </button>
-          <Button variant="danger"
-            onClick={handleAbortDeploy}
-            disabled={abortLoading || !actions.allowed("create")}
-            title={createGate.title}>
-            {abortLoading ? "Aborting..." : "Abort Deployment"}
-          </Button>
-          </>
-        }
-      >
+        busy={abortLoading}
+        reason={createGate.title}
+        onCancel={() => setShowAbortConfirm(false)}
+        onConfirm={() => void handleAbortDeploy()}
+      />
 
-        <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-          <p className="text-sm font-medium text-amber-800 mb-1">
-            This may leave infrastructure in an unexpected state
-          </p>
-          <p className="text-xs text-amber-700">
-            Aborting will cancel the current deployment. Some resources may
-            have already been created and will need to be cleaned up manually
-            or by re-running the deployment.
-          </p>
-        </div>
-
-      </Modal>
-
-      {/* Abandon Run Confirmation Modal */}
-      <Modal
+      <AbandonRunDialog
         open={showAbandonModal}
-        title="Abandon Terraform Operation"
-        onClose={() => setShowAbandonModal(false)}
-        size="md"
-        footer={
-          <>
-          <button
-            onClick={() => setShowAbandonModal(false)}
-            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-          >
-            Keep Running
-          </button>
-          <button
-            onClick={handleAbandonRun}
-            disabled={abandonLoading || !actions.allowed("create")}
-            title={createGate.title}
-            className="px-4 py-2 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
-          >
-            {abandonLoading ? "Abandoning..." : "Abandon Operation"}
-          </button>
-          </>
-        }
-      >
-
-        <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-          <p className="text-sm font-medium text-amber-800 mb-1">
-            This may leave infrastructure in a partial state
-          </p>
-          <p className="text-xs text-amber-700">
-            Abandoning a running operation releases the Terraform state lock
-            so you can start a new operation. If Terraform was mid-apply,
-            some resources may have been created or modified. You can re-run
-            the operation to reconcile.
-          </p>
-        </div>
-
-        <p className="text-sm text-gray-600 mb-4">
-          Run <span className="font-mono font-medium">#{tfStatus?.active_run_id}</span>{" "}
-          ({tfStatus?.active_run_status}) will be marked as cancelled.
-        </p>
-
-      </Modal>
+        busy={abandonLoading}
+        reason={createGate.title}
+        runId={tfStatus?.active_run_id}
+        runStatus={tfStatus?.active_run_status}
+        onCancel={() => setShowAbandonModal(false)}
+        onConfirm={() => void handleAbandonRun()}
+      />
     </>
   );
 }
