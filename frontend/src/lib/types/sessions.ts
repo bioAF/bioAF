@@ -1,6 +1,7 @@
 // Notebook sessions, environments, packages, analysis snapshots and work nodes.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
+import type { components } from "../../../contracts/internal-api";
 import type { ExperimentReference, ProjectSummary } from "./experiments";
 import type { UserSummary } from "./identity";
 
@@ -19,34 +20,14 @@ export const RESOURCE_PROFILES: Record<ResourceProfile, { cpu: number; memory: n
   "2xlarge": { cpu: 16, memory: 128 },
 };
 
-export interface NotebookSession {
-  id: number;
-  session_type: SessionType;
-  user: UserSummary | null;
-  experiment: ExperimentReference | null;
-  project: ProjectSummary | null;
-  resource_profile: ResourceProfile;
-  cpu_cores: number;
-  memory_gb: number;
-  requested_disk_gb: number | null;
-  status: SessionStatus;
-  failure_reason: string | null;
-  failure_message: string | null;
-  idle_since: string | null;
-  proxy_url: string | null;
-  started_at: string | null;
-  stopped_at: string | null;
-  created_at: string;
-  git_branch_name: string | null;
-  git_commit_hash: string | null;
-  environment_version_id: number | null;
-  input_file_ids: number[] | null;
-}
+/**
+ * A notebook session as the session API emits it. Generated transport: `status`, `session_type`
+ * and `resource_profile` are open strings on the wire; narrow them explicitly (see
+ * `lib/sessionRecreate.ts`) rather than asserting the unions above.
+ */
+export type NotebookSession = components["schemas"]["SessionResponse"];
 
-export interface SessionListResponse {
-  sessions: NotebookSession[];
-  total: number;
-}
+export type SessionListResponse = components["schemas"]["SessionListResponse"];
 
 export interface SessionLaunchRequest {
   session_type: SessionType;

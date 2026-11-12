@@ -1,6 +1,7 @@
 // Pipeline catalog, custom pipelines, runs and run reviews.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
+import type { components } from "../../../contracts/internal-api";
 import type { ExperimentReference } from "./experiments";
 import type { UserSummary } from "./identity";
 
@@ -507,40 +508,30 @@ export type ReviewVerdict = "approved" | "approved_with_caveats" | "rejected" | 
 /** A sample's QC verdict within a review: its own vocabulary, not a run-review verdict. */
 export type SampleVerdict = "pass" | "warning" | "fail";
 
-export interface SampleVerdictEntry {
-  verdict: SampleVerdict;
-  notes?: string | null;
-}
+type GeneratedSampleVerdictEntry = components["schemas"]["SampleVerdictEntry"];
+type GeneratedReviewCreate = components["schemas"]["PipelineRunReviewCreate"];
 
-/** POST /api/pipeline-runs/{id}/reviews. Sample verdicts are keyed by sample id. */
-export interface PipelineRunReviewCreate {
-  verdict: ReviewVerdict;
-  notes?: string | null;
-  sample_verdicts?: Record<string, SampleVerdictEntry> | null;
-  recommended_exclusions?: number[] | null;
-}
+/** One sample's verdict in a review request: the generated entry with the verdict values the backend accepts. */
+export type SampleVerdictEntry = Omit<GeneratedSampleVerdictEntry, "verdict"> & { verdict: SampleVerdict };
 
 /**
- * A review as the review API emits it. `verdict` is an open string on the wire; the badge
- * labels unknown values. `reviewer` is nullable in the declared schema (a stored review always
- * has one today), and `sample_verdicts_json` is the stored dictionary, not validated data.
+ * POST /api/pipeline-runs/{id}/reviews. The generated request with its two open `verdict`
+ * strings narrowed to the values the backend validators accept. Sample verdicts are keyed by sample id.
  */
-export interface PipelineRunReview {
-  id: number;
-  pipeline_run_id: number;
-  reviewer: UserSummary | null;
-  verdict: string;
-  notes: string | null;
-  sample_verdicts_json: Record<string, unknown> | null;
-  recommended_exclusions: number[] | null;
-  is_active: boolean;
-  reviewed_at: string;
-  created_at: string;
-}
+export type PipelineRunReviewCreate = Omit<GeneratedReviewCreate, "verdict" | "sample_verdicts"> & {
+  verdict: ReviewVerdict;
+  sample_verdicts?: Record<string, SampleVerdictEntry> | null;
+};
 
-export interface PipelineRunReviewListResponse {
-  reviews: PipelineRunReview[];
-}
+/**
+ * A review as the review API emits it. Generated transport: `verdict` is an open string (the
+ * badge labels unknown values), `reviewer` is nullable in the declared schema (a stored review
+ * always has one today), `sample_verdicts_json` is the stored dictionary, not validated data,
+ * and `recommended_exclusions` is an untyped list in the schema.
+ */
+export type PipelineRunReview = components["schemas"]["PipelineRunReviewResponse"];
+
+export type PipelineRunReviewListResponse = components["schemas"]["PipelineRunReviewListResponse"];
 
 /** One value a scientist stated, with the authorship the run keeps. A value
  *  that did not change keeps its original author, so re-saving a design does

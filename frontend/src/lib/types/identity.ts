@@ -1,6 +1,8 @@
 // Users, roles, permissions and the audit log.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
+import type { components } from "../../../contracts/internal-api";
+
 export interface User {
   id: number;
   email: string;
@@ -40,11 +42,8 @@ export interface LoginResponse {
   token_type: string;
 }
 
-export interface UserSummary {
-  id: number;
-  name: string | null;
-  email: string;
-}
+/** A user as other records reference them. Generated transport (internal schema). */
+export type UserSummary = components["schemas"]["UserSummary"];
 
 export interface AuditLogEntry {
   id: number;

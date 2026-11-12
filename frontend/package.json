@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "jest"
+    "test": "jest",
+    "contracts:generate": "openapi-typescript ../backend/contracts/internal-openapi.json --output contracts/internal-api.ts",
+    "contracts:check": "openapi-typescript ../backend/contracts/internal-openapi.json --output contracts/internal-api.ts --check"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",

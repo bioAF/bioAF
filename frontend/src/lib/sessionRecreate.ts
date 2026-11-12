@@ -5,11 +5,12 @@
 // deleted, the environment may have a newer version available, etc.) and
 // clicks Launch to submit a fresh session via the existing endpoint.
 
-import type { NotebookSession, WorkNode } from "@/lib/types";
+import { RESOURCE_PROFILES } from "@/lib/types";
+import type { NotebookSession, ResourceProfile, SessionType, WorkNode } from "@/lib/types";
 
 export interface NotebookRecreatePrefill {
-  session_type: NotebookSession["session_type"];
-  resource_profile: NotebookSession["resource_profile"];
+  session_type: SessionType;
+  resource_profile: ResourceProfile;
   environment_version_id: number | null;
   scope_type: "experiment" | "project";
   experiment_id: number | null;
@@ -27,14 +28,29 @@ export interface WorkNodeRecreatePrefill {
   source_session_id: number;
 }
 
-export function prefillFromNotebookSession(s: NotebookSession): NotebookRecreatePrefill {
+const SESSION_TYPES: readonly string[] = ["jupyter", "rstudio"] satisfies SessionType[];
+
+// The session API emits type and profile as open strings; the launcher offers only these.
+function knownSessionType(value: string): SessionType | null {
+  return SESSION_TYPES.includes(value) ? (value as SessionType) : null;
+}
+
+function knownResourceProfile(value: string): ResourceProfile | null {
+  return Object.prototype.hasOwnProperty.call(RESOURCE_PROFILES, value) ? (value as ResourceProfile) : null;
+}
+
+/** The launch form's prefill, or null when the session's type or profile is not one the launcher offers. */
+export function prefillFromNotebookSession(s: NotebookSession): NotebookRecreatePrefill | null {
+  const sessionType = knownSessionType(s.session_type);
+  const resourceProfile = knownResourceProfile(s.resource_profile);
+  if (!sessionType || !resourceProfile) return null;
   // A session is tied to either an experiment OR a project, never both.
   // Pick whichever one is set; default to experiment scope so the form
   // toggle has a sensible initial state for legacy rows with neither.
   const hasProject = !!s.project;
   return {
-    session_type: s.session_type,
-    resource_profile: s.resource_profile,
+    session_type: sessionType,
+    resource_profile: resourceProfile,
     environment_version_id: s.environment_version_id,
     scope_type: hasProject ? "project" : "experiment",
     experiment_id: s.experiment?.id ?? null,

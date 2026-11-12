@@ -1,6 +1,7 @@
 // Projects, experiments, samples, batches, vocabularies and sample-sheet import.
 // Re-exported by the compatibility barrel `@/lib/types`; import siblings directly, never the barrel.
 
+import type { components } from "../../../contracts/internal-api";
 import type { UserSummary } from "./identity";
 
 export type ExperimentStatus =
@@ -35,67 +36,25 @@ export type SampleStatus =
   | "pipeline_complete"
   | "analysis_complete";
 
-export interface ProjectSummary {
-  id: number;
-  name: string;
-}
+/** A link to a project: id and name. Generated transport. */
+export type ProjectSummary = components["schemas"]["ProjectSummary"];
 
-export interface Project {
-  id: number;
-  name: string;
-  code: string | null;
-  external_id: string | null;
-  description: string | null;
-  hypothesis: string | null;
-  status: string | null;
-  owner_user_id: number | null;
-  owner_name: string | null;
-  sample_count: number;
-  experiment_count: number;
-  pipeline_run_count: number;
-  snapshot_count: number;
-  created_at: string;
-}
+/** A project as the project API emits it. Generated transport; `status` is an open string. */
+export type Project = components["schemas"]["ProjectResponse"];
 
-export interface ProjectSampleResponse {
-  sample_id: number;
-  external_id: string | null;
-  organism: string | null;
-  tissue_type: string | null;
-  qc_status: QCStatus | null;
-  added_by: string | null;
-  added_at: string | null;
-  notes: string | null;
-}
+/** A sample row in project detail. Generated transport; `qc_status` is an open string. */
+export type ProjectSampleResponse = components["schemas"]["ProjectSampleResponse"];
 
-export interface ProjectSampleGroup {
-  experiment_id: number;
-  experiment_name: string;
-  samples: ProjectSampleResponse[];
-}
+export type ProjectSampleGroup = components["schemas"]["ProjectSampleGroup"];
 
-export interface PipelineRunSummary {
-  id: number;
-  pipeline_name: string;
-  pipeline_version: string | null;
-  status: string;
-  created_at: string | null;
-}
+/** A run as project detail lists it. Generated transport. */
+export type PipelineRunSummary = components["schemas"]["PipelineRunSummary"];
 
-/** An experiment as the project detail API lists it (backend `schemas/project.py:ExperimentSummary`). */
-export interface ProjectExperimentSummary {
-  id: number;
-  name: string;
-  status: string;
-  sample_count: number;
-  created_at: string | null;
-}
+/** An experiment as the project detail API lists it (backend `schemas/project.py:ExperimentSummary`). Generated transport. */
+export type ProjectExperimentSummary = components["schemas"]["ExperimentSummary"];
 
-export interface ProjectDetailResponse extends Project {
-  samples: ProjectSampleGroup[];
-  experiments: ProjectExperimentSummary[];
-  pipeline_runs: PipelineRunSummary[];
-}
+/** GET /api/projects/{id}. Generated transport. */
+export type ProjectDetailResponse = components["schemas"]["ProjectDetailResponse"];
 
 export interface ProjectListResponse {
   projects: Project[];
@@ -383,11 +342,8 @@ export interface TemplateCreateRequest {
   naming_profile_id?: number | null;
 }
 
-/** A link to an experiment: only its id and name, as session and run responses emit it. */
-export interface ExperimentReference {
-  id: number;
-  name: string;
-}
+/** A link to an experiment: only its id and name, as session and run responses emit it. Generated transport. */
+export type ExperimentReference = components["schemas"]["ExperimentReference"];
 
 export interface ControlledVocabularyValue {
   id: number;

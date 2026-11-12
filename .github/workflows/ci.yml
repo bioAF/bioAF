@@ -267,6 +267,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # frontend/contracts/internal-api.ts must match backend/contracts/internal-openapi.json; writes nothing.
+      - name: Generated API types are current
+        run: npm run contracts:check
+
       - name: TypeScript check
         run: npx tsc --noEmit
 
