@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useInfrastructureActions, usePermissionGate } from "@/hooks/useInfrastructureActions";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/shared/Toast";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -31,6 +32,12 @@ export function AutoIngestControls({
   pubsubConfigured,
   onUpdateStorage,
 }: AutoIngestControlsProps) {
+  // Adding the Pub/Sub resources applies Terraform (infrastructure deploy); the auto-ingest
+  // settings themselves are a pipelines setting (pipelines configure).
+  const infrastructureActions = useInfrastructureActions();
+  const pipelineActions = usePermissionGate<"configure">("pipelines");
+  const deployReason = infrastructureActions.reason("deploy");
+  const settingsReason = pipelineActions.reason("configure");
   const toast = useToast();
   const [status, setStatus] = useState<AutoIngestStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,6 +80,7 @@ export function AutoIngestControls({
   if (!storageDeployed) return null;
 
   const handleUpdateStorage = async () => {
+    if (!infrastructureActions.allowed("deploy")) return;
     setUpdating(true);
     setUpdateError("");
     try {
@@ -100,7 +108,8 @@ export function AutoIngestControls({
         )}
         <button
           onClick={handleUpdateStorage}
-          disabled={updating}
+          disabled={updating || deployReason !== null}
+          title={deployReason ?? undefined}
           className="mt-2 px-3 py-1.5 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 disabled:opacity-50"
         >
           {updating ? "Updating infrastructure..." : "Update Storage Infrastructure"}
@@ -110,6 +119,7 @@ export function AutoIngestControls({
   }
 
   const handleToggle = async () => {
+    if (!pipelineActions.allowed("configure")) return;
     const newEnabled = !status?.enabled;
     setLoading(true);
     try {
@@ -135,6 +145,7 @@ export function AutoIngestControls({
   };
 
   const handleSave = async () => {
+    if (!pipelineActions.allowed("configure")) return;
     setSaving(true);
     setSaveSuccess(false);
     try {
@@ -188,7 +199,8 @@ export function AutoIngestControls({
           data-testid="auto-ingest-toggle"
           aria-label="toggle"
           onClick={handleToggle}
-          disabled={loading}
+          disabled={loading || settingsReason !== null}
+          title={settingsReason ?? undefined}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
             status?.enabled ? "bg-bioaf-600" : "bg-gray-300"
           } ${loading ? "opacity-50" : ""}`}
@@ -311,7 +323,8 @@ export function AutoIngestControls({
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || settingsReason !== null}
+                title={settingsReason ?? undefined}
                 className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-xs hover:bg-bioaf-700 disabled:opacity-50"
               >
                 {saving ? "Saving..." : "Save changes"}

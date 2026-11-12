@@ -339,7 +339,10 @@ export default function InfraComponentsPage() {
               <BootstrapCard
                 terraformInitialized={false}
                 gcpCredentialsConfigured={tfStatus.gcp_credentials_configured}
-                onBootstrapStart={() => setShowBootstrapModal(true)}
+                onBootstrapStart={() => {
+                  // The progress dialog sends terraform/bootstrap as it opens.
+                  if (actions.allowed("create")) setShowBootstrapModal(true);
+                }}
               />
             )}
 

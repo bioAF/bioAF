@@ -7,34 +7,38 @@ import { usePermissions } from "@/hooks/usePermissions";
 export type InfrastructureAction = "configure" | "deploy" | "create";
 
 /**
- * Whether the user may start an infrastructure mutation, and if not, why.
+ * Whether the user may start a mutation on `resource`, and if not, why.
  *
  * An action is allowed only once permissions have loaded, the read succeeded, and the role has
  * the action. Controls stay visible: callers disable them and show `reason`, so a role that cannot
  * act still sees what exists. `stillAllowed` reads the latest answer, for a handler that awaited a
  * confirmation. The backend checks the same permissions; this is the interface, not the guard.
  */
-export function useInfrastructureActions() {
+export function usePermissionGate<A extends string>(resource: string) {
   const { canAccess, loading, failed } = usePermissions();
 
-  const allowed = (action: InfrastructureAction) => !loading && !failed && canAccess("infrastructure", action);
+  const allowed = (action: A) => !loading && !failed && canAccess(resource, action);
 
-  const reason = (action: InfrastructureAction): string | null => {
+  const reason = (action: A): string | null => {
     if (loading) return "Checking your permissions.";
     if (failed) return "Your permissions could not be confirmed, so this action is unavailable.";
-    if (!canAccess("infrastructure", action)) return `Your role does not include infrastructure ${action} permission.`;
+    if (!canAccess(resource, action)) return `Your role does not include ${resource} ${action} permission.`;
     return null;
   };
 
   /** Props for a control that performs `action`: disabled with its reason when not allowed. */
-  const gate = (action: InfrastructureAction) => {
+  const gate = (action: A) => {
     const why = reason(action);
     return why ? { disabled: true, title: why } : {};
   };
 
   const latest = useRef(allowed);
   latest.current = allowed;
-  const stillAllowed = (action: InfrastructureAction) => latest.current(action);
+  const stillAllowed = (action: A) => latest.current(action);
 
   return { allowed, reason, gate, stillAllowed };
+}
+
+export function useInfrastructureActions() {
+  return usePermissionGate<InfrastructureAction>("infrastructure");
 }

@@ -9,6 +9,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { StorageSection } from "@/components/components/StorageSection";
 
+// These controls need infrastructure/pipelines permissions; the suite is about their behavior, so
+// the role has every permission.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
+}));
+
 const mockApiGet = jest.fn();
 jest.mock("@/lib/api", () => ({
   api: { get: (...args: unknown[]) => mockApiGet(...args) },
