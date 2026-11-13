@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.models.experiment import EXPERIMENT_STATUSES
+from app.schemas.entity_reference import ProjectSummary
 from app.schemas.user_summary import UserSummary
 
 
@@ -101,13 +102,6 @@ class ExperimentStatusUpdate(BaseModel):
         if v not in EXPERIMENT_STATUSES:
             raise ValueError(f"Invalid status '{v}'. Must be one of: {', '.join(EXPERIMENT_STATUSES)}")
         return v
-
-
-class ProjectSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
 
 
 class ExperimentResponse(BaseModel):

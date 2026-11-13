@@ -21,7 +21,7 @@ import { isPermissionDenied } from "@/lib/projectOptions";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/shared/Modal";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
-import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
+import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
@@ -578,7 +578,7 @@ export default function ProjectDetailPage() {
                     <td className="px-4 py-2 text-sm text-gray-500">{s.organism || NOT_SET}</td>
                     <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || NOT_SET}</td>
                     <td className="px-4 py-2">
-                      {s.qc_status ? <SampleQCBadge status={s.qc_status as QCStatus} /> : NOT_SET}
+                      {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : NOT_SET}
                     </td>
                   </tr>
                 ))}

@@ -457,7 +457,7 @@ async def test_confirm_still_reports_other_failures_as_400(client, session, admi
     monkeypatch.setattr("app.api.assistant.get_tool", lambda name: _stub_tool(RuntimeError("boom")))
     plan_id = await _plan(session, admin_user, [{"tool": "stub", "args": {}}])
     response = await client.post(f"/api/assistant/action-plans/{plan_id}/confirm", headers=headers)
-    assert _body(response) == (400, {"detail": "action 'stub' failed: boom"})
+    assert _body(response) == (400, {"detail": "action 'stub' failed and did not complete."})
 
 
 def test_no_service_module_raises_http_exceptions():

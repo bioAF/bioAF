@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "jest"
+    "test": "jest",
+    "contracts:generate": "openapi-typescript ../backend/contracts/internal-openapi.json --output contracts/internal-api.ts",
+    "contracts:check": "openapi-typescript ../backend/contracts/internal-openapi.json --output contracts/internal-api.ts --check"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",
@@ -36,6 +38,7 @@
     "identity-obj-proxy": "^3.0.0",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
+    "openapi-typescript": "7.13.0",
     "postcss": "^8.5.23",
     "tailwindcss": "^3.4.1",
     "ts-jest": "^29.4.6",

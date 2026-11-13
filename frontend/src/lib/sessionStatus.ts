@@ -9,10 +9,10 @@
 // formatLinkedTo collapses the (experiment, project) pair into one "Linked to"
 // cell. Only one of the two can be set on a row.
 
-// Minimal shape: just id + name. The session API only emits those.
-// (types.ts has a richer ExperimentSummary for the experiments domain;
-// we don't want to demand those fields here.)
-type LinkSummary = { id: number; name: string } | null | undefined;
+import type { ExperimentReference, ProjectSummary } from "@/lib/types";
+
+// The session APIs link an experiment or project by id and name only.
+type LinkSummary = ExperimentReference | ProjectSummary | null | undefined;
 
 const FAILURE_REASON_LABELS: Record<string, string> = {
   resource_exhausted: "Resource Failure",

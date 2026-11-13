@@ -237,6 +237,7 @@ export default function NotebooksPage() {
   function handleRecreateSession(source: NotebookSession) {
     if (!launchPermission.allowed("launch")) return;
     const prefill = prefillFromNotebookSession(source);
+    if (!prefill) return;
     // Resolve the environment that owns this version so the selector names it.
     const owner = prefill.environment_version_id
       ? environments.find((env) => env.latest_version?.id === prefill.environment_version_id)

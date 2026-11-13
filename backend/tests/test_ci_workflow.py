@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -118,15 +119,93 @@ def test_ci_validates_terraform_with_the_version_the_backend_image_ships(workflo
     assert versions == {shipped.group(1)}
 
 
+# GitHub's implicit shell is `bash -e {0}`, without pipefail: `pytest | tee out || status=$?` records tee's
+# success and passes a failed run. An explicit `bash` is `bash --noprofile --norc -eo pipefail {0}`.
+IMPLICIT_BASH = ["bash", "-e"]
+EXPLICIT_BASH = ["bash", "--noprofile", "--norc", "-eo", "pipefail"]
+BENCHMARK = REPO / ".github" / "workflows" / "backend-benchmark.yml"
+
+
+def _effective_shell(workflow: dict, job: dict, step: dict) -> str | None:
+    """The shell GitHub runs a step with. A job's own ``defaults.run`` replaces the workflow's, so a job that
+    sets only its working directory gets the implicit shell (seen in the runner log as ``bash -e {0}``)."""
+    if "shell" in step:
+        return step["shell"]
+    if "run" in job.get("defaults", {}):
+        return job["defaults"]["run"].get("shell")
+    return workflow.get("defaults", {}).get("run", {}).get("shell")
+
+
+def test_effective_shell_follows_job_defaults_replacing_workflow_defaults():
+    workflow = {"defaults": {"run": {"shell": "bash"}}}
+    assert _effective_shell(workflow, {}, {}) == "bash"
+    assert _effective_shell(workflow, {"defaults": {"run": {"working-directory": "backend"}}}, {}) is None
+    assert _effective_shell(workflow, {"defaults": {"run": {"working-directory": "b", "shell": "bash"}}}, {}) == "bash"
+    assert _effective_shell({}, {}, {"shell": "bash"}) == "bash"
+
+
 def test_every_run_step_fails_on_a_failure_anywhere_in_a_pipeline(workflow):
-    # GitHub's implicit shell is `bash -e {0}`, without pipefail: `pytest | tee out || status=$?` would
-    # record tee's success and pass a failed run. An explicit `bash` is `bash --noprofile --norc -eo
-    # pipefail {0}`.
-    assert workflow["defaults"]["run"]["shell"] == "bash"
-    for name, job in workflow["jobs"].items():
-        assert job.get("defaults", {}).get("run", {}).get("shell", "bash") == "bash", name
-        for step in job.get("steps", []):
-            assert step.get("shell", "bash") == "bash", (name, step.get("name"))
+    implicit = [
+        (name, step.get("name"))
+        for name, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+        if "run" in step and _effective_shell(workflow, job, step) != "bash"
+    ]
+    assert implicit == []
+
+
+def _tee_steps(workflow: dict) -> list[tuple[str, dict, dict]]:
+    """Backend test steps: pytest from PATH piped into tee, keeping the pipeline's status. (The SDK and bats
+    steps share the shape but need their own fixtures to run; the structural guard above covers their shell.)"""
+    return [
+        (name, job, step)
+        for name, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+        if re.search(r"^\s*pytest ", step.get("run", ""), re.M)
+        and re.search(r"\| tee [^\n]*\|\| status=\$\?", step.get("run", ""))
+    ]
+
+
+def _run_step(script: str, shell: list[str], tmp_path: Path, pytest_exit: int) -> tuple[int, Path]:
+    """Run a step script with every external tool it calls stubbed; pytest prints a failure and exits as told."""
+    bin_dir, work = tmp_path / "bin", tmp_path / "work"
+    for d in (bin_dir, work / "test-artifacts", tmp_path / "runner"):
+        d.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "pytest").write_text(f"#!/bin/sh\necho '1 failed, 7888 passed'\nexit {pytest_exit}\n")
+    for tool in ("uv", "python"):
+        (bin_dir / tool).write_text("#!/bin/sh\necho stub\n")
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    (work / "uv.lock").write_text("")
+    # Workflow expressions are not shell; give each one a plain value (a full-suite benchmark, one worker).
+    script = re.sub(r"\$\{\{\s*inputs\.scope\s*\}\}", "full", script)
+    script = re.sub(r"\$\{\{[^}]*\}\}", "1", script)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "RUNNER_TEMP": str(tmp_path / "runner"), "HOME": str(tmp_path)}
+    result = subprocess.run([*shell, "-c", script], cwd=work, env=env, capture_output=True, text=True, timeout=60)
+    return result.returncode, work
+
+
+def test_the_implicit_shell_really_masks_a_failed_pipeline(tmp_path):
+    # The premise of the two tests below: without pipefail the step passes a failed run.
+    script = "status=0\npytest 2>&1 | tee out.txt || status=$?\nexit $status\n"
+    assert _run_step(script, IMPLICIT_BASH, tmp_path / "implicit", pytest_exit=1)[0] == 0
+    assert _run_step(script, EXPLICIT_BASH, tmp_path / "explicit", pytest_exit=1)[0] == 1
+
+
+@pytest.mark.parametrize("path", [WORKFLOW, BENCHMARK], ids=lambda p: p.name)
+def test_a_failed_test_run_fails_its_step_and_records_the_failure(path, tmp_path):
+    workflow = yaml.safe_load(path.read_text())
+    steps = _tee_steps(workflow)
+    assert steps, f"no test step pipes through tee in {path.name}"
+    for name, job, step in steps:
+        shell = EXPLICIT_BASH if _effective_shell(workflow, job, step) == "bash" else IMPLICIT_BASH
+        failed, work = _run_step(step["run"], shell, tmp_path / f"{name}-failed", pytest_exit=1)
+        assert failed == 1, (name, step.get("name"))
+        status_file = work / "test-artifacts" / "exit-status"
+        if "test-artifacts/exit-status" in step["run"]:
+            assert status_file.read_text().strip() == "1", (name, step.get("name"))
+        passed, _ = _run_step(step["run"], shell, tmp_path / f"{name}-passed", pytest_exit=0)
+        assert passed == 0, (name, step.get("name"))
 
 
 def test_the_shell_job_gates_its_bats_output(workflow):
