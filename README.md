@@ -83,8 +83,9 @@ group, and the `bioaf-app` IAM role + instance profile, then launches an
 Ubuntu 22.04 EC2 VM (the VM authenticates via its instance profile, so no
 long-lived keys are stored) stamped `cloud_provider: aws`. It then offers to
 finish setup on the VM for you, or prints a worksheet so you can SSH in and run
-`./bioaf setup` yourself. For options (region, SSH source CIDR), clone the repo
-and run `./install-aws.sh --help`.
+`./bioaf setup` yourself. For options (region, SSH source CIDR), add them after
+`bash -s --`, e.g. `... | bash -s -- --help`. To install a release instead of
+`main`, see "Pinned installer versions" in the deployment guide.
 
 > AWS support is being completed: storage (S3) and Kubernetes compute (EKS) are
 > ready, while a few components are still being brought to parity. See the

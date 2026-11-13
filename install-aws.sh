@@ -13,7 +13,7 @@
 # does NOT provision the S3/Secrets/EKS substrate (Stage 6/7, run later).
 #
 # Usage:
-#   ./install-aws.sh [--region us-east-1] [--ssh-cidr 0.0.0.0/0] [--verbose]
+#   ./install-aws.sh [--region us-east-1] [--ssh-cidr 203.0.113.7/32] [--ref <ref>] [--verbose]
 #
 # What this script does:
 #   1. Checks for (or installs) the AWS CLI v2; on macOS it installs it with
@@ -40,89 +40,177 @@ set -euo pipefail
 # stdin at the terminal instead. The matching brace is at the end of the file.
 {
 
+# >>> bioaf helper loader
+# The same block is in install-gcp.sh and install-aws.sh. It stays in each installer (not in a
+# helper) because it is what loads the first helper.
+#
+# Helpers come from installer/ beside this script only when it runs from a script file that has
+# them (a clone). Run any other way, including `curl ... | bash`, they are downloaded from the ref
+# this installer came from: --ref or BIOAF_INSTALLER_REF, else main (the rolling one-liner; a piped
+# script cannot tell which URL it was fetched from). The current directory is never searched. A
+# download that fails, is empty, is not valid shell, or lacks a function the installer needs is
+# never used, and a selected ref is never replaced by main.
+BIOAF_RAW_BASE="https://raw.githubusercontent.com/bioAF/bioAF"
+BIOAF_SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    BIOAF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+bioaf_ref_valid() {
+    # A branch, tag or commit name: no path tricks, spaces, shell syntax or option-like values.
+    case "$1" in "" | -* | *..* | *//* | */ | *.lock) return 1 ;; esac
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ ]]
+}
+
+_bioaf_helper_error() {
+    # _bioaf_helper_error <required|optional> <source> <problem>
+    if [ "$1" = required ]; then
+        printf 'Could not load %s: it %s.\n' "$2" "$3" >&2
+        printf 'Check your network. A pinned installer needs its ref: --ref <tag or commit> (see --help).\n' >&2
+    else
+        printf '  Skipping optional helper %s: it %s.\n' "$2" "$3" >&2
+    fi
+}
+
+bioaf_load_helper() {
+    # bioaf_load_helper <installer/file> <required|optional> <function>...: load one helper and check
+    # that it defines every named function. Returns 1, after a message, instead of using a bad one.
+    local rel="$1" need="$2" origin payload fn
+    shift 2
+    if [ -n "$BIOAF_SCRIPT_DIR" ] && [ -f "$BIOAF_SCRIPT_DIR/$rel" ]; then
+        origin="$BIOAF_SCRIPT_DIR/$rel"
+        # shellcheck disable=SC1090
+        source "$origin" || { _bioaf_helper_error "$need" "$origin" "failed to load"; return 1; }
+    else
+        origin="$BIOAF_RAW_BASE/$BIOAF_INSTALLER_REF/$rel"
+        if ! payload="$(curl -fsSL "$origin")"; then
+            _bioaf_helper_error "$need" "$origin" "could not be downloaded"; return 1
+        elif [ -z "$payload" ]; then
+            _bioaf_helper_error "$need" "$origin" "was empty"; return 1
+        elif ! "${BASH:-bash}" -n -c "$payload" 2>/dev/null; then
+            _bioaf_helper_error "$need" "$origin" "is not valid shell"; return 1
+        elif ! eval "$payload"; then
+            _bioaf_helper_error "$need" "$origin" "failed to load"; return 1
+        fi
+    fi
+    for fn in "$@"; do
+        if ! declare -F "$fn" >/dev/null; then
+            _bioaf_helper_error "$need" "$origin" "does not define $fn (a different bioAF version?)"; return 1
+        fi
+    done
+}
+# <<< bioaf helper loader
+
 # ---------------------------------------------------------------------------
-# CLI flags (parsed before any output so --verbose disables log redirect)
+# Value checks. The region ends up in AWS calls, a key-file path and the prefill
+# YAML; the SSH range in a security-group rule. Pure Bash: no Python exists yet.
+# ---------------------------------------------------------------------------
+aws_region_valid() {
+    # One AWS region name, e.g. us-east-1, ap-southeast-2, us-gov-west-1.
+    [[ "$1" =~ ^[a-z]{2}(-[a-z]+){1,3}-[0-9]{1,2}$ ]]
+}
+
+ipv4_valid() {
+    local IFS=. octet
+    local -a octets
+    [[ "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+    read -r -a octets <<<"$1"
+    for octet in "${octets[@]}"; do
+        [[ "$octet" =~ ^(0|[1-9][0-9]*)$ ]] && [ "$octet" -le 255 ] || return 1
+    done
+}
+
+ipv4_cidr_valid() {
+    # address/prefix, the form the security group's IpRanges take.
+    [[ "$1" == */* ]] || return 1
+    local prefix="${1##*/}"
+    ipv4_valid "${1%/*}" && [[ "$prefix" =~ ^(0|[1-9][0-9]?)$ ]] && [ "$prefix" -le 32 ]
+}
+
+# ---------------------------------------------------------------------------
+# CLI flags (parsed before any output so --verbose disables log redirect, and
+# before any download or AWS call so a bad value stops the run first)
 # ---------------------------------------------------------------------------
 BIOAF_VERBOSE=0
+BIOAF_INSTALLER_REF="${BIOAF_INSTALLER_REF:-}"
 REGION_FLAG=""
 SSH_CIDR=""
-for arg in "$@"; do
-    case "$arg" in
-        --verbose|-v) BIOAF_VERBOSE=1 ;;
-        --region=*)   REGION_FLAG="${arg#*=}" ;;
-        --ssh-cidr=*) SSH_CIDR="${arg#*=}" ;;
-        --help|-h)
-            cat <<'USAGE'
-Usage: install-aws.sh [--region <region>] [--ssh-cidr <cidr>] [--verbose]
+aws_usage() {
+    cat <<'USAGE'
+Usage: install-aws.sh [--region <region>] [--ssh-cidr <cidr>] [--ref <ref>] [--verbose]
 
 Options:
   --region <region>   AWS region to deploy into (e.g. us-east-1). Defaults to
                       your configured region, else prompts.
-  --ssh-cidr <cidr>   Source CIDR allowed to SSH (tcp:22). Defaults to your
-                      current public IP /32. Pass 0.0.0.0/0 to allow SSH from
-                      anywhere (e.g. to let a remote agent connect to the VM);
-                      only do this on a disposable account.
+  --ssh-cidr <cidr>   IPv4 source range allowed to SSH (tcp:22), e.g.
+                      203.0.113.7/32. Defaults to your current public IP /32;
+                      if that cannot be detected the install stops and asks for
+                      this option. Pass 0.0.0.0/0 to allow SSH from anywhere
+                      (e.g. to let a remote agent connect to the VM); only do
+                      this on a disposable account.
+  --ref <ref>         The bioAF branch, tag or commit this script came from.
+                      Its helpers are downloaded from the same ref when there is
+                      no installer/ folder beside the script (e.g. curl | bash).
+                      Defaults to $BIOAF_INSTALLER_REF, else main. A pinned install:
+                        curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/<ref>/install-aws.sh \
+                          | bash -s -- --ref <ref>
   --verbose, -v       Print all command output inline instead of routing it to
                       the install log. Use when debugging a failed step.
+
+Both "--option value" and "--option=value" work.
 
 The full transcript of each run is always written to:
   ~/.bioaf/install-aws.log
 USAGE
-            exit 0
-            ;;
+}
+aws_flag_error() {
+    printf 'install-aws.sh: %s (see --help)\n' "$1" >&2
+    exit 2
+}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --verbose|-v) BIOAF_VERBOSE=1 ;;
+        --region|--ssh-cidr|--ref)
+            if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then aws_flag_error "$1 needs a value"; fi
+            case "$1" in
+                --region) REGION_FLAG="$2" ;;
+                --ssh-cidr) SSH_CIDR="$2" ;;
+                --ref) BIOAF_INSTALLER_REF="$2" ;;
+            esac
+            shift ;;
+        --region=*) REGION_FLAG="${1#*=}"; [ -n "$REGION_FLAG" ] || aws_flag_error "--region needs a value" ;;
+        --ssh-cidr=*) SSH_CIDR="${1#*=}"; [ -n "$SSH_CIDR" ] || aws_flag_error "--ssh-cidr needs a value" ;;
+        --ref=*) BIOAF_INSTALLER_REF="${1#*=}"; [ -n "$BIOAF_INSTALLER_REF" ] || aws_flag_error "--ref needs a value" ;;
+        --help|-h) aws_usage; exit 0 ;;
+        *) aws_flag_error "unknown option $(printf '%q' "$1")" ;;
     esac
+    shift
 done
+if [ -n "$REGION_FLAG" ] && ! aws_region_valid "$REGION_FLAG"; then
+    aws_flag_error "--region $(printf '%q' "$REGION_FLAG") is not an AWS region name like us-east-1"
+fi
+if [ -n "$SSH_CIDR" ] && ! ipv4_cidr_valid "$SSH_CIDR"; then
+    aws_flag_error "--ssh-cidr $(printf '%q' "$SSH_CIDR") is not an IPv4 range like 203.0.113.7/32"
+fi
+BIOAF_INSTALLER_REF="${BIOAF_INSTALLER_REF:-main}"
+if ! bioaf_ref_valid "$BIOAF_INSTALLER_REF"; then
+    aws_flag_error "$(printf '%q' "$BIOAF_INSTALLER_REF") is not a branch, tag or commit name"
+fi
 export BIOAF_VERBOSE
 export BIOAF_INSTALL_LOG="${HOME}/.bioaf/install-aws.log"
 
 # ---------------------------------------------------------------------------
-# Display helpers
+# Output and display helpers (red/green/.../step/section/warn/io_finish).
 # ---------------------------------------------------------------------------
-red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
-green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
-yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
-dim()    { printf '\033[2m%s\033[0m\n' "$*"; }
-
-# ---------------------------------------------------------------------------
-# Output helpers (step / maybe_step / section / warn / io_finish). Sourced from
-# a local clone if present, otherwise fetched over HTTPS so this script still
-# works as `curl|bash`. Identical contract to install-gcp.sh.
-# ---------------------------------------------------------------------------
-OUTPUT_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/output.sh"
-OUTPUT_HELPER_URL="https://raw.githubusercontent.com/bioAF/bioAF/main/installer/output.sh"
-if [ -f "$OUTPUT_HELPER_LOCAL" ]; then
-    # shellcheck source=installer/output.sh
-    source "$OUTPUT_HELPER_LOCAL"
-else
-    output_helper_payload="$(curl -fsSL "$OUTPUT_HELPER_URL" 2>/dev/null || true)"
-    if [ -z "$output_helper_payload" ]; then
-        printf 'Could not load the output helper from %s\n' "$OUTPUT_HELPER_URL" >&2
-        printf 'Re-run with the bioAF repo cloned locally, or check your network.\n' >&2
-        exit 1
-    fi
-    eval "$output_helper_payload"
-fi
+bioaf_load_helper installer/output.sh required io_init io_finish step maybe_step section say note warn \
+    fail_line red green yellow bold dim || exit 1
 io_init
 
 # ---------------------------------------------------------------------------
 # Laptop prerequisites (terminal input, Homebrew). Same local-or-HTTPS
 # loading as the output helper.
 # ---------------------------------------------------------------------------
-PREREQS_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/local_prereqs.sh"
-PREREQS_HELPER_URL="https://raw.githubusercontent.com/bioAF/bioAF/main/installer/local_prereqs.sh"
-if [ -f "$PREREQS_HELPER_LOCAL" ]; then
-    # shellcheck source=installer/local_prereqs.sh
-    source "$PREREQS_HELPER_LOCAL"
-else
-    prereqs_helper_payload="$(curl -fsSL "$PREREQS_HELPER_URL" 2>/dev/null || true)"
-    if [ -z "$prereqs_helper_payload" ]; then
-        printf 'Could not load the prerequisites helper from %s\n' "$PREREQS_HELPER_URL" >&2
-        printf 'Re-run with the bioAF repo cloned locally, or check your network.\n' >&2
-        exit 1
-    fi
-    eval "$prereqs_helper_payload"
-fi
+bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew || exit 1
 # Prompts and interactive commands (sudo, ssh) all read from the terminal
 # from here on.
 attach_terminal || exit 1
@@ -206,6 +294,10 @@ if ! aws sts get-caller-identity >/dev/null 2>&1; then
     exit 1
 fi
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+    red "  AWS returned an account ID that is not 12 digits; nothing was created."
+    exit 1
+fi
 CALLER_ARN="$(aws sts get-caller-identity --query Arn --output text)"
 step "Authenticated as ${CALLER_ARN}" -- true
 note "Account: ${ACCOUNT_ID}"
@@ -223,8 +315,26 @@ if [ -z "$REGION" ]; then
     read -rp "  Region to deploy into: [us-east-1] " REGION
     REGION="${REGION:-us-east-1}"
 fi
+if ! aws_region_valid "$REGION"; then
+    red "  $(printf '%q' "$REGION") is not an AWS region name like us-east-1; nothing was created."
+    red "  Re-run with --region <region>, or fix the region in your AWS configuration."
+    exit 1
+fi
 export AWS_DEFAULT_REGION="$REGION"
 step "Using region ${REGION}" -- true
+
+# The SSH source range, settled before anything is created. Without --ssh-cidr it
+# is this machine's public IPv4 /32; if that cannot be detected the install stops
+# rather than opening SSH wider than asked.
+if [ -z "$SSH_CIDR" ]; then
+    MY_IP="$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true)"
+    if ! ipv4_valid "$MY_IP"; then
+        red "  Could not detect this machine's public IPv4 address, so nothing was created."
+        red "  Re-run with the range allowed to SSH to the VM, e.g. --ssh-cidr 203.0.113.7/32"
+        exit 1
+    fi
+    SSH_CIDR="${MY_IP}/32"
+fi
 
 # Resolve the default VPC + a subnet in it (new accounts have a default VPC).
 VPC_ID="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
@@ -270,15 +380,10 @@ fi
 # 5. Security group
 # ---------------------------------------------------------------------------
 section "Step 5 / 8  -  Security group"
-if [ -z "$SSH_CIDR" ]; then
-    MY_IP="$(curl -fsS https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true)"
-    if [ -n "$MY_IP" ]; then
-        SSH_CIDR="${MY_IP}/32"
-        note "Restricting SSH (tcp:22) to your current IP: ${SSH_CIDR}"
-    else
-        SSH_CIDR="0.0.0.0/0"
-        warn "Could not detect your public IP; opening SSH to ${SSH_CIDR}."
-    fi
+if [ "$SSH_CIDR" = "0.0.0.0/0" ]; then
+    warn "SSH (tcp:22) will be open to any address (--ssh-cidr 0.0.0.0/0)."
+else
+    note "Allowing SSH (tcp:22) from ${SSH_CIDR}"
 fi
 
 SG_ID="$(aws ec2 describe-security-groups \
@@ -291,6 +396,7 @@ if [ "$SG_ID" = "None" ] || [ -z "$SG_ID" ]; then
     step "Created security group ${SECURITY_GROUP_NAME} (${SG_ID})" -- true
 else
     step "Security group ${SECURITY_GROUP_NAME} already exists (${SG_ID})" -- true
+    SG_REUSED=true
 fi
 
 # Authorize ingress rules (idempotent: a duplicate rule returns
@@ -308,6 +414,20 @@ authorize_ingress() {
 authorize_ingress tcp 80 "0.0.0.0/0" "HTTP"
 authorize_ingress tcp 443 "0.0.0.0/0" "HTTPS"
 authorize_ingress tcp 22 "$SSH_CIDR" "SSH"
+
+# Adding this rule removes nothing: a reused group keeps any SSH rules it already
+# had, possibly broader ones. Say so instead of implying SSH is now restricted.
+if [ "${SG_REUSED:-false}" = true ]; then
+    other_ssh=""
+    for cidr in $(aws ec2 describe-security-groups --group-ids "$SG_ID" \
+        --query 'SecurityGroups[0].IpPermissions[?FromPort==`22`].IpRanges[].CidrIp' --output text 2>/dev/null || true); do
+        [ "$cidr" = "$SSH_CIDR" ] || other_ssh="${other_ssh} ${cidr}"
+    done
+    if [ -n "$other_ssh" ]; then
+        warn "Security group ${SECURITY_GROUP_NAME} also allows SSH from:${other_ssh}. Those rules were kept;"
+        warn "remove any you no longer want (aws ec2 revoke-security-group-ingress --group-id ${SG_ID} ...)."
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # 6. IAM role + instance profile (the AWS analog of the GCP app service account)

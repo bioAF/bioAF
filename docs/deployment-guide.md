@@ -41,6 +41,23 @@ cd bioAF
 Open the printed URL in your browser, enter the setup code, and follow the
 wizard to create your admin account and configure the platform.
 
+### Pinned installer versions
+
+The one-liners above run the installer from `main`, and an installer run that
+way downloads its helper files (`installer/*.sh`) from `main` too: a piped
+script cannot tell which URL it came from. To install from a release tag or a
+commit, pass the same ref to the script with `--ref` (or `BIOAF_INSTALLER_REF`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/v2026.11.22/install-gcp.sh \
+  | bash -s -- --ref v2026.11.22
+```
+
+`main` moves; use a commit when you need the exact same files again. A ref that
+does not exist, or helpers that fail to download completely, stop the
+installer; it never falls back to `main`. A script run from a clone uses the
+helpers beside it and never looks in the current directory.
+
 ## One-Command AWS Setup
 
 To deploy on AWS instead of GCP, use the sibling installer. Run it on your
@@ -67,8 +84,14 @@ VM's attached service account), so no long-lived credentials are stored. The
 script then offers to finish setup on the VM for you, or prints a worksheet so
 you can SSH in and run `./bioaf setup` yourself.
 
-Pass options with the cloned form, e.g. `./install-aws.sh --region us-east-1`
-or `./install-aws.sh --help`. From there, deployment is identical to GCP: open
+Pass options after `bash -s --` in the one-liner, or to the cloned script, e.g.
+`./install-aws.sh --region us-east-1 --ssh-cidr 203.0.113.7/32` (the
+`--option=value` form works too; `--help` lists them). SSH (port 22) is opened
+only to your current public IPv4 address unless you pass `--ssh-cidr`; if that
+address cannot be detected the installer stops before creating anything and
+asks for `--ssh-cidr`. Reusing an existing `bioaf-allow-web` security group
+keeps any SSH rules it already has, and the installer lists broader ones.
+From there, deployment is identical to GCP: open
 the printed URL, enter the setup code, and follow the wizard. Storage (S3) and
 Kubernetes compute (EKS) are provisioned from the Infrastructure page once you
 are in; a few components are still being brought to parity with GCP.
