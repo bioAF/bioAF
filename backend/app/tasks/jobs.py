@@ -98,9 +98,14 @@ async def _environment_build_poll(session) -> None:
 
 
 def _slurm_enabled() -> bool:
-    from app.config import settings
+    """SSH status polling only for an initialized SLURM stack that is not simulated.
 
-    return settings.compute_mode == "slurm"
+    The stack is the one the registry initialized (restart-bound), never BIOAF_COMPUTE_MODE alone."""
+    from app.adapters.registry import get_active_compute_stack
+    from app.config import settings
+    from app.settings_contract import is_simulated
+
+    return get_active_compute_stack() == "slurm" and not is_simulated(settings.compute_mode)
 
 
 async def _job_status_sync(session) -> None:

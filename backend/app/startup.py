@@ -254,6 +254,21 @@ async def adapters(ctx: StartupContext) -> None:
     async with async_session_factory() as session:
         await initialize_adapters(session, session_factory=async_session_factory)
     logger.info("BAL adapters initialized")
+    _log_compute_configuration()
+
+
+def _log_compute_configuration() -> None:
+    """The one startup line operators check: effective mode, whether adapters simulate, active stack."""
+    from app.adapters.registry import get_active_compute_stack
+    from app.config import settings
+    from app.settings_contract import is_simulated
+
+    logger.info(
+        "Compute configuration: mode=%s simulation=%s active_compute_stack=%s",
+        settings.compute_mode.value,
+        "enabled" if is_simulated(settings.compute_mode) else "disabled",
+        get_active_compute_stack(),
+    )
 
 
 async def role_sync(ctx: StartupContext) -> None:

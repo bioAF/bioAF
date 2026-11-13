@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.exceptions import ValidationError
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,9 +16,8 @@ from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 
 
 @pytest.fixture
-def adapter():
-    provider = KubernetesNotebookProvider()
-    provider._mode = "k8s"
+def adapter(mode_adapter_factory):
+    provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
     provider._namespace_ready = False
     provider._api_client = MagicMock()
     provider._client_created_at = time.monotonic()

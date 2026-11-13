@@ -11,14 +11,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
+from tests.support.mode_adapters import build_mode_adapter
 from app.adapters.work_nodes.ec2 import Ec2VmInstance, Ec2WorkNodeProvider, _build_ec2_startup_script
 from app.exceptions import ValidationError
 
 
 def _aws_provider() -> Ec2VmInstance:
     """An EC2 provider in real (non-local) mode with networking config preloaded."""
-    p = Ec2VmInstance()
-    p._mode = "aws"
+    p = build_mode_adapter(Ec2VmInstance, mode=ComputeMode.KUBERNETES)
     p._aws_config = {
         "aws_region": "us-west-1",
         "working_bucket_name": "bioaf-working-5f6286",

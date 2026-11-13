@@ -177,6 +177,10 @@ docker compose -f docker/docker-compose.dev.yml up
 cd backend
 uv sync --locked          # runtime + development groups into backend/.venv
 source .venv/bin/activate
+# Required, no default: local simulates compute and storage; kubernetes contacts real backends.
+# Settings read the environment, then a .env in the directory you launch from (here backend/),
+# so the repository-root .env.example alone does not apply. Alembic and CLI commands need it too.
+export BIOAF_COMPUTE_MODE=local
 uvicorn app.main:app --reload
 
 # Frontend
@@ -186,7 +190,7 @@ npm run dev
 
 # Database (requires PostgreSQL 16)
 cd backend
-alembic upgrade head
+BIOAF_COMPUTE_MODE=local alembic upgrade head
 ```
 
 ### Running Tests

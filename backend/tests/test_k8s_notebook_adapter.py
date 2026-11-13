@@ -3,6 +3,7 @@
 import pytest
 
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider, _local_sessions
+from app.settings_contract import ComputeMode
 
 
 @pytest.fixture(autouse=True)
@@ -140,12 +141,10 @@ class TestOutOfClusterClientAuthHeader:
     """The K8s client built from platform_config must send Authorization."""
 
     @pytest.fixture
-    def provider_with_cfg(self, monkeypatch):
-        # Force the out-of-cluster path (no BIOAF_COMPUTE_MODE=local override
-        # is needed for _build_out_of_cluster_client itself, but make the
-        # branch obvious).
-        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
-        p = KubernetesNotebookProvider()
+    def provider_with_cfg(self, mode_adapter_factory):
+        # The real (out-of-cluster) branch. _build_out_of_cluster_client does not
+        # consult the mode itself, but the adapter is built the way production is.
+        p = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
         p._cluster_config = {
             "gke_cluster_endpoint": "1.2.3.4",
             "gke_cluster_ca_cert": _DUMMY_CA_B64,
@@ -212,9 +211,8 @@ class TestApiClientCacheInvalidation:
     """Rebuilding the cluster must invalidate any cached K8s client."""
 
     @pytest.fixture
-    def provider(self, monkeypatch):
-        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
-        return KubernetesNotebookProvider()
+    def provider(self, mode_adapter_factory):
+        return mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
 
     def _fake_load_cluster_config(self, provider, endpoint, ca_b64):
         """Stand-in for load_cluster_config that just sets _cluster_config."""

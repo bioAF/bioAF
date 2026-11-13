@@ -22,6 +22,7 @@ from kubernetes.client.rest import ApiException
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.adapters.storage.s3 import S3StorageProvider
+from app.settings_contract import ComputeMode
 
 GOLDENS = Path(__file__).parent / "fixtures" / "k8s_manifests"
 FROZEN_EPOCH = 1_790_000_000
@@ -175,16 +176,18 @@ SCENARIOS = {
 }
 
 
-async def submit(name: str, spec: dict, config: dict, creds: tuple[str, str], storage: str = "gcs") -> dict:
-    """Run one scenario through the adapter; return everything it sent to Kubernetes."""
-    provider = KubernetesComputeProvider()
+async def submit(build, name: str, spec: dict, config: dict, creds: tuple[str, str], storage: str = "gcs") -> dict:
+    """Run one scenario through the adapter; return everything it sent to Kubernetes.
+
+    ``build`` is the mode_adapter_factory: the compute and storage adapters take their real branches."""
+    provider = build(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._namespace_ready = True
     provider._autoscaler_ready = True
     provider._cluster_config = dict(config)
 
     batch, core = MagicMock(), MagicMock()
     core.read_namespaced_secret.side_effect = ApiException(status=404)
-    storage_adapter = S3StorageProvider() if storage == "s3" else GcsStorageProvider()
+    storage_adapter = build(S3StorageProvider if storage == "s3" else GcsStorageProvider, mode=ComputeMode.KUBERNETES)
 
     async def fresh():
         return None
@@ -211,9 +214,8 @@ async def submit(name: str, spec: dict, config: dict, creds: tuple[str, str], st
 
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
 @pytest.mark.asyncio
-async def test_manifest_matches_golden(name, monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    sent = json.loads(json.dumps(await submit(name, **SCENARIOS[name]), sort_keys=True))
+async def test_manifest_matches_golden(name, mode_adapter_factory):
+    sent = json.loads(json.dumps(await submit(mode_adapter_factory, name, **SCENARIOS[name]), sort_keys=True))
     golden = GOLDENS / f"{name}.json"
     if os.environ.get("BIOAF_REGEN_K8S_GOLDENS"):
         golden.parent.mkdir(parents=True, exist_ok=True)

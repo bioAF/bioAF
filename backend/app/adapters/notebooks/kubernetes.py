@@ -1,7 +1,7 @@
 """Kubernetes notebook adapter.
 
 Supports local/mock mode for development and real K8s API for production.
-Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
+Mode is the resolved settings.compute_mode (BIOAF_COMPUTE_MODE), fixed when the adapter is built.
 
 When running outside the cluster (e.g., Docker Compose on a VM), the adapter
 builds a K8s client from platform_config credentials (gke_cluster_endpoint,
@@ -12,12 +12,13 @@ gke_cluster_ca_cert) and a GCP access token from the credential injector
 import asyncio
 import logging
 import posixpath
-import os
 import uuid
 from datetime import datetime, timezone
 
 from kubernetes import client
 
+from app.config import compute_mode_for
+from app.settings_contract import ComputeMode, is_simulated
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_word
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
@@ -98,8 +99,8 @@ class KubernetesNotebookProvider(NotebookProvider):
         "gcp_zone",
     ]
 
-    def __init__(self, session_factory=None):
-        self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+    def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
+        self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         # Notebook launches must survive a cluster teardown + redeploy mid-process,
         # so the connection rebuilds its client when the cluster identity changes
@@ -153,7 +154,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     @property
     def is_local(self) -> bool:
-        return self._mode == "local"
+        return is_simulated(self._mode)
 
     async def launch_session(self, session_spec: dict) -> SessionInfo:
         d = self._local_launch_session(session_spec) if self.is_local else await self._k8s_launch_session(session_spec)

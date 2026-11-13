@@ -143,6 +143,8 @@ def build(commit: str, head: str, url: str) -> Manifest:
         "PATH": os.environ.get("PATH", ""),
         "HOME": os.environ.get("HOME", ""),
         "BIOAF_DATABASE_URL": UNREACHABLE_URL,
+        # Required by settings from plan 21 on; earlier releases ignore it.
+        "BIOAF_COMPUTE_MODE": "local",
         "BIOAF_ENCRYPTION_KEYS": TEST_ENCRYPTION_KEY,
         "BIOAF_JWT_SECRET_KEY": TEST_JWT_SECRET,
         "BIOAF_ENVIRONMENT": "test",

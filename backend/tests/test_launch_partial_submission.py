@@ -12,15 +12,15 @@ from kubernetes.client.rest import ApiException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.settings_contract import ComputeMode
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 from app.models.pipeline_run import PipelineRun
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_job_leaves_its_ssh_key_secret_behind(monkeypatch):
+async def test_a_rejected_job_leaves_its_ssh_key_secret_behind(mode_adapter_factory):
     """The per-run SSH key Secret is created before the Job; a Job the API rejects does not remove it."""
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = KubernetesComputeProvider()
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._namespace_ready = True
     batch, core = MagicMock(), MagicMock()
     batch.create_namespaced_job.side_effect = RuntimeError("admission webhook denied the request")

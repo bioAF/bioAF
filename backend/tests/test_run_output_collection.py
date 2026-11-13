@@ -17,6 +17,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.settings_contract import ComputeMode
 from app.adapters.storage import gcs as gcs_module
 from app.adapters.storage import s3 as s3_module
 from app.adapters.storage.gcs import GcsStorageProvider
@@ -91,9 +92,8 @@ async def test_collection_from_a_filesystem_path_is_refused(local_root, name):
 
 
 @pytest.mark.asyncio
-async def test_cloud_gcs_collection_lists_the_separator_terminated_prefix_with_credentials(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    storage = GcsStorageProvider(org_slug="t")
+async def test_cloud_gcs_collection_lists_the_separator_terminated_prefix_with_credentials(mode_adapter_factory):
+    storage = mode_adapter_factory(GcsStorageProvider, org_slug="t", mode=ComputeMode.KUBERNETES)
     storage._credentials, storage._credentials_loaded = "CREDS", True
     blob = MagicMock(size=3, md5_hash="m", time_created=None, updated=None, generation=1)
     blob.name = "experiments/3/pipeline-runs/1/a.txt"

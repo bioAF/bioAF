@@ -33,7 +33,9 @@ services:
       BIOAF_JWT_SECRET_KEY: ${SECRET_KEY:-CHANGE_ME_TO_RANDOM_STRING}
       BIOAF_ENCRYPTION_KEYS: ${BIOAF_ENCRYPTION_KEYS:-}
       BIOAF_ENVIRONMENT: ${BIOAF_ENVIRONMENT:-production}
-      BIOAF_COMPUTE_MODE: ${BIOAF_COMPUTE_MODE:-k8s}
+      # Real backends unless the host env file sets a mode (an empty value also means kubernetes here).
+      # The application has no default; it normalizes case/whitespace and rejects unknown values.
+      BIOAF_COMPUTE_MODE: ${BIOAF_COMPUTE_MODE:-kubernetes}
       BIOAF_GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"

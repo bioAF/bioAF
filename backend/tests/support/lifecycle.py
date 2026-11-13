@@ -77,6 +77,7 @@ NOT_RESET: dict[tuple[str, str], str] = {
     ("app.adapters.registry", "_cellxgene_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_work_node_adapter"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_initialized"): "reset by the _init_adapter_registry fixture",
+    ("app.adapters.registry", "_active_compute_stack"): "reset by the _init_adapter_registry fixture",
     ("app.services.post_commit_events", "_in_flight"): "drained by settle_owner; tasks remove themselves",
     ("app.adapters.validation.gcp", "RECOMMENDED_ROLES"): "built once at import from a static map",
     ("app.adapters.validation.gcp", "_APP_PERMS"): "built once at import from a static probe file",
