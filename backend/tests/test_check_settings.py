@@ -91,3 +91,56 @@ def test_a_check_that_cannot_run_is_distinguished_from_a_rejection(tmp_path):
     assert proc.returncode not in (0, EX_CONFIG)
     assert "could not" in proc.stderr
     assert "BIOAF_COMPUTE_MODE" not in proc.stderr
+
+
+# --- The real entrypoint (backend/entrypoint.sh) with the real checker ----------------------------
+# A python shim runs the real checker and records every other python call; uvicorn is a recorder.
+# Lives here rather than in the Bats suite because it needs the backend's locked environment.
+
+ENTRYPOINT = BACKEND / "entrypoint.sh"
+
+
+def _entrypoint(tmp_path: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess, list[str]]:
+    bin_dir, work, calls = tmp_path / "bin", tmp_path / "work", tmp_path / "calls"
+    bin_dir.mkdir()
+    work.mkdir()
+    (bin_dir / "python").write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *app.cli.check_settings*) exec "{sys.executable}" "$@" ;; esac\n'
+        f'echo "python $*" >> "{calls}"\n'
+    )
+    (bin_dir / "uvicorn").write_text(f'#!/bin/sh\necho "uvicorn $*" >> "{calls}"\n')
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    proc = subprocess.run(
+        ["sh", str(ENTRYPOINT), "uvicorn", "app.main:app"],
+        cwd=work,
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "PYTHONPATH": str(BACKEND),
+            "HOME": str(tmp_path),
+            "BIOAF_ENCRYPTION_KEYS": "abc",
+            "BIOAF_JWT_SECRET_KEY": SECRET,
+            "BIOAF_UPGRADE_BACKUPS_DIR": str(tmp_path / "none"),
+            **env,
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return proc, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_the_entrypoint_stops_on_a_missing_mode_before_the_upgrade_and_server(tmp_path):
+    proc, calls = _entrypoint(tmp_path, {})
+    assert proc.returncode == EX_CONFIG
+    assert "BIOAF_COMPUTE_MODE is not set" in proc.stderr
+    assert SECRET not in proc.stdout + proc.stderr
+    assert calls == []
+
+
+def test_the_entrypoint_accepts_a_normalized_mode_then_upgrades_and_serves(tmp_path):
+    proc, calls = _entrypoint(tmp_path, {"BIOAF_COMPUTE_MODE": " K8S "})
+    assert proc.returncode == 0, proc.stderr
+    assert "compute mode kubernetes" in proc.stdout
+    assert calls == ["python -m app.schema_upgrade run", "uvicorn app.main:app"]
