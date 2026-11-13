@@ -167,3 +167,74 @@ rendered() {
     grep -q VALIDATOR-OUTPUT-MARKER "$log"
     [ "$(stat -c %a "$log" 2>/dev/null || stat -f %Lp "$log")" = "600" ]
 }
+
+# run_failing <op> [activate statuses...]: like production, the helper runs on the left of || under
+# set -euo pipefail (which disables errexit inside it); MF_PRIV is a wrapper that fails one operation.
+run_failing() {
+    local op="$1"; shift
+    printf '%s\n' "$@" > "$T/activate_plan"
+    cat > "$T/priv" <<'PRIV'
+#!/usr/bin/env bash
+case "$FAIL_OP:$1:$*" in
+    mkdir:mkdir:*) exit 1 ;;
+    cp-stage:cp:*bioaf-staged*) exit 1 ;;
+    chmod-stage:chmod:*bioaf-staged*) exit 1 ;;
+    cp-backup:cp:*bioaf-previous*) exit 1 ;;
+    mv-install:mv:*bioaf-staged*) exit 1 ;;
+    mv-restore:mv:*bioaf-previous*) exit 1 ;;
+esac
+exec "$@"
+PRIV
+    chmod +x "$T/priv"
+    run env FAIL_OP="$op" bash -c "
+        set -euo pipefail
+        source '$HELPER'
+        validate() { return 0; }
+        activate() {
+            local s; s=\$(head -1 '$T/activate_plan'); sed -i.bak 1d '$T/activate_plan'
+            echo \"activate \$(tail -1 '$DEST' 2>/dev/null)\" >> '$T/calls'
+            return \${s:-0}
+        }
+        reconcile() {
+            local rc=0
+            MF_PRIV='$T/priv' managed_file_reconcile test-config/v2 '$T/template.yaml' '$DEST' '$LEGACY_SHA' validate activate '$T/detail' || rc=\$?
+            echo \"outcome=\$MF_OUTCOME rc=\$rc\"
+        }
+        reconcile
+    " </dev/null
+}
+
+@test "a staging failure stops before activation and reports failure" {
+    for op in mkdir cp-stage chmod-stage; do
+        cp "$T/legacy.yaml" "$DEST"; : > "$T/calls"
+        run_failing "$op" 0
+        [[ "$output" == *"outcome=install_failed rc=1"* ]]
+        cmp -s "$DEST" "$T/legacy.yaml"
+        ! grep -q '^activate' "$T/calls"
+        [ ! -e "$DEST.bioaf-staged" ]
+    done
+}
+
+@test "a backup failure stops before replacing the file" {
+    cp "$T/legacy.yaml" "$DEST"
+    run_failing cp-backup 0
+    [[ "$output" == *"outcome=install_failed rc=1"* ]]
+    cmp -s "$DEST" "$T/legacy.yaml"
+    ! grep -q '^activate' "$T/calls"
+}
+
+@test "a failed install rename is never reported as migrated and the old file is not reactivated" {
+    cp "$T/legacy.yaml" "$DEST"
+    run_failing mv-install 0
+    [[ "$output" == *"outcome=install_failed rc=1"* ]]
+    cmp -s "$DEST" "$T/legacy.yaml"
+    ! grep -q '^activate' "$T/calls"
+    [ ! -e "$DEST.bioaf-staged" ]
+}
+
+@test "a failed restore is reported as a failed rollback without reactivating" {
+    cp "$T/legacy.yaml" "$DEST"
+    run_failing mv-restore 1 0
+    [[ "$output" == *"outcome=rollback_failed rc=1"* ]]
+    [ "$(grep -c '^activate' "$T/calls")" -eq 1 ]
+}

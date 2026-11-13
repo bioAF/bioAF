@@ -16,9 +16,11 @@
 #   operator_managed  the file contains the line "# bioaf-managed: operator": left alone
 #   custom            anything else, including a managed file edited after install: left alone; the
 #                     rendered candidate is saved to <detail_dir> for the operator to merge
+#   install_failed    staging, backing up or installing the file failed: the current file is unchanged
+#                     and nothing was activated
 #   invalid           <validate_fn> rejected the staged candidate: nothing installed
 #   activation_failed <activate_fn> failed: the previous file was restored and reactivated
-#   rollback_failed   reactivating the restored previous file failed too
+#   rollback_failed   the previous file could not be restored, or reactivating it failed too
 #
 # The callbacks are function names, called as `<fn> <path>` (validate gets the staged candidate,
 # activate the installed path); no command string is evaluated. MF_PRIV, when set (e.g. sudo),
@@ -76,8 +78,11 @@ managed_file_reconcile() {
     MF_OUTCOME=""
     ( umask 077; mkdir -p "$detail_dir" )
     log="$detail_dir/$name.log"
-    rendered=$(mktemp)
-    managed_file_render "$identity" "$template" > "$rendered"
+    if ! rendered=$(mktemp) || ! managed_file_render "$identity" "$template" > "$rendered"; then
+        MF_OUTCOME=install_failed
+        echo "Could not render $template, so $dest was not changed."
+        return 1
+    fi
     state=$(_mf_state "$dest" "$rendered" "$legacy")
 
     case "$state" in
@@ -88,20 +93,30 @@ managed_file_reconcile() {
             rm -f "$rendered"; return 0 ;;
         custom)
             MF_OUTCOME=custom
-            ( umask 077; cp "$rendered" "$detail_dir/$name.candidate" )
-            chmod 600 "$detail_dir/$name.candidate"
-            if [ -t 1 ]; then ${MF_PRIV:-} diff -u "$dest" "$detail_dir/$name.candidate" || true; fi
             echo "$dest is not a file bioAF recognizes, so it was left unchanged."
-            echo "Merge $detail_dir/$name.candidate into it (or replace it), then rerun."
+            if ( umask 077; cp "$rendered" "$detail_dir/$name.candidate" ) && chmod 600 "$detail_dir/$name.candidate"; then
+                if [ -t 1 ]; then ${MF_PRIV:-} diff -u "$dest" "$detail_dir/$name.candidate" || true; fi
+                echo "Merge $detail_dir/$name.candidate into it (or replace it), then rerun."
+            else
+                echo "The candidate could not be saved to $detail_dir; render it with managed_file_render, merge it, then rerun."
+            fi
             echo "To keep your own file, add the line '# bioaf-managed: operator' to it."
             rm -f "$rendered"; return 1 ;;
     esac
 
     staged="$dest.bioaf-staged"
     previous="$dest.bioaf-previous"
-    ${MF_PRIV:-} mkdir -p "$(dirname "$dest")"
-    ${MF_PRIV:-} cp "$rendered" "$staged"
-    ${MF_PRIV:-} chmod 644 "$staged"
+    # Every file operation is checked explicitly: callers run this on the left of `||`, where Bash
+    # ignores errexit, so a failed step must never fall through to activation or a success report.
+    if ! { ${MF_PRIV:-} mkdir -p "$(dirname "$dest")" \
+        && ${MF_PRIV:-} cp "$rendered" "$staged" \
+        && ${MF_PRIV:-} chmod 644 "$staged"; }; then
+        ${MF_PRIV:-} rm -f "$staged" 2>/dev/null || true
+        rm -f "$rendered"
+        MF_OUTCOME=install_failed
+        echo "Could not stage the new $dest, so nothing was changed."
+        return 1
+    fi
     rm -f "$rendered"
     if ! _mf_quiet "$log" "$validate_fn" "$staged"; then
         ${MF_PRIV:-} rm -f "$staged"
@@ -110,20 +125,36 @@ managed_file_reconcile() {
         return 1
     fi
     if [ "$state" = known ]; then
-        ${MF_PRIV:-} cp -p "$dest" "$previous"
+        if ! ${MF_PRIV:-} cp -p "$dest" "$previous"; then
+            ${MF_PRIV:-} rm -f "$staged" 2>/dev/null || true
+            MF_OUTCOME=install_failed
+            echo "Could not keep a copy of the current $dest, so nothing was changed."
+            return 1
+        fi
         had_previous=true
     fi
-    ${MF_PRIV:-} mv -f "$staged" "$dest"
+    if ! ${MF_PRIV:-} mv -f "$staged" "$dest"; then
+        ${MF_PRIV:-} rm -f "$staged" 2>/dev/null || true
+        MF_OUTCOME=install_failed
+        echo "Could not install the new $dest; the current one is unchanged and still active."
+        return 1
+    fi
     if _mf_quiet "$log" "$activate_fn" "$dest"; then
         [ "$state" = known ] && MF_OUTCOME=migrated || MF_OUTCOME=installed
         return 0
     fi
 
     echo "Activating the new $dest failed; restoring the previous one. Details: $log"
+    local restored=true
     if [ "$had_previous" = true ]; then
-        ${MF_PRIV:-} mv -f "$previous" "$dest"
+        ${MF_PRIV:-} mv -f "$previous" "$dest" || restored=false
     else
-        ${MF_PRIV:-} rm -f "$dest"
+        ${MF_PRIV:-} rm -f "$dest" || restored=false
+    fi
+    if [ "$restored" = false ]; then
+        MF_OUTCOME=rollback_failed
+        echo "Could not restore the previous $dest; the new, failing one is still in place."
+        return 1
     fi
     if _mf_quiet "$log" "$activate_fn" "$dest"; then
         MF_OUTCOME=activation_failed
