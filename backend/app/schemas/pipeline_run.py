@@ -3,12 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.samplesheet_mapping import SamplesheetPrefill
+from app.schemas.entity_reference import ExperimentReference
 from app.schemas.user_summary import UserSummary
 
-
-class ExperimentSummary(BaseModel):
-    id: int
-    name: str
+# The old name for the shared experiment link, kept for existing imports.
+ExperimentSummary = ExperimentReference
 
 
 class SampleSummary(BaseModel):

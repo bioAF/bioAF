@@ -9,19 +9,10 @@ import { PickerNotice } from "@/components/shared/PickerNotice";
 import { Button } from "@/components/ui/Button";
 import { isAbortError } from "@/lib/abort";
 import { watchJob } from "@/lib/watchJob";
+import type { Experiment, ExperimentListResponse } from "@/lib/types";
 
-interface ExperimentSummary {
-  id: number;
-  name: string;
-  project: { id: number; name: string } | null;
-}
-
-interface ExperimentListResponse {
-  experiments: ExperimentSummary[];
-  total: number;
-  page: number;
-  page_size: number;
-}
+// What the picker keeps of each experiment: the project link drives the filter and labels.
+type LauncherExperiment = Pick<Experiment, "id" | "name" | "project">;
 
 interface Props {
   onSubmitted?: (run: LitReviewRun) => void;
@@ -29,7 +20,7 @@ interface Props {
 
 export function AiLitReviewLauncher({ onSubmitted }: Props) {
   const projectOptions = useProjectOptions({ path: "/api/projects?page_size=200" });
-  const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
+  const [experiments, setExperiments] = useState<LauncherExperiment[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [experimentId, setExperimentId] = useState<string>("");
   const [running, setRunning] = useState(false);
@@ -77,7 +68,7 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
     }
   }, [filteredExperiments, experimentId]);
 
-  const labelFor = (e: ExperimentSummary): string => {
+  const labelFor = (e: LauncherExperiment): string => {
     if (!projectId && e.project) return `${e.project.name} > ${e.name}`;
     return e.name;
   };

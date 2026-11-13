@@ -7,11 +7,18 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ReviewBadge } from "./ReviewBadge";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { NOT_SET } from "@/lib/placeholders";
 import type {
   PipelineRunReview,
+  PipelineRunReviewCreate,
   PipelineRunReviewListResponse,
   ReviewVerdict,
 } from "@/lib/types";
+
+// The declared response allows a null reviewer even though a stored review always has one.
+function reviewerName(review: PipelineRunReview): string {
+  return review.reviewer?.name || review.reviewer?.email || NOT_SET;
+}
 
 interface ReviewPanelProps {
   pipelineRunId: number;
@@ -63,10 +70,8 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
   async function handleSubmitReview() {
     setSubmitting(true);
     try {
-      await api.post(`/api/pipeline-runs/${pipelineRunId}/reviews`, {
-        verdict,
-        notes: notes || null,
-      });
+      const body: PipelineRunReviewCreate = { verdict, notes: notes || null };
+      await api.post(`/api/pipeline-runs/${pipelineRunId}/reviews`, body);
       setShowForm(false);
       setNotes("");
       loadReviews();
@@ -101,7 +106,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
             <ReviewBadge verdict={activeReview.verdict} size="md" />
           </div>
           <p className="text-sm text-gray-600">
-            Reviewed by {activeReview.reviewer.name || activeReview.reviewer.email} on{" "}
+            Reviewed by {reviewerName(activeReview)} on{" "}
             {new Date(activeReview.reviewed_at).toLocaleString()}
           </p>
           {activeReview.notes && (
@@ -184,7 +189,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
                 <div key={r.id} className="bg-gray-50 rounded p-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-500">
-                      {r.reviewer.name || r.reviewer.email}: {new Date(r.reviewed_at).toLocaleString()}
+                      {reviewerName(r)}: {new Date(r.reviewed_at).toLocaleString()}
                     </span>
                     <ReviewBadge verdict={r.verdict} />
                   </div>

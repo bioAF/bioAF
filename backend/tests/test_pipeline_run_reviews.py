@@ -6,7 +6,7 @@ from sqlalchemy import text
 @pytest_asyncio.fixture
 async def experiment_and_run(client, admin_token, session):
     """Create an experiment and a completed pipeline run."""
-    from app.models.pipeline_run import PipelineRun
+    from app.models.pipeline_run import PipelineRun, PipelineRunSample
 
     # Get org_id from the experiment creation
     resp = await client.post(
@@ -39,6 +39,9 @@ async def experiment_and_run(client, admin_token, session):
         status="completed",
     )
     session.add(run)
+    await session.flush()
+    # The run analyzed the sample, so a review's sample verdict may name it.
+    session.add(PipelineRunSample(pipeline_run_id=run.id, sample_id=sample_id))
     await session.flush()
     await session.commit()
 

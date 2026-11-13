@@ -27,6 +27,8 @@ jobs:
     if: true
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: backend/terraform
     steps:
       - uses: actions/checkout@v5
@@ -87,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: backend
     steps:
       - uses: actions/checkout@v5
@@ -125,6 +129,10 @@ jobs:
       - name: Mypy type check
         run: mypy . --ignore-missing-imports
 
+      # The checked-in internal OpenAPI artifact must match the API; offline, writes nothing.
+      - name: Internal OpenAPI schema is current
+        run: python -m app.cli.export_openapi --check
+
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
@@ -144,6 +152,8 @@ jobs:
           --health-retries 5
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: backend
     env:
       BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test
@@ -192,7 +202,7 @@ jobs:
 
       - name: Run tests
         run: |
-          # The shell is bash -eo pipefail (workflow defaults); capture the status so the finish time is still written.
+          # The shell is bash -eo pipefail (this job's defaults.run); capture the status so the finish time is still written.
           # Not fail-fast (plan 8): every test runs, so a failed run still reports every failure.
           echo "tests_started=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           status=0
@@ -247,6 +257,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: frontend
     steps:
       - uses: actions/checkout@v5
@@ -263,6 +275,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # frontend/contracts/internal-api.ts must match backend/contracts/internal-openapi.json; writes nothing.
+      - name: Generated API types are current
+        run: npm run contracts:check
+
       - name: TypeScript check
         run: npx tsc --noEmit
 
@@ -271,6 +287,8 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: frontend
     steps:
       - uses: actions/checkout@v5

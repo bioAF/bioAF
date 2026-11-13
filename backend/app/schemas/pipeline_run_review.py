@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator
 
 from app.models.pipeline_run_review import REVIEW_VERDICTS
+from app.schemas.user_summary import UserSummary
 
 
 class SampleVerdictEntry(BaseModel):
@@ -31,12 +32,8 @@ class PipelineRunReviewCreate(BaseModel):
         return v
 
 
-class ReviewerSummary(BaseModel):
-    id: int
-    name: str | None = None
-    email: str
-
-    model_config = {"from_attributes": True}
+# A reviewer is a user as other records reference them; one definition, the old name kept.
+ReviewerSummary = UserSummary
 
 
 class PipelineRunReviewResponse(BaseModel):
@@ -51,7 +48,7 @@ class PipelineRunReviewResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"json_schema_serialization_defaults_required": True, "from_attributes": True}
 
 
 class PipelineRunReviewListResponse(BaseModel):

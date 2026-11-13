@@ -13,10 +13,10 @@ decision; ``tests/test_qc_template_helpers.py`` pins both until it is made.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 
-def number(value: Any) -> float | None:
+def number(value: object) -> float | None:
     """A number, or numeric text such as ``"1,234"``; None for anything else, booleans included."""
     if isinstance(value, bool):
         return None
@@ -30,7 +30,7 @@ def number(value: Any) -> float | None:
     return None
 
 
-def first_number(sample: dict, *keys: str) -> float | None:
+def first_number(sample: Mapping[str, object], *keys: str) -> float | None:
     """First numeric value among the given keys for one sample record."""
     for k in keys:
         if k in sample:
@@ -40,7 +40,7 @@ def first_number(sample: dict, *keys: str) -> float | None:
     return None
 
 
-def numbers(section: dict, *keys: str) -> list[float]:
+def numbers(section: Mapping[str, object], *keys: str) -> list[float]:
     """One value per sample record in a section, from the first key that holds a number."""
     out: list[float] = []
     for v in section.values():
@@ -55,7 +55,7 @@ def mean(xs: list[float]) -> float:
     return sum(xs) / len(xs)
 
 
-def pick_raw_fastqc(raw: dict) -> dict:
+def pick_raw_fastqc(raw: Mapping[str, object]) -> Mapping[str, object]:
     """The RAW FastQC section, chosen by the physical invariant rather than by its suffix.
 
     nf-core runs FastQC on raw and trimmed reads, and MultiQC stores them as
@@ -65,7 +65,7 @@ def pick_raw_fastqc(raw: dict) -> dict:
     is kept.
     """
     sections = [v for k, v in raw.items() if isinstance(v, dict) and k.startswith("multiqc_fastqc")]
-    best: dict = {}
+    best: Mapping[str, object] = {}
     best_total = -1.0
     for sec in sections:
         total = sum(numbers(sec, "Total Sequences", "total_sequences"))

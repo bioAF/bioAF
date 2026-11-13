@@ -1,10 +1,10 @@
 "use client";
 
-import type { ReviewVerdict } from "@/lib/types";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 interface ReviewBadgeProps {
-  verdict: ReviewVerdict;
+  // An open wire value: an unknown verdict gets a neutral badge and a humanized label.
+  verdict: string;
   size?: "sm" | "md";
 }
 

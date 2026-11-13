@@ -153,3 +153,15 @@ disallow_incomplete_defs = false
 check_untyped_defs = true
 no_implicit_optional = true
 disable_error_code = ["assignment", "arg-type", "attr-defined", "union-attr", "return-value", "var-annotated", "import-untyped", "dict-item"]
+
+# Strict value typing for a growing list of modules (plan 20). The global settings above stay
+# as they are, including the import-untyped suppression and CI's --ignore-missing-imports, so
+# this checks first-party values, not third-party imports. Add modules here; do not relax it.
+# tests/test_typed_module_gate.py proves each listed category is enforced.
+[[tool.mypy.overrides]]
+module = ["app.services.file_type_utils", "app.services.qc.template_helpers", "app.services.samplesheet_inputs"]
+enable_error_code = ["assignment", "arg-type", "attr-defined", "union-attr", "return-value", "var-annotated", "dict-item"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+warn_return_any = true

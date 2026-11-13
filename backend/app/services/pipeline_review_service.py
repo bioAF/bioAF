@@ -3,12 +3,13 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import NotFoundError
-from app.models.pipeline_run import PipelineRun
+from app.exceptions import NotFoundError, UnprocessableError
+from app.models.experiment import Experiment
+from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_review import PipelineRunReview
 from app.models.sample import Sample
 from app.services.audit_service import log_action
@@ -18,12 +19,95 @@ from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.pipeline_review")
 
+# One message for every bad sample reference, so a caller cannot tell a sample in another
+# Organization from one that does not exist.
+_BAD_SAMPLE_REFERENCE = "Sample verdicts must reference samples in this pipeline run"
+# samples.id is a PostgreSQL integer; a larger key cannot name a sample and must not reach the query.
+_MAX_SAMPLE_ID = 2**31 - 1
+# Ids per membership query; well under asyncpg's 32,767 bind parameters.
+_ID_QUERY_CHUNK = 1000
+
+
+async def _scoped_run(session: AsyncSession, pipeline_run_id: int, org_id: int) -> PipelineRun:
+    """The run, only when it belongs to ``org_id``; a foreign run is the same 404 as a missing one."""
+    result = await session.execute(
+        select(PipelineRun)
+        .options(selectinload(PipelineRun.experiment))
+        .where(PipelineRun.id == pipeline_run_id, PipelineRun.organization_id == org_id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise NotFoundError("Pipeline run not found")
+    return run
+
+
+async def _active_review(session: AsyncSession, pipeline_run_id: int) -> PipelineRunReview | None:
+    """The active review of a run the caller has already scoped."""
+    result = await session.execute(
+        select(PipelineRunReview)
+        .options(selectinload(PipelineRunReview.reviewer))
+        .where(
+            PipelineRunReview.pipeline_run_id == pipeline_run_id,
+            PipelineRunReview.superseded_by_id.is_(None),
+        )
+        .order_by(PipelineRunReview.reviewed_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _verdict_samples(
+    session: AsyncSession, run: PipelineRun, org_id: int, sample_verdicts: dict
+) -> dict[int, Sample]:
+    """Resolve every sample a review's verdicts name, or refuse the whole request.
+
+    A sample must be a member of the run (``pipeline_run_samples``) and owned by ``org_id``
+    through its experiment. Membership alone is not enough: a corrupt association to another
+    Organization's sample must not let a review change it. Nothing is skipped, so a mixed
+    payload never half-applies.
+    """
+    ids: set[int] = set()
+    for key in sample_verdicts:
+        try:
+            sample_id = int(key)
+        except (TypeError, ValueError):
+            raise UnprocessableError(_BAD_SAMPLE_REFERENCE) from None
+        if str(sample_id) != key or sample_id in ids or not 0 < sample_id <= _MAX_SAMPLE_ID:
+            raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
+        ids.add(sample_id)
+    # A run cannot have more verdict-able samples than members, so a larger payload is refused
+    # before any id reaches a query. Within that bound, ids are resolved in chunks so no single
+    # IN list exceeds the driver's bind-parameter limit.
+    members = await session.scalar(
+        select(func.count()).select_from(PipelineRunSample).where(PipelineRunSample.pipeline_run_id == run.id)
+    )
+    if len(ids) > (members or 0):
+        raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
+    ordered = sorted(ids)
+    samples: dict[int, Sample] = {}
+    for start in range(0, len(ordered), _ID_QUERY_CHUNK):
+        result = await session.execute(
+            select(Sample)
+            .join(PipelineRunSample, PipelineRunSample.sample_id == Sample.id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(
+                Sample.id.in_(ordered[start : start + _ID_QUERY_CHUNK]),
+                PipelineRunSample.pipeline_run_id == run.id,
+                Experiment.organization_id == org_id,
+            )
+        )
+        samples.update((sample.id, sample) for sample in result.scalars().unique())
+    if set(samples) != ids:
+        raise UnprocessableError(_BAD_SAMPLE_REFERENCE)
+    return samples
+
 
 class PipelineReviewService:
     @staticmethod
     async def create_review(
         session: AsyncSession,
         pipeline_run_id: int,
+        org_id: int,
         reviewer_user_id: int,
         verdict: str,
         notes: str | None,
@@ -31,6 +115,9 @@ class PipelineReviewService:
         recommended_exclusions: list[int] | None,
     ) -> PipelineRunReview:
         """Create a review with all side effects in a single transaction.
+
+        The run must belong to ``org_id`` (404 otherwise) and every sample verdict must name a
+        member sample owned by ``org_id`` (422 otherwise). Both are checked before any write.
 
         Side effects:
         1. Supersede existing active review (if any)
@@ -40,18 +127,11 @@ class PipelineReviewService:
         5. Transition experiment from pipeline_complete → reviewed
         6. Emit notification event
         """
-        # Load pipeline run with relationships
-        run = await session.execute(
-            select(PipelineRun)
-            .options(selectinload(PipelineRun.experiment), selectinload(PipelineRun.samples))
-            .where(PipelineRun.id == pipeline_run_id)
-        )
-        run = run.scalar_one_or_none()
-        if not run:
-            raise NotFoundError("Pipeline run not found")
+        run = await _scoped_run(session, pipeline_run_id, org_id)
+        samples = await _verdict_samples(session, run, org_id, sample_verdicts) if sample_verdicts else {}
 
         # 1. Supersede existing active review
-        active_review = await PipelineReviewService.get_active_review(session, pipeline_run_id)
+        active_review = await _active_review(session, pipeline_run_id)
 
         # 2. Create new review
         review = PipelineRunReview(
@@ -74,16 +154,7 @@ class PipelineReviewService:
         # 3. Update sample QC flags
         if sample_verdicts:
             for sample_id_str, verdict_data in sample_verdicts.items():
-                try:
-                    sample_id = int(sample_id_str)
-                except (ValueError, TypeError):
-                    continue
-
-                result = await session.execute(select(Sample).where(Sample.id == sample_id))
-                sample = result.scalar_one_or_none()
-                if not sample:
-                    continue
-
+                sample = samples[int(sample_id_str)]
                 new_qc = verdict_data.get("verdict") if isinstance(verdict_data, dict) else None
                 new_notes = verdict_data.get("notes") if isinstance(verdict_data, dict) else None
 
@@ -118,8 +189,12 @@ class PipelineReviewService:
             },
         )
 
-        # 5. Update experiment status
-        if run.experiment and verdict in ("approved", "approved_with_caveats"):
+        # 5. Update experiment status, only for an experiment of the same Organization
+        if (
+            run.experiment
+            and run.experiment.organization_id == org_id
+            and verdict in ("approved", "approved_with_caveats")
+        ):
             experiment = run.experiment
             if experiment.status == "pipeline_complete":
                 old_status = experiment.status
@@ -170,23 +245,17 @@ class PipelineReviewService:
         return review
 
     @staticmethod
-    async def get_active_review(session: AsyncSession, pipeline_run_id: int) -> PipelineRunReview | None:
-        """Get the active (non-superseded) review for a pipeline run."""
-        result = await session.execute(
-            select(PipelineRunReview)
-            .options(selectinload(PipelineRunReview.reviewer))
-            .where(
-                PipelineRunReview.pipeline_run_id == pipeline_run_id,
-                PipelineRunReview.superseded_by_id.is_(None),
-            )
-            .order_by(PipelineRunReview.reviewed_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
+    async def get_active_review(
+        session: AsyncSession, pipeline_run_id: int, *, org_id: int
+    ) -> PipelineRunReview | None:
+        """Get the active (non-superseded) review of a run in ``org_id``; None when it has none."""
+        await _scoped_run(session, pipeline_run_id, org_id)
+        return await _active_review(session, pipeline_run_id)
 
     @staticmethod
-    async def list_reviews(session: AsyncSession, pipeline_run_id: int) -> list[PipelineRunReview]:
-        """List all reviews for a pipeline run, newest first."""
+    async def list_reviews(session: AsyncSession, pipeline_run_id: int, *, org_id: int) -> list[PipelineRunReview]:
+        """List all reviews of a run in ``org_id``, newest first."""
+        await _scoped_run(session, pipeline_run_id, org_id)
         result = await session.execute(
             select(PipelineRunReview)
             .options(selectinload(PipelineRunReview.reviewer))
@@ -200,7 +269,11 @@ class PipelineReviewService:
         session: AsyncSession,
         hours_threshold: int = 72,
     ) -> list[PipelineRun]:
-        """Find completed pipeline runs with no active review older than threshold."""
+        """Find completed pipeline runs with no active review older than threshold.
+
+        Deliberately crosses Organizations: the background reminder scan emits each event with
+        its run's own org. It is not an API lookup and must not be used as one.
+        """
         from datetime import timedelta
 
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_threshold)

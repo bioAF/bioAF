@@ -23,6 +23,7 @@ const baseNotebook: NotebookSession = {
   git_commit_hash: null,
   environment_version_id: 42,
   input_file_ids: [1, 2, 3],
+  provider_metadata: null,
 };
 
 const baseWorkNode: WorkNode = {
@@ -76,14 +77,14 @@ describe("prefillFromNotebookSession", () => {
       project: { id: 13, name: "Project Beta" },
     };
     const prefill = prefillFromNotebookSession(session);
-    expect(prefill.scope_type).toBe("project");
-    expect(prefill.project_id).toBe(13);
-    expect(prefill.experiment_id).toBeNull();
+    expect(prefill?.scope_type).toBe("project");
+    expect(prefill?.project_id).toBe(13);
+    expect(prefill?.experiment_id).toBeNull();
   });
 
   it("defaults input_file_ids to [] when the backend response omits the field", () => {
     const session: NotebookSession = { ...baseNotebook, input_file_ids: null };
-    expect(prefillFromNotebookSession(session).input_file_ids).toEqual([]);
+    expect(prefillFromNotebookSession(session)?.input_file_ids).toEqual([]);
   });
 });
 

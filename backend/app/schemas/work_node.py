@@ -5,14 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.entity_reference import ProjectSummary
 from app.schemas.user_summary import UserSummary
-
-
-class ProjectSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
 
 
 class WorkNodeLaunchRequest(BaseModel):

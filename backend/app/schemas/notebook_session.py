@@ -3,21 +3,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.entity_reference import ExperimentReference, ProjectSummary
 from app.schemas.user_summary import UserSummary
 
-
-class ExperimentSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
-
-
-class ProjectSummary(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
+# The old name for the shared experiment link, kept for existing imports.
+ExperimentSummary = ExperimentReference
 
 
 class SessionLaunchRequest(BaseModel):
@@ -52,7 +42,7 @@ class SessionResponse(BaseModel):
     # Backend-neutral provider-details disclosure (BAL Phase 4).
     provider_metadata: dict | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"json_schema_serialization_defaults_required": True, "from_attributes": True}
 
 
 class SessionListResponse(BaseModel):

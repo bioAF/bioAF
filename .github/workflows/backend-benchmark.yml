@@ -51,6 +51,8 @@ jobs:
           --health-retries 5
     defaults:
       run:
+        # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
+        shell: bash
         working-directory: backend
     env:
       BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test

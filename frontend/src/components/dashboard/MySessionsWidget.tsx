@@ -4,7 +4,9 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import type { SessionListResponse } from "@/lib/types";
 
+// The work-node list as this widget reads it (no generated transport for that route yet).
 interface RawSession {
   id: number;
   session_type: string;
@@ -36,7 +38,7 @@ export function MySessionsWidget() {
       // the hour, which makes a false "you have none" the expensive direction to
       // be wrong in.
       const [notebooks, workNodes] = await Promise.all([
-        api.getWithRetry<SessionList>("/api/v1/notebooks/sessions"),
+        api.getWithRetry<SessionListResponse>("/api/v1/notebooks/sessions"),
         api.getWithRetry<SessionList>("/api/v1/work-nodes/sessions"),
       ]);
       const combined: CombinedSession[] = [
@@ -45,7 +47,8 @@ export function MySessionsWidget() {
           kind: "Notebook",
           sessionType: s.session_type,
           status: s.status,
-          url: s.proxy_url || s.access_url || null,
+          // A notebook session's only link is its proxy URL.
+          url: s.proxy_url || null,
           listHref: "/notebooks",
         })),
         ...(workNodes.sessions || []).map((s) => ({
