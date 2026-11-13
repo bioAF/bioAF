@@ -6,6 +6,7 @@ each record as one JSON object on one line. Root, Uvicorn, SQLAlchemy, Alembic a
 are left alone, and ``bioaf`` keeps propagating so capture and embedding hosts still see records.
 """
 
+import functools
 import json
 import logging
 import sys
@@ -24,50 +25,182 @@ _REDACTION = "***"
 # Don't redact values shorter than this: a trivially short "secret" would risk
 # mangling unrelated text, and offers little protection anyway.
 _MIN_SECRET_LEN = 4
+# Public placeholders shipped in the repository (settings defaults, Compose and .env examples). They
+# protect nothing, and redacting them would mangle ordinary words such as "password" in every line.
+_PUBLIC_PLACEHOLDERS = frozenset(
+    {
+        "password",
+        "devpassword",
+        "change_me",
+        "change_me_to_random_string",
+        "dev-secret-key-change-in-production",
+        "dev-secret-key-do-not-use-in-production",
+    }
+)
+# Structured record attributes the sanitizer supports. Other ``extra`` values are not covered.
+_STRUCTURED_ATTRIBUTES = ("json_fields", "labels", "http_request")
+_MAX_DEPTH = 32
+_SANITIZED = "_bioaf_sanitized"
 
 
-def _live_secrets() -> list[str]:
-    """Plaintext secret values that must never reach a log sink.
+@functools.lru_cache(maxsize=8)
+def _database_password_forms(url: str) -> tuple[str, ...]:
+    """The decoded password in ``url`` and its spelling inside the URL (raw or percent-encoded).
 
-    Read from the live settings singleton so the current value is redacted.
-    Currently the SMTP password; extend this list as other in-memory secrets
-    need the same protection.
+    Parses in memory only: never connects, and never logs the URL when it does not parse.
     """
-    candidates = [settings.smtp_password]
-    return [s for s in candidates if isinstance(s, str) and len(s) >= _MIN_SECRET_LEN]
+    from urllib.parse import quote, urlsplit
+
+    from sqlalchemy.engine import make_url
+
+    forms: list[str] = []
+    try:
+        password = make_url(url).password
+    except Exception:
+        password = None
+    if password:
+        forms += [str(password), quote(str(password), safe="")]
+    try:
+        spelled = urlsplit(url).password
+    except Exception:
+        spelled = None
+    if spelled:
+        forms.append(spelled)
+    return tuple(forms)
+
+
+def _known_secrets() -> list[str]:
+    """The live values that must never reach an application sink, longest first.
+
+    Read from the settings singleton at emission, so values loaded later (SMTP from the database, a
+    Secret Manager database password) and rotations are covered. Only these settings: SMTP password,
+    JWT signing key, the Slack client and signing secret slots, each at-rest encryption key, and the
+    database URL's password. Organization credentials stored in the database (bot tokens, webhook URLs,
+    per-organization Slack secrets not mirrored into settings) are not here: their callers must keep
+    them out of log calls. No database or network reads happen on this path.
+    """
+    from app.config import parse_encryption_keys
+
+    candidates: list[Any] = [
+        getattr(settings, "smtp_password", ""),
+        getattr(settings, "jwt_secret_key", ""),
+        getattr(settings, "slack_client_secret", ""),
+        getattr(settings, "slack_signing_secret", ""),
+    ]
+    raw_keys = getattr(settings, "encryption_keys", "")
+    if isinstance(raw_keys, str):
+        candidates += parse_encryption_keys(raw_keys)
+    url = getattr(settings, "database_url", "")
+    if isinstance(url, str) and url:
+        candidates += _database_password_forms(url)
+    eligible = {
+        value
+        for value in candidates
+        if isinstance(value, str) and len(value) >= _MIN_SECRET_LEN and value.lower() not in _PUBLIC_PLACEHOLDERS
+    }
+    return sorted(eligible, key=len, reverse=True)
+
+
+def _scrub(text: str, secrets: list[str]) -> str:
+    for secret in secrets:
+        text = text.replace(secret, _REDACTION)
+    return text
+
+
+def _clean(value: Any, secrets: list[str], depth: int = 0, path: frozenset[int] = frozenset()) -> Any:
+    """A sanitized JSON-like copy: str, int, float, bool, None, and dicts/lists/tuples of them.
+
+    Anything else becomes a type placeholder (never its ``repr``). Cycles and excessive nesting are
+    cut off with fixed markers. The input is never mutated.
+    """
+    if isinstance(value, str):
+        return _scrub(value, secrets)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if not isinstance(value, (dict, list, tuple)):
+        return f"<unsupported {type(value).__name__}>"
+    if id(value) in path:
+        return "<cycle>"
+    if depth >= _MAX_DEPTH:
+        return "<too deep>"
+    path = path | {id(value)}
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) or key is None or isinstance(key, (bool, int, float)):
+                name = _scrub(str(key), secrets)
+            else:
+                name = f"<unsupported {type(key).__name__}>"
+            cleaned[name] = _clean(item, secrets, depth + 1, path)
+        return cleaned
+    return [_clean(item, secrets, depth + 1, path) for item in value]
+
+
+def _withhold(record: logging.LogRecord, reason: Exception) -> None:
+    """Replace the record's content with a fixed diagnostic; keep its level, logger and origin."""
+    record.msg = f"log record withheld: it could not be sanitized (error_type={type(reason).__name__})"
+    record.args = None
+    record.exc_info = None
+    record.exc_text = None
+    record.stack_info = None
+    for attribute in _STRUCTURED_ATTRIBUTES:
+        record.__dict__.pop(attribute, None)
+
+
+def _sanitize(record: logging.LogRecord) -> None:
+    secrets = _known_secrets()
+    if isinstance(record.msg, dict):
+        record.msg = _clean(record.msg, secrets)
+        record.args = None
+    else:
+        message = record.getMessage()
+        scrubbed = _scrub(message, secrets)
+        if scrubbed != message:
+            record.msg = scrubbed
+            record.args = None
+    if record.exc_info and not record.exc_text:
+        record.exc_text = logging.Formatter().formatException(record.exc_info)
+    if isinstance(record.exc_text, str) and record.exc_text:
+        scrubbed = _scrub(record.exc_text, secrets)
+        if scrubbed != record.exc_text:
+            record.exc_text = scrubbed
+            # The cached text is now authoritative; a formatter that re-renders must not see the original.
+            record.exc_info = None
+    if isinstance(record.stack_info, str) and record.stack_info:
+        record.stack_info = _scrub(record.stack_info, secrets)
+    for attribute in _STRUCTURED_ATTRIBUTES:
+        if attribute in record.__dict__:
+            cleaned = _clean(record.__dict__[attribute], secrets)
+            if isinstance(cleaned, dict):
+                record.__dict__[attribute] = cleaned
+            else:
+                record.__dict__.pop(attribute)
 
 
 class RedactSecretsFilter(logging.Filter):
-    """Scrub known plaintext secrets from log records before they are emitted.
+    """Sanitize an application record in place, once, before any sink formats it.
 
-    Defense in depth: even if a log call, exception message, or third-party
-    output routed through our logger includes a live secret (e.g. the SMTP
-    password), it is replaced with ``***``. Attach to handlers rather than a
-    logger so it also runs on records propagated up from child loggers.
+    Covers the message (a mapping message stays a mapping), fresh and cached exception text
+    (chained exceptions included), stack information, and the supported structured attributes
+    (``json_fields``, ``labels``, ``http_request``). Because the record itself is rewritten, sinks
+    after this one, and capture or root handlers it propagates to, see the sanitized record.
 
-    Never raises and never drops a record: on any error it lets the original
-    record through unchanged rather than losing the log line.
+    Never raises and never passes an unsafe record through: if sanitizing (or formatting the
+    message) fails, the record's content is replaced by a fixed diagnostic naming the error class.
+    It never logs from inside the filter.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if record.__dict__.get(_SANITIZED):
+            return True
         try:
-            secrets = _live_secrets()
-            if not secrets:
-                return True
-            message = record.getMessage()
-            redacted = message
-            for secret in secrets:
-                redacted = redacted.replace(secret, _REDACTION)
-            if redacted != message:
-                record.msg = redacted
-                record.args = None
-            if isinstance(record.exc_text, str) and record.exc_text:
-                for secret in secrets:
-                    record.exc_text = record.exc_text.replace(secret, _REDACTION)
-        except Exception:
-            # Defensive by design: logging filters must not raise or drop records.
-            # If redaction fails, allow the original record through unchanged.
-            pass
+            _sanitize(record)
+        except Exception as exc:
+            try:
+                _withhold(record, exc)
+            except Exception:
+                pass
+        record.__dict__[_SANITIZED] = True
         return True
 
 
