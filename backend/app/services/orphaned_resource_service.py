@@ -1,16 +1,16 @@
 """Service for tracking and cleaning up orphaned GCP resources."""
 
-import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_app_logger
 from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.orphaned_resource import OrphanedResource
 from app.platform.platform_config_service import PlatformConfigService
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 # Cluster status strings (as mapped by the compute adapter's ClusterProbe):
 # statuses that indicate the cluster is alive and usable

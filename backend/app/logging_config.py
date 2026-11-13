@@ -1,19 +1,24 @@
-"""Logging configuration with Cloud Logging support.
+"""Application logging: one hierarchy, one sanitizer, single-line JSON on stdout.
 
-Sets up stdout logging at import time.  After the database is available,
-``attach_cloud_logging`` can be called with the app's configured GCP
-credentials so structured logs flow to Cloud Console using the same
-service account the rest of the platform uses.
+Every application module logs under ``bioaf`` (``get_app_logger(__name__)`` maps ``app.x`` to
+``bioaf.x``). ``configure_logging`` installs the one application-owned stdout handler, which writes
+each record as one JSON object on one line. Root, Uvicorn, SQLAlchemy, Alembic and cloud SDK loggers
+are left alone, and ``bioaf`` keeps propagating so capture and embedding hosts still see records.
 """
 
+import functools
+import json
 import logging
+import math
 import sys
 import urllib.request
+from datetime import datetime, timezone
+from collections.abc import Callable
 from typing import Any
 
 from app.config import settings
 
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+APP_LOGGER = "bioaf"
 _GCE_METADATA_URL = "http://169.254.169.254/computeMetadata/v1/project/project-id"
 _METADATA_HEADERS = {"Metadata-Flavor": "Google"}
 
@@ -22,50 +27,167 @@ _REDACTION = "***"
 # Don't redact values shorter than this: a trivially short "secret" would risk
 # mangling unrelated text, and offers little protection anyway.
 _MIN_SECRET_LEN = 4
+# Structured record attributes the sanitizer supports. Other ``extra`` values are not covered.
+_STRUCTURED_ATTRIBUTES = ("json_fields", "labels", "http_request")
+_MAX_DEPTH = 32
+_SANITIZED = "_bioaf_sanitized"
 
 
-def _live_secrets() -> list[str]:
-    """Plaintext secret values that must never reach a log sink.
+@functools.lru_cache(maxsize=8)
+def _database_password_forms(url: str) -> tuple[str, ...]:
+    """The decoded password in ``url`` and its spelling inside the URL (raw or percent-encoded).
 
-    Read from the live settings singleton so the current value is redacted.
-    Currently the SMTP password; extend this list as other in-memory secrets
-    need the same protection.
+    Parses in memory only: never connects, and never logs the URL when it does not parse.
     """
-    candidates = [settings.smtp_password]
-    return [s for s in candidates if isinstance(s, str) and len(s) >= _MIN_SECRET_LEN]
+    from urllib.parse import quote, urlsplit
+
+    from sqlalchemy.engine import make_url
+
+    forms: list[str] = []
+    try:
+        password = make_url(url).password
+    except Exception:
+        password = None
+    if password:
+        forms += [str(password), quote(str(password), safe="")]
+    try:
+        spelled = urlsplit(url).password
+    except Exception:
+        spelled = None
+    if spelled:
+        forms.append(spelled)
+    return tuple(forms)
+
+
+def _known_secrets() -> list[str]:
+    """The live values that must never reach an application sink, longest first.
+
+    Read from the settings singleton at emission, so values loaded later (SMTP from the database, a
+    Secret Manager database password) and rotations are covered. Only these settings: SMTP password,
+    JWT signing key, the Slack client and signing secret slots, each at-rest encryption key, and the
+    database URL's password. Organization credentials stored in the database (bot tokens, webhook URLs,
+    per-organization Slack secrets not mirrored into settings) are not here: their callers must keep
+    them out of log calls. No database or network reads happen on this path.
+    """
+    from app.config import parse_encryption_keys
+
+    candidates: list[Any] = [
+        getattr(settings, "smtp_password", ""),
+        getattr(settings, "jwt_secret_key", ""),
+        getattr(settings, "slack_client_secret", ""),
+        getattr(settings, "slack_signing_secret", ""),
+    ]
+    raw_keys = getattr(settings, "encryption_keys", "")
+    if isinstance(raw_keys, str):
+        candidates += parse_encryption_keys(raw_keys)
+    url = getattr(settings, "database_url", "")
+    if isinstance(url, str) and url:
+        candidates += _database_password_forms(url)
+    eligible = {value for value in candidates if isinstance(value, str) and len(value) >= _MIN_SECRET_LEN}
+    return sorted(eligible, key=len, reverse=True)
+
+
+def _scrub(text: str, secrets: list[str]) -> str:
+    for secret in secrets:
+        text = text.replace(secret, _REDACTION)
+    return text
+
+
+def _clean(value: Any, secrets: list[str], depth: int = 0, path: frozenset[int] = frozenset()) -> Any:
+    """A sanitized JSON-like copy: str, int, float, bool, None, and dicts/lists/tuples of them.
+
+    Anything else becomes a type placeholder (never its ``repr``). Cycles and excessive nesting are
+    cut off with fixed markers. The input is never mutated.
+    """
+    if isinstance(value, str):
+        return _scrub(value, secrets)
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if not isinstance(value, (dict, list, tuple)):
+        return f"<unsupported {type(value).__name__}>"
+    if id(value) in path:
+        return "<cycle>"
+    if depth >= _MAX_DEPTH:
+        return "<too deep>"
+    path = path | {id(value)}
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) or key is None or isinstance(key, (bool, int, float)):
+                name = _scrub(str(key), secrets)
+            else:
+                name = f"<unsupported {type(key).__name__}>"
+            cleaned[name] = _clean(item, secrets, depth + 1, path)
+        return cleaned
+    return [_clean(item, secrets, depth + 1, path) for item in value]
+
+
+def _withhold(record: logging.LogRecord, reason: Exception) -> None:
+    """Replace the record's content with a fixed diagnostic; keep its level, logger and origin."""
+    record.msg = f"log record withheld: it could not be sanitized (error_type={type(reason).__name__})"
+    record.args = None
+    record.exc_info = None
+    record.exc_text = None
+    record.stack_info = None
+    for attribute in _STRUCTURED_ATTRIBUTES:
+        record.__dict__.pop(attribute, None)
+
+
+def _sanitize(record: logging.LogRecord) -> None:
+    secrets = _known_secrets()
+    if isinstance(record.msg, dict):
+        record.msg = _clean(record.msg, secrets)
+        record.args = None
+    else:
+        # Render once and keep that rendering: arguments are not formatted again by any sink, so what
+        # was checked is exactly what every sink (and every propagated handler) emits.
+        record.msg = _scrub(record.getMessage(), secrets)
+        record.args = None
+    if record.exc_info and not record.exc_text:
+        record.exc_text = logging.Formatter().formatException(record.exc_info)
+    if isinstance(record.exc_text, str) and record.exc_text:
+        scrubbed = _scrub(record.exc_text, secrets)
+        if scrubbed != record.exc_text:
+            record.exc_text = scrubbed
+            # The cached text is now authoritative; a formatter that re-renders must not see the original.
+            record.exc_info = None
+    if isinstance(record.stack_info, str) and record.stack_info:
+        record.stack_info = _scrub(record.stack_info, secrets)
+    for attribute in _STRUCTURED_ATTRIBUTES:
+        if attribute in record.__dict__:
+            cleaned = _clean(record.__dict__[attribute], secrets)
+            if isinstance(cleaned, dict):
+                record.__dict__[attribute] = cleaned
+            else:
+                record.__dict__.pop(attribute)
 
 
 class RedactSecretsFilter(logging.Filter):
-    """Scrub known plaintext secrets from log records before they are emitted.
+    """Sanitize an application record in place, once, before any sink formats it.
 
-    Defense in depth: even if a log call, exception message, or third-party
-    output routed through our logger includes a live secret (e.g. the SMTP
-    password), it is replaced with ``***``. Attach to handlers rather than a
-    logger so it also runs on records propagated up from child loggers.
+    Covers the message (a mapping message stays a mapping), fresh and cached exception text
+    (chained exceptions included), stack information, and the supported structured attributes
+    (``json_fields``, ``labels``, ``http_request``). Because the record itself is rewritten, sinks
+    after this one, and capture or root handlers it propagates to, see the sanitized record.
 
-    Never raises and never drops a record: on any error it lets the original
-    record through unchanged rather than losing the log line.
+    Never raises and never passes an unsafe record through: if sanitizing (or formatting the
+    message) fails, the record's content is replaced by a fixed diagnostic naming the error class.
+    It never logs from inside the filter.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if record.__dict__.get(_SANITIZED):
+            return True
         try:
-            secrets = _live_secrets()
-            if not secrets:
-                return True
-            message = record.getMessage()
-            redacted = message
-            for secret in secrets:
-                redacted = redacted.replace(secret, _REDACTION)
-            if redacted != message:
-                record.msg = redacted
-                record.args = None
-            if isinstance(record.exc_text, str) and record.exc_text:
-                for secret in secrets:
-                    record.exc_text = record.exc_text.replace(secret, _REDACTION)
-        except Exception:
-            # Defensive by design: logging filters must not raise or drop records.
-            # If redaction fails, allow the original record through unchanged.
-            pass
+            _sanitize(record)
+        except Exception as exc:
+            try:
+                _withhold(record, exc)
+            except Exception:
+                pass
+        record.__dict__[_SANITIZED] = True
         return True
 
 
@@ -86,19 +208,116 @@ def get_gce_project_id() -> str:
         return resp.read().decode().strip()
 
 
-def configure_logging(*, debug: bool) -> None:
-    """Set up the ``bioaf`` logger with stdout only.
+def get_app_logger(name: str) -> logging.Logger:
+    """The standard logger for module ``name`` inside the application hierarchy.
 
-    Cloud Logging is attached later via ``attach_cloud_logging`` once the
-    database is available and GCP credentials can be loaded.
+    ``app.services.x`` becomes ``bioaf.services.x``; names already under ``bioaf`` are kept. Installs
+    no handlers: the shared configuration applies through propagation.
     """
-    bioaf_logger = logging.getLogger("bioaf")
+    if name == APP_LOGGER or name.startswith(APP_LOGGER + "."):
+        return logging.getLogger(name)
+    if name == "app":
+        return logging.getLogger(APP_LOGGER)
+    if name.startswith("app."):
+        name = name[len("app.") :]
+    return logging.getLogger(f"{APP_LOGGER}.{name}")
+
+
+# Handlers this module installed, by role ("stdout", "direct"). Only these are ever replaced or closed.
+_owned: dict[str, logging.Handler] = {}
+
+
+class JsonFormatter(logging.Formatter):
+    """One JSON object per record, on one physical line.
+
+    ``time``, ``severity``, ``logger`` and ``message`` belong to the formatter; supported structured
+    data (a mapping message, ``json_fields``) is nested under ``fields`` so it cannot overwrite them.
+    ``json.dumps`` escapes CR, LF, other control characters and every non-ASCII character
+    (including U+2028/U+2029), so a traceback or untrusted text stays inside its one record.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        try:
+            return _dumps(self._entry(record))
+        except Exception as exc:
+            return _dumps(
+                {
+                    "time": _timestamp(getattr(record, "created", None)),
+                    "severity": _severity(record),
+                    "logger": _safe_name(record),
+                    "message": f"log record withheld: it could not be formatted (error_type={type(exc).__name__})",
+                }
+            )
+
+    def _entry(self, record: logging.LogRecord) -> dict[str, Any]:
+        fields: dict[str, Any] = {}
+        if isinstance(record.msg, dict):
+            fields.update(record.msg)
+            message = ""
+        else:
+            message = record.getMessage()
+        json_fields = getattr(record, "json_fields", None)
+        if isinstance(json_fields, dict):
+            fields.update(json_fields)
+        entry: dict[str, Any] = {
+            "time": _timestamp(record.created),
+            "severity": _severity(record),
+            "logger": record.name,
+            "message": message,
+        }
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            entry["exception"] = record.exc_text
+        if record.stack_info:
+            entry["stack"] = self.formatStack(record.stack_info)
+        if fields:
+            entry["fields"] = fields
+        return entry
+
+
+def _dumps(entry: dict[str, Any]) -> str:
+    # allow_nan=False: NaN/Infinity are not standard JSON; such a record falls back to the diagnostic.
+    return json.dumps(entry, ensure_ascii=True, allow_nan=False, default=lambda o: f"<unsupported {type(o).__name__}>")
+
+
+def _timestamp(created: float | None) -> str:
+    moment = (
+        datetime.fromtimestamp(created, timezone.utc)
+        if isinstance(created, (int, float))
+        else datetime.now(timezone.utc)
+    )
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _severity(record: logging.LogRecord) -> str:
+    name = getattr(record, "levelname", None)
+    return name if isinstance(name, str) else "DEFAULT"
+
+
+def _safe_name(record: logging.LogRecord) -> str:
+    name = getattr(record, "name", None)
+    return name if isinstance(name, str) else APP_LOGGER
+
+
+def configure_logging(*, debug: bool) -> None:
+    """Install (or replace) the application-owned stdout handler and set the application level.
+
+    Safe to call repeatedly: the previously owned stdout handler is removed and closed, and only it.
+    Handlers others attached to ``bioaf`` (capture, tests, an embedding host, a direct sink) are kept.
+    The handler writes to the current ``sys.stdout``.
+    """
+    bioaf_logger = logging.getLogger(APP_LOGGER)
     bioaf_logger.setLevel(logging.DEBUG if debug else logging.INFO)
-    bioaf_logger.handlers.clear()
 
     stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    stdout_handler.setFormatter(JsonFormatter())
     stdout_handler.addFilter(RedactSecretsFilter())
+    previous = _owned.pop("stdout", None)
+    if previous is not None:
+        bioaf_logger.removeHandler(previous)
+        previous.close()
+    _owned["stdout"] = stdout_handler
     bioaf_logger.addHandler(stdout_handler)
 
 
@@ -107,25 +326,103 @@ def attach_cloud_logging(
     credentials: Any = None,
     *,
     debug: bool = False,
-) -> None:
-    """Attach a centralized-logging handler to the ``bioaf`` logger.
+) -> Callable[[], None] | None:
+    """Attach the opt-in direct centralized-logging handler; return its cleanup, or None.
 
-    The backend-specific handler is built by the BAL LogSinkProvider (Phase 9G),
-    so this module holds no cloud SDK. Uses the provided *credentials* (typically
-    the app's configured service account); when ``None`` the GCP client falls
-    back to Application Default Credentials. Secret redaction and the stdout
-    fallback stay here.
+    Used only when ``BIOAF_LOG_DELIVERY=direct``. The backend-specific handler is built by the BAL
+    LogSinkProvider, so this module holds no cloud SDK; *credentials* ``None`` means the provider's
+    default credentials. At most one direct handler is application-owned: while one is attached,
+    another call attaches nothing and returns a cleanup that does nothing. A different configuration
+    needs that cleanup (or a restart) first. The returned cleanup removes and closes only the handler
+    this call installed, once, and never raises. When the sink is unavailable, stdout stays the only
+    application sink and None is returned.
+
+    The sanitizer runs first among the handler's filters, ahead of any provider filter that derives
+    fields (labels, HTTP request) from the record. A synchronous emit failure is reported as one
+    fixed line on stderr and never reaches the logging caller. Delivery stays best effort: records
+    the provider's background transport fails to ship are lost, not replayed.
     """
     from app.adapters.observability import create_log_sink_provider
     from app.platform.cloud_provider import backend_for
 
-    bioaf_logger = logging.getLogger("bioaf")
+    bioaf_logger = logging.getLogger(APP_LOGGER)
+    current = _owned.get("direct")
+    if current is not None and current in bioaf_logger.handlers:
+        return _noop_cleanup
+
     provider = create_log_sink_provider(project_id, credentials, backend=backend_for("log_sink"))
     handler = provider.build_handler(debug=debug)
     if handler is None:
         bioaf_logger.warning("Centralized logging unavailable, stdout only")
-        return
+        return None
 
-    handler.addFilter(RedactSecretsFilter())
+    sanitizer = RedactSecretsFilter()
+    filters = getattr(handler, "filters", None)
+    if isinstance(filters, list):
+        filters.insert(0, sanitizer)
+    else:
+        handler.addFilter(sanitizer)
+    _guard_emit(handler)
+    _owned["direct"] = handler
     bioaf_logger.addHandler(handler)
     bioaf_logger.info("Cloud Logging enabled (project=%s)", project_id)
+
+    def cleanup() -> None:
+        if _owned.get("direct") is handler:
+            del _owned["direct"]
+        if handler not in bioaf_logger.handlers:
+            return
+        bioaf_logger.removeHandler(handler)
+        flush, close = handler.flush, handler.close
+        # Logging's own exit hook (logging.shutdown) takes every live handler's lock, then flushes and
+        # closes it again. If this flush is abandoned at the shutdown deadline it may still hold that
+        # lock (StreamHandler.flush does) or block again, holding up process exit. The handler is off
+        # the logger, so this cleanup is its only flush/close: later callers get no-ops, lock included.
+        handler.acquire = _noop_cleanup  # type: ignore[method-assign]
+        handler.release = _noop_cleanup  # type: ignore[method-assign]
+        handler.flush = _noop_cleanup  # type: ignore[method-assign]
+        handler.close = _noop_cleanup  # type: ignore[method-assign]
+        try:
+            flush()
+        except Exception:
+            pass
+        try:
+            close()
+        except Exception:
+            pass
+
+    return cleanup
+
+
+def _noop_cleanup() -> None:
+    return None
+
+
+def _guard_emit(handler: logging.Handler) -> None:
+    """Keep a sink's synchronous emit failure away from the logging caller.
+
+    Writes one fixed JSON line to stderr (the error class only, never the record or the error text)
+    and does not log through ``bioaf``, so it cannot recurse.
+    """
+    emit = handler.emit
+
+    def guarded(record: logging.LogRecord) -> None:
+        try:
+            emit(record)
+        except Exception as exc:
+            try:
+                sys.stderr.write(
+                    _dumps(
+                        {
+                            "time": _timestamp(None),
+                            "severity": "ERROR",
+                            "logger": f"{APP_LOGGER}.logging",
+                            "message": f"direct log sink emit failed (error_type={type(exc).__name__})",
+                        }
+                    )
+                    + "\n"
+                )
+            except Exception:
+                pass
+
+    handler.emit = guarded  # type: ignore[method-assign]

@@ -35,6 +35,11 @@ if [ -f "$SCRIPT_DIR/installer/output.sh" ]; then
     # shellcheck source=installer/output.sh
     source "$SCRIPT_DIR/installer/output.sh"
 fi
+# Reconciliation of host files bioAF manages (the Ops Agent config).
+if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
+    # shellcheck source=installer/managed_file.sh
+    source "$SCRIPT_DIR/installer/managed_file.sh"
+fi
 
 wait_for_db() {
     echo "Waiting for database to be ready..."
@@ -106,32 +111,124 @@ is_ec2() {
         >/dev/null 2>&1
 }
 
-ensure_cloud_logging() {
-    # Install and configure the Google Cloud Ops Agent on GCE so that
-    # all Docker container logs are forwarded to Cloud Logging.
-    # Idempotent -- safe to call on every start.
+# The Ops Agent config bioAF manages, its validator, and the one config earlier releases installed
+# without a marker (v0.6.3 through v2026.11.21), recognized by its whole-file sha256.
+OPS_AGENT_CONFIG="/etc/google-cloud-ops-agent/config.yaml"
+OPS_AGENT_ENGINE="/opt/google-cloud-ops-agent/libexec/google_cloud_ops_agent_engine"
+OPS_AGENT_LEGACY_SHA256="c22d2ac0a7deaedcd683f0f37fea7f9f99e518d00b9e6a521d19cfd3d4235b2f"
+OPS_AGENT_DETAIL_DIR=""      # host-only; defaults to $SCRIPT_DIR/host-only (never a backend mount)
+OPS_AGENT_ACTIVE_WAIT=10     # seconds to wait for the agent's log collector after a restart
 
+ops_agent_validate() {
+    # Generate the agent's collector config from the candidate, as the service does at start.
+    local out status=0
+    out=$(mktemp -d)
+    sudo "$OPS_AGENT_ENGINE" -service=fluentbit -in "$1" -out "$out" -logs "$out" -state "$out" || status=$?
+    sudo rm -rf "$out"
+    return "$status"
+}
+
+ops_agent_activate() {
+    # Restart, then require the log collector to be running on the new config.
+    local waited=0
+    sudo systemctl restart google-cloud-ops-agent || return 1
+    until sudo systemctl is-active --quiet google-cloud-ops-agent-fluent-bit; do
+        [ "$waited" -ge "$OPS_AGENT_ACTIVE_WAIT" ] && return 1
+        sleep 1; waited=$((waited + 1))
+    done
+}
+
+effective_log_delivery() {
+    # The BIOAF_LOG_DELIVERY Compose will give the backend (selected Compose and env files and the
+    # caller's environment, resolved by Compose itself), lowercased and trimmed. Fails when Compose
+    # cannot render its configuration.
+    local rendered
+    rendered=$($DC config --format json 2>/dev/null) || return 1
+    printf '%s' "$rendered" | python3 -c '
+import json, sys
+env = json.load(sys.stdin).get("services", {}).get("backend", {}).get("environment") or {}
+print(str(env.get("BIOAF_LOG_DELIVERY") or "stdout").strip().lower())
+'
+}
+
+# The line an operator adds to their own agent config to declare that it reads no container logs.
+OPS_AGENT_NO_CONTAINER_LOGS_MARKER="# bioaf-log-delivery: no-container-logs"
+
+ops_agent_container_collection() {
+    # For direct delivery: prints none (verifiably no container collection), overlap (a bioAF config,
+    # which collects container logs), or unknown (anything else, including a config or directory that
+    # cannot be inspected). Deliberately an allowlist: whether an arbitrary agent config reads
+    # container logs is not decided here, so only an absent or comment-only config, or one the
+    # operator marked, counts as none.
+    local dir config
+    dir=$(dirname "$OPS_AGENT_CONFIG")
+    if [ ! -e "$dir" ] && [ -x "$(dirname "$dir")" ]; then echo none; return; fi
+    if [ ! -d "$dir" ] || [ ! -x "$dir" ]; then echo unknown; return; fi
+    if [ ! -e "$OPS_AGENT_CONFIG" ] && [ ! -L "$OPS_AGENT_CONFIG" ]; then echo none; return; fi
+    if ! config=$(sudo cat "$OPS_AGENT_CONFIG"); then echo unknown; return; fi
+    if printf '%s\n' "$config" | grep -q '^# bioaf-managed: ops-agent-config/' \
+        || [ "$(sudo cat "$OPS_AGENT_CONFIG" | _mf_sha256)" = "$OPS_AGENT_LEGACY_SHA256" ]; then
+        echo overlap; return
+    fi
+    if printf '%s\n' "$config" | grep -qxF "$OPS_AGENT_NO_CONTAINER_LOGS_MARKER"; then echo none; return; fi
+    if ! printf '%s\n' "$config" | grep -qvE '^[[:space:]]*(#.*)?$'; then echo none; return; fi
+    echo unknown
+}
+
+ensure_cloud_logging() {
+    # GCE only, stdout delivery only: install the Ops Agent if missing and reconcile its config with
+    # the one this release ships, so the backend's JSON stdout is parsed before it becomes the centralized route. Safe to
+    # call on every setup, start and update. Fails (non-zero) when the config could not be brought to
+    # this release's version: a custom file, a rejected candidate, or an agent that did not come back
+    # (the previous config is then restored). Never disables collection.
     if ! is_gce; then
         return 0
     fi
 
-    # Install the Ops Agent if the binary is not present
-    if ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+    # One centralized path (plan 22, D1). Direct delivery ships from the backend itself, so the host
+    # must not also collect its stdout: install and reconcile nothing, and refuse an agent that
+    # already reads container logs rather than ingest every backend record twice.
+    local delivery
+    if ! delivery=$(effective_log_delivery); then
+        red "Could not read the Compose configuration to find BIOAF_LOG_DELIVERY; the Ops Agent was not changed."
+        return 1
+    fi
+    case "$delivery" in
+        stdout) ;;
+        direct)
+            case "$(ops_agent_container_collection)" in
+                none) return 0 ;;
+                overlap)
+                    red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent on this host also collects container logs ($OPS_AGENT_CONFIG), so every backend record would be ingested twice."
+                    red "Use BIOAF_LOG_DELIVERY=stdout, or remove container collection from the agent config." ;;
+                *)
+                    red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent config ($OPS_AGENT_CONFIG) is not recognized or could not be inspected, so direct delivery was not accepted."
+                    red "If that config reads no container logs, add the line '$OPS_AGENT_NO_CONTAINER_LOGS_MARKER' to it; otherwise use BIOAF_LOG_DELIVERY=stdout." ;;
+            esac
+            return 1 ;;
+        *)
+            red "BIOAF_LOG_DELIVERY must be stdout or direct; the Ops Agent was not changed."
+            return 1 ;;
+    esac
+
+    if [ ! -x "$OPS_AGENT_ENGINE" ] && ! command -v google_cloud_ops_agent_engine &>/dev/null; then
         bold "Installing Google Cloud Ops Agent..."
         curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
         sudo bash add-google-cloud-ops-agent-repo.sh --also-install
         rm -f add-google-cloud-ops-agent-repo.sh
     fi
 
-    # Deploy the Docker log collection config if not already present
-    local ops_config="/etc/google-cloud-ops-agent/config.yaml"
-    if [ ! -f "$ops_config" ] || ! grep -q "docker_logs" "$ops_config" 2>/dev/null; then
-        bold "Configuring Ops Agent for Docker log collection..."
-        sudo mkdir -p /etc/google-cloud-ops-agent
-        sudo cp "$SCRIPT_DIR/docker/ops-agent-config.yaml" "$ops_config"
-        sudo systemctl restart google-cloud-ops-agent
-        green "Cloud Logging configured -- logs will appear in Google Cloud Console."
-    fi
+    local status=0
+    MF_PRIV=sudo managed_file_reconcile ops-agent-config/v2 "$SCRIPT_DIR/docker/ops-agent-config.yaml" \
+        "$OPS_AGENT_CONFIG" "$OPS_AGENT_LEGACY_SHA256" ops_agent_validate ops_agent_activate \
+        "${OPS_AGENT_DETAIL_DIR:-$SCRIPT_DIR/host-only}" || status=$?
+    case "$MF_OUTCOME" in
+        unchanged) ;;
+        installed|migrated) green "Ops Agent config ${MF_OUTCOME}: backend logs are parsed into Cloud Logging." ;;
+        operator_managed) yellow "Ops Agent config is operator-managed; bioAF did not change it." ;;
+        *) red "Ops Agent config not updated (${MF_OUTCOME})." ;;
+    esac
+    return "$status"
 }
 
 ensure_update_agent() {
@@ -505,6 +602,12 @@ cmd_start() {
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
     ensure_backups_dir
+
+    # The agent must parse the backend's JSON lines before they are collected (GCE only).
+    if ! ensure_cloud_logging; then
+        red "ERROR: Could not configure Cloud Logging collection; services were not started."
+        exit 1
+    fi
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -1100,7 +1203,9 @@ cmd_update() {
         # it on first boot of the new image. No-op on installs that already have
         # the value.
         write_update_status in_progress ensure_encryption_key
-        bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+        # This updater reconciles the Ops Agent itself (cloud_logging step below), so the install.sh
+        # hook that does it for older updaters is skipped here.
+        BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
             update_failed ensure_encryption_key "encryption key bootstrap failed"
 
         # Pull pre-built images while old containers are still running,
@@ -1137,15 +1242,15 @@ cmd_update() {
     # recreates it. No --force-recreate: unchanged, running containers are left alone. The new
     # backend runs the database upgrade before serving (backend/entrypoint.sh) and answers 503 until
     # it has completed.
+    # The target's agent config (its parser for the backend's JSON lines) is active before the new
+    # backend starts writing them. Old services keep running while it is reconciled; a failure stops
+    # here with them unchanged. Details stay on the host (host-only/), never in the status file.
+    write_update_status in_progress cloud_logging
+    ensure_cloud_logging || update_failed cloud_logging "Cloud Logging collection could not be configured for v${target_version}, so the services were not restarted. Run ./bioaf start on the host to see why, fix it, then run ./bioaf update ${target_version} again."
+
     write_update_status in_progress restart
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
-
-    if [ "$retry_only" = false ]; then
-        # Cloud Logging (GCE only, idempotent) -- run after restart so it
-        # does not block the update while containers are down.
-        ensure_cloud_logging
-    fi
 
     # The shared lifecycle again: waits for the entrypoint's run, then finds nothing to do; after a
     # failure it is the retry.
@@ -1363,6 +1468,8 @@ case "$command" in
     setup)        cmd_setup "$@" ;;
     create-admin) cmd_create_admin ;;
     start)        cmd_start ;;
+    # Host step the target's install.sh runs during any release's update (plan 22); not in help.
+    ensure-cloud-logging) ensure_cloud_logging ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;

@@ -56,6 +56,8 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.adapters.work_nodes.ec2", "_local_vms"),
     ("app.adapters.work_nodes.gce", "_local_vms"),
     ("app.adapters.notebooks.kubernetes", "_local_sessions"),
+    # Application-owned log handlers; the handlers themselves are restored by logging_state().
+    ("app.logging_config", "_owned"),
     # Tests reload encryption_service with other keys; reload keeps the module object, so
     # restoring these two restores it for every importer.
     ("app.platform.encryption_service", "_keys"),
@@ -216,6 +218,37 @@ def _restore_into(owner: Any, attr: str, original: Any, contents: Any) -> None:
 
 
 @contextmanager
+def logging_state() -> Iterator[None]:
+    """Restore the ``bioaf`` logger's handlers, filters, level and propagation after a test.
+
+    Handlers the test added are removed; application-owned ones it created are also closed, so a
+    test that configures or attaches logging leaks neither handlers nor transports.
+    """
+    from app import logging_config
+
+    bioaf = logging.getLogger(logging_config.APP_LOGGER)
+    handlers, filters = list(bioaf.handlers), list(bioaf.filters)
+    level, propagate, disabled = bioaf.level, bioaf.propagate, bioaf.disabled
+    owned_before = set(map(id, logging_config._owned.values()))
+    try:
+        yield
+    finally:
+        for handler in list(bioaf.handlers):
+            if handler not in handlers:
+                bioaf.removeHandler(handler)
+        for handler in list(logging_config._owned.values()):
+            if id(handler) not in owned_before:
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+        bioaf.handlers[:] = handlers
+        bioaf.filters[:] = filters
+        bioaf.setLevel(level)
+        bioaf.propagate, bioaf.disabled = propagate, disabled
+
+
+@contextmanager
 def isolated_state() -> Iterator[None]:
     saved: list[tuple[Any, str, Any, Any]] = []
     for module_name, attr in RESET_STATE:
@@ -231,7 +264,8 @@ def isolated_state() -> Iterator[None]:
         value = getattr(owner, attr)
         saved.append((owner, attr, value, _copy(value)))
     try:
-        yield
+        with logging_state():
+            yield
     finally:
         for owner, attr, original, contents in saved:
             _restore_into(owner, attr, original, contents)

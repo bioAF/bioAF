@@ -12,10 +12,10 @@ account without `compute.regions.get`, or an unreachable cluster all produce an
 
 from __future__ import annotations
 
-import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_app_logger
 from app.adapters.registry import get_compute_adapter
 from app.services.cluster_quota import (
     PoolPlan,
@@ -25,7 +25,7 @@ from app.services.cluster_quota import (
 )
 from app.platform.platform_config_service import PlatformConfigService
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 # The GKE node pool the pipeline workload runs on. Its name is fixed by the
 # compute terraform module.

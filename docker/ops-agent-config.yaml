@@ -1,10 +1,18 @@
-# Google Cloud Ops Agent -- bioAF Docker log collection
+# Google Cloud Ops Agent: bioAF Docker log collection (managed by ./bioaf; schema v2)
 #
-# Reads Docker container JSON log files and forwards them to
-# Cloud Logging.  Merges with the Ops Agent built-in defaults
-# (syslog, host metrics) so those continue to work.
+# Reads Docker's JSON log files for every container and forwards them to Cloud Logging. Merges with
+# the agent's built-in defaults (syslog, host metrics), which keep working.
 #
-# Installed automatically by ./bioaf setup / ./bioaf start on GCE.
+# The backend writes one JSON object per line (BIOAF_LOG_DELIVERY=stdout): parse_bioaf_json lifts
+# it out of Docker's "log" field so time, severity, logger, message, exception and fields become the
+# entry's own fields, and the record's time becomes the entry timestamp. A line that is not JSON
+# (other containers, Uvicorn's stderr) fails that parse and is kept as Docker's envelope, unchanged.
+# Only the backend's own records are sanitized by bioAF; other output is shipped as written.
+#
+# ./bioaf setup, start and update install this file on GCE and replace only the previously shipped
+# version or an unedited managed copy. To keep your own config instead, add the line
+#   # bioaf-managed: operator
+# to it; it must then carry the parser below itself.
 
 logging:
   receivers:
@@ -17,6 +25,16 @@ logging:
       type: parse_json
       time_key: time
       time_format: "%Y-%m-%dT%H:%M:%S.%LZ"
+    parse_bioaf_json:
+      type: parse_json
+      field: log
+      time_key: time
+      time_format: "%Y-%m-%dT%H:%M:%S.%LZ"
+    bioaf_severity:
+      type: modify_fields
+      fields:
+        severity:
+          copy_from: jsonPayload.severity
   service:
     pipelines:
       docker:
@@ -24,3 +42,5 @@ logging:
           - docker_logs
         processors:
           - parse_docker_json
+          - parse_bioaf_json
+          - bioaf_severity

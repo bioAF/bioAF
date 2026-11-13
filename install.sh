@@ -343,6 +343,19 @@ for v in cfg.get('volumes', {}).values():
 # operator's whole .env (which would risk losing custom lines), this helper
 # appends exactly one line if the variable is missing or empty. Idempotent.
 # ---------------------------------------------------------------------------
+prepare_host_log_collection() {
+    # Every ./bioaf update since v0.13.1 runs this release's `install.sh ensure-encryption-key`
+    # after checking out the release and before restarting the services, and stops the update if
+    # it fails. It is the one point where an older updater runs this release's code before the new
+    # backend starts, so it is where an older updater's update installs this release's Ops Agent
+    # parser (plan 22): the backend's JSON stdout must not become the centralized route before the
+    # agent can parse it. An updater that reconciles the agent itself sets
+    # BIOAF_HOST_LOG_COLLECTION=caller. Off GCE, and in direct delivery, ./bioaf does nothing.
+    [ "${BIOAF_HOST_LOG_COLLECTION:-}" = caller ] && return 0
+    [ -f "$SCRIPT_DIR/bioaf" ] || return 0
+    bash "$SCRIPT_DIR/bioaf" ensure-cloud-logging
+}
+
 ensure_encryption_key_in_env() {
     if [ ! -f "$ENV_FILE" ]; then
         # Nothing to amend; generate-env hasn't been run. Not an error.
@@ -532,6 +545,7 @@ case "$command" in
     ensure-encryption-key)
         shift
         ensure_encryption_key_in_env "$@"
+        prepare_host_log_collection
         ;;
     --help|-h)
         usage
