@@ -13,6 +13,7 @@ import math
 import sys
 import urllib.request
 from datetime import datetime, timezone
+from collections.abc import Callable
 from typing import Any
 
 from app.config import settings
@@ -342,25 +343,94 @@ def attach_cloud_logging(
     credentials: Any = None,
     *,
     debug: bool = False,
-) -> None:
-    """Attach a centralized-logging handler to the ``bioaf`` logger.
+) -> Callable[[], None] | None:
+    """Attach the opt-in direct centralized-logging handler; return its cleanup, or None.
 
-    The backend-specific handler is built by the BAL LogSinkProvider (Phase 9G),
-    so this module holds no cloud SDK. Uses the provided *credentials* (typically
-    the app's configured service account); when ``None`` the GCP client falls
-    back to Application Default Credentials. Secret redaction and the stdout
-    fallback stay here.
+    Used only when ``BIOAF_LOG_DELIVERY=direct``. The backend-specific handler is built by the BAL
+    LogSinkProvider, so this module holds no cloud SDK; *credentials* ``None`` means the provider's
+    default credentials. At most one direct handler is application-owned: while one is attached,
+    another call attaches nothing and returns a cleanup that does nothing. A different configuration
+    needs that cleanup (or a restart) first. The returned cleanup removes and closes only the handler
+    this call installed, once, and never raises. When the sink is unavailable, stdout stays the only
+    application sink and None is returned.
+
+    The sanitizer runs first among the handler's filters, ahead of any provider filter that derives
+    fields (labels, HTTP request) from the record. A synchronous emit failure is reported as one
+    fixed line on stderr and never reaches the logging caller. Delivery stays best effort: records
+    the provider's background transport fails to ship are lost, not replayed.
     """
     from app.adapters.observability import create_log_sink_provider
     from app.platform.cloud_provider import backend_for
 
-    bioaf_logger = logging.getLogger("bioaf")
+    bioaf_logger = logging.getLogger(APP_LOGGER)
+    current = _owned.get("direct")
+    if current is not None and current in bioaf_logger.handlers:
+        return _noop_cleanup
+
     provider = create_log_sink_provider(project_id, credentials, backend=backend_for("log_sink"))
     handler = provider.build_handler(debug=debug)
     if handler is None:
         bioaf_logger.warning("Centralized logging unavailable, stdout only")
-        return
+        return None
 
-    handler.addFilter(RedactSecretsFilter())
+    sanitizer = RedactSecretsFilter()
+    filters = getattr(handler, "filters", None)
+    if isinstance(filters, list):
+        filters.insert(0, sanitizer)
+    else:
+        handler.addFilter(sanitizer)
+    _guard_emit(handler)
+    _owned["direct"] = handler
     bioaf_logger.addHandler(handler)
     bioaf_logger.info("Cloud Logging enabled (project=%s)", project_id)
+
+    def cleanup() -> None:
+        if _owned.get("direct") is handler:
+            del _owned["direct"]
+        if handler not in bioaf_logger.handlers:
+            return
+        bioaf_logger.removeHandler(handler)
+        try:
+            handler.flush()
+        except Exception:
+            pass
+        try:
+            handler.close()
+        except Exception:
+            pass
+
+    return cleanup
+
+
+def _noop_cleanup() -> None:
+    return None
+
+
+def _guard_emit(handler: logging.Handler) -> None:
+    """Keep a sink's synchronous emit failure away from the logging caller.
+
+    Writes one fixed JSON line to stderr (the error class only, never the record or the error text)
+    and does not log through ``bioaf``, so it cannot recurse.
+    """
+    emit = handler.emit
+
+    def guarded(record: logging.LogRecord) -> None:
+        try:
+            emit(record)
+        except Exception as exc:
+            try:
+                sys.stderr.write(
+                    _dumps(
+                        {
+                            "time": _timestamp(None),
+                            "severity": "ERROR",
+                            "logger": f"{APP_LOGGER}.logging",
+                            "message": f"direct log sink emit failed (error_type={type(exc).__name__})",
+                        }
+                    )
+                    + "\n"
+                )
+            except Exception:
+                pass
+
+    handler.emit = guarded  # type: ignore[method-assign]
