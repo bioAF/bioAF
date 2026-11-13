@@ -40,6 +40,9 @@ if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
     # shellcheck source=installer/managed_file.sh
     source "$SCRIPT_DIR/installer/managed_file.sh"
 fi
+# The host I/O program shared with the update agent, read now so an update that checks out another
+# release keeps using the code this process started with.
+HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
 
 wait_for_db() {
     echo "Waiting for database to be ready..."
@@ -1051,20 +1054,24 @@ get_latest_github_version() {
 }
 
 write_update_status() {
-    # write_update_status <status> <step> [error]; uses _update_from/_update_to.
+    # write_update_status <status> <step> [error]; uses _update_from/_update_to. Published through the
+    # host I/O program shared with the update agent (scripts/update_host_io.py): JSON-encoded, staged
+    # privately and renamed into update-status/ at 0644, never written through a link there.
     local status="$1" step="$2" error="${3:-}" stamp_key="started_at"
-    mkdir -p "$SCRIPT_DIR/update-status"
     [ "$status" = "in_progress" ] || stamp_key="completed_at"
-    local error_json=""
-    [ -n "$error" ] && error_json=", \"error\": \"$(printf '%s' "$error" | sed 's/["\\]/\\&/g')\""
-    printf '{"status": "%s", "from_version": "%s", "to_version": "%s", "step": "%s"%s, "%s": "%s"}\n' \
-        "$status" "$_update_from" "$_update_to" "$step" "$error_json" "$stamp_key" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SCRIPT_DIR/update-status/current.json"
+    local -a fields=(status "$status" from_version "$_update_from" to_version "$_update_to" step "$step")
+    [ -n "$error" ] && fields+=(error "$error")
+    fields+=("$stamp_key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+    if [ -z "$HOST_IO_PY" ]; then
+        red "Could not record the update status: scripts/update_host_io.py was not loaded."
+        return 1
+    fi
+    python3 -I -c "$HOST_IO_PY" write-status "$SCRIPT_DIR" "${fields[@]}"
 }
 
 update_failed() {
     # update_failed <step> <message>: record the failure where the UI and agent read it, then stop.
-    write_update_status failed "$1" "$2"
+    write_update_status failed "$1" "$2" || red "The failure could not be recorded in update-status/current.json."
     red "ERROR: $2"
     exit 1
 }

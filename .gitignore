@@ -46,8 +46,11 @@ update-status/
 update-requests/
 # Recovery dumps the update writes on the host (each holds the whole database)
 /backups/
-# Host-only detail from managed-file reconciliation (candidates, validation output); never mounted
+# Host-only detail from managed-file reconciliation (candidates, validation output) and the update
+# agent's private log; never mounted
 /host-only/
+# The update agent's private staging for status writes and its running-code record; never mounted
+/host-state/
 
 # Terraform
 *.tfvars
