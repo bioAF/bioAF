@@ -6,27 +6,18 @@ from fastapi import Request
 
 logger = logging.getLogger("bioaf")
 
-REDACT_FIELDS = {"password", "token", "secret", "key", "authorization", "cookie"}
-
-
-def _redact_value(key: str, value: str) -> str:
-    if any(field in key.lower() for field in REDACT_FIELDS):
-        return "***REDACTED***"
-    return value
-
 
 class LoggingMiddleware(BaseHTTPMiddleware):
+    """Logs method, path, status and duration only.
+
+    No headers, query string or body: they carry credentials (Authorization, cookies, OAuth
+    ``code``/``state``). If a header is ever needed, add it as a named field with a use case.
+    """
+
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
 
-        # Log request (redact sensitive headers)
-        safe_headers = {k: _redact_value(k, v) for k, v in request.headers.items()}
-        logger.info(
-            "Request: %s %s",
-            request.method,
-            request.url.path,
-            extra={"headers": safe_headers},
-        )
+        logger.info("Request: %s %s", request.method, request.url.path)
 
         response = await call_next(request)
 

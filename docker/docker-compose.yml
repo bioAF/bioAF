@@ -37,6 +37,9 @@ services:
       # The application has no default; it normalizes case/whitespace and rejects unknown values.
       BIOAF_COMPUTE_MODE: ${BIOAF_COMPUTE_MODE:-kubernetes}
       BIOAF_GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      # One centralized log path. stdout: the host's Ops Agent ships the backend's JSON lines (setup
+      # and start configure it on GCE). Set direct only where nothing collects container output.
+      BIOAF_LOG_DELIVERY: ${BIOAF_LOG_DELIVERY:-stdout}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
     volumes:

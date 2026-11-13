@@ -1,0 +1,26 @@
+# Google Cloud Ops Agent -- bioAF Docker log collection
+#
+# Reads Docker container JSON log files and forwards them to
+# Cloud Logging.  Merges with the Ops Agent built-in defaults
+# (syslog, host metrics) so those continue to work.
+#
+# Installed automatically by ./bioaf setup / ./bioaf start on GCE.
+
+logging:
+  receivers:
+    docker_logs:
+      type: files
+      include_paths:
+        - /var/lib/docker/containers/*/*.log
+  processors:
+    parse_docker_json:
+      type: parse_json
+      time_key: time
+      time_format: "%Y-%m-%dT%H:%M:%S.%LZ"
+  service:
+    pipelines:
+      docker:
+        receivers:
+          - docker_logs
+        processors:
+          - parse_docker_json

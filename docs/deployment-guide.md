@@ -162,6 +162,120 @@ redirected to HTTPS on port 443.
 ./bioaf dbshell             # Open psql
 ```
 
+## Logging
+
+### What the backend writes
+
+The backend writes each log record as one JSON object on one line of stdout: `time` (UTC),
+`severity` (`DEBUG` to `CRITICAL`), `logger` (`bioaf` or `bioaf.<module>`), `message`, and, when
+present, `exception` (the whole traceback, chained causes included), `stack`, and `fields`
+(structured data). Newlines, control characters and Unicode line separators are escaped inside the
+line, so a traceback or a hostile request path can never start a forged record. Production logs
+`INFO` and above; `BIOAF_DEBUG=true` adds `DEBUG`. There is no text format and no switching on
+environment or terminal.
+
+### Choosing the delivery path
+
+`BIOAF_LOG_DELIVERY` selects exactly one centralized path. There is no automatic fallback between
+them, including during a collector outage.
+
+| Value | Who ships to Cloud Logging | Use it when |
+| --- | --- | --- |
+| `stdout` (default, both Compose files) | The Ops Agent on the VM reads Docker's log files | Supported GCE installs (`./bioaf setup` installs and configures the agent) |
+| `direct` | The backend itself, with the GCP project and credentials in platform config | Nothing collects container output (no agent). Never together with the agent, or every backend record is ingested twice |
+
+`./bioaf setup`, `start` and `update` read the value Compose will give the backend (from
+`docker compose config`, so `docker/.env` and your shell environment both count). In `direct` mode
+they install and reconfigure no agent. They accept direct delivery only when the agent config
+(`/etc/google-cloud-ops-agent/config.yaml`) is absent, contains only comments, or contains the line
+`# bioaf-log-delivery: no-container-logs`, which you add after checking that your config reads no
+container logs. A bioAF-managed or previously shipped config, any other config, and a config that
+cannot be read all stop the command with an error. bioAF does not try to work out what an arbitrary
+agent config collects.
+
+In `stdout` mode the backend builds no Cloud Logging client and reads no credentials for logging.
+In `direct` mode stdout is still written; a direct sink that cannot be built is reported once by
+error class and the backend keeps running with stdout only.
+
+Installs from before this change attached the direct handler automatically on GCE while the agent
+also collected stdout, so backend records reached Cloud Logging twice. After updating they arrive
+once, through the agent. A manual install that relied on the automatic direct handler and runs no
+collector must set `BIOAF_LOG_DELIVERY=direct` in `docker/.env`.
+
+### The Ops Agent config
+
+`docker/ops-agent-config.yaml` (schema v2) parses the backend's JSON out of Docker's `log` field, so
+`severity`, `logger`, `message` and `fields` become entry fields and the record's own time becomes
+the entry timestamp. Lines that are not JSON (other containers, Uvicorn's own stderr) are kept as
+Docker's envelope.
+
+`./bioaf setup`, `./bioaf start` and `./bioaf update` (including a retried update) reconcile
+`/etc/google-cloud-ops-agent/config.yaml` before the services start:
+
+- The installed file starts with `# bioaf-managed: ops-agent-config/v2 sha256=...`. A current file is
+  left alone (no restart).
+- The config earlier releases installed, or an unedited managed copy of any version, is replaced:
+  the candidate is validated with the agent's own config generator, installed atomically, the agent
+  is restarted, and its log collector must come back. If it does not, the previous file is restored
+  and the agent restarted on it. Collection is never disabled as a fallback.
+- Any other file (your own config, or a managed copy edited after install) is left unchanged and
+  the command fails. The candidate is saved to `host-only/ops-agent-config-v2.candidate` (mode 600;
+  this directory is never mounted into the backend). Merge it, or add the line
+  `# bioaf-managed: operator` to your file to keep managing it yourself (it must then contain the
+  `parse_bioaf_json` and `bioaf_severity` processors).
+- Validation and restart output goes to the terminal when there is one, otherwise to
+  `host-only/ops-agent-config-v2.log`. The update status file and the update agent's log only get a
+  fixed message.
+
+A failed reconciliation stops `./bioaf update` before the services restart (the status step is
+`cloud_logging`) and stops `./bioaf start` before starting services. Run `./bioaf start` in a
+terminal to see the cause.
+
+An update started from an older release runs that release's updater, which does not know about
+this config. Every updater since v0.13.1 runs the new release's `install.sh ensure-encryption-key`
+after checking it out and before restarting the services; that step now reconciles the agent config
+too, so the parser is in place before the new backend starts. If it fails, the older updater stops
+with the step `ensure_encryption_key` and the message "encryption key bootstrap failed", leaving the
+old services running. Run `./bioaf start` in a terminal to see the cause.
+
+### Checking the effective path
+
+```bash
+grep -m1 bioaf-managed /etc/google-cloud-ops-agent/config.yaml   # managed version on this host
+systemctl is-active google-cloud-ops-agent-fluent-bit            # the agent's log collector
+grep BIOAF_LOG_DELIVERY docker/.env                              # unset means stdout
+docker inspect -f '{{.HostConfig.LogConfig.Type}}' $(docker compose -f docker/docker-compose.yml ps -q backend)  # json-file
+```
+
+The agent writes to the VM's own project; the direct sink writes to the project in platform config.
+They can differ: check the project before switching paths. A query such as
+`jsonPayload.logger=~"^bioaf"` finds backend records sent through the agent.
+
+### What is redacted, and what is not
+
+- Every backend record (message, traceback, stack, structured fields) has the live values of these
+  settings replaced with `***`: SMTP password, JWT signing key, the Slack client and signing secret
+  slots, each `BIOAF_ENCRYPTION_KEYS` key, and the database URL password (decoded and as written in
+  the URL). Values shorter than four characters and the repository's public placeholders are not
+  matched. Only current values are matched: rotated-out secrets, other encodings, fragments, and
+  organization credentials stored in the database (Slack bot tokens, webhook URLs, per-organization
+  secrets) are protected only by not being logged in the first place.
+- A record that cannot be formatted or sanitized is replaced by `log record withheld: ...` with its
+  severity and logger, never passed through.
+- Request logs carry method, path, status and duration only: no headers, query string or body.
+- Output the backend does not own is shipped as written: Uvicorn's own stderr (including tracebacks
+  for unhandled requests), other libraries' root-logger output, import-time errors, the database,
+  frontend and nginx containers. nginx's default access log records full request lines, query
+  strings included (for example password-reset `token` and Slack OAuth `code`/`state` parameters).
+  Application redaction does not cover any of these.
+
+### Delivery limits
+
+Delivery is best effort. With the agent, records wait in Docker's log files and are shipped when the
+agent recovers, subject to Docker's and the agent's own retention. With `direct`, records the
+background transport cannot send are lost; on shutdown the direct sink gets 2 seconds to flush
+after owned work has stopped.
+
 ## Updating
 
 From the CLI:

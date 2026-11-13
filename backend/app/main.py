@@ -36,11 +36,13 @@ async def lifespan(app: FastAPI):
     request_pacing.reset()
     # Read the module's engine when the lifespan starts (tests substitute it).
     ctx = startup.StartupContext(engine=engine, stack=AsyncExitStack(), subscriptions=AsyncExitStack())
-    # Unwound in reverse: owned work stops and settles, then this lifespan's subscriptions go, then
-    # the engine is disposed. Resources later steps acquire are released before all three.
+    # Unwound in reverse: owned work stops and settles, then what must outlive it (the direct log
+    # sink) is closed, then this lifespan's subscriptions go, then the engine is disposed. Resources
+    # later steps acquire on ctx.stack are released before all of these.
     async with ctx.stack:
         ctx.stack.push_async_callback(_dispose_engine, ctx.engine, owner)
         await ctx.stack.enter_async_context(ctx.subscriptions)
+        await ctx.stack.enter_async_context(ctx.after_work)
         ctx.stack.push_async_callback(_stop_owned_work, owner)
         with runtime.bound(owner):
             await startup.run_steps(startup.PRE_GATE_STEPS, ctx)

@@ -1,0 +1,110 @@
+"""An abandoned direct-sink flush cannot hold up process exit.
+
+The lifespan gives the direct sink ``LOG_SINK_SECONDS`` to flush. Returning from that wait is not
+enough: Python's ``logging.shutdown`` (run at interpreter exit) flushes and closes every live handler
+again. These tests run a real interpreter to its normal exit with a handler whose flush and close
+block, so they prove the exit itself, not just the coroutine's elapsed time.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+BACKEND = Path(__file__).resolve().parents[1]
+
+PROBE = textwrap.dedent(
+    """
+    import asyncio, logging, sys, threading, time
+    from unittest.mock import patch
+
+    from app import logging_config, startup
+
+    release = threading.Event()
+
+    class Blocking(logging.Handler):
+        # Blocks in flush and close without taking its lock.
+
+        def emit(self, record):
+            pass
+
+        def flush(self):
+            release.wait()
+
+        def close(self):
+            release.wait()
+            super().close()
+
+    class LockHolding(logging.Handler):
+        # Blocks in flush while holding its handler lock, as StreamHandler.flush does.
+
+        def emit(self, record):
+            pass
+
+        def flush(self):
+            with self.lock:
+                release.wait()
+
+    class BlockingStream:
+        def write(self, text):
+            pass
+
+        def flush(self):
+            release.wait()
+
+    def real_google_handler():
+        from google.auth.credentials import AnonymousCredentials
+        from google.cloud.logging_v2.client import Client
+        from google.cloud.logging_v2.handlers import CloudLoggingHandler
+        from google.cloud.logging_v2.resource import Resource
+        from tests.support.log_sinks import RecordingTransport
+
+        client = Client(project="probe-project", credentials=AnonymousCredentials(), _use_grpc=False)
+        return CloudLoggingHandler(
+            client, resource=Resource(type="global", labels={}), transport=RecordingTransport, stream=BlockingStream()
+        )
+
+    kind = sys.argv[2]
+    build = {"unlocked": Blocking, "locked": LockHolding, "google": real_google_handler}[kind]
+
+    class Provider:
+        def build_handler(self, debug=False):
+            return build()
+
+    logging.getLogger("bioaf").setLevel(logging.INFO)
+    with patch("app.adapters.observability.create_log_sink_provider", lambda *a, **k: Provider()):
+        cleanup = logging_config.attach_cloud_logging("probe-project", None)
+    startup.LOG_SINK_SECONDS = 0.05
+    asyncio.run(startup._close_log_sink(cleanup))
+    print("budget returned", flush=True)
+    if sys.argv[1] == "late":
+        # The abandoned flush finishes after the event loop has closed.
+        release.set()
+        time.sleep(0.5)
+    """
+)
+
+
+@pytest.mark.parametrize("kind", ["unlocked", "locked", "google"])
+@pytest.mark.parametrize("scenario", ["blocked", "late"])
+def test_the_process_exits_after_an_abandoned_flush(scenario, kind):
+    """``locked`` and ``google`` hold the handler lock while blocked, which logging.shutdown takes first."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", PROBE, scenario, kind],
+            cwd=BACKEND,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("the interpreter did not exit: logging shutdown is still waiting on the abandoned sink")
+    assert "budget returned" in result.stdout
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr and "Exception in thread" not in result.stderr, result.stderr

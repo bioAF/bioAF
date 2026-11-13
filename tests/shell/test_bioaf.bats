@@ -728,3 +728,341 @@ HARNESS
     [ "$status" -ne 0 ]
     grep -q '"step": "migrate"' "$tmp/update-status/current.json"
 }
+
+# ---------------------------------------------------------------------------
+# Ops Agent config reconciliation (plan 22). Shell stubs only: the engine, systemctl and sudo are
+# fakes, so these prove outcomes and ordering, not that the real agent accepts the parser.
+# ---------------------------------------------------------------------------
+
+LEGACY_OPS_CONFIG="$BATS_TEST_DIRNAME/fixtures/ops-agent-config.v0.6.3.yaml"
+
+# cloud_env <tmp>: fake sudo/systemctl/engine on PATH; the agent config lives under <tmp>/etc.
+cloud_env() {
+    local tmp="$1"
+    mkdir -p "$tmp/bin" "$tmp/etc"
+    # FAKE_SUDO_FAIL names one privileged command that fails (e.g. cat: an unreadable config).
+    printf '#!/bin/sh\n[ -n "$FAKE_SUDO_FAIL" ] && [ "$1" = "$FAKE_SUDO_FAIL" ] && exit 2\n"$@"\n' > "$tmp/bin/sudo"
+    # docker info reports Docker's root directory, where container logs live.
+    printf '#!/bin/sh\n[ "$1" = info ] || exit 1\n[ "${FAKE_DOCKER_STATUS:-0}" = 0 ] || exit "$FAKE_DOCKER_STATUS"\necho "${FAKE_DOCKER_ROOT:-/var/lib/docker}"\n' > "$tmp/bin/docker"
+    # Never fetch or run the real agent installer from a test.
+    printf '#!/bin/sh\necho "curl $*" >> "$FAKE_LOG"\nexit 1\n' > "$tmp/bin/curl"
+    cat > "$tmp/bin/systemctl" <<'STUB'
+#!/bin/sh
+echo "systemctl $*" >> "$FAKE_LOG"
+case "$1" in
+    restart) exit "${FAKE_RESTART_STATUS:-0}" ;;
+    is-active) exit "${FAKE_ACTIVE_STATUS:-0}" ;;
+esac
+STUB
+    cat > "$tmp/engine" <<'STUB'
+#!/bin/sh
+echo "engine $*" >> "$FAKE_LOG"
+echo "ENGINE-DETAIL-MARKER"
+exit "${FAKE_ENGINE_STATUS:-0}"
+STUB
+    # The effective Compose configuration: FAKE_DELIVERY is what Compose resolves for the backend.
+    cat > "$tmp/fake-config" <<'STUB'
+#!/bin/sh
+[ "${FAKE_CONFIG_STATUS:-0}" = 0 ] || exit "$FAKE_CONFIG_STATUS"
+case "$*" in
+    *"config --format json"*)
+        printf '{"services": {"backend": {"environment": {"BIOAF_LOG_DELIVERY": "%s"}}}}' "${FAKE_DELIVERY-stdout}" ;;
+    *) exit 1 ;;
+esac
+STUB
+    chmod +x "$tmp/bin/sudo" "$tmp/bin/docker" "$tmp/bin/curl" "$tmp/bin/systemctl" "$tmp/engine" "$tmp/fake-config"
+    cat > "$tmp/cloud.sh" <<HARNESS
+source '$BIOAF_SCRIPT' >/dev/null
+export PATH='$tmp/bin':"\$PATH"
+is_gce() { return 0; }
+OPS_AGENT_CONFIG='$tmp/etc/config.yaml'
+OPS_AGENT_ENGINE='$tmp/engine'
+OPS_AGENT_DETAIL_DIR='$tmp/host-only'
+OPS_AGENT_ACTIVE_WAIT=0
+DC='$tmp/fake-config'
+HARNESS
+}
+
+@test "the legacy fixture is the config v0.6.3 shipped, by the hash ./bioaf recognizes" {
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; echo \"\$OPS_AGENT_LEGACY_SHA256\""
+    [ "$output" = "$(shasum -a 256 < "$LEGACY_OPS_CONFIG" | cut -d' ' -f1)" ]
+}
+
+@test "a fresh GCE host gets the parser config validated, installed and the agent restarted" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    head -1 "$tmp/etc/config.yaml" | grep -q '^# bioaf-managed: ops-agent-config/v2 sha256='
+    grep -q 'field: log' "$tmp/etc/config.yaml"
+    grep -q '^engine .*-in .*config.yaml.bioaf-staged' "$tmp/log"
+    grep -q '^systemctl restart google-cloud-ops-agent$' "$tmp/log"
+    grep -q '^systemctl is-active --quiet google-cloud-ops-agent-fluent-bit$' "$tmp/log"
+}
+
+@test "an existing install's legacy config is migrated to the parser config" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    grep -q 'field: log' "$tmp/etc/config.yaml"
+    [[ "$output" == *"migrated"* ]]
+}
+
+@test "a current config is not rewritten and the agent is not restarted" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    : > "$tmp/log"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    ! grep -q 'systemctl restart' "$tmp/log"
+}
+
+@test "a custom agent config is kept, fails the step, and its content is not printed" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'logging:\n  receivers:\n    mine: {type: files, include_paths: [/x/CUSTOM-MARKER]}\n' > "$tmp/etc/config.yaml"
+    cp "$tmp/etc/config.yaml" "$tmp/before"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+    [[ "$output" != *"CUSTOM-MARKER"* ]] && [[ "$output" != *"field: log"* ]]
+    [ -f "$tmp/host-only/ops-agent-config-v2.candidate" ]
+    ! grep -q 'systemctl restart' "$tmp/log"
+}
+
+@test "a parser config the engine rejects is not installed and the agent keeps running" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" FAKE_ENGINE_STATUS=1 bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$LEGACY_OPS_CONFIG"
+    ! grep -q 'systemctl restart' "$tmp/log"
+    [[ "$output" != *"ENGINE-DETAIL-MARKER"* ]]
+    grep -q ENGINE-DETAIL-MARKER "$tmp/host-only/ops-agent-config-v2.log"
+}
+
+@test "an agent that does not come back on the parser config is restored to the previous config" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" FAKE_ACTIVE_STATUS=1 bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$LEGACY_OPS_CONFIG"
+    [ "$(grep -c '^systemctl restart' "$tmp/log")" -eq 2 ]
+}
+
+@test "off GCE nothing is installed or configured" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; is_gce() { return 1; }; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/etc/config.yaml" ] && [ ! -s "$tmp/log" ]
+}
+
+@test "update reconciles the agent config after checkout and before the services restart" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(git .* checkout |cloud_logging|up )' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'git\ncloud_logging\nup')" ]
+}
+
+@test "an unsettled retry reconciles the agent config before the services restart" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 bash -c "
+        source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(cloud_logging|up)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'cloud_logging\nup')" ]
+}
+
+@test "a failed agent reconciliation stops the update before the services restart" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; ensure_cloud_logging() { echo 'RAW-AGENT-DETAIL'; return 1; }; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+    grep -q '"step": "cloud_logging"' "$tmp/update-status/current.json"
+    ! grep -q 'RAW-AGENT-DETAIL' "$tmp/update-status/current.json"
+}
+
+@test "start reconciles the agent config before starting services and stops if that fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    stubs="DC='$tmp/fake-dc --env-file $tmp/.env'; ensure_pinned_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }; cmd_status() { :; }; sleep() { :; }"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs
+        ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_start"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(cloud_logging|up)' "$tmp/log" | head -2 | cut -d' ' -f1)" = "$(printf 'cloud_logging\nup')" ]
+    : > "$tmp/log"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs
+        ensure_cloud_logging() { return 1; }; cmd_start"
+    [ "$status" -ne 0 ]
+    ! grep -q '^up' "$tmp/log"
+    [[ "$output" != *"All services started"* ]]
+}
+
+@test "direct delivery on a GCE host without an agent installs and configures nothing" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct bash -c "source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/absent'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/etc/config.yaml" ]
+    ! grep -qE '^(curl|engine|systemctl)' "$tmp/log" 2>/dev/null
+}
+
+@test "direct delivery is rejected while the agent collects container logs" {
+    for existing in legacy managed; do
+        tmp="$(mktemp -d)"; cloud_env "$tmp"
+        if [ "$existing" = legacy ]; then
+            cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+        else
+            run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+            [ "$status" -eq 0 ]
+        fi
+        cp "$tmp/etc/config.yaml" "$tmp/before"; : > "$tmp/log"
+        run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=" Direct " bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"BIOAF_LOG_DELIVERY=direct"* ]]
+        [[ "$output" == *"ingested twice"* ]]
+        cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+        ! grep -qE '^(engine|systemctl restart)' "$tmp/log"
+    done
+}
+
+@test "an unknown delivery value or an unreadable Compose configuration stops before touching the agent" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=agent bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"BIOAF_LOG_DELIVERY"* ]]
+    run env FAKE_LOG="$tmp/log" FAKE_CONFIG_STATUS=1 bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/etc/config.yaml" ]
+    ! grep -qE '^(curl|engine|systemctl)' "$tmp/log" 2>/dev/null
+}
+
+@test "the delivery comes from the effective Compose configuration, env file and shell override included" {
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/docker"
+    cp "$BATS_TEST_DIRNAME/../../docker/docker-compose.yml" "$tmp/docker/"
+    if ! docker compose version >/dev/null 2>&1; then skip "docker compose is not available"; fi
+    printf 'BIOAF_LOG_DELIVERY=direct\n' > "$tmp/.env"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = direct ]
+    run env BIOAF_LOG_DELIVERY=stdout bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = stdout ]
+    : > "$tmp/.env"
+    run env -u BIOAF_LOG_DELIVERY bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = stdout ]
+}
+
+# ---------------------------------------------------------------------------
+# The first update from the previous release (plan 22). That release's own cmd_update runs from
+# memory; the only new code it executes before restarting the services is the target's
+# `install.sh ensure-encryption-key` (every updater since v0.13.1 runs it after checkout). The
+# fixture is v2026.11.21's ./bioaf, verbatim.
+# ---------------------------------------------------------------------------
+
+OLD_BIOAF="$BATS_TEST_DIRNAME/fixtures/bioaf.v2026.11.21"
+
+# old_update_env <tmp>: update_env, but driven by the previous release's updater, with the target's
+# real install.sh and a target ./bioaf whose ensure-cloud-logging records the call.
+old_update_env() {
+    local tmp="$1"
+    update_env "$tmp" v1.0.0
+    sed -i.bak "s|source '$BIOAF_SCRIPT'|source '$OLD_BIOAF'|" "$tmp/harness.sh"
+    cp "$BATS_TEST_DIRNAME/../../install.sh" "$tmp/install.sh"
+    cat > "$tmp/bioaf" <<'STUB'
+#!/usr/bin/env bash
+echo "target-bioaf $*" >> "$FAKE_LOG"
+exit "${FAKE_HOOK_STATUS:-0}"
+STUB
+    chmod +x "$tmp/bioaf"
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+}
+
+@test "the previous release's updater reconciles the agent config before the new backend starts" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(git .* checkout |target-bioaf|pull|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
+      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\npull tag=v2.0.0\nup args=[--env-file')" ]
+}
+
+@test "a failed reconciliation stops the previous release's update before the services restart" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+}
+
+@test "the current updater reconciles once, under its own cloud_logging step" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    sed -i.bak "s|source '$OLD_BIOAF'|source '$BIOAF_SCRIPT'|" "$tmp/harness.sh"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    ! grep -q '^target-bioaf' "$tmp/log"
+    [ "$(grep -c '^cloud_logging' "$tmp/log")" -eq 1 ]
+}
+
+@test "ensure-cloud-logging is a host command of ./bioaf" {
+    tmp="$(mktemp -d)"; mkdir -p "$tmp/bin"
+    printf '#!/bin/sh\nexit 7\n' > "$tmp/bin/curl"; chmod +x "$tmp/bin/curl"
+    run env PATH="$tmp/bin:$PATH" bash "$BIOAF_SCRIPT" ensure-cloud-logging
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Unknown command"* ]]
+}
+
+# direct_run <tmp> [env...]: ensure_cloud_logging in direct delivery.
+direct_run() {
+    local tmp="$1"; shift
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct "$@" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+}
+
+@test "direct delivery accepts only an absent, comment-only or operator-marked agent config" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    direct_run "$tmp"
+    [ "$status" -eq 0 ]
+    printf '# The agent package default: everything commented out.\n\n#logging:\n#  receivers: {}\n' > "$tmp/etc/config.yaml"
+    direct_run "$tmp"
+    [ "$status" -eq 0 ]
+    printf '# bioaf-log-delivery: no-container-logs\nlogging:\n  receivers:\n    app: {type: files, include_paths: [/var/log/myapp/*.log]}\n' > "$tmp/etc/config.yaml"
+    cp "$tmp/etc/config.yaml" "$tmp/before"
+    direct_run "$tmp"
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+    ! grep -qE '^(curl|engine|systemctl)' "$tmp/log" 2>/dev/null
+}
+
+@test "direct delivery rejects any other agent config as unrecognized, whatever it collects" {
+    for config in \
+        'logging:\n  receivers:\n    c: {type: files, include_paths: [/var/lib/docker/containers/ab*/*.log]}\n' \
+        'logging:\n  receivers:\n    app: {type: files, include_paths: [/var/log/myapp/*.log]}\n' \
+        'metrics:\n  receivers: {}\n'; do
+        tmp="$(mktemp -d)"; cloud_env "$tmp"
+        printf "$config" > "$tmp/etc/config.yaml"
+        cp "$tmp/etc/config.yaml" "$tmp/before"
+        direct_run "$tmp"
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"not recognized"* ]]
+        [[ "$output" == *"bioaf-log-delivery: no-container-logs"* ]]
+        cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+    done
+}
+
+@test "direct delivery rejects an agent config that cannot be inspected" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+    direct_run "$tmp" FAKE_SUDO_FAIL=cat
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not be inspected"* ]]
+    # A directory that cannot be searched cannot show that the config is absent.
+    rm "$tmp/etc/config.yaml"; chmod 000 "$tmp/etc"
+    direct_run "$tmp" FAKE_SUDO_FAIL=test
+    chmod 755 "$tmp/etc"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not be inspected"* ]]
+}
