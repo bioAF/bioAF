@@ -511,17 +511,27 @@ export type SampleVerdict = "pass" | "warning" | "fail";
 type GeneratedReviewCreate = paths["/api/pipeline-runs/{run_id}/reviews"]["post"]["requestBody"]["content"]["application/json"];
 type GeneratedSampleVerdictEntry = NonNullable<GeneratedReviewCreate["sample_verdicts"]>[string];
 
+/**
+ * `G` with the fields named in `N` narrowed to `N`'s value types. Which fields are required (and
+ * readonly) stays exactly as generated: the mapped type is homomorphic over `Pick<G, ...>`, so a
+ * field the schema makes required becomes required here too. type-contracts holds each narrowed
+ * request assignable to its generated one, so a narrowing cannot widen what the schema allows.
+ */
+type Narrow<G, N extends { [K in keyof G]?: unknown }> = Omit<G, keyof N> & {
+  [K in keyof Pick<G, keyof N & keyof G>]: K extends keyof N ? N[K] : never;
+};
+
 /** One sample's verdict in a review request: the generated entry with the verdict values the backend accepts. */
-export type SampleVerdictEntry = Omit<GeneratedSampleVerdictEntry, "verdict"> & { verdict: SampleVerdict };
+export type SampleVerdictEntry = Narrow<GeneratedSampleVerdictEntry, { verdict: SampleVerdict }>;
 
 /**
  * POST /api/pipeline-runs/{id}/reviews. The generated request with its two open `verdict`
  * strings narrowed to the values the backend validators accept. Sample verdicts are keyed by sample id.
  */
-export type PipelineRunReviewCreate = Omit<GeneratedReviewCreate, "verdict" | "sample_verdicts"> & {
-  verdict: ReviewVerdict;
-  sample_verdicts?: Record<string, SampleVerdictEntry> | null;
-};
+export type PipelineRunReviewCreate = Narrow<
+  GeneratedReviewCreate,
+  { verdict: ReviewVerdict; sample_verdicts: Record<string, SampleVerdictEntry> | null }
+>;
 
 /**
  * A review as the review API emits it. Generated transport: `verdict` is an open string (the

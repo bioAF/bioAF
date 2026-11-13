@@ -21,6 +21,7 @@ import type {
   ProvenanceDAG,
   ProvenanceEdge,
   ProvenanceNode,
+  SampleVerdictEntry,
   SessionListResponse,
   UserSummary,
 } from "@/lib/types";
@@ -34,6 +35,15 @@ type Json200<P extends keyof paths, M extends "get" | "post"> = paths[P][M] exte
 }
   ? B
   : never;
+type JsonBody<P extends keyof paths> = paths[P]["post"] extends {
+  requestBody: { content: { "application/json": infer B } };
+}
+  ? B
+  : never;
+// Keys a value of T must carry (optional ones excluded), so requiredness can be compared exactly.
+type RequiredKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? never : K }[keyof T];
+type Assignable<A, B> = [A] extends [B] ? true : false;
+
 type Json201<P extends keyof paths> = paths[P]["post"] extends {
   responses: { 201: { content: { "application/json": infer B } } };
 }
@@ -56,6 +66,8 @@ export type Bindings = [
   Expect<NotNever<PipelineRunReviewListResponse>>,
   Expect<NotNever<PipelineRunReview>>,
   Expect<NotNever<PipelineRunReviewCreate>>,
+  Expect<NotNever<SampleVerdictEntry>>,
+  Expect<NotNever<ReviewCreateBody>>,
 
   // Notebook sessions: the notebooks page uses /api/v1/notebooks; the experiment activity tab
   // lists and launches through /api/notebooks.
@@ -71,4 +83,16 @@ export type Bindings = [
   // Run reviews: the panel reads the list and the active review and posts a new one.
   Expect<Equal<Json200<"/api/pipeline-runs/{run_id}/review", "get">, PipelineRunReview | null>>,
   Expect<Equal<Json201<"/api/pipeline-runs/{run_id}/reviews">, PipelineRunReview>>,
+
+  // Requests narrow open strings to the accepted values. A narrowed request must still be a valid
+  // generated request (so a field the schema stops accepting null for, or retypes, fails here), and
+  // it requires exactly the fields the schema requires (so a field the schema makes required fails
+  // at every call site that omits it).
+  Expect<Assignable<PipelineRunReviewCreate, ReviewCreateBody>>,
+  Expect<Equal<RequiredKeys<PipelineRunReviewCreate>, RequiredKeys<ReviewCreateBody>>>,
+  Expect<Assignable<SampleVerdictEntry, ReviewCreateEntry>>,
+  Expect<Equal<RequiredKeys<SampleVerdictEntry>, RequiredKeys<ReviewCreateEntry>>>,
 ];
+
+type ReviewCreateBody = JsonBody<"/api/pipeline-runs/{run_id}/reviews">;
+type ReviewCreateEntry = NonNullable<ReviewCreateBody["sample_verdicts"]>[string];
