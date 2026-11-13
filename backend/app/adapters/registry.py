@@ -197,6 +197,8 @@ def initialize_adapters_sync(
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
     global _active_compute_stack
 
+    # As in initialize_adapters: a failed reinitialization must not leave an earlier stack published.
+    _active_compute_stack = None
     # Sync init is the local/test path (no DB to read cloud_provider from); clear
     # the resolved-backend cache so backend_for falls back to the gcp defaults
     # (kubernetes -> gcs), preserving today's behavior.

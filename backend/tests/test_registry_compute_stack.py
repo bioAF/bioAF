@@ -74,3 +74,16 @@ async def test_a_failure_after_the_stack_is_chosen_exposes_no_stack(session, mon
     with pytest.raises(RuntimeError):
         await initialize_adapters(session)
     assert get_active_compute_stack() is None
+
+
+def test_a_failed_sync_reinitialization_exposes_no_stack(monkeypatch):
+    from app.exceptions import ValidationError
+    from app.tasks.jobs import PERIODIC_JOBS
+
+    monkeypatch.setattr(settings, "compute_mode", ComputeMode.KUBERNETES)
+    initialize_adapters_sync("slurm")
+    with pytest.raises(ValidationError):
+        initialize_adapters_sync("kubernetes", work_node_backend="mainframe")
+    assert get_active_compute_stack() is None
+    job = next(j for j in PERIODIC_JOBS if j.role == "job-status-sync")
+    assert job.enabled is not None and not job.enabled()
