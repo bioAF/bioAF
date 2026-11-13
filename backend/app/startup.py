@@ -263,7 +263,10 @@ async def _close_log_sink(cleanup: Callable[[], None]) -> None:
         try:
             cleanup()
         finally:
-            loop.call_soon_threadsafe(finish)
+            try:
+                loop.call_soon_threadsafe(finish)
+            except RuntimeError:
+                pass  # abandoned: the event loop has already closed
 
     threading.Thread(target=run, name="bioaf-log-sink-close", daemon=True).start()
     await bounded(done, LOG_SINK_SECONDS, "close_log_sink")
