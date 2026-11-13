@@ -464,3 +464,13 @@ def billing_clock():
     clock = BillingClock()
     yield clock
     clock.restore()
+
+
+@pytest.fixture
+def mode_adapter_factory():
+    """Build a mode-aware adapter in an explicit typed mode, asserting it took that branch.
+
+    Call as ``mode_adapter_factory(ProviderClass, *existing_args, mode=ComputeMode.KUBERNETES)``."""
+    from tests.support.mode_adapters import build_mode_adapter
+
+    return build_mode_adapter

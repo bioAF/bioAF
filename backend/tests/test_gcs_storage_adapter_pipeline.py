@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.adapters.storage.gcs import GcsStorageProvider
 
 
 @pytest.fixture
-def adapter(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = GcsStorageProvider(org_slug="testorg")
+def adapter(mode_adapter_factory):
+    provider = mode_adapter_factory(GcsStorageProvider, org_slug="testorg", mode=ComputeMode.KUBERNETES)
     provider._credentials_loaded = True  # ADC; no platform_config read
     return provider
 

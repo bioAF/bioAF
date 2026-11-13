@@ -206,3 +206,10 @@ def load_settings() -> Settings:
 
 
 settings = load_settings()
+
+
+def compute_mode_for(override: ComputeMode | None = None) -> ComputeMode:
+    """The mode a mode-aware adapter is built in: the resolved setting, or a typed in-process override.
+
+    The override is a test seam, not a second bootstrap path: the setting stays required either way."""
+    return settings.compute_mode if override is None else ComputeMode(override)

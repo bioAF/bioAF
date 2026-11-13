@@ -14,6 +14,7 @@ those are covered by test_storage_staging_image. The gsutil-ls parser stays here
 import pytest
 from unittest.mock import MagicMock, patch
 
+from app.settings_contract import ComputeMode
 from app.adapters.notebooks.gcs_sync import parse_gsutil_ls_output
 
 
@@ -28,12 +29,11 @@ def test_parse_gsutil_ls_output():
 
 
 @pytest.mark.asyncio
-async def test_sync_session_storage_execs_in_pod():
+async def test_sync_session_storage_execs_in_pod(mode_adapter_factory):
     """The pod-exec sync runs gsutil rsync inside the named pod via the adapter."""
     from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 
-    adapter = KubernetesNotebookProvider()
-    adapter._mode = "k8s"
+    adapter = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
     mock_core = MagicMock()
     adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
     mock_stream = MagicMock(return_value="sync complete")
@@ -53,12 +53,11 @@ async def test_sync_session_storage_execs_in_pod():
 
 
 @pytest.mark.asyncio
-async def test_sync_session_storage_local_mode_is_noop():
+async def test_sync_session_storage_local_mode_is_noop(mode_adapter_factory):
     """In local mode there is no pod to exec into; the sync is skipped."""
     from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 
-    adapter = KubernetesNotebookProvider()
-    adapter._mode = "local"
+    adapter = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.LOCAL)
     adapter._get_k8s_core_client = MagicMock(side_effect=AssertionError("should not touch K8s"))
 
     await adapter.sync_session_storage(session_id=1, pod_name="p", namespace="n", gcs_prefix="gs://x/")

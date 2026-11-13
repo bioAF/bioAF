@@ -6,8 +6,8 @@ URLs) in one class, for ``s3://`` URIs, mirroring ``GcsStorageProvider``.
 
 Like the GCS adapter it supports a local/mock mode for development (object ops
 emulate an object store on the local filesystem, so dev/CI need no real S3) and a
-real S3 mode via the boto3 client. Mode is the shared ``BIOAF_COMPUTE_MODE``
-environment variable. boto3 (and any ``s3://`` literal / ``aws`` CLI string) lives
+real S3 mode via the boto3 client. Mode is the resolved ``settings.compute_mode``
+(``BIOAF_COMPUTE_MODE``), fixed when the adapter is built. boto3 (and any ``s3://`` literal / ``aws`` CLI string) lives
 here inside ``adapters/`` by design: the BAL guard forbids them everywhere else.
 
 This module is built in sub-blocks (6a.1 foundation: URI/scheme + CLI staging +
@@ -22,6 +22,8 @@ import logging
 import os
 from typing import BinaryIO
 
+from app.config import compute_mode_for
+from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
@@ -122,8 +124,8 @@ def _summarize_s3_lifecycle(rules) -> list[str]:
 class S3StorageProvider(StorageProvider):
     """S3 storage backend with local mode for development."""
 
-    def __init__(self, org_slug: str = "demo"):
-        self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+    def __init__(self, org_slug: str = "demo", *, mode: ComputeMode | None = None):
+        self._mode = compute_mode_for(mode)
         self._org_slug = org_slug
         # Region for the boto3 client (real mode). Resolved from the standard AWS
         # env vars first; the explicit per-install region (platform_config) is read
@@ -140,7 +142,7 @@ class S3StorageProvider(StorageProvider):
 
     @property
     def is_local(self) -> bool:
-        return self._mode == "local"
+        return is_simulated(self._mode)
 
     @property
     def ingest_bucket(self) -> str:

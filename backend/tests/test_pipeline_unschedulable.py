@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
+from app.settings_contract import ComputeMode
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 from app.models.pipeline_run import PipelineRun
 from app.services.pipeline_monitor_service import (
@@ -223,13 +224,14 @@ class TestUnschedulableReasonIsNeverUnknown:
     it asked for.
     """
 
-    def test_an_unrecognised_scheduling_message_still_reports_resource_exhaustion(self, monkeypatch):
+    def test_an_unrecognised_scheduling_message_still_reports_resource_exhaustion(
+        self, mode_adapter_factory, monkeypatch
+    ):
         from unittest.mock import MagicMock
 
         from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
-        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-        provider = KubernetesComputeProvider()
+        provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
         pod = MagicMock()
         pod.spec.node_name = None
@@ -334,11 +336,10 @@ class TestTaskTerminationsAreCaptured:
     data instead of a guess.
     """
 
-    def test_an_oom_killed_task_reports_its_reason(self, monkeypatch):
+    def test_an_oom_killed_task_reports_its_reason(self, mode_adapter_factory, monkeypatch):
         from unittest.mock import MagicMock
 
-        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-        provider = KubernetesComputeProvider()
+        provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
         pod = MagicMock()
         pod.metadata.name = "nf-abc123"
@@ -360,11 +361,10 @@ class TestTaskTerminationsAreCaptured:
         assert result[0]["exit_code"] == 137
         assert result[0]["pod"] == "nf-abc123"
 
-    def test_a_healthy_task_reports_nothing(self, monkeypatch):
+    def test_a_healthy_task_reports_nothing(self, mode_adapter_factory, monkeypatch):
         from unittest.mock import MagicMock
 
-        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-        provider = KubernetesComputeProvider()
+        provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
         pod = MagicMock()
         pod.metadata.name = "nf-ok"
@@ -380,9 +380,8 @@ class TestTaskTerminationsAreCaptured:
         assert provider._read_task_terminations(47, "bioaf-pipelines") == []
 
     @pytest.mark.asyncio
-    async def test_the_reader_returns_none_when_the_cluster_cannot_be_asked(self, monkeypatch):
-        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-        provider = KubernetesComputeProvider()
+    async def test_the_reader_returns_none_when_the_cluster_cannot_be_asked(self, mode_adapter_factory, monkeypatch):
+        provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
         monkeypatch.setattr(provider, "_get_k8s_core_client", MagicMock(side_effect=RuntimeError("unreachable")))
         assert await provider.get_task_terminations(47) is None
 

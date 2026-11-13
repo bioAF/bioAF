@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
 
 @pytest.fixture
-def adapter_k8s_mode(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = KubernetesComputeProvider()
+def adapter_k8s_mode(mode_adapter_factory):
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._namespace_ready = True
     return provider
 

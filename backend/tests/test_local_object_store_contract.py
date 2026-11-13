@@ -19,6 +19,7 @@ import os
 import pytest
 import pytest_asyncio
 
+from app.settings_contract import ComputeMode
 from app.adapters.models import StorageObjectNotFound
 from app.adapters.storage import gcs as gcs_module
 from app.adapters.storage import s3 as s3_module
@@ -302,13 +303,12 @@ class TestCopyMove:
         assert await b.s.read_bytes(b.uri("a")) == b"1"
 
 
-def test_cloud_prefix_reads_reject_negative_and_skip_zero(monkeypatch):
+def test_cloud_prefix_reads_reject_negative_and_skip_zero(mode_adapter_factory):
     """The cloud range request used max(length - 1, 0), so 0 and -1 both asked for byte 0."""
     import asyncio
     from unittest.mock import MagicMock, patch
 
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    gcs = GcsStorageProvider(org_slug="t")
+    gcs = mode_adapter_factory(GcsStorageProvider, org_slug="t", mode=ComputeMode.KUBERNETES)
     gcs._credentials_loaded = True
     client = MagicMock()
     with patch.object(gcs, "_get_gcs_client", return_value=client):
