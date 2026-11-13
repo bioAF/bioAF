@@ -35,6 +35,11 @@ if [ -f "$SCRIPT_DIR/installer/output.sh" ]; then
     # shellcheck source=installer/output.sh
     source "$SCRIPT_DIR/installer/output.sh"
 fi
+# Reconciliation of host files bioAF manages (the Ops Agent config).
+if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
+    # shellcheck source=installer/managed_file.sh
+    source "$SCRIPT_DIR/installer/managed_file.sh"
+fi
 
 wait_for_db() {
     echo "Waiting for database to be ready..."
@@ -106,32 +111,61 @@ is_ec2() {
         >/dev/null 2>&1
 }
 
-ensure_cloud_logging() {
-    # Install and configure the Google Cloud Ops Agent on GCE so that
-    # all Docker container logs are forwarded to Cloud Logging.
-    # Idempotent -- safe to call on every start.
+# The Ops Agent config bioAF manages, its validator, and the one config earlier releases installed
+# without a marker (v0.6.3 through v2026.11.21), recognized by its whole-file sha256.
+OPS_AGENT_CONFIG="/etc/google-cloud-ops-agent/config.yaml"
+OPS_AGENT_ENGINE="/opt/google-cloud-ops-agent/libexec/google_cloud_ops_agent_engine"
+OPS_AGENT_LEGACY_SHA256="c22d2ac0a7deaedcd683f0f37fea7f9f99e518d00b9e6a521d19cfd3d4235b2f"
+OPS_AGENT_DETAIL_DIR=""      # host-only; defaults to $SCRIPT_DIR/host-only (never a backend mount)
+OPS_AGENT_ACTIVE_WAIT=10     # seconds to wait for the agent's log collector after a restart
 
+ops_agent_validate() {
+    # Generate the agent's collector config from the candidate, as the service does at start.
+    local out status=0
+    out=$(mktemp -d)
+    sudo "$OPS_AGENT_ENGINE" -service=fluentbit -in "$1" -out "$out" -logs "$out" -state "$out" || status=$?
+    sudo rm -rf "$out"
+    return "$status"
+}
+
+ops_agent_activate() {
+    # Restart, then require the log collector to be running on the new config.
+    local waited=0
+    sudo systemctl restart google-cloud-ops-agent || return 1
+    until sudo systemctl is-active --quiet google-cloud-ops-agent-fluent-bit; do
+        [ "$waited" -ge "$OPS_AGENT_ACTIVE_WAIT" ] && return 1
+        sleep 1; waited=$((waited + 1))
+    done
+}
+
+ensure_cloud_logging() {
+    # GCE only: install the Ops Agent if missing and reconcile its config with the one this release
+    # ships, so the backend's JSON stdout is parsed before it becomes the centralized route. Safe to
+    # call on every setup, start and update. Fails (non-zero) when the config could not be brought to
+    # this release's version: a custom file, a rejected candidate, or an agent that did not come back
+    # (the previous config is then restored). Never disables collection.
     if ! is_gce; then
         return 0
     fi
 
-    # Install the Ops Agent if the binary is not present
-    if ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+    if [ ! -x "$OPS_AGENT_ENGINE" ] && ! command -v google_cloud_ops_agent_engine &>/dev/null; then
         bold "Installing Google Cloud Ops Agent..."
         curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
         sudo bash add-google-cloud-ops-agent-repo.sh --also-install
         rm -f add-google-cloud-ops-agent-repo.sh
     fi
 
-    # Deploy the Docker log collection config if not already present
-    local ops_config="/etc/google-cloud-ops-agent/config.yaml"
-    if [ ! -f "$ops_config" ] || ! grep -q "docker_logs" "$ops_config" 2>/dev/null; then
-        bold "Configuring Ops Agent for Docker log collection..."
-        sudo mkdir -p /etc/google-cloud-ops-agent
-        sudo cp "$SCRIPT_DIR/docker/ops-agent-config.yaml" "$ops_config"
-        sudo systemctl restart google-cloud-ops-agent
-        green "Cloud Logging configured -- logs will appear in Google Cloud Console."
-    fi
+    local status=0
+    MF_PRIV=sudo managed_file_reconcile ops-agent-config/v2 "$SCRIPT_DIR/docker/ops-agent-config.yaml" \
+        "$OPS_AGENT_CONFIG" "$OPS_AGENT_LEGACY_SHA256" ops_agent_validate ops_agent_activate \
+        "${OPS_AGENT_DETAIL_DIR:-$SCRIPT_DIR/host-only}" || status=$?
+    case "$MF_OUTCOME" in
+        unchanged) ;;
+        installed|migrated) green "Ops Agent config ${MF_OUTCOME}: backend logs are parsed into Cloud Logging." ;;
+        operator_managed) yellow "Ops Agent config is operator-managed; bioAF did not change it." ;;
+        *) red "Ops Agent config not updated (${MF_OUTCOME})." ;;
+    esac
+    return "$status"
 }
 
 ensure_update_agent() {
@@ -505,6 +539,12 @@ cmd_start() {
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
     ensure_backups_dir
+
+    # The agent must parse the backend's JSON lines before they are collected (GCE only).
+    if ! ensure_cloud_logging; then
+        red "ERROR: Could not configure Cloud Logging collection; services were not started."
+        exit 1
+    fi
 
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
@@ -1137,15 +1177,15 @@ cmd_update() {
     # recreates it. No --force-recreate: unchanged, running containers are left alone. The new
     # backend runs the database upgrade before serving (backend/entrypoint.sh) and answers 503 until
     # it has completed.
+    # The target's agent config (its parser for the backend's JSON lines) is active before the new
+    # backend starts writing them. Old services keep running while it is reconciled; a failure stops
+    # here with them unchanged. Details stay on the host (host-only/), never in the status file.
+    write_update_status in_progress cloud_logging
+    ensure_cloud_logging || update_failed cloud_logging "Cloud Logging collection could not be configured for v${target_version}, so the services were not restarted. Run ./bioaf start on the host to see why, fix it, then run ./bioaf update ${target_version} again."
+
     write_update_status in_progress restart
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
-
-    if [ "$retry_only" = false ]; then
-        # Cloud Logging (GCE only, idempotent) -- run after restart so it
-        # does not block the update while containers are down.
-        ensure_cloud_logging
-    fi
 
     # The shared lifecycle again: waits for the entrypoint's run, then finds nothing to do; after a
     # failure it is the retry.

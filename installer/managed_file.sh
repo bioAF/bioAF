@@ -69,6 +69,7 @@ _mf_quiet() {
     "$@" >> "$log" 2>&1
 }
 
+# shellcheck disable=SC2034  # MF_OUTCOME is read by the caller.
 managed_file_reconcile() {
     local identity="$1" template="$2" dest="$3" legacy="$4" validate_fn="$5" activate_fn="$6" detail_dir="$7"
     local name="${identity//\//-}" rendered state staged previous had_previous=false log
