@@ -10,17 +10,17 @@ history to be checked: equal to the run's own location, or refused before any st
 
 from __future__ import annotations
 
-import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_app_logger
 from app.adapters.models import StorageStore
 from app.adapters.registry import get_storage_adapter
 from app.exceptions import ValidationError
 from app.platform.platform_config_service import PlatformConfigService
 from app.platform.run_output_layout import directory_prefix, results_bucket_from_config, run_output_key
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 
 class OutputLocationRefused(ValidationError):

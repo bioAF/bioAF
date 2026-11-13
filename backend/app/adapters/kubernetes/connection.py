@@ -11,13 +11,13 @@ current behavior while sharing one implementation.
 """
 
 import base64
-import logging
 import tempfile
 import time
 
 from kubernetes import client, config
+from app.logging_config import get_app_logger
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 # First-time client setup for kubectl access to a GKE cluster. Lives in the K8s
 # adapter package (cloud CLI strings are allowed here); the EKS realization
@@ -175,8 +175,9 @@ class GkeConnection:
                     "K8s client built for endpoint %s",
                     self._cluster_auth.cluster_endpoint(self._cluster_config or {}),
                 )
-            except Exception:
-                logger.exception("Failed to build out-of-cluster K8s client")
+            except Exception as exc:
+                # Credential handling: the class only, never the error text or traceback.
+                logger.error("Failed to build out-of-cluster K8s client (error_type=%s)", type(exc).__name__)
                 raise
 
         return self._api_client
@@ -223,8 +224,9 @@ class GkeConnection:
                     "K8s client built for endpoint %s",
                     self._cluster_auth.cluster_endpoint(self._cluster_config or {}),
                 )
-            except Exception:
-                logger.exception("Failed to build out-of-cluster K8s client")
+            except Exception as exc:
+                # Credential handling: the class only, never the error text or traceback.
+                logger.error("Failed to build out-of-cluster K8s client (error_type=%s)", type(exc).__name__)
                 raise
 
         return self._api_client
@@ -259,8 +261,9 @@ class GkeConnection:
                 self._api_client = self.build_out_of_cluster_client()
                 self._cached_cluster_fingerprint = current_fp
                 logger.info("K8s client built for endpoint %s", current_fp[0])
-            except Exception:
-                logger.exception("Failed to build out-of-cluster K8s client")
+            except Exception as exc:
+                # Credential handling: the class only, never the error text or traceback.
+                logger.error("Failed to build out-of-cluster K8s client (error_type=%s)", type(exc).__name__)
                 raise
 
         return self._api_client

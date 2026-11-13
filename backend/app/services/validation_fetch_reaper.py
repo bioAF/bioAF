@@ -44,12 +44,12 @@ it under the lock, so a retry that landed meanwhile is built on, not overwritten
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_app_logger
 from app.adapters.registry import get_storage_adapter
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
@@ -60,7 +60,7 @@ from app.platform.work_dir_layout import work_dir_key
 from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
 from app.services.validation_study_service import VALIDATION_FETCH_RETENTION_DAYS
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 _REAPED_KEY = "fetch_reaped"
 _DEADLINE_KEY = "fetch_reap_after"

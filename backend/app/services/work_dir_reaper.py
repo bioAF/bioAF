@@ -17,18 +17,18 @@ radius.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_app_logger
 from app.adapters.registry import get_storage_adapter
 from app.models.pipeline_run import PipelineRun
 from app.platform.run_output_layout import directory_prefix, uri_within
 from app.platform.work_dir_layout import WORK_DIR_ROOT, work_dir_key
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 # How long an abandoned run's intermediates are kept. Retries and post-mortems both
 # happen within a day or two; nothing needs them after that.
