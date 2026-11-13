@@ -27,7 +27,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 # Paths relative to backend/. Reviewed 2026-11-07: the custom launcher's launchability and variable
 # decisions, from SimpleNamespace inputs; no fixtures beyond the autouse guards.
-UNIT_TEST_FILES: tuple[str, ...] = ("tests/test_custom_launch_decisions.py",)
+# Reviewed 2026-11-12 (plan 21): the compute-mode parser, from literal inputs; no fixtures, no settings
+# construction, no environment.
+UNIT_TEST_FILES: tuple[str, ...] = (
+    "tests/test_custom_launch_decisions.py",
+    "tests/test_compute_mode.py",
+)
 
 
 def command(extra: list[str]) -> list[str]:
