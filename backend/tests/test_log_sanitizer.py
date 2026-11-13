@@ -100,7 +100,7 @@ def test_a_url_without_a_usable_password_is_handled_without_disclosure(monkeypat
     assert [line["message"] for line in lines] == ["ordinary line"]
 
 
-def test_short_empty_and_public_placeholder_values_are_not_eligible(monkeypatch, capsys):
+def test_short_and_empty_values_are_not_eligible(monkeypatch, capsys):
     monkeypatch.setattr(
         logging_config,
         "settings",
@@ -110,12 +110,58 @@ def test_short_empty_and_public_placeholder_values_are_not_eligible(monkeypatch,
             slack_client_secret="",
             slack_signing_secret="",
             encryption_keys="",
-            database_url="postgresql+asyncpg://bioaf_app:password@localhost:5432/bioaf",
+            database_url="postgresql+asyncpg://bioaf_app@localhost:5432/bioaf",
         ),
     )
     configure_logging(debug=False)
     get_app_logger("app.x").info("abc reset the password for the abc lab")
     assert _lines(capsys)[0]["message"] == "abc reset the password for the abc lab"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"smtp_password": "PaSsWoRd"},
+        {"smtp_password": "change_me"},
+        {"database_url": "postgresql+asyncpg://bioaf_app:password@db:5432/bioaf"},
+        {"database_url": "postgresql+asyncpg://bioaf:CHANGE_ME@db:5432/bioaf"},
+    ],
+)
+def test_a_live_credential_is_redacted_even_when_it_looks_like_a_placeholder(monkeypatch, capsys, overrides):
+    """A configured value is a credential whatever it looks like; weak or example-like values included."""
+    fake = _settings(**overrides)
+    monkeypatch.setattr(logging_config, "settings", fake)
+    value = overrides.get("smtp_password") or fake.database_url.split(":")[2].split("@")[0]
+    configure_logging(debug=False)
+    get_app_logger("app.x").info("configured credential=%s", value)
+    assert value not in _lines(capsys)[0]["message"]
+
+
+class _ChangingArgument:
+    """Renders ordinary text the first time and a known secret afterwards."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __str__(self) -> str:
+        self.calls += 1
+        return "ordinary" if self.calls == 1 else f"late {SMTP}"
+
+
+def test_the_sanitized_rendering_is_the_one_every_sink_emits(secrets, capsys, caplog):
+    configure_logging(debug=False)
+    caplog.set_level(logging.INFO)
+    seen: list[str] = []
+
+    class Later(logging.Handler):
+        def emit(self, record):
+            seen.append(self.format(record))
+
+    logging.getLogger("bioaf").addHandler(Later())
+    get_app_logger("app.x").info("value %s", _ChangingArgument())
+    assert _lines(capsys)[0]["message"] == "value ordinary"
+    assert seen == ["value ordinary"]
+    assert SMTP not in caplog.text and "value ordinary" in caplog.text
 
 
 def test_overlapping_secrets_are_replaced_longest_first(monkeypatch, capsys):

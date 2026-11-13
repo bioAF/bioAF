@@ -27,18 +27,6 @@ _REDACTION = "***"
 # Don't redact values shorter than this: a trivially short "secret" would risk
 # mangling unrelated text, and offers little protection anyway.
 _MIN_SECRET_LEN = 4
-# Public placeholders shipped in the repository (settings defaults, Compose and .env examples). They
-# protect nothing, and redacting them would mangle ordinary words such as "password" in every line.
-_PUBLIC_PLACEHOLDERS = frozenset(
-    {
-        "password",
-        "devpassword",
-        "change_me",
-        "change_me_to_random_string",
-        "dev-secret-key-change-in-production",
-        "dev-secret-key-do-not-use-in-production",
-    }
-)
 # Structured record attributes the sanitizer supports. Other ``extra`` values are not covered.
 _STRUCTURED_ATTRIBUTES = ("json_fields", "labels", "http_request")
 _MAX_DEPTH = 32
@@ -95,11 +83,7 @@ def _known_secrets() -> list[str]:
     url = getattr(settings, "database_url", "")
     if isinstance(url, str) and url:
         candidates += _database_password_forms(url)
-    eligible = {
-        value
-        for value in candidates
-        if isinstance(value, str) and len(value) >= _MIN_SECRET_LEN and value.lower() not in _PUBLIC_PLACEHOLDERS
-    }
+    eligible = {value for value in candidates if isinstance(value, str) and len(value) >= _MIN_SECRET_LEN}
     return sorted(eligible, key=len, reverse=True)
 
 
@@ -157,11 +141,10 @@ def _sanitize(record: logging.LogRecord) -> None:
         record.msg = _clean(record.msg, secrets)
         record.args = None
     else:
-        message = record.getMessage()
-        scrubbed = _scrub(message, secrets)
-        if scrubbed != message:
-            record.msg = scrubbed
-            record.args = None
+        # Render once and keep that rendering: arguments are not formatted again by any sink, so what
+        # was checked is exactly what every sink (and every propagated handler) emits.
+        record.msg = _scrub(record.getMessage(), secrets)
+        record.args = None
     if record.exc_info and not record.exc_text:
         record.exc_text = logging.Formatter().formatException(record.exc_info)
     if isinstance(record.exc_text, str) and record.exc_text:
