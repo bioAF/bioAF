@@ -28,6 +28,8 @@ PROBE = textwrap.dedent(
     release = threading.Event()
 
     class Blocking(logging.Handler):
+        # Blocks in flush and close without taking its lock.
+
         def emit(self, record):
             pass
 
@@ -38,9 +40,41 @@ PROBE = textwrap.dedent(
             release.wait()
             super().close()
 
+    class LockHolding(logging.Handler):
+        # Blocks in flush while holding its handler lock, as StreamHandler.flush does.
+
+        def emit(self, record):
+            pass
+
+        def flush(self):
+            with self.lock:
+                release.wait()
+
+    class BlockingStream:
+        def write(self, text):
+            pass
+
+        def flush(self):
+            release.wait()
+
+    def real_google_handler():
+        from google.auth.credentials import AnonymousCredentials
+        from google.cloud.logging_v2.client import Client
+        from google.cloud.logging_v2.handlers import CloudLoggingHandler
+        from google.cloud.logging_v2.resource import Resource
+        from tests.support.log_sinks import RecordingTransport
+
+        client = Client(project="probe-project", credentials=AnonymousCredentials(), _use_grpc=False)
+        return CloudLoggingHandler(
+            client, resource=Resource(type="global", labels={}), transport=RecordingTransport, stream=BlockingStream()
+        )
+
+    kind = sys.argv[2]
+    build = {"unlocked": Blocking, "locked": LockHolding, "google": real_google_handler}[kind]
+
     class Provider:
         def build_handler(self, debug=False):
-            return Blocking()
+            return build()
 
     logging.getLogger("bioaf").setLevel(logging.INFO)
     with patch("app.adapters.observability.create_log_sink_provider", lambda *a, **k: Provider()):
@@ -56,11 +90,13 @@ PROBE = textwrap.dedent(
 )
 
 
+@pytest.mark.parametrize("kind", ["unlocked", "locked", "google"])
 @pytest.mark.parametrize("scenario", ["blocked", "late"])
-def test_the_process_exits_after_an_abandoned_flush(scenario):
+def test_the_process_exits_after_an_abandoned_flush(scenario, kind):
+    """``locked`` and ``google`` hold the handler lock while blocked, which logging.shutdown takes first."""
     try:
         result = subprocess.run(
-            [sys.executable, "-c", PROBE, scenario],
+            [sys.executable, "-c", PROBE, scenario, kind],
             cwd=BACKEND,
             env=os.environ.copy(),
             capture_output=True,

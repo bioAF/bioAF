@@ -374,9 +374,12 @@ def attach_cloud_logging(
             return
         bioaf_logger.removeHandler(handler)
         flush, close = handler.flush, handler.close
-        # Logging's own exit hook (logging.shutdown) flushes and closes every live handler again. If
-        # this flush is abandoned at the shutdown deadline, a second blocking call there would hold
-        # up process exit, so later callers get no-ops: this cleanup is the handler's only flush/close.
+        # Logging's own exit hook (logging.shutdown) takes every live handler's lock, then flushes and
+        # closes it again. If this flush is abandoned at the shutdown deadline it may still hold that
+        # lock (StreamHandler.flush does) or block again, holding up process exit. The handler is off
+        # the logger, so this cleanup is its only flush/close: later callers get no-ops, lock included.
+        handler.acquire = _noop_cleanup  # type: ignore[method-assign]
+        handler.release = _noop_cleanup  # type: ignore[method-assign]
         handler.flush = _noop_cleanup  # type: ignore[method-assign]
         handler.close = _noop_cleanup  # type: ignore[method-assign]
         try:
