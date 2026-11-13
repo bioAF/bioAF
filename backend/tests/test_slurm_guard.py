@@ -31,7 +31,7 @@ def test_compute_mode_reads_from_env():
         mp.setenv("BIOAF_COMPUTE_MODE", "slurm")
         from app.config import Settings
 
-        s = Settings()
+        s = Settings()  # type: ignore[call-arg]  # read from the environment
         assert s.compute_mode == "slurm"
 
 

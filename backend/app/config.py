@@ -200,7 +200,7 @@ class Settings(BaseSettings):
 def load_settings() -> Settings:
     """The process settings, or a SettingsError whose message names the bad settings and no values."""
     try:
-        return Settings()
+        return Settings()  # type: ignore[call-arg]  # compute_mode comes from the environment or .env
     except ValidationError as exc:
         raise SettingsError(describe_settings_error(exc)) from None
 
