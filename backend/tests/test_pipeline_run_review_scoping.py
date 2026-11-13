@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 
 from app.exceptions import NotFoundError, UnprocessableError
 from app.models.audit_log import AuditLog
@@ -298,10 +298,17 @@ async def test_a_payload_larger_than_one_query_can_carry_is_the_generic_422(
 
 @pytest.mark.asyncio
 async def test_members_are_resolved_across_bounded_queries(
-    client, session, comp_bio_token, world, spawned, monkeypatch
+    client, session, db_engine, comp_bio_token, world, spawned, monkeypatch
 ):
     """With one id per query, every member still resolves and a bad id in a later query still rejects all."""
     monkeypatch.setattr("app.services.pipeline_review_service._ID_QUERY_CHUNK", 1)
+    resolutions: list[str] = []
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT SAMPLES.") and "JOIN pipeline_run_samples" in statement:
+            resolutions.append(statement)
+
+    event.listen(db_engine.sync_engine, "before_cursor_execute", _count)
     two = await _run(
         session,
         world.org_id,
@@ -311,20 +318,22 @@ async def test_members_are_resolved_across_bounded_queries(
     await session.commit()
     two_id = two.id
     before = await _snapshot(session, world)
+    # Two ids for a two-member run pass the count guard; ids resolve in ascending order, so the
+    # missing id (larger than any real one) is the second query's, after the member resolved.
+    missing = 2_000_000_000
+    assert world.member < missing
     rejected = await client.post(
         f"/api/pipeline-runs/{two_id}/reviews",
         json={
             "verdict": "approved",
-            "sample_verdicts": {
-                str(world.member): {"verdict": "fail"},
-                str(world.non_member): {"verdict": "fail"},
-                str(world.foreign_sample): {"verdict": "fail"},
-            },
+            "sample_verdicts": {str(world.member): {"verdict": "fail"}, str(missing): {"verdict": "fail"}},
         },
         headers=_bearer(comp_bio_token),
     )
     assert rejected.status_code == 422, rejected.text
+    assert len(resolutions) == 2
     assert await _snapshot(session, world) == before
+    resolutions.clear()
 
     accepted = await client.post(
         f"/api/pipeline-runs/{two_id}/reviews",
@@ -335,6 +344,8 @@ async def test_members_are_resolved_across_bounded_queries(
         headers=_bearer(comp_bio_token),
     )
     assert accepted.status_code == 201, accepted.text
+    assert len(resolutions) == 2
+    event.remove(db_engine.sync_engine, "before_cursor_execute", _count)
     session.expire_all()
     assert (await session.get(Sample, world.member)).qc_status == "fail"
     assert (await session.get(Sample, world.non_member)).qc_status == "warning"
