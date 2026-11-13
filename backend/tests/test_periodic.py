@@ -11,6 +11,7 @@ import logging
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.tasks import jobs
 from app.tasks.periodic import PeriodicJob, run_periodic
 
@@ -250,13 +251,28 @@ async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch,
     assert (len(backfills), len(scans)) == (1, 3)
 
 
-async def test_slurm_job_sync_is_disabled_outside_slurm_mode(monkeypatch):
+@pytest.mark.parametrize(
+    ("stack", "mode", "expected"),
+    [
+        ("kubernetes", ComputeMode.LOCAL, False),
+        ("kubernetes", ComputeMode.KUBERNETES, False),
+        ("kubernetes", ComputeMode.SLURM, False),
+        ("slurm", ComputeMode.LOCAL, False),
+        ("slurm", ComputeMode.KUBERNETES, True),
+        ("slurm", ComputeMode.SLURM, True),
+    ],
+)
+async def test_slurm_job_sync_runs_only_for_an_initialized_slurm_stack_outside_simulation(
+    monkeypatch, stack, mode, expected
+):
+    from app.adapters.registry import initialize_adapters_sync, reset_registry
     from app.config import settings
 
     job = next(j for j in jobs.PERIODIC_JOBS if j.role == "job-status-sync")
     enabled = job.enabled
     assert enabled is not None
-    monkeypatch.setattr(settings, "compute_mode", "kubernetes")
-    assert not enabled()
-    monkeypatch.setattr(settings, "compute_mode", "slurm")
-    assert enabled()
+    monkeypatch.setattr(settings, "compute_mode", mode)
+    initialize_adapters_sync(stack)
+    assert enabled() is expected
+    reset_registry()
+    assert not enabled(), "no initialized stack: polling must not start"
