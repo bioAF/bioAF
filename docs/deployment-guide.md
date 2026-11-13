@@ -227,10 +227,12 @@ A failed reconciliation stops `./bioaf update` before the services restart (the 
 `cloud_logging`) and stops `./bioaf start` before starting services. Run `./bioaf start` in a
 terminal to see the cause.
 
-The first update from a release older than this one runs that older release's updater, which does
-not reconcile the agent config. Backend records then still arrive once, but as a JSON string in
-`jsonPayload.log` without parsed severity. Run `./bioaf start` once after that update to install the
-parser.
+An update started from an older release runs that release's updater, which does not know about
+this config. Every updater since v0.13.1 runs the new release's `install.sh ensure-encryption-key`
+after checking it out and before restarting the services; that step now reconciles the agent config
+too, so the parser is in place before the new backend starts. If it fails, the older updater stops
+with the step `ensure_encryption_key` and the message "encryption key bootstrap failed", leaving the
+old services running. Run `./bioaf start` in a terminal to see the cause.
 
 ### Checking the effective path
 

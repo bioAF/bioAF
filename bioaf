@@ -1180,7 +1180,9 @@ cmd_update() {
         # it on first boot of the new image. No-op on installs that already have
         # the value.
         write_update_status in_progress ensure_encryption_key
-        bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+        # This updater reconciles the Ops Agent itself (cloud_logging step below), so the install.sh
+        # hook that does it for older updaters is skipped here.
+        BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
             update_failed ensure_encryption_key "encryption key bootstrap failed"
 
         # Pull pre-built images while old containers are still running,
@@ -1443,6 +1445,8 @@ case "$command" in
     setup)        cmd_setup "$@" ;;
     create-admin) cmd_create_admin ;;
     start)        cmd_start ;;
+    # Host step the target's install.sh runs during any release's update (plan 22); not in help.
+    ensure-cloud-logging) ensure_cloud_logging ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;

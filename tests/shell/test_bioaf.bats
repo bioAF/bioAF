@@ -958,3 +958,65 @@ HARNESS
     run env -u BIOAF_LOG_DELIVERY bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
     [ "$output" = stdout ]
 }
+
+# ---------------------------------------------------------------------------
+# The first update from the previous release (plan 22). That release's own cmd_update runs from
+# memory; the only new code it executes before restarting the services is the target's
+# `install.sh ensure-encryption-key` (every updater since v0.13.1 runs it after checkout). The
+# fixture is v2026.11.21's ./bioaf, verbatim.
+# ---------------------------------------------------------------------------
+
+OLD_BIOAF="$BATS_TEST_DIRNAME/fixtures/bioaf.v2026.11.21"
+
+# old_update_env <tmp>: update_env, but driven by the previous release's updater, with the target's
+# real install.sh and a target ./bioaf whose ensure-cloud-logging records the call.
+old_update_env() {
+    local tmp="$1"
+    update_env "$tmp" v1.0.0
+    sed -i.bak "s|source '$BIOAF_SCRIPT'|source '$OLD_BIOAF'|" "$tmp/harness.sh"
+    cp "$BATS_TEST_DIRNAME/../../install.sh" "$tmp/install.sh"
+    cat > "$tmp/bioaf" <<'STUB'
+#!/usr/bin/env bash
+echo "target-bioaf $*" >> "$FAKE_LOG"
+exit "${FAKE_HOOK_STATUS:-0}"
+STUB
+    chmod +x "$tmp/bioaf"
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+}
+
+@test "the previous release's updater reconciles the agent config before the new backend starts" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(git .* checkout |target-bioaf|pull|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
+      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\npull tag=v2.0.0\nup args=[--env-file')" ]
+}
+
+@test "a failed reconciliation stops the previous release's update before the services restart" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+}
+
+@test "the current updater reconciles once, under its own cloud_logging step" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+    sed -i.bak "s|source '$OLD_BIOAF'|source '$BIOAF_SCRIPT'|" "$tmp/harness.sh"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    ! grep -q '^target-bioaf' "$tmp/log"
+    [ "$(grep -c '^cloud_logging' "$tmp/log")" -eq 1 ]
+}
+
+@test "ensure-cloud-logging is a host command of ./bioaf" {
+    tmp="$(mktemp -d)"; mkdir -p "$tmp/bin"
+    printf '#!/bin/sh\nexit 7\n' > "$tmp/bin/curl"; chmod +x "$tmp/bin/curl"
+    run env PATH="$tmp/bin:$PATH" bash "$BIOAF_SCRIPT" ensure-cloud-logging
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Unknown command"* ]]
+}

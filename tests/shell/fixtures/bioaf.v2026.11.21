@@ -1,0 +1,1388 @@
+#!/usr/bin/env bash
+# bioAF Management Script
+# Usage: ./bioaf <command> [args]
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="${BIOAF_COMPOSE_FILE:-$SCRIPT_DIR/docker/docker-compose.yml}"
+ENV_FILE="${BIOAF_ENV_FILE:-$SCRIPT_DIR/docker/.env}"
+
+DC="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE"
+
+# --progress is a global docker compose flag; must precede the build subcommand.
+# Use the fancy TTY display when stdout is a real terminal, plain text otherwise.
+[ -t 1 ] && _progress="auto" || _progress="plain"
+DC_BUILD="docker compose --progress=$_progress -f $COMPOSE_FILE --env-file $ENV_FILE build"
+DC_PULL="docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
+
+# Structured per-step output helpers (step / maybe_step / warn / io_finish).
+# Sourced unconditionally so any command can use them, but io_init is only
+# called from commands that actually want the install-log + step UI
+# treatment (currently cmd_setup).
+if [ -f "$SCRIPT_DIR/installer/output.sh" ]; then
+    # shellcheck source=installer/output.sh
+    source "$SCRIPT_DIR/installer/output.sh"
+fi
+
+wait_for_db() {
+    echo "Waiting for database to be ready..."
+    local retries=30
+    while [ $retries -gt 0 ]; do
+        if $DC exec -T db pg_isready -U bioaf -q 2>/dev/null; then
+            green "Database is ready."
+            return 0
+        fi
+        retries=$((retries - 1))
+        sleep 2
+    done
+    red "ERROR: Database did not become ready in time."
+    exit 1
+}
+
+slugify() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//'
+}
+
+get_access_url() {
+    # Try to detect the best URL for accessing the web UI.
+    # On a cloud VM the external IP is NAT'd and not visible to the OS, so we
+    # query the cloud's metadata server for it (GCE first, then EC2). Falling
+    # back to hostname -I would return the private IP, which is unroutable from
+    # the operator's browser.
+    local host=""
+
+    if is_gce; then
+        host=$(curl -sf -m 2 -H "Metadata-Flavor: Google" \
+            "http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip" \
+            2>/dev/null) || true
+    fi
+
+    # On EC2 the public IP is likewise not on the OS interface; read it from
+    # IMDSv2 (a session-token PUT first, then the public-ipv4 metadata key).
+    if [ -z "$host" ] && is_ec2; then
+        local imds_token
+        imds_token=$(curl -sf -m 2 -X PUT \
+            -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+            "http://169.254.169.254/latest/api/token" 2>/dev/null) || true
+        if [ -n "$imds_token" ]; then
+            host=$(curl -sf -m 2 -H "X-aws-ec2-metadata-token: ${imds_token}" \
+                "http://169.254.169.254/latest/meta-data/public-ipv4" 2>/dev/null) || true
+        fi
+    fi
+
+    if [ -z "$host" ]; then
+        host=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+    fi
+    if [ -z "$host" ]; then
+        host=$(ipconfig getifaddr en0 2>/dev/null) || true
+    fi
+    host=${host:-localhost}
+    echo "https://${host}"
+}
+
+is_gce() {
+    curl -sf -m 1 -H "Metadata-Flavor: Google" \
+        "http://169.254.169.254/computeMetadata/v1/project/project-id" \
+        >/dev/null 2>&1
+}
+
+is_ec2() {
+    # The IMDSv2 token PUT succeeds only on EC2; -m 1 keeps non-cloud hosts fast.
+    curl -sf -m 1 -X PUT \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+        "http://169.254.169.254/latest/api/token" \
+        >/dev/null 2>&1
+}
+
+ensure_cloud_logging() {
+    # Install and configure the Google Cloud Ops Agent on GCE so that
+    # all Docker container logs are forwarded to Cloud Logging.
+    # Idempotent -- safe to call on every start.
+
+    if ! is_gce; then
+        return 0
+    fi
+
+    # Install the Ops Agent if the binary is not present
+    if ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+        bold "Installing Google Cloud Ops Agent..."
+        curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
+        sudo bash add-google-cloud-ops-agent-repo.sh --also-install
+        rm -f add-google-cloud-ops-agent-repo.sh
+    fi
+
+    # Deploy the Docker log collection config if not already present
+    local ops_config="/etc/google-cloud-ops-agent/config.yaml"
+    if [ ! -f "$ops_config" ] || ! grep -q "docker_logs" "$ops_config" 2>/dev/null; then
+        bold "Configuring Ops Agent for Docker log collection..."
+        sudo mkdir -p /etc/google-cloud-ops-agent
+        sudo cp "$SCRIPT_DIR/docker/ops-agent-config.yaml" "$ops_config"
+        sudo systemctl restart google-cloud-ops-agent
+        green "Cloud Logging configured -- logs will appear in Google Cloud Console."
+    fi
+}
+
+ensure_update_agent() {
+    # Install the update agent systemd service so the backend can trigger
+    # host-level updates via a trigger file. Idempotent.
+
+    # Skip on non-systemd systems and non-Linux
+    if ! command -v systemctl &>/dev/null; then
+        return 0
+    fi
+
+    # Create directories
+    mkdir -p "$SCRIPT_DIR/update-requests" "$SCRIPT_DIR/update-status"
+
+    local service_name="bioaf-update-agent"
+    local service_file="/etc/systemd/system/${service_name}.service"
+    local current_user
+    current_user=$(whoami)
+    local current_group
+    current_group=$(id -gn)
+
+    # Check if already installed with correct paths
+    if [ -f "$service_file" ] && grep -q "$SCRIPT_DIR" "$service_file" 2>/dev/null; then
+        # Ensure it's running
+        if ! systemctl is-active --quiet "$service_name" 2>/dev/null; then
+            sudo systemctl start "$service_name"
+        fi
+        return 0
+    fi
+
+    bold "Installing update agent service..."
+    sed -e "s|__BIOAF_DIR__|$SCRIPT_DIR|g" \
+        -e "s|__BIOAF_USER__|$current_user|g" \
+        -e "s|__BIOAF_GROUP__|$current_group|g" \
+        "$SCRIPT_DIR/docker/bioaf-update-agent.service" | sudo tee "$service_file" > /dev/null
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$service_name"
+    sudo systemctl start "$service_name"
+    green "Update agent installed and running."
+}
+
+build_setup_reexec_cmd() {
+    # Build the single command string handed to `sg docker -c` when setup
+    # re-execs itself to activate docker-group membership. `sg ... -c` takes
+    # one string, so we shell-quote the script path plus EVERY original
+    # argument. Preserving them all is the whole point: a prior version hard-
+    # coded `setup [--version X]` and silently dropped --prefill/--local-build,
+    # so anyone whose shell lacked the docker group got a flagless setup.
+    local self="$1"
+    shift
+    local cmd
+    printf -v cmd '%q ' "$self" setup "$@"
+    printf '%s' "${cmd% }"
+}
+
+discover_prefill_file() {
+    # Echo the first prefill file present on this host, in priority order:
+    # the install-gcp.sh handoff drop (~/.bioaf-prefill.yaml), then the
+    # locally-generated copy (~/.bioaf/prefill.yaml). Echo nothing if neither
+    # exists. Used by --local-build so `./bioaf setup --local-build` fills
+    # platform_config from the values install-gcp.sh already produced, without
+    # requiring an explicit --prefill.
+    local candidate
+    for candidate in "$HOME/.bioaf-prefill.yaml" "$HOME/.bioaf/prefill.yaml"; do
+        if [ -f "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+cmd_setup() {
+    # Capture the full, original argument list up front. If we later have to
+    # re-exec under `sg docker` to activate docker-group membership, every flag
+    # (--prefill, --local-build, --version, --verbose) must survive the hop.
+    local -a _setup_args=("$@")
+
+    # Parse flags
+    local setup_version=""
+    local prefill_path=""
+    local local_build=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --version)
+                setup_version="${2:-}"
+                if [ -z "$setup_version" ]; then
+                    red "ERROR: --version requires a value (e.g., --version 0.8.1)"
+                    exit 1
+                fi
+                setup_version="${setup_version#v}"
+                shift 2
+                ;;
+            --prefill)
+                prefill_path="${2:-}"
+                if [ -z "$prefill_path" ]; then
+                    red "ERROR: --prefill requires a YAML file path"
+                    exit 1
+                fi
+                if [ ! -f "$prefill_path" ]; then
+                    red "ERROR: prefill file not found: $prefill_path"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --local-build)
+                # Force build-from-source, skipping the GitHub Releases lookup
+                # and registry pulls. Use this when testing an unreleased branch
+                # so the running images match the local source tree.
+                local_build=true
+                shift
+                ;;
+            --verbose|-v)
+                BIOAF_VERBOSE=1
+                shift
+                ;;
+            *)
+                red "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+    export BIOAF_VERBOSE="${BIOAF_VERBOSE:-0}"
+    export BIOAF_INSTALL_LOG="${HOME}/.bioaf/install.log"
+    if declare -F io_init >/dev/null 2>&1; then
+        io_init
+    fi
+
+    # OS gate -- catch macOS/Windows before anything else
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Darwin)
+            echo ""
+            red "bioAF cannot be installed on macOS."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            echo ""
+            red "bioAF cannot be installed on Windows."
+            echo ""
+            echo "bioAF requires a Linux server, typically a VM in Google Cloud."
+            echo "See the installation guide for step-by-step instructions:"
+            echo ""
+            bold "  https://bioaf.co/docs/installation/gcp-setup/"
+            echo ""
+            exit 1
+            ;;
+    esac
+
+    # If Docker is installed but the socket is inaccessible, try to auto-recover.
+    # Two cases:
+    #   1. User is in the docker group but the current shell session predates
+    #      that change -- re-exec under `sg docker` to activate it inline.
+    #   2. User is not in the docker group at all (e.g. fresh GCE VM where the
+    #      startup script could not add them because /home was empty at boot) --
+    #      add them via sudo, then re-exec under `sg docker`.
+    if command -v docker &>/dev/null && ! docker info &>/dev/null; then
+        # Re-exec with the FULL original arg list so flags survive the hop.
+        # ${arr[@]+"${arr[@]}"} expands to nothing on an empty array without
+        # tripping `set -u` (the common `./bioaf setup` no-args case).
+        local reexec_cmd
+        reexec_cmd="$(build_setup_reexec_cmd "$0" ${_setup_args[@]+"${_setup_args[@]}"})"
+
+        if id -nG 2>/dev/null | grep -qw docker || grep -q "docker.*$(whoami)\|$(whoami).*docker" /etc/group 2>/dev/null; then
+            yellow "Activating docker group for this session..."
+            exec sg docker -c "$reexec_cmd"
+        elif getent group docker &>/dev/null && sudo -n true 2>/dev/null; then
+            yellow "Adding $(whoami) to the docker group..."
+            sudo usermod -aG docker "$(whoami)"
+            exec sg docker -c "$reexec_cmd"
+        fi
+    fi
+
+    section "bioAF First-Run Setup"
+
+    # Auto-run install.sh if it hasn't been run yet
+    if [ ! -f "$ENV_FILE" ] || [ ! -f "$SCRIPT_DIR/docker/certs/tls.crt" ]; then
+        step "Run first-time installer (generate .env, TLS certs)" -- \
+            "$SCRIPT_DIR/install.sh" --non-interactive --quiet
+    else
+        # .env and certs exist -- just ensure they're current (idempotent)
+        step "Refresh .env" -- \
+            "$SCRIPT_DIR/install.sh" generate-env --non-interactive
+        step "Refresh TLS certs" -- \
+            "$SCRIPT_DIR/install.sh" generate-certs
+    fi
+
+    # Remove stale database volume if it exists. The volume holds the
+    # old password from a previous install, which won't match the newly
+    # generated credentials.
+    local vol_name
+    vol_name=$($DC config --format json 2>/dev/null | python3 -c "
+import sys, json
+cfg = json.load(sys.stdin)
+for v in cfg.get('volumes', {}).values():
+    print(v.get('name', ''))
+    break
+" 2>/dev/null || echo "")
+
+    if [ -n "$vol_name" ] && docker volume inspect "$vol_name" > /dev/null 2>&1; then
+        maybe_step "Remove stale database volume ($vol_name) to avoid password mismatch" -- \
+            $DC down -v
+    fi
+
+    # Cloud Logging (GCE only, idempotent). Critical for production
+    # observability -- abort the install if it fails rather than letting
+    # the user end up with a running stack that ships no logs.
+    step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
+
+    # Update agent (idempotent). Required for the in-app self-update
+    # feature to work; without it, backend-triggered updates are a no-op.
+    step "Configure update agent (idempotent)" -- ensure_update_agent
+
+    # If a specific version was requested, checkout that tag
+    if [ -n "$setup_version" ]; then
+        step "Fetch tags from origin" -- git -C "$SCRIPT_DIR" fetch --tags --force
+        if ! git -C "$SCRIPT_DIR" rev-parse "v${setup_version}" >/dev/null 2>&1; then
+            fail_line "Version ${setup_version} not found."
+            io_finish
+            exit 1
+        fi
+        step "Checkout v${setup_version}" -- git -C "$SCRIPT_DIR" checkout "v${setup_version}"
+    fi
+
+    # Resolve and pull pre-built images (falls back to building from source).
+    # --local-build short-circuits the registry lookup entirely.
+    if [ "$local_build" = true ]; then
+        export BIOAF_IMAGE_TAG="v$(get_current_version)"
+        step "Build images from local source (--local-build)" -- $DC_BUILD
+    else
+        step "Resolve and pull bioAF images" -- resolve_and_pull_images "$setup_version"
+    fi
+    # Pin whichever tag we ended up with so future start/restart commands
+    # always use this exact version, independent of the worktree.
+    pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
+    ensure_backups_dir
+    step "Start services (docker compose up -d)" -- $DC up -d
+
+    # Wait for DB
+    step "Wait for database to accept connections" -- wait_for_db
+
+    # Run migrations
+    # The backend's entrypoint already ran the shared upgrade lifecycle; this confirms it (a no-op
+    # when done) and fails setup if it did not complete.
+    step "Run database migrations" -- \
+        $DC exec -T backend python -m app.schema_upgrade run
+
+    # Apply prefill values to platform_config if --prefill was supplied.
+    # The file is YAML with flat key/value pairs, e.g.:
+    #   gcp_project_id: my-project
+    #   gcp_region: us-central1
+    #   gcp_bootstrap_sa_email: bioaf-bootstrap@my-project.iam.gserviceaccount.com
+    # Each pair is upserted into the existing platform_config table; existing
+    # rows are overwritten so re-running setup with a fresh prefill always wins.
+    #
+    # --local-build pre-applies the prefill install-gcp.sh already dropped on
+    # this host, so `./bioaf setup --local-build` fills platform_config without
+    # an explicit --prefill. An explicit --prefill always wins.
+    if [ "$local_build" = true ] && [ -z "$prefill_path" ]; then
+        prefill_path="$(discover_prefill_file)"
+        [ -n "$prefill_path" ] && green "Using prefill found on this host: $prefill_path"
+    fi
+
+    if [ -n "$prefill_path" ]; then
+        step "Copy prefill into backend container" -- \
+            $DC cp "$prefill_path" backend:/tmp/bioaf-prefill.yaml
+        step "Apply prefill values to platform_config" -- \
+            $DC exec -T backend python -c "
+import asyncio, yaml
+from sqlalchemy import text
+from app.database import async_session_factory
+
+async def _apply():
+    with open('/tmp/bioaf-prefill.yaml') as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise SystemExit('prefill YAML must be a flat mapping of key: value')
+    async with async_session_factory() as session:
+        for k, v in data.items():
+            if v is None:
+                continue
+            await session.execute(
+                text(
+                    'INSERT INTO platform_config (key, value) VALUES (:k, :v) '
+                    \"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()\"
+                ).bindparams(k=str(k), v=str(v))
+            )
+        await session.commit()
+    print(f'Applied {sum(1 for v in data.values() if v is not None)} prefill rows.')
+
+asyncio.run(_apply())
+"
+    fi
+
+    # Generate setup code via the Python service. We need its stdout, so
+    # use $() directly rather than step.
+    local setup_response
+    setup_response=$($DC exec -T backend python -c "
+import asyncio, json
+from app.services.setup_code_service import generate_setup_code_for_cli
+result = asyncio.run(generate_setup_code_for_cli())
+print(json.dumps(result))
+" 2>>"$BIOAF_INSTALL_LOG" || echo '')
+    if [ -z "$setup_response" ]; then
+        fail_line "Failed to generate a setup code (see $BIOAF_INSTALL_LOG)."
+        io_finish
+        exit 1
+    fi
+
+    local already_setup
+    already_setup=$(echo "$setup_response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('already_setup', False))")
+
+    if [ "$already_setup" = "True" ]; then
+        local access_url
+        access_url=$(get_access_url)
+        echo ""
+        green "bioAF is already set up."
+        echo "Log in at: $access_url"
+        if declare -F io_finish >/dev/null 2>&1; then io_finish; fi
+        return 0
+    fi
+
+    local setup_code
+    setup_code=$(echo "$setup_response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('code', ''))")
+
+    local access_url
+    access_url=$(get_access_url)
+
+    echo ""
+    bold "=================================================="
+    bold "  bioAF Setup Code"
+    bold "=================================================="
+    echo ""
+    echo "  Your one-time setup code is:"
+    echo ""
+    green "    $setup_code"
+    echo ""
+    echo "  Open the setup wizard in your browser:"
+    echo ""
+    green "    ${access_url}/setup"
+    echo ""
+    echo "  Enter the code above to begin platform setup."
+    echo "  The code expires in 1 hour."
+    echo ""
+    bold "=================================================="
+    echo ""
+    echo "Management commands:"
+    echo "  ./bioaf status     Show service status"
+    echo "  ./bioaf logs       Tail logs (use -n N for more lines)"
+    echo "  ./bioaf stop       Stop all services"
+    echo "  ./bioaf help       Show all commands"
+    if declare -F io_finish >/dev/null 2>&1; then io_finish; fi
+}
+
+cmd_start() {
+    bold "=== Starting Services ==="
+    # Use whatever version is pinned in docker/.env. Never derive the image
+    # tag from the worktree -- a `git pull` followed by `bioaf restart` must
+    # not silently switch versions. Bootstrap the pin from the running
+    # container (or disk, as a last resort) for legacy installs.
+    ensure_pinned_image_tag
+    ensure_backups_dir
+
+    for svc in db backend frontend nginx; do
+        echo "Starting $svc..."
+        $DC up -d "$svc"
+
+        if [ "$svc" = "db" ]; then
+            wait_for_db
+        fi
+
+        # Give backend time to bind before starting frontend
+        if [ "$svc" = "backend" ]; then
+            echo "Waiting for backend to initialize..."
+            sleep 3
+        fi
+    done
+
+    echo ""
+    green "All services started."
+    cmd_status
+}
+
+cmd_stop() {
+    bold "=== Stopping Services ==="
+
+    for svc in nginx frontend backend db; do
+        echo "Stopping $svc..."
+        $DC stop "$svc"
+    done
+
+    echo ""
+    green "All services stopped."
+}
+
+cmd_restart() {
+    cmd_stop
+    echo ""
+    cmd_start
+}
+
+cmd_status() {
+    bold "=== Service Status ==="
+    echo ""
+
+    for svc in db backend frontend nginx; do
+        local state
+        state=$($DC ps --format "{{.State}}" "$svc" 2>/dev/null || echo "not created")
+        case "$state" in
+            running) green "  $svc: running" ;;
+            exited)  red   "  $svc: exited" ;;
+            *)       yellow "  $svc: $state" ;;
+        esac
+    done
+
+    echo ""
+}
+
+cmd_logs() {
+    local tail_lines=100
+    local service=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -n)
+                tail_lines="${2:-100}"
+                shift 2
+                ;;
+            *)
+                service="$1"
+                shift
+                ;;
+        esac
+    done
+    if [ -n "$service" ]; then
+        $DC logs -f --tail="$tail_lines" "$service"
+    else
+        $DC logs -f --tail="$tail_lines"
+    fi
+}
+
+check_backend_settings() {
+    # Validate the backend's settings in a one-off container (backend/app/cli/check_settings.py), so
+    # the check works while the backend service is stopped or restarting on bad settings. --no-deps
+    # starts nothing else; the command starts with python, so the entrypoint runs neither its server
+    # preflight nor the database upgrade. Uses the env file's tag unless the caller scopes
+    # BIOAF_IMAGE_TAG to this call. Returns 0 valid, 78 rejected, anything else: could not check
+    # (Docker failed, or an image older than the checker).
+    $DC run --rm --no-deps -T backend python -m app.cli.check_settings
+}
+
+cmd_migrate() {
+    # The backend's shared upgrade lifecycle (backend/app/schema_upgrade.py): lock, verified recovery
+    # backup in backups/, migrate, validate, record. Safe to repeat; a no-op once done. A backend
+    # serving maintenance responses restarts into normal service once this succeeds.
+    bold "=== Running Database Migrations ==="
+    local check_status=0
+    check_backend_settings || check_status=$?
+    if [ "$check_status" -ne 0 ]; then
+        if [ "$check_status" -eq 78 ]; then
+            red "The backend's settings were rejected (see above, e.g. BIOAF_COMPUTE_MODE). Nothing was migrated."
+            echo "  Correct docker/.env, recreate the backend so it receives the new value, then run ./bioaf migrate again:"
+        else
+            red "The backend's settings could not be checked (Docker failed, or this image predates the check). Nothing was migrated."
+            echo "  For an older release, use that release's ./bioaf. Otherwise fix Docker, then recreate the backend and retry:"
+        fi
+        echo "  docker compose -f docker/docker-compose.yml --env-file docker/.env up -d backend"
+        return 1
+    fi
+    wait_for_db
+    if ! $DC exec -T backend python -m app.schema_upgrade run; then
+        red "Database upgrade failed. Details: update-status/schema-upgrade.json"
+        echo "  Fix the cause shown there, then run ./bioaf migrate again."
+        return 1
+    fi
+    green "Migrations complete."
+}
+
+ensure_backups_dir() {
+    # backups/ holds full-database dumps: private to the operator who runs ./bioaf (0700), with
+    # earlier bioAF backups tightened to 0600. Creating it here, before any container starts, keeps
+    # Docker from creating the bind-mount source as root; the backend then gives its dumps to the
+    # directory's owner, so the operator can restore them without root.
+    local dir="${1:-$SCRIPT_DIR/backups}"
+    mkdir -p "$dir" && chmod 700 "$dir" || return 1
+    find "$dir" -maxdepth 1 -type f -name 'bioaf_*' -exec chmod 600 {} + 2>/dev/null || true
+}
+
+backup_database() {
+    # Write a gzipped plain-SQL dump to "$1" with the database container's own pg_dump (the bundled
+    # server's version) and keep it only if pg_dump succeeded and the archive is non-empty and intact.
+    # The dump is created 0600 (umask 077), never readable by other accounts even while partial.
+    local target="$1"
+    local partial="${target}.partial"
+    ensure_backups_dir "$(dirname "$target")" || return 1
+    if ! { (umask 077; $DC exec -T db pg_dump -U bioaf bioaf | gzip > "$partial"); }; then
+        rm -f "$partial"
+        return 1
+    fi
+    if ! gzip -t "$partial" 2>/dev/null || [ "$(gzip -dc "$partial" | head -c 1 | wc -c)" -eq 0 ]; then
+        rm -f "$partial"
+        return 1
+    fi
+    mv "$partial" "$target"
+}
+
+db_upgrade_settled() {
+    # True when the running backend image says its own database upgrade completed.
+    local out
+    out=$($DC exec -T backend python -m app.schema_upgrade status 2>/dev/null) || return 1
+    printf '%s' "$out" | grep -q '"settled": true'
+}
+
+wait_for_backend_ready() {
+    # Poll the backend's readiness probe from inside its container (503 while in maintenance).
+    local timeout="${BIOAF_READY_TIMEOUT_SECONDS:-300}" waited=0
+    while [ "$waited" -lt "$timeout" ]; do
+        if $DC exec -T backend python -c "import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=5); sys.exit(0)" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    return 1
+}
+
+cmd_migrate_down() {
+    local target="${1:-}"
+    if [ -z "$target" ]; then
+        red "Usage: ./bioaf migrate-down <revision>"
+        echo "  Downgrades the database to the specified alembic revision."
+        echo "  Example: ./bioaf migrate-down 052"
+        return 1
+    fi
+    bold "=== Downgrading Database to Revision $target ==="
+    wait_for_db
+    $DC exec -T backend alembic -c alembic/alembic.ini downgrade "$target"
+    green "Downgrade to $target complete."
+}
+
+cmd_backup() {
+    bold "=== Database Backup ==="
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$SCRIPT_DIR/backups/bioaf_${timestamp}.sql.gz"
+    if ! backup_database "$backup_file"; then
+        red "ERROR: Database backup failed; no backup was written."
+        return 1
+    fi
+    green "Backup saved to: $backup_file"
+}
+
+get_current_version() {
+    # Read version from backend/pyproject.toml (single source of truth on disk).
+    # Use this for image-tag selection during build/start, NOT for "what is currently
+    # deployed" -- a partial update can leave the worktree at a newer tag than
+    # the running container. Use get_running_version for that.
+    local version
+    version=$(python3 -c "
+import tomllib, pathlib
+data = tomllib.loads(pathlib.Path('$SCRIPT_DIR/backend/pyproject.toml').read_text())
+print(data['project']['version'])
+" 2>/dev/null) || version=""
+
+    if [ -z "$version" ]; then
+        version=$(grep '^version' "$SCRIPT_DIR/backend/pyproject.toml" 2>/dev/null \
+            | head -1 | sed 's/version = "\(.*\)"/\1/')
+    fi
+
+    echo "${version:-unknown}"
+}
+
+parse_version_from_image() {
+    # Extract the version (without leading 'v') from a docker image reference.
+    # Returns 1 if the input has no parseable version tag (no tag, "latest",
+    # or empty input).
+    #   "ghcr.io/bioaf/bioaf-backend:v0.11.5" -> "0.11.5"
+    #   "ghcr.io/bioaf/bioaf-backend:0.11.5"  -> "0.11.5"
+    #   "ghcr.io/bioaf/bioaf-backend:latest"  -> error (1)
+    #   "ghcr.io/bioaf/bioaf-backend"         -> error (1)
+    local image="${1:-}"
+    [ -z "$image" ] && return 1
+    case "$image" in
+        *:*) ;;
+        *) return 1 ;;
+    esac
+    local tag="${image##*:}"
+    [ -z "$tag" ] && return 1
+    [ "$tag" = "latest" ] && return 1
+    echo "${tag#v}"
+}
+
+get_running_version() {
+    # Returns the version of the currently running backend container, e.g. "0.11.5".
+    # Falls back to the on-disk version (get_current_version) if no container is
+    # running, the image cannot be inspected, or the image tag is unparseable
+    # (e.g. "latest"). Always prints something (never empty).
+    local cid image version
+    cid=$($DC ps -q backend 2>/dev/null | head -1)
+    if [ -n "$cid" ]; then
+        image=$(docker inspect "$cid" --format '{{.Config.Image}}' 2>/dev/null) || image=""
+        if [ -n "$image" ] && version=$(parse_version_from_image "$image"); then
+            echo "$version"
+            return 0
+        fi
+    fi
+    get_current_version
+}
+
+# Repos in the bioAF release bundle. Kept in sync with .github/workflows/release.yml
+# -- if a new image is added there, add it here so the update preflight checks it.
+RELEASE_IMAGE_REPOS=(
+    "bioaf/bioaf-backend"
+    "bioaf/bioaf-frontend"
+    "bioaf/bioaf-cellxgene"
+)
+
+verify_image_available() {
+    # Check whether <repo>:<tag> exists on ghcr.io.
+    # Exits:  0 = available, 1 = manifest missing, 2 = check itself failed (network/tooling).
+    local repo="$1"
+    local tag="$2"
+    local token status
+    token=$(curl -sf --max-time 10 \
+        "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" 2>/dev/null \
+        | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null) || token=""
+    if [ -z "$token" ]; then
+        return 2
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+        "https://ghcr.io/v2/${repo}/manifests/${tag}" 2>/dev/null) || status=""
+    case "$status" in
+        200) return 0 ;;
+        404) return 1 ;;
+        *)   return 2 ;;
+    esac
+}
+
+verify_release_images() {
+    # Verify all release images for the given version are pullable from ghcr.io.
+    # Returns 0 if all available, 1 if one or more is missing, 2 if the check
+    # itself failed for any image (network error, etc.).
+    # Prints a human-readable error to stderr-style output on failure.
+    local version="$1"
+    local tag="v${version}"
+    local missing=()
+    local check_failed=()
+    local repo status
+    for repo in "${RELEASE_IMAGE_REPOS[@]}"; do
+        status=0
+        verify_image_available "$repo" "$tag" || status=$?
+        case "$status" in
+            0) ;;
+            1) missing+=("ghcr.io/${repo}:${tag}") ;;
+            *) check_failed+=("ghcr.io/${repo}:${tag}") ;;
+        esac
+    done
+    if [ ${#check_failed[@]} -gt 0 ]; then
+        red "ERROR: Could not verify release image availability (network or registry error):"
+        for img in "${check_failed[@]}"; do
+            echo "  - $img"
+        done
+        return 2
+    fi
+    if [ ${#missing[@]} -gt 0 ]; then
+        red "ERROR: The update cannot be run right now -- the following release images are not yet published:"
+        for img in "${missing[@]}"; do
+            echo "  - $img"
+        done
+        echo ""
+        yellow "The release publish workflow may still be in progress. Please try again in a few minutes."
+        return 1
+    fi
+    return 0
+}
+
+pin_image_tag() {
+    # Persist BIOAF_IMAGE_TAG=<tag> in docker/.env so docker compose uses this
+    # image on every subsequent invocation -- regardless of what the worktree
+    # is on. This is the source of truth for which image is currently deployed.
+    # Only operations that intentionally change the deployed version (setup,
+    # update, build) should call this -- start/restart must NOT.
+    local tag="${1:-}"
+    if [ -z "$tag" ]; then
+        red "ERROR: pin_image_tag requires a tag argument"
+        return 1
+    fi
+
+    [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
+
+    if grep -q '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null; then
+        local tmp
+        tmp=$(mktemp)
+        awk -v tag="$tag" '/^BIOAF_IMAGE_TAG=/ { print "BIOAF_IMAGE_TAG=" tag; next } { print }' "$ENV_FILE" > "$tmp"
+        mv "$tmp" "$ENV_FILE"
+    else
+        # Ensure trailing newline before appending so we don't merge with the prior line.
+        if [ -s "$ENV_FILE" ] && [ "$(tail -c 1 "$ENV_FILE" | wc -l)" -eq 0 ]; then
+            echo "" >> "$ENV_FILE"
+        fi
+        echo "BIOAF_IMAGE_TAG=$tag" >> "$ENV_FILE"
+    fi
+    # Also export so the current process (e.g. an immediately-following $DC up
+    # call within the same script) sees the new value without re-reading the file.
+    export BIOAF_IMAGE_TAG="$tag"
+}
+
+ensure_pinned_image_tag() {
+    # If docker/.env already pins BIOAF_IMAGE_TAG, do nothing -- that pin is
+    # the authoritative deployed version. Otherwise (legacy install upgrading
+    # to a script that uses pinning), bootstrap from the running container so
+    # we don't accidentally switch versions on the next start. Falls back to
+    # the on-disk version only if no container exists (fresh install).
+    if [ -f "$ENV_FILE" ] && grep -q '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null; then
+        return 0
+    fi
+    local version
+    version=$(get_running_version)
+    pin_image_tag "v${version}"
+}
+
+resolve_and_pull_images() {
+    # Resolve a version with available pre-built images and pull them.
+    # Falls back to building from source if no images are found.
+    #
+    # Usage:
+    #   resolve_and_pull_images              # auto-detect from latest release
+    #   resolve_and_pull_images "0.7.5"      # try a specific version
+    local explicit_version="${1:-}"
+
+    if [ -n "$explicit_version" ]; then
+        export BIOAF_IMAGE_TAG="v${explicit_version}"
+        bold "Pulling images for v${explicit_version}..."
+        if $DC_PULL backend frontend 2>/dev/null; then
+            green "Images pulled (v${explicit_version})."
+            return 0
+        fi
+        yellow "Pre-built images not available for v${explicit_version}, building from source..."
+        $DC_BUILD
+        return 0
+    fi
+
+    # No explicit version: try recent releases in order, then build
+    local releases
+    releases=$(curl -sf --max-time 10 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/bioAF/bioAF/releases?per_page=5" 2>/dev/null) || {
+        yellow "Could not reach GitHub to check for images, building from source..."
+        $DC_BUILD
+        return 0
+    }
+
+    local versions
+    versions=$(echo "$releases" | python3 -c "
+import sys, json
+for r in json.load(sys.stdin):
+    tag = r.get('tag_name', '')
+    if tag.startswith('v'):
+        print(tag)
+" 2>/dev/null)
+
+    if [ -z "$versions" ]; then
+        yellow "No releases found, building from source..."
+        $DC_BUILD
+        return 0
+    fi
+
+    for tag in $versions; do
+        export BIOAF_IMAGE_TAG="$tag"
+        bold "Trying images for ${tag}..."
+        if $DC_PULL backend frontend 2>/dev/null; then
+            green "Images pulled (${tag})."
+            return 0
+        fi
+    done
+
+    yellow "No pre-built images available, building from source..."
+    $DC_BUILD
+}
+
+get_latest_github_version() {
+    # Query GitHub Releases API for the latest release tag
+    local response
+    response=$(curl -sf --max-time 10 \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/bioAF/bioAF/releases/latest" 2>/dev/null) || {
+        red "ERROR: Could not reach GitHub to check for the latest version."
+        echo "Provide a specific version instead: ./bioaf update <version>"
+        exit 1
+    }
+
+    local tag
+    tag=$(echo "$response" | python3 -c "import sys, json; print(json.load(sys.stdin).get('tag_name', ''))" 2>/dev/null)
+
+    if [ -z "$tag" ]; then
+        red "ERROR: Could not determine the latest version from GitHub."
+        exit 1
+    fi
+
+    # Strip leading 'v' if present
+    echo "${tag#v}"
+}
+
+write_update_status() {
+    # write_update_status <status> <step> [error]; uses _update_from/_update_to.
+    local status="$1" step="$2" error="${3:-}" stamp_key="started_at"
+    mkdir -p "$SCRIPT_DIR/update-status"
+    [ "$status" = "in_progress" ] || stamp_key="completed_at"
+    local error_json=""
+    [ -n "$error" ] && error_json=", \"error\": \"$(printf '%s' "$error" | sed 's/["\\]/\\&/g')\""
+    printf '{"status": "%s", "from_version": "%s", "to_version": "%s", "step": "%s"%s, "%s": "%s"}\n' \
+        "$status" "$_update_from" "$_update_to" "$step" "$error_json" "$stamp_key" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SCRIPT_DIR/update-status/current.json"
+}
+
+update_failed() {
+    # update_failed <step> <message>: record the failure where the UI and agent read it, then stop.
+    write_update_status failed "$1" "$2"
+    red "ERROR: $2"
+    exit 1
+}
+
+update_settings_preflight() {
+    # update_settings_preflight <target>: check the target's settings in a one-off container, under a
+    # tag scoped to this call (never the env file, the caller's shell, or the running services).
+    # Persisted messages are fixed text: the checker's own output stays in the terminal.
+    local target="$1" check_status=0
+    write_update_status in_progress settings_preflight
+    echo ""
+    bold "Checking backend configuration..."
+    BIOAF_IMAGE_TAG="v${target}" check_backend_settings || check_status=$?
+    case "$check_status" in
+        0) green "Backend configuration is valid." ;;
+        78) update_failed settings_preflight "The v${target} backend rejected its configuration (for example BIOAF_COMPUTE_MODE in docker/.env). The running services were not changed. Correct the configuration, then run ./bioaf update ${target} again." ;;
+        *) update_failed settings_preflight "The v${target} backend configuration could not be checked (Docker failed, or the image predates the check). The running services were not changed. Fix the cause, then run ./bioaf update ${target} again." ;;
+    esac
+}
+
+cmd_update() {
+    local target_version="${1:-}"
+    local current_version
+    # Use the running container's image tag, NOT the on-disk pyproject.toml.
+    # A previously failed update can leave the worktree checked out at the new
+    # tag while the running containers are still on the old version, which
+    # caused this short-circuit to no-op silently before.
+    current_version=$(get_running_version)
+
+    # If no version specified, fetch the latest from GitHub
+    if [ -z "$target_version" ]; then
+        echo "Checking GitHub for the latest release..."
+        target_version=$(get_latest_github_version)
+    fi
+
+    # Strip leading 'v' if the user passed one
+    target_version="${target_version#v}"
+
+    # Validate version format (semver: X.Y.Z)
+    if ! echo "$target_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        red "ERROR: Invalid version format '$target_version'. Expected format: X.Y.Z"
+        exit 1
+    fi
+
+    # Running the target image is not the same as being updated: its database upgrade may have
+    # failed. Only a settled database upgrade makes this a no-op; otherwise retry just that part.
+    local retry_only=false
+    if [ "$current_version" = "$target_version" ]; then
+        if db_upgrade_settled; then
+            green "Already running version $current_version. Nothing to update."
+            exit 0
+        fi
+        retry_only=true
+    fi
+
+    bold "=== bioAF Update ==="
+    echo ""
+    echo "  Current version:  $current_version"
+    echo "  Target version:   $target_version"
+    if [ "$retry_only" = true ]; then
+        yellow "  Version $target_version is installed but has not finished starting and upgrading; retrying that."
+    fi
+    echo ""
+
+    # Confirmation prompt (skipped when called with --yes flag for automation)
+    local auto_confirm=false
+    if [ "${2:-}" = "--yes" ] || [ "${BIOAF_AUTO_CONFIRM:-}" = "1" ]; then
+        auto_confirm=true
+    fi
+
+    if [ "$auto_confirm" = false ]; then
+        read -rp "Proceed with update? [y/N] " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Update cancelled."
+            exit 0
+        fi
+    fi
+
+    _update_from="$current_version"
+    _update_to="$target_version"
+
+    if [ "$retry_only" = false ]; then
+        # Pre-flight: verify all release images exist before doing anything destructive.
+        # Without this, an in-progress release-publish workflow lets us git-checkout
+        # the new tag and then fail at `docker compose pull`, leaving the worktree
+        # in an inconsistent state.
+        write_update_status in_progress verify_images
+        echo ""
+        bold "Verifying release images are published..."
+        local verify_status=0
+        verify_release_images "$target_version" || verify_status=$?
+        if [ $verify_status -ne 0 ]; then
+            if [ $verify_status -eq 1 ]; then
+                update_failed verify_images "Release images for v${target_version} are not yet published. The release publish workflow may still be in progress -- please try again in a few minutes."
+            fi
+            update_failed verify_images "Could not verify release image availability (network or registry error)."
+        fi
+        green "All release images are available."
+    fi
+
+    # Retrying an installed target: check its configuration before anything else. A backend restarting
+    # on a bad mode cannot answer exec, but this one-off container can.
+    if [ "$retry_only" = true ]; then
+        update_settings_preflight "$target_version"
+    fi
+
+    # Back up the database before updating. A failed backup stops the update: nothing has been
+    # changed yet, and an update without recovery material is not safe to continue (the backend
+    # also makes its own verified backup before migrating).
+    write_update_status in_progress backup
+    echo ""
+    bold "Backing up database..."
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$SCRIPT_DIR/backups/bioaf_pre_update_${current_version}_to_${target_version}_${timestamp}.sql.gz"
+    if ! backup_database "$backup_file"; then
+        update_failed backup "Database backup failed, so the update was stopped before changing anything. Check free disk space and that the database is running, then retry."
+    fi
+    green "Backup saved: $backup_file"
+
+    if [ "$retry_only" = false ]; then
+        # Fetch and checkout the target version
+        write_update_status in_progress checkout
+        echo ""
+        bold "Fetching version $target_version..."
+        git -C "$SCRIPT_DIR" fetch --tags --force
+        if ! git -C "$SCRIPT_DIR" rev-parse "v${target_version}" >/dev/null 2>&1; then
+            update_failed checkout "Tag v${target_version} not found in the repository."
+        fi
+        git -C "$SCRIPT_DIR" checkout "v${target_version}"
+
+        # Upgrade-path: installs that predate v0.13.0 have no BIOAF_ENCRYPTION_KEYS
+        # in docker/.env. The backend's startup validator would refuse to come up
+        # without it. Append the variable to the existing .env (leaving every
+        # other line untouched) before the container restart so the backend sees
+        # it on first boot of the new image. No-op on installs that already have
+        # the value.
+        write_update_status in_progress ensure_encryption_key
+        bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+            update_failed ensure_encryption_key "encryption key bootstrap failed"
+
+        # Pull pre-built images while old containers are still running,
+        # so the only downtime is the restart + migrate window. The target tag is scoped to the
+        # pull and the check: docker/.env keeps the old pin until both succeed.
+        write_update_status in_progress pull
+        echo ""
+        bold "Pulling pre-built images..."
+        BIOAF_IMAGE_TAG="v${target_version}" $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
+
+        update_settings_preflight "$target_version"
+    fi
+
+    # Pin the target in docker/.env (and this process) only now that its settings passed, so this
+    # version sticks for any future start/restart and the up below uses it.
+    pin_image_tag "v${target_version}"
+
+    if [ "$retry_only" = false ]; then
+
+        # Warning window before restart: give the UI time to show a countdown
+        # so users know the app is about to go offline briefly. Skipped when
+        # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
+        local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
+        if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
+            write_update_status in_progress warn
+            echo ""
+            yellow "Restarting in ${warn_seconds}s (notifying active users)..."
+            sleep "$warn_seconds"
+        fi
+    fi
+
+    # Bring the services to the pinned target with the current env file, on a fresh update and on a
+    # retry alike: a backend restarting on bad settings keeps its old environment until Compose
+    # recreates it. No --force-recreate: unchanged, running containers are left alone. The new
+    # backend runs the database upgrade before serving (backend/entrypoint.sh) and answers 503 until
+    # it has completed.
+    write_update_status in_progress restart
+    $DC up -d || update_failed restart "Could not start the v${target_version} containers."
+    wait_for_db
+
+    if [ "$retry_only" = false ]; then
+        # Cloud Logging (GCE only, idempotent) -- run after restart so it
+        # does not block the update while containers are down.
+        ensure_cloud_logging
+    fi
+
+    # The shared lifecycle again: waits for the entrypoint's run, then finds nothing to do; after a
+    # failure it is the retry.
+    write_update_status in_progress migrate
+    echo ""
+    bold "Running database upgrade..."
+    if ! $DC exec -T backend python -m app.schema_upgrade run; then
+        update_failed migrate "The database upgrade did not complete. Details: update-status/schema-upgrade.json. Fix the cause, then run ./bioaf update $target_version again."
+    fi
+
+    write_update_status in_progress ready
+    if ! wait_for_backend_ready; then
+        update_failed ready "The backend did not report ready after the database upgrade. Check ./bioaf logs backend."
+    fi
+
+    local new_version
+    new_version=$(get_running_version)
+    _update_to="$new_version"
+    write_update_status completed done
+
+    echo ""
+    green "=================================================="
+    green "  Update complete: $current_version -> $new_version"
+    green "=================================================="
+}
+
+cmd_build() {
+    # `build` is the local-dev counterpart to `update` -- it produces a new
+    # image at the worktree's version and pins it as the deployed tag, so the
+    # next `start`/`restart` runs that build instead of whatever was there
+    # before.
+    pin_image_tag "v$(get_current_version)"
+    local service="${1:-}"
+    if [ -n "$service" ]; then
+        bold "=== Building $service ==="
+        $DC_BUILD "$service"
+        green "$service built."
+    else
+        bold "=== Building All Services ==="
+        $DC_BUILD
+        green "All services built."
+    fi
+}
+
+cmd_shell() {
+    local service="${1:-backend}"
+    bold "Opening shell in $service..."
+    $DC exec "$service" sh
+}
+
+cmd_dbshell() {
+    bold "Opening database shell..."
+    $DC exec db psql -U bioaf bioaf
+}
+
+cmd_seed() {
+    local script="${1:-}"
+    if [ -z "$script" ]; then
+        red "Usage: ./bioaf seed <script.py>"
+        echo ""
+        echo "Available seed scripts:"
+        # List .py files in scripts/ that contain 'seed' or 'generate' in the name
+        find "$SCRIPT_DIR/scripts" -maxdepth 1 -name "*.py" -type f 2>/dev/null | sort | while read -r f; do
+            echo "  $(basename "$f")"
+        done
+        exit 1
+    fi
+
+    # Resolve the script path relative to scripts/ if not absolute
+    local script_path
+    if [ -f "$SCRIPT_DIR/scripts/$script" ]; then
+        script_path="scripts/$script"
+    elif [ -f "$script" ]; then
+        script_path="$script"
+    else
+        red "Script not found: $script"
+        red "Looked in: $SCRIPT_DIR/scripts/$script"
+        exit 1
+    fi
+
+    bold "=== Running seed script: $script_path ==="
+    $DC exec -T backend python "$script_path"
+    green "Seed script complete."
+}
+
+cmd_create_admin() {
+    yellow "DEPRECATED: 'create-admin' has been replaced by the setup wizard."
+    echo "Run './bioaf setup' instead -- it generates a setup code that you"
+    echo "enter in the web UI to create your admin account securely."
+}
+
+cmd_reset_db() {
+    bold "=== Database Reset ==="
+    red "WARNING: This will destroy ALL data in the database."
+    read -rp "Type 'yes' to confirm: " confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    echo "Stopping backend and frontend..."
+    $DC stop backend frontend nginx 2>/dev/null || true
+
+    # Ensure the db container is running so we can drop the database
+    local db_state
+    db_state=$($DC ps --format "{{.State}}" db 2>/dev/null || echo "not created")
+    if [ "$db_state" != "running" ]; then
+        echo "Starting database..."
+        $DC up -d db
+    fi
+    wait_for_db
+
+    # Terminate any lingering connections before dropping
+    echo "Dropping and recreating database..."
+    $DC exec -T db psql -U bioaf -d postgres -c \
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'bioaf' AND pid <> pg_backend_pid();" \
+        > /dev/null 2>&1 || true
+    $DC exec -T db dropdb -U bioaf --if-exists bioaf
+    $DC exec -T db createdb -U bioaf bioaf
+
+    echo "Starting backend..."
+    ensure_backups_dir
+    $DC up -d backend
+    wait_for_db
+
+    echo "Running migrations..."
+    $DC exec -T backend python -m app.schema_upgrade run
+
+    green "Database reset complete. Run './bioaf setup' to generate a new setup code."
+}
+
+cmd_register_outputs() {
+    bold "=== Register Pipeline Output Files ==="
+    $DC exec -T backend python -m app.cli.register_outputs "$@"
+}
+
+cmd_rotate_encryption_keys() {
+    bold "=== Re-encrypt sensitive columns under the current primary key ==="
+    $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
+}
+
+cmd_help() {
+    bold "bioAF Management"
+    echo ""
+    echo "Usage: ./bioaf <command> [args]"
+    echo ""
+    bold "First-Run:"
+    echo "  setup [--version X.Y.Z] [--prefill FILE] [--local-build] [--verbose]"
+    echo "                      Pull images and generate a setup code for the web wizard."
+    echo "                      --local-build builds images from the local source tree and"
+    echo "                      applies any prefill found on this host (~/.bioaf-prefill.yaml)."
+    echo "                      Verbose output goes to ~/.bioaf/install.log by default."
+    echo ""
+    bold "Service Management:"
+    echo "  start               Start all services"
+    echo "  stop                Stop all services"
+    echo "  restart             Restart all services"
+    echo "  status              Show status of all services"
+    echo "  logs [service] [-n N]  Tail logs (default 100 lines, use -n to change)"
+    echo "  build [service]     Build container images locally (development only)"
+    echo ""
+    bold "Database:"
+    echo "  migrate             Upgrade the database (backup, migrate, validate); retry after a failure"
+    echo "  migrate-down <rev>  Downgrade database to a specific revision"
+    echo "  seed <script.py>    Run a seed/data script in the backend container"
+    echo "  backup              Create a database backup"
+    echo "  reset-db            Destroy and recreate the database (with confirmation)"
+    echo ""
+    bold "Debugging:"
+    echo "  shell [service]     Open a shell in a container (default: backend)"
+    echo "  dbshell             Open a psql session to the database"
+    echo ""
+    bold "Pipeline:"
+    echo "  register-outputs [--run-id N] [--force]"
+    echo "                      Register pipeline output files from GCS into the database"
+    echo ""
+    bold "Maintenance:"
+    echo "  update [version]    Update to a specific version (or latest if omitted)"
+    echo "  rotate-encryption-keys [--dry-run]"
+    echo "                      Re-encrypt sensitive DB columns under the primary"
+    echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  help                Show this help message"
+    echo ""
+    bold "Examples:"
+    echo "  ./bioaf setup               # First-time setup (latest version)"
+    echo "  ./bioaf setup --version 0.8.1  # Install a specific version"
+    echo "  ./bioaf build               # Build all container images"
+    echo "  ./bioaf start               # Start services"
+    echo "  ./bioaf logs backend        # Tail backend logs (last 100 lines)"
+    echo "  ./bioaf logs backend -n 500 # Tail backend logs (last 500 lines)"
+    echo "  ./bioaf migrate             # Run pending migrations"
+    echo "  ./bioaf seed <script.py>    # Run a seed/data script in the backend container"
+    echo "  ./bioaf shell backend       # Open shell in backend"
+    echo "  ./bioaf dbshell             # Open psql session"
+    echo "  ./bioaf backup              # Create database backup"
+    echo "  ./bioaf update              # Update to the latest version"
+    echo "  ./bioaf update 0.7.0        # Update to a specific version"
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+# Allow this script to be sourced by tests without triggering the dispatch.
+# When sourced, BASH_SOURCE[0] differs from $0; only run dispatch on direct exec.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+    return 0
+fi
+
+command="${1:-help}"
+shift || true
+
+case "$command" in
+    setup)        cmd_setup "$@" ;;
+    create-admin) cmd_create_admin ;;
+    start)        cmd_start ;;
+    stop)     cmd_stop ;;
+    restart)  cmd_restart ;;
+    status)   cmd_status ;;
+    logs)     cmd_logs "$@" ;;
+    build)    cmd_build "$@" ;;
+    migrate)  cmd_migrate ;;
+    migrate-down) cmd_migrate_down "$@" ;;
+    seed)     cmd_seed "$@" ;;
+    backup)   cmd_backup ;;
+    shell)    cmd_shell "$@" ;;
+    dbshell)  cmd_dbshell ;;
+    update)   cmd_update "$@" ;;
+    reset-db) cmd_reset_db ;;
+    register-outputs) cmd_register_outputs "$@" ;;
+    rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
+    help|-h|--help) cmd_help ;;
+    *)
+        red "Unknown command: $command"
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac
