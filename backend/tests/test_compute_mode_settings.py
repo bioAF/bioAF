@@ -151,3 +151,37 @@ def test_ordinary_pytest_pins_local_mode_whatever_the_shell_exports(tmp_path, ho
     )
     env = {"PYTHONPATH": str(BACKEND), **hostile}
     assert _probe(tmp_path, env, code=code) == {"mode": "local"}
+
+
+@pytest.mark.parametrize("hostile", [{"BIOAF_COMPUTE_MODE": "typo"}, {"bioaf_compute_mode": "kubernetes"}, {}])
+def test_the_offline_schema_export_supplies_its_own_mode(tmp_path, hostile):
+    """The exporter's synthetic local mode keeps it working with an absent or hostile mode and .env."""
+    (tmp_path / ".env").write_text("BIOAF_COMPUTE_MODE=   \n")
+    proc = subprocess.run(
+        [sys.executable, "-m", "app.cli.export_openapi", "--check"],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(BACKEND), **hostile},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_alembic_without_a_mode_fails_on_settings_before_any_connection(tmp_path):
+    alembic = Path(sys.executable).with_name("alembic")
+    proc = subprocess.run(
+        [str(alembic), "-c", str(BACKEND / "alembic" / "alembic.ini"), "current"],
+        cwd=tmp_path,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(BACKEND),
+            "BIOAF_DATABASE_URL": "postgresql+asyncpg://nobody:x@unreachable.invalid:5432/none",
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode != 0
+    assert "BIOAF_COMPUTE_MODE is not set" in proc.stderr
+    assert "unreachable.invalid" not in proc.stderr
