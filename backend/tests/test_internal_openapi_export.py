@@ -79,9 +79,15 @@ def _run_cli(cwd: Path, env: dict, out: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_inherited_bioaf_settings_cannot_break_or_change_the_export(tmp_path):
+# pydantic-settings matches variable names case-insensitively, so every spelling is a setting.
+_SPELLINGS = {"upper": str.upper, "lower": str.lower, "mixed": lambda k: "Bioaf_" + k[len("BIOAF_") :].title()}
+
+
+@pytest.mark.parametrize("spelling", sorted(_SPELLINGS))
+def test_inherited_bioaf_settings_cannot_break_or_change_the_export(tmp_path, spelling):
+    hostile = {_SPELLINGS[spelling](k): v for k, v in _HOSTILE.items()}
     out = tmp_path / "schema.json"
-    result = _run_cli(BACKEND, {**_clean_env(), **_HOSTILE}, out)
+    result = _run_cli(BACKEND, {**_clean_env(), **hostile}, out)
     assert result.returncode == 0, result.stderr[-2000:]
     assert out.read_bytes() == ARTIFACT.read_bytes()
 

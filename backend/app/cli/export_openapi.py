@@ -3,9 +3,10 @@
 The schema is the candidate authority for frontend transport types. It is built offline from
 ``create_app().openapi()``: the lifespan never runs, no database connection is opened and no
 provider is called, so the command needs no credentials or infrastructure. Settings are isolated
-before the app is imported: every inherited ``BIOAF_*`` variable is dropped, fixed synthetic
-values are set, and the import runs from an empty temporary working directory, so no ``.env``
-file (pydantic-settings reads one from the working directory) can break or change the output.
+before the app is imported: every inherited ``BIOAF_*`` variable (in any letter case) is
+dropped, fixed synthetic values are set, and the import runs from an empty temporary working
+directory, so no ``.env`` file (pydantic-settings reads one from the working directory) can
+break or change the output.
 Production still serves neither docs nor this schema over HTTP; the mounted Integration API
 keeps its own public schema and is not part of this one.
 
@@ -45,8 +46,10 @@ SYNTHETIC_ENV = {
 
 
 def _isolate_settings(workdir: str) -> None:
-    """Only the synthetic settings reach the app: no inherited BIOAF_* value and no .env file."""
-    for key in [k for k in os.environ if k.startswith("BIOAF_")]:
+    """Only the synthetic settings reach the app: no inherited BIOAF_* value and no .env file.
+
+    pydantic-settings matches names case-insensitively, so every spelling of the prefix is dropped."""
+    for key in [k for k in os.environ if k.upper().startswith("BIOAF_")]:
         del os.environ[key]
     os.environ.update(SYNTHETIC_ENV)
     if str(BACKEND) not in sys.path:
