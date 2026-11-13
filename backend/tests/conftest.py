@@ -2,7 +2,12 @@ import os
 
 # Pin env vars BEFORE any app.* import so pydantic-settings reads them at
 # Settings() construction time.
-os.environ.setdefault("BIOAF_COMPUTE_MODE", "local")
+# Ordinary tests simulate: pin local mode over whatever the shell exports, in any letter case
+# (pydantic-settings reads environment names case-insensitively). Real-branch tests opt in through
+# the mode_adapter_factory fixture below; settings-source tests run their own processes.
+for _name in [name for name in os.environ if name.upper() == "BIOAF_COMPUTE_MODE"]:
+    del os.environ[_name]
+os.environ["BIOAF_COMPUTE_MODE"] = "local"
 # Two keys exercise the MultiFernet rotation path; only the first is the writer.
 os.environ.setdefault(
     "BIOAF_ENCRYPTION_KEYS",

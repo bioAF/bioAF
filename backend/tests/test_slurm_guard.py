@@ -2,24 +2,27 @@ import os
 import pytest
 
 
-def test_compute_mode_defaults_to_kubernetes():
-    """Settings.compute_mode defaults to 'kubernetes' when env var is absent."""
-    env = os.environ.copy()
-    env.pop("BIOAF_COMPUTE_MODE", None)
+def test_compute_mode_is_required_when_env_var_is_absent(tmp_path):
+    """Settings has no compute-mode default: an absent BIOAF_COMPUTE_MODE is rejected, naming the setting.
 
+    A fresh process in an empty directory, so neither the conftest pin nor a developer .env applies."""
+    import subprocess
     import sys
+    from pathlib import Path
 
-    # Remove cached config module so Settings re-reads env
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("app.config"):
-            del sys.modules[mod]
-
-    with pytest.MonkeyPatch().context() as mp:
-        mp.delenv("BIOAF_COMPUTE_MODE", raising=False)
-        from app.config import Settings
-
-        s = Settings()
-        assert s.compute_mode == "kubernetes"
+    backend = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k.upper() != "BIOAF_COMPUTE_MODE"}
+    env["PYTHONPATH"] = str(backend)
+    proc = subprocess.run(
+        [sys.executable, "-c", "from app.config import Settings; Settings()"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode != 0
+    assert "BIOAF_COMPUTE_MODE" in proc.stderr
 
 
 def test_compute_mode_reads_from_env():
