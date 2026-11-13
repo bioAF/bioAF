@@ -9,6 +9,7 @@ are left alone, and ``bioaf`` keeps propagating so capture and embedding hosts s
 import functools
 import json
 import logging
+import math
 import sys
 import urllib.request
 from datetime import datetime, timezone
@@ -115,6 +116,8 @@ def _clean(value: Any, secrets: list[str], depth: int = 0, path: frozenset[int] 
     """
     if isinstance(value, str):
         return _scrub(value, secrets)
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if not isinstance(value, (dict, list, tuple)):
@@ -290,7 +293,8 @@ class JsonFormatter(logging.Formatter):
 
 
 def _dumps(entry: dict[str, Any]) -> str:
-    return json.dumps(entry, ensure_ascii=True, default=lambda o: f"<unsupported {type(o).__name__}>")
+    # allow_nan=False: NaN/Infinity are not standard JSON; such a record falls back to the diagnostic.
+    return json.dumps(entry, ensure_ascii=True, allow_nan=False, default=lambda o: f"<unsupported {type(o).__name__}>")
 
 
 def _timestamp(created: float | None) -> str:
