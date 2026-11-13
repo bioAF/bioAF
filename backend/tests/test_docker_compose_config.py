@@ -136,3 +136,24 @@ def test_a_previous_release_tag_in_the_env_file_renders_that_backend_image(tmp_p
     # An exported shell tag overrides the env file: the rollback note tells operators to unset it.
     shadowed = _render(COMPOSE_FILE, tmp_path, ["BIOAF_IMAGE_TAG=v2026.11.20"], {"BIOAF_IMAGE_TAG": "v2026.11.21"})
     assert shadowed["image"] == "ghcr.io/bioaf/bioaf-backend:v2026.11.21"
+
+
+class TestBackendLogDelivery:
+    """Plan 22, D1: both Compose files select stdout delivery, agreeing with the application default.
+
+    Production lets the host override it (``direct`` only where no collector ships container output);
+    the development file pins stdout. Neither enables the direct sink alongside a collector.
+    """
+
+    def test_production_falls_back_to_stdout(self, compose_config):
+        backend_env = compose_config["services"]["backend"]["environment"]
+        assert backend_env["BIOAF_LOG_DELIVERY"] == "${BIOAF_LOG_DELIVERY:-stdout}"
+
+    def test_development_pins_stdout(self):
+        backend_env = yaml.safe_load(DEV_COMPOSE_FILE.read_text())["services"]["backend"]["environment"]
+        assert "BIOAF_LOG_DELIVERY=stdout" in backend_env
+
+    def test_the_compose_default_is_the_application_default(self):
+        from app.config import Settings
+
+        assert Settings.model_fields["log_delivery"].default == "stdout"

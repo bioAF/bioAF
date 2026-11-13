@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -212,7 +213,7 @@ def test_a_mapping_message_stays_structured_and_sanitized(secrets, capsys):
 
 def test_json_fields_labels_and_http_request_are_sanitized_in_place_of_their_values(secrets, capsys):
     configure_logging(debug=False)
-    fields = {"operation": "sync", "detail": {"inner": [f"x{SMTP}x"]}}
+    fields: dict[str, Any] = {"operation": "sync", "detail": {"inner": [f"x{SMTP}x"]}}
     get_app_logger("app.x").info(
         "structured",
         extra={

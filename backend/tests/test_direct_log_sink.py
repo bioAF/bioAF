@@ -18,49 +18,21 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from google.auth.credentials import AnonymousCredentials
-from google.cloud.logging_v2.client import Client
 from google.cloud.logging_v2.handlers import CloudLoggingHandler
-from google.cloud.logging_v2.handlers.transports.base import Transport
-from google.cloud.logging_v2.resource import Resource
 
 from app import logging_config
 from app.logging_config import attach_cloud_logging, configure_logging, get_app_logger
+from tests.support import log_sinks
+from tests.support.log_sinks import RecordingTransport
 
 SMTP = "direct-smtp-canary-31x"
 JWT = "direct-jwt-canary-0123456789abcdef0123456789abcdef"
 
 
-class RecordingTransport(Transport):
-    sent: list[dict] = []
-    fail_send = False
-    fail_close = False
-    closed = 0
-
-    def __init__(self, client, name, resource=None, **kwargs):
-        self.client, self.name, self.resource = client, name, resource
-
-    def send(self, record, message, **kwargs):
-        if RecordingTransport.fail_send:
-            raise ConnectionError("transport down")
-        RecordingTransport.sent.append({"message": message, **kwargs})
-
-    def flush(self):
-        if RecordingTransport.fail_close:
-            raise ConnectionError("flush failed")
-
-    def close(self):
-        RecordingTransport.closed += 1
-        if RecordingTransport.fail_close:
-            raise ConnectionError("close failed")
-
-
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
     """No metadata server, resource detection, or sockets; fresh transport recording."""
-    RecordingTransport.sent = []
-    RecordingTransport.fail_send = RecordingTransport.fail_close = False
-    RecordingTransport.closed = 0
+    log_sinks.reset()
 
     def forbidden(*args, **kwargs):
         raise AssertionError("network or metadata access attempted")
@@ -83,13 +55,8 @@ def offline(monkeypatch):
     )
 
 
-def _real_handler() -> CloudLoggingHandler:
-    client = Client(project="offline-project", credentials=AnonymousCredentials(), _use_grpc=False)
-    return CloudLoggingHandler(client, resource=Resource(type="global", labels={}), transport=RecordingTransport)
-
-
 def _attach(handler=None):
-    handler = handler or _real_handler()
+    handler = handler or log_sinks.real_handler()
     with patch("app.adapters.observability.gcp.cloud_logging.Client") as client_cls:
         client_cls.return_value.get_default_handler.return_value = handler
         detach = attach_cloud_logging("offline-project", None, debug=False)

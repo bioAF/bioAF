@@ -6,7 +6,14 @@ from pathlib import Path
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
 
-from app.settings_contract import ComputeMode, SettingsError, describe_settings_error, parse_compute_mode
+from app.settings_contract import (
+    ComputeMode,
+    LogDelivery,
+    SettingsError,
+    describe_settings_error,
+    parse_compute_mode,
+    parse_log_delivery,
+)
 
 logger = logging.getLogger("bioaf")
 
@@ -114,6 +121,9 @@ class Settings(BaseSettings):
     app_version: str = _read_pyproject_version()
     debug: bool = False
     environment: str = "production"
+    # Centralized log delivery (one path, never both): stdout for a host collector such as the Ops
+    # Agent, or direct for the application's own cloud log sink. No automatic fallback between them.
+    log_delivery: LogDelivery = "stdout"
 
     # Database
     database_url: str = "postgresql+asyncpg://bioaf_app:password@localhost:5432/bioaf"
@@ -195,6 +205,11 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_compute_mode(cls, value: object) -> ComputeMode:
         return parse_compute_mode(value)
+
+    @field_validator("log_delivery", mode="before")
+    @classmethod
+    def _normalize_log_delivery(cls, value: object) -> LogDelivery:
+        return parse_log_delivery(value)
 
 
 def load_settings() -> Settings:

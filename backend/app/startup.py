@@ -5,7 +5,7 @@ Startup is a list of named steps run in order, each with a declared failure poli
 - ``fatal``: the exception propagates and startup stops (secrets, settings validation, the
   database connection, notification and cascade registration, adapters).
 - ``optional``: the exception is logged with the step's own message and startup continues
-  (bootstrap metadata, Cloud Logging, SMTP settings, seeds, restart reconciliation).
+  (bootstrap metadata, the direct log sink, SMTP settings, seeds, restart reconciliation).
 
 Cleanup is acquired as each resource is installed, on one ``AsyncExitStack``: whatever a step
 installed is undone on a partial startup, on normal exit, on an exception through the lifespan,
@@ -16,7 +16,8 @@ The schema gate (plan 9) precedes every normal step that writes, subscribes, or 
 Steps are never run in parallel.
 
 Shutdown budgets: active work gets ``DRAIN_SECONDS`` to settle, then
-cancellation and event/child cleanup get ``CANCEL_SECONDS``, then owned resources get
+cancellation and event/child cleanup get ``CANCEL_SECONDS``, then the direct log sink (only in
+``BIOAF_LOG_DELIVERY=direct``) gets ``LOG_SINK_SECONDS`` to flush, then owned resources get
 ``RESOURCE_SECONDS``. The container's 60 s stop grace (docker-compose) is the hard stop when work
 does not cooperate; uvicorn's own request grace runs before the lifespan's shutdown and is separate.
 """
@@ -27,7 +28,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from app.services.event_bus import event_bus
@@ -36,6 +37,7 @@ logger = logging.getLogger("bioaf")
 
 DRAIN_SECONDS = 10.0
 CANCEL_SECONDS = 20.0
+LOG_SINK_SECONDS = 2.0
 RESOURCE_SECONDS = 5.0
 
 
@@ -52,11 +54,13 @@ class Step:
 
 @dataclass
 class StartupContext:
-    """``stack`` holds cleanup for what steps install; ``subscriptions`` removes their subscribers."""
+    """``stack`` holds cleanup for what steps install; ``subscriptions`` removes their subscribers;
+    ``after_work`` holds cleanup that must wait until owned work has settled (the direct log sink)."""
 
     engine: Any
     stack: AsyncExitStack
     subscriptions: AsyncExitStack
+    after_work: AsyncExitStack = field(default_factory=AsyncExitStack)
 
 
 @contextmanager
@@ -188,9 +192,20 @@ async def bootstrap_metadata(ctx: StartupContext) -> None:
 
 
 async def cloud_logging(ctx: StartupContext) -> None:
-    """Attach Cloud Logging using the app's configured GCP credentials."""
-    from app.adapters.credentials import credential_injector
+    """Attach the direct log sink when ``BIOAF_LOG_DELIVERY=direct``; otherwise do nothing.
+
+    In ``stdout`` delivery (the default) nothing is built and no database or credential read happens:
+    the host collector ships the sanitized stdout. In ``direct`` delivery the handler is attached
+    once, with the app's configured GCP credentials, and closed after owned work has settled. A
+    failure leaves stdout as the only sink and is reported by class, never by its text.
+    """
     from app.config import settings
+
+    if settings.log_delivery != "direct":
+        logger.info("Log delivery: stdout (a host collector ships container output)")
+        return
+
+    from app.adapters.credentials import credential_injector
     from app.database import async_session_factory
     from app.logging_config import attach_cloud_logging
     from app.platform.platform_config_service import PlatformConfigService
@@ -198,22 +213,53 @@ async def cloud_logging(ctx: StartupContext) -> None:
     async with async_session_factory() as session:
         project_value = await PlatformConfigService.get(session, "gcp_project_id")
         gcp_project_id = project_value if project_value and project_value != "null" else ""
+        if not gcp_project_id:
+            logger.warning("Log delivery: direct, but no GCP project is configured; stdout only")
+            return
+        cred_config = await PlatformConfigService.get_many(
+            session,
+            [
+                "gcp_credential_source",
+                "gcp_service_account_key",
+                "gcp_service_account_email",
+                "gcp_bootstrap_sa_email",
+            ],
+        )
+    try:
+        credentials = credential_injector.load_gcp_credentials(cred_config)
+    except Exception:
+        credentials = None
+    try:
+        cleanup = attach_cloud_logging(gcp_project_id, credentials, debug=settings.debug)
+    except Exception as exc:
+        logger.warning("Log delivery: direct sink unavailable, stdout only (error_type=%s)", type(exc).__name__)
+        return
+    if cleanup is not None:
+        ctx.after_work.push_async_callback(_close_log_sink, cleanup)
 
-        if gcp_project_id:
-            cred_config = await PlatformConfigService.get_many(
-                session,
-                [
-                    "gcp_credential_source",
-                    "gcp_service_account_key",
-                    "gcp_service_account_email",
-                    "gcp_bootstrap_sa_email",
-                ],
-            )
-            try:
-                credentials = credential_injector.load_gcp_credentials(cred_config)
-            except Exception:
-                credentials = None
-            attach_cloud_logging(gcp_project_id, credentials, debug=settings.debug)
+
+async def _close_log_sink(cleanup: Callable[[], None]) -> None:
+    """Flush and close the direct sink in a daemon thread, abandoned after ``LOG_SINK_SECONDS``.
+
+    A daemon thread (not the default executor) so an abandoned flush cannot hold up process exit.
+    """
+    import threading
+
+    loop = asyncio.get_running_loop()
+    done = loop.create_future()
+
+    def finish() -> None:
+        if not done.done():
+            done.set_result(None)
+
+    def run() -> None:
+        try:
+            cleanup()
+        finally:
+            loop.call_soon_threadsafe(finish)
+
+    threading.Thread(target=run, name="bioaf-log-sink-close", daemon=True).start()
+    await bounded(done, LOG_SINK_SECONDS, "close_log_sink")
 
 
 async def smtp_settings(ctx: StartupContext) -> None:
@@ -377,7 +423,7 @@ async def interrupted_local_jobs(ctx: StartupContext) -> None:
 
 NORMAL_STEPS = [
     Step("bootstrap_metadata", bootstrap_metadata, "optional", "Bootstrap metadata read skipped: %s", logging.INFO),
-    Step("cloud_logging", cloud_logging, "optional", "Cloud Logging not configured: %s", logging.INFO),
+    Step("cloud_logging", cloud_logging, "optional", "Direct log sink not configured: %s", logging.INFO),
     Step("smtp_settings", smtp_settings, "optional", "Could not load SMTP settings from database: %s"),
     Step("notifications", notifications),
     Step("pipeline_cascade", pipeline_cascade),

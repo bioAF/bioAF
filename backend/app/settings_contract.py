@@ -9,6 +9,7 @@ or the cloud (``platform_config.cloud_provider``).
 """
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -51,6 +52,24 @@ def parse_compute_mode(value: object) -> ComputeMode:
     except ValueError:
         problem = "is empty" if not normalized else "is not a recognized value"
         raise ValueError(f"{COMPUTE_MODE_SETTING} {problem}. {COMPUTE_MODE_ADVICE}") from None
+
+
+LOG_DELIVERY_SETTING = "BIOAF_LOG_DELIVERY"
+LogDelivery = Literal["stdout", "direct"]
+LOG_DELIVERY_ADVICE = (
+    f"{LOG_DELIVERY_SETTING} must be stdout (the host's collector ships container output; the default) "
+    "or direct (the application ships to the cloud log sink itself; only where nothing collects stdout)."
+)
+
+
+def parse_log_delivery(value: object) -> LogDelivery:
+    """``stdout`` or ``direct``, ignoring surrounding whitespace and case. Never echoes rejected input."""
+    normalized = value.strip().lower() if isinstance(value, str) else None
+    if normalized == "stdout":
+        return "stdout"
+    if normalized == "direct":
+        return "direct"
+    raise ValueError(f"{LOG_DELIVERY_SETTING} is not a recognized value. {LOG_DELIVERY_ADVICE}")
 
 
 def is_simulated(mode: str) -> bool:
