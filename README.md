@@ -181,7 +181,8 @@ source .venv/bin/activate
 # Settings read the environment, then a .env in the directory you launch from (here backend/),
 # so the repository-root .env.example alone does not apply. Alembic and CLI commands need it too.
 export BIOAF_COMPUTE_MODE=local
-uvicorn app.main:app --reload
+# Same flags as the packaged image: Uvicorn's access log would print full request lines.
+uvicorn app.main:app --reload --no-access-log
 
 # Frontend
 cd frontend
@@ -203,6 +204,26 @@ cd backend && python -m pytest tests/ -v
 # Frontend tests
 cd frontend && npm test
 ```
+
+### Logging
+
+The backend writes one JSON object per line to stdout, in development as in production
+(`time`, `severity`, `logger`, `message`, and `exception`, `stack` or `fields` when present).
+Pipe it through `jq` to read it locally, for example `... | jq -r '"\(.severity) \(.logger): \(.message)"'`.
+
+- Get a module's logger with `get_app_logger(__name__)` from `app.logging_config` (it maps
+  `app.x` to `bioaf.x`), or use an explicit `bioaf.*` name. A test rejects any other logger name
+  in `backend/app`. Do not add handlers in modules.
+- Structured data goes in a mapping message (`logger.info({"event": ...})`) or
+  `extra={"json_fields": {...}}`; it appears under `fields`. Other `extra` values are not emitted.
+- Known secrets (the live SMTP password, JWT key, Slack client and signing secret slots, each
+  encryption key, the database URL password; values of four characters or more) are replaced with
+  `***` in every application sink. Everything else, including organization credentials stored in
+  the database, must be kept out of log calls at the source: log fixed text plus the exception
+  class, never raw provider errors, bodies, URLs with credentials, or headers.
+
+Delivery, collection and their limits are in the deployment guide's
+[Logging](docs/deployment-guide.md#logging) section.
 
 ## Component Catalog
 
