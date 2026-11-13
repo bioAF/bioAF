@@ -593,7 +593,7 @@ HARNESS
         esac
         cp "$tmp/.env" "$tmp/env.before"
         run $caller FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=78 BIOAF_SKIP_RESTART_WARN=1 bash -c "
-            source '$tmp/harness.sh'; ( cmd_update 2.0.0 --yes ); echo \"rc=\$? caller=\${BIOAF_IMAGE_TAG-unset}\""
+            source '$tmp/harness.sh'; rc=0; ( cmd_update 2.0.0 --yes ) || rc=\$?; echo \"rc=\$rc caller=\${BIOAF_IMAGE_TAG-unset}\""
         [[ "$output" == *"rc=1"* ]]
         if [ "$start" = exported ]; then [[ "$output" == *"caller=v0.9.9"* ]]; else [[ "$output" == *"caller=unset"* ]]; fi
         # The target was what got checked, whatever the shell exported.
