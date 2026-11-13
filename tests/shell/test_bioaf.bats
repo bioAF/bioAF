@@ -973,6 +973,7 @@ old_update_env() {
     cat > "$tmp/bioaf" <<'STUB'
 #!/usr/bin/env bash
 echo "target-bioaf $*" >> "$FAKE_LOG"
+[ "$1" = ensure-update-agent ] && exit "${FAKE_AGENT_HOOK_STATUS:-${FAKE_HOOK_STATUS:-0}}"
 exit "${FAKE_HOOK_STATUS:-0}"
 STUB
     chmod +x "$tmp/bioaf"
@@ -985,7 +986,7 @@ STUB
         source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
     [ "$status" -eq 0 ]
     [ "$(grep -E '^(git .* checkout |target-bioaf|pull|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
-      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\npull tag=v2.0.0\nup args=[--env-file')" ]
+      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\ntarget-bioaf ensure-update-agent\npull tag=v2.0.0\nup args=[--env-file')" ]
 }
 
 @test "a failed reconciliation stops the previous release's update before the services restart" {
@@ -1004,7 +1005,7 @@ STUB
     run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
         source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
     [ "$status" -eq 0 ]
-    ! grep -q '^target-bioaf' "$tmp/log"
+    ! grep -q '^target-bioaf ensure-cloud-logging' "$tmp/log"
     [ "$(grep -c '^cloud_logging' "$tmp/log")" -eq 1 ]
 }
 
@@ -1361,4 +1362,68 @@ busy_agent() {
     # The last argument is the agent PID; the program before it is the same for any PID.
     [ "$(tail -1 "$tmp/run-args")" = "$AGENT_PID" ]
     ! sed '$d' "$tmp/run-args" | grep -q "$AGENT_PID"
+}
+
+# ---------------------------------------------------------------------------
+# Where the update-agent unit is reconciled (plan 23): setup after any checkout, start, and every
+# updater through the target's install.sh hook. The unit is the agent's, not the services': its
+# failure is reported but stops neither start nor an update.
+# ---------------------------------------------------------------------------
+
+@test "every updater runs the target's update-agent reconciliation, and its failure does not stop the update" {
+    local updater
+    for updater in "$OLD_BIOAF" "$BIOAF_SCRIPT"; do
+        tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+        sed -i.bak "s|source '$OLD_BIOAF'|source '$updater'|" "$tmp/harness.sh"
+        run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_AGENT_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+            source '$tmp/harness.sh'; ensure_cloud_logging() { :; }; cmd_update 2.0.0 --yes"
+        [ "$status" -eq 0 ]
+        [ "$(grep -E '^(git .* checkout |target-bioaf ensure-update-agent|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
+          "$(printf 'git -C\ntarget-bioaf ensure-update-agent\nup args=[--env-file')" ]
+        [ "$(cat "$tmp/state/backend")" = v2.0.0 ]
+        [[ "$output" == *"update agent"* ]]
+    done
+}
+
+@test "ensure-update-agent is a host command of ./bioaf" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    cp "$BIOAF_SCRIPT" "$tmp/repo/bioaf"
+    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
+    # The real unit path is not writable here, so the reconciliation runs and reports its failure.
+    run env FAKE_LOG="$tmp/log" PATH="$tmp/bin:$PATH" FAKE_VERIFY_STATUS=1 bash "$tmp/repo/bioaf" ensure-update-agent </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Update agent unit not updated"* ]]
+    [[ "$output" != *"Unknown command"* ]]
+    run bash "$BIOAF_SCRIPT" help
+    [[ "$output" != *"ensure-update-agent"* ]]
+}
+
+@test "start reconciles the update agent and still starts the services when that fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    stubs="DC='$tmp/fake-dc --env-file $tmp/.env'; ensure_pinned_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }; cmd_status() { :; }; sleep() { :; }; ensure_cloud_logging() { :; }"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs
+        ensure_update_agent() { echo update_agent >> '$tmp/log'; return 1; }; cmd_start"
+    [ "$status" -eq 0 ]
+    grep -q '^update_agent' "$tmp/log"
+    grep -q '^up' "$tmp/log"
+    [[ "$output" == *"update agent"* ]]
+}
+
+@test "setup reconciles the update agent after checking out the requested version" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    mkdir -p "$tmp/docker/certs"; : > "$tmp/.env"; : > "$tmp/docker/certs/tls.crt"
+    printf '#!/bin/sh\nexit 0\n' > "$tmp/install.sh"; chmod +x "$tmp/install.sh"
+    printf '#!/bin/sh\necho Linux\n' > "$tmp/uname"; chmod +x "$tmp/uname"
+    run env FAKE_LOG="$tmp/log" PATH="$tmp:$PATH" HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc --env-file $tmp/.env'; ENV_FILE='$tmp/.env'; SCRIPT_DIR='$tmp'
+        io_init() { :; }; section() { :; }; io_finish() { :; }; fail_line() { echo \"\$*\"; }
+        step() { echo \"step \$1\" >> '$tmp/log'; shift; [ \"\$1\" = -- ] && shift; \"\$@\"; }
+        maybe_step() { step \"\$@\"; }
+        docker() { return 0; }
+        git() { [ \"\$3\" = checkout ] && echo checkout >> '$tmp/log'; return 0; }
+        ensure_cloud_logging() { :; }; ensure_update_agent() { echo update_agent >> '$tmp/log'; }
+        resolve_and_pull_images() { :; }; pin_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }
+        get_access_url() { echo https://x; }
+        cmd_setup --version 9.9.9" </dev/null
+    [ "$(grep -E '^(checkout|update_agent)' "$tmp/log")" = "$(printf 'checkout\nupdate_agent')" ]
 }

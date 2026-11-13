@@ -574,10 +574,6 @@ for v in cfg.get('volumes', {}).values():
     # the user end up with a running stack that ships no logs.
     step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
 
-    # Update agent (idempotent). Required for the in-app self-update
-    # feature to work; without it, backend-triggered updates are a no-op.
-    step "Configure update agent (idempotent)" -- ensure_update_agent
-
     # If a specific version was requested, checkout that tag
     if [ -n "$setup_version" ]; then
         step "Fetch tags from origin" -- git -C "$SCRIPT_DIR" fetch --tags --force
@@ -588,6 +584,12 @@ for v in cfg.get('volumes', {}).values():
         fi
         step "Checkout v${setup_version}" -- git -C "$SCRIPT_DIR" checkout "v${setup_version}"
     fi
+
+    # Update agent (idempotent). Required for the in-app self-update
+    # feature to work; without it, backend-triggered updates are a no-op.
+    # After any checkout, so the unit and agent code installed are the ones
+    # that will run (this script's own functions render the checked-out template).
+    step "Configure update agent (idempotent)" -- ensure_update_agent
 
     # Resolve and pull pre-built images (falls back to building from source).
     # --local-build short-circuits the registry lookup entirely.
@@ -732,6 +734,11 @@ cmd_start() {
     if ! ensure_cloud_logging; then
         red "ERROR: Could not configure Cloud Logging collection; services were not started."
         exit 1
+    fi
+
+    # The update agent is not needed to serve, so a problem with it is reported and start continues.
+    if ! ensure_update_agent; then
+        yellow "WARNING: The update agent could not be configured; in-app updates will not run until this is fixed."
     fi
 
     for svc in db backend frontend nginx; do
@@ -1599,6 +1606,8 @@ case "$command" in
     start)        cmd_start ;;
     # Host step the target's install.sh runs during any release's update (plan 22); not in help.
     ensure-cloud-logging) ensure_cloud_logging ;;
+    # Host step setup, start and the target's install.sh run during any release's update (plan 23).
+    ensure-update-agent) ensure_update_agent ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;
