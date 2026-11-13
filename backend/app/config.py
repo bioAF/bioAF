@@ -3,7 +3,10 @@ import sys
 import tomllib
 from pathlib import Path
 
+from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
+
+from app.settings_contract import ComputeMode, SettingsError, describe_settings_error, parse_compute_mode
 
 logger = logging.getLogger("bioaf")
 
@@ -144,8 +147,9 @@ class Settings(BaseSettings):
     rate_limit_reset: int = 3
     trusted_proxy_cidrs: str = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128"
 
-    # Compute
-    compute_mode: str = "kubernetes"
+    # Compute: required, with no default (app/settings_contract.py). Production Compose supplies
+    # kubernetes when the host leaves it unset; development and tests supply local explicitly.
+    compute_mode: ComputeMode
 
     # Local mode cost overrides (used when BIOAF_COMPUTE_MODE=local)
     local_node_cost_hourly: float = 0.01
@@ -184,7 +188,28 @@ class Settings(BaseSettings):
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""
 
-    model_config = {"env_prefix": "BIOAF_", "env_file": ".env", "extra": "ignore"}
+    # hide_input_in_errors: a rejected setting must not print the other supplied values (secrets).
+    model_config = {"env_prefix": "BIOAF_", "env_file": ".env", "extra": "ignore", "hide_input_in_errors": True}
+
+    @field_validator("compute_mode", mode="before")
+    @classmethod
+    def _normalize_compute_mode(cls, value: object) -> ComputeMode:
+        return parse_compute_mode(value)
 
 
-settings = Settings()
+def load_settings() -> Settings:
+    """The process settings, or a SettingsError whose message names the bad settings and no values."""
+    try:
+        return Settings()  # type: ignore[call-arg]  # compute_mode comes from the environment or .env
+    except ValidationError as exc:
+        raise SettingsError(describe_settings_error(exc)) from None
+
+
+settings = load_settings()
+
+
+def compute_mode_for(override: ComputeMode | None = None) -> ComputeMode:
+    """The mode a mode-aware adapter is built in: the resolved setting, or a typed in-process override.
+
+    The override is a test seam, not a second bootstrap path: the setting stays required either way."""
+    return settings.compute_mode if override is None else ComputeMode(override)

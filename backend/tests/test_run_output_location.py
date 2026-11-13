@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+from app.settings_contract import ComputeMode
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun
@@ -76,9 +77,8 @@ async def test_with_no_bucket_configured_the_adapter_names_its_results_store(ses
 
 
 @pytest.mark.asyncio
-async def test_a_cloud_install_with_no_results_bucket_is_refused(session, admin_user, experiment, monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    storage = GcsStorageProvider(org_slug="t")
+async def test_a_cloud_install_with_no_results_bucket_is_refused(mode_adapter_factory, session, admin_user, experiment):
+    storage = mode_adapter_factory(GcsStorageProvider, org_slug="t", mode=ComputeMode.KUBERNETES)
     storage._bucket_config = {}
     run = await _run(session, admin_user, experiment)
     with pytest.raises(OutputLocationRefused):

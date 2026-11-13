@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from kubernetes.client.rest import ApiException
 
+from app.settings_contract import ComputeMode
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 from app.adapters.pod_identity.aws import EksIrsaPodIdentityProvider
 
@@ -17,9 +18,8 @@ ROLE_ARN = "arn:aws:iam::043671579834:role/bioaf-bioaf-8ec3ba-cluster-autoscaler
 
 
 @pytest.fixture
-def adapter(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = KubernetesComputeProvider()
+def adapter(mode_adapter_factory):
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     # Force the AWS pod-identity provider so the SA gets the IRSA annotation
     # (the factory would default to GKE on an unconfigured/test install).
     provider._pod_identity_provider = EksIrsaPodIdentityProvider()

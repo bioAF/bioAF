@@ -96,6 +96,8 @@ class CaseDatabase:
         return {
             **base,
             "BIOAF_DATABASE_URL": self.url,
+            # Required by settings (plan 21); the upgrade lifecycle does not depend on it.
+            "BIOAF_COMPUTE_MODE": "local",
             "BIOAF_ENCRYPTION_KEYS": runner.TEST_ENCRYPTION_KEY,
             "BIOAF_JWT_SECRET_KEY": runner.TEST_JWT_SECRET,
             "BIOAF_UPGRADE_PG_BIN_DIR": str(pg_bin_dir()),

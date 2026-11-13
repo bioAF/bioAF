@@ -6,11 +6,12 @@ Supports local/mock mode for development and real GCE API for production.
 
 import asyncio
 import logging
-import os
 import posixpath
 import uuid
 from datetime import datetime, timezone
 
+from app.config import compute_mode_for
+from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import VmInstance, WorkNodeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
@@ -310,8 +311,8 @@ class GceVmInstance(VmInstance):
     spawn. ``GCEWorkNodeProvider`` rides on this under the WorkNodeProvider names.
     """
 
-    def __init__(self, session_factory=None):
-        self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+    def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
+        self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         self._gcp_config: dict | None = None
         # In-memory store for sync SSH private keys, keyed by session_id.
@@ -320,7 +321,7 @@ class GceVmInstance(VmInstance):
 
     @property
     def is_local(self) -> bool:
-        return self._mode == "local"
+        return is_simulated(self._mode)
 
     async def load_config(self, force: bool = False) -> dict:
         """Neutral entrypoint (registry init): delegates to ``load_gcp_config``."""

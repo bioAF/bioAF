@@ -4,13 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
+from tests.support.mode_adapters import build_mode_adapter
 from app.adapters.work_nodes.gce import GCEWorkNodeProvider
 from app.exceptions import ValidationError
 
 
 def _launch_provider():
-    provider = GCEWorkNodeProvider()
-    provider._mode = "gce"
+    provider = build_mode_adapter(GCEWorkNodeProvider, mode=ComputeMode.KUBERNETES)
     provider._gcp_config = {
         "gcp_project_id": "proj",
         "gcp_zone": "us-central1-b",

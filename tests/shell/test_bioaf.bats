@@ -362,15 +362,52 @@ fake_curl() {
 
 # A stand-in for `docker compose ...`: the test sets FAKE_DUMP / FAKE_DUMP_STATUS / FAKE_SCHEMA_STATUS /
 # FAKE_READY and the stub answers the commands the script runs.
+#
+# Plan 21 additions (all optional; unset keeps the earlier behavior):
+#   FAKE_CHECK_STATUS      exit of the one-off settings check (`run ... app.cli.check_settings`)
+#   FAKE_PULL_STATUS       exit of `pull`;  FAKE_UP_STATUS  exit of `up -d`
+#   FAKE_STATUS_EXEC_FAILS=1  `exec ... schema_upgrade status` fails (a restarting backend)
+#   FAKE_STATE=<dir>       service state: `up` writes the effective tag to <dir>/backend and
+#                          <dir>/frontend and marks the corrected env applied (<dir>/applied)
+#   FAKE_UPGRADE_NEEDS_UP=1   the upgrade `exec` fails until an `up` has applied the env
+# The check, pull and up record their arguments and the effective tag (shell over env file) in
+# FAKE_LOG, and the check also records the persisted pin at the time it ran.
 make_fake_dc() {
     local dir="$1"
     cat > "$dir/fake-dc" <<'STUB'
 #!/usr/bin/env bash
 args="$*"
+log="${FAKE_LOG:-/dev/null}"
+env_file=""
+prev=""
+for a in "$@"; do
+    [ "$prev" = "--env-file" ] && env_file="$a"
+    prev="$a"
+done
+pinned() { [ -n "$env_file" ] && grep '^BIOAF_IMAGE_TAG=' "$env_file" 2>/dev/null | tail -1 | cut -d= -f2-; }
+effective_tag() { if [ -n "${BIOAF_IMAGE_TAG+x}" ]; then echo "$BIOAF_IMAGE_TAG"; else pinned; fi; }
 case "$args" in
     *"pg_dump"*) printf '%s' "${FAKE_DUMP-}"; exit "${FAKE_DUMP_STATUS:-0}" ;;
-    *"app.schema_upgrade status"*) printf '%s' "${FAKE_SCHEMA_STATUS:-{\}}"; exit 0 ;;
-    *"app.schema_upgrade run"*) echo "schema_upgrade run" >> "${FAKE_LOG:-/dev/null}"; exit "${FAKE_RUN_STATUS:-0}" ;;
+    *"app.schema_upgrade status"*)
+        [ "${FAKE_STATUS_EXEC_FAILS:-0}" = 1 ] && exit 1
+        printf '%s' "${FAKE_SCHEMA_STATUS:-{\}}"; exit 0 ;;
+    *"app.schema_upgrade run"*)
+        if [ "${FAKE_UPGRADE_NEEDS_UP:-0}" = 1 ] && [ ! -e "${FAKE_STATE:-/nonexistent}/applied" ]; then
+            echo "schema_upgrade exec refused (restarting)" >> "$log"; exit 1
+        fi
+        echo "schema_upgrade run" >> "$log"; exit "${FAKE_RUN_STATUS:-0}" ;;
+    *"app.cli.check_settings"*)
+        echo "check args=[$args] tag=$(effective_tag) pin=$(pinned)" >> "$log"
+        exit "${FAKE_CHECK_STATUS:-0}" ;;
+    *" pull "*|*" pull")
+        echo "pull tag=$(effective_tag)" >> "$log"; exit "${FAKE_PULL_STATUS:-0}" ;;
+    *" up "*|*" up")
+        echo "up args=[$args] tag=$(effective_tag)" >> "$log"
+        [ "${FAKE_UP_STATUS:-0}" = 0 ] || exit "$FAKE_UP_STATUS"
+        if [ -n "${FAKE_STATE:-}" ]; then
+            effective_tag > "$FAKE_STATE/backend"; effective_tag > "$FAKE_STATE/frontend"; : > "$FAKE_STATE/applied"
+        fi
+        exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
 esac
 exit 0
@@ -438,7 +475,7 @@ STUB
     run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": false}' \
         BIOAF_AUTO_CONFIRM=1 bash -c "
         source '$BIOAF_SCRIPT' >/dev/null
-        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
         get_running_version() { echo 9.9.9; }
         wait_for_db() { :; }
         backup_database() { echo backup >> '$tmp/log'; }
@@ -453,7 +490,7 @@ STUB
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"
     run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": false}' BIOAF_AUTO_CONFIRM=1 bash -c "
         source '$BIOAF_SCRIPT' >/dev/null
-        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
         get_running_version() { echo 9.9.9; }
         wait_for_db() { :; }
         backup_database() { return 1; }
@@ -468,7 +505,7 @@ STUB
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"
     run env FAKE_LOG="$tmp/log" FAKE_RUN_STATUS=1 FAKE_SCHEMA_STATUS='{"settled": false}' BIOAF_AUTO_CONFIRM=1 bash -c "
         source '$BIOAF_SCRIPT' >/dev/null
-        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
         get_running_version() { echo 9.9.9; }
         wait_for_db() { :; }
         backup_database() { :; }
@@ -482,7 +519,7 @@ STUB
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"
     run env FAKE_LOG="$tmp/log" FAKE_SCHEMA_STATUS='{"settled": true}' bash -c "
         source '$BIOAF_SCRIPT' >/dev/null
-        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
         get_running_version() { echo 9.9.9; }
         cmd_update 9.9.9 --yes"
     [ "$status" -eq 0 ]
@@ -501,4 +538,193 @@ STUB
     # A dump holds the whole database; the checkout on the host must not list it as a file to commit.
     run git -C "$BATS_TEST_DIRNAME/../.." check-ignore -q backups/bioaf_pre_upgrade_131_to_132_x.dump
     [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Settings preflight for update and migrate (plan 21)
+#
+# Shell-state tests: the stub proves host ordering, status and pinning. It does not prove Docker's
+# exit-code propagation or Compose's recreation of changed containers.
+# ---------------------------------------------------------------------------
+
+# A sourced ./bioaf with every host side effect outside Compose stubbed. get_running_version reports
+# the stub's backend image; FAKE_STATE starts with both services on $1 (e.g. v1.0.0).
+update_env() {
+    local tmp="$1" start_tag="$2"
+    mkdir -p "$tmp/state"
+    echo "$start_tag" > "$tmp/state/backend"; echo "$start_tag" > "$tmp/state/frontend"
+    printf '#!/bin/sh\nexit 0\n' > "$tmp/install.sh"
+    cat > "$tmp/harness.sh" <<HARNESS
+source '$BIOAF_SCRIPT' >/dev/null
+DC='$tmp/fake-dc --env-file $tmp/.env'; DC_PULL='$tmp/fake-dc --env-file $tmp/.env pull'
+SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
+get_running_version() { local t; t=\$(cat '$tmp/state/backend'); echo "\${t#v}"; }
+verify_release_images() { return 0; }
+git() { echo "git \$*" >> '$tmp/log'; }
+wait_for_db() { :; }
+ensure_cloud_logging() { :; }
+backup_database() { echo backup >> '$tmp/log'; }
+HARNESS
+}
+
+@test "update pulls and checks the target under a scoped tag, then pins and restarts both services" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'OTHER=x\nBIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    grep -q '^pull tag=v2.0.0$' "$tmp/log"
+    # The check ran on the target image while the env file still pinned the old release.
+    grep -q '^check args=\[.*run --rm --no-deps -T backend python -m app.cli.check_settings\] tag=v2.0.0 pin=v1.0.0$' "$tmp/log"
+    grep -q '^BIOAF_IMAGE_TAG=v2.0.0$' "$tmp/.env"
+    grep -q '^OTHER=x$' "$tmp/.env"
+    [ "$(grep -E '^(pull|check|up|schema_upgrade run|backup)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'backup\npull\ncheck\nup\nschema_upgrade')" ]
+    [ "$(cat "$tmp/state/backend")" = v2.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v2.0.0 ]
+    grep -q '"status": "completed"' "$tmp/update-status/current.json"
+}
+
+@test "update stops at a rejected settings check with the old pin, both old services and the caller's tag" {
+    for start in pinned absent exported; do
+        tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+        case "$start" in
+            pinned)   printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"; caller="env -u BIOAF_IMAGE_TAG" ;;
+            absent)   printf 'OTHER=x\n' > "$tmp/.env"; caller="env -u BIOAF_IMAGE_TAG" ;;
+            exported) printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"; caller="env BIOAF_IMAGE_TAG=v0.9.9" ;;
+        esac
+        cp "$tmp/.env" "$tmp/env.before"
+        run $caller FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=78 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+            source '$tmp/harness.sh'; rc=0; ( cmd_update 2.0.0 --yes ) || rc=\$?; echo \"rc=\$rc caller=\${BIOAF_IMAGE_TAG-unset}\""
+        [[ "$output" == *"rc=1"* ]]
+        if [ "$start" = exported ]; then [[ "$output" == *"caller=v0.9.9"* ]]; else [[ "$output" == *"caller=unset"* ]]; fi
+        # The target was what got checked, whatever the shell exported.
+        grep -q '^check .* tag=v2.0.0 ' "$tmp/log"
+        cmp -s "$tmp/.env" "$tmp/env.before"
+        [ "$(cat "$tmp/state/backend")" = v1.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v1.0.0 ]
+        ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+        grep -q '"status": "failed"' "$tmp/update-status/current.json"
+        grep -q '"step": "settings_preflight"' "$tmp/update-status/current.json"
+        grep -q 'BIOAF_COMPUTE_MODE' "$tmp/update-status/current.json"
+        grep -q './bioaf update 2.0.0' "$tmp/update-status/current.json"
+        ! grep -qi 'migrat\|database upgrade' "$tmp/update-status/current.json"
+    done
+}
+
+@test "update reports a settings check that could not run without claiming the settings are invalid" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"step": "settings_preflight"' "$tmp/update-status/current.json"
+    grep -q 'could not be checked' "$tmp/update-status/current.json"
+    ! grep -q 'rejected' "$tmp/update-status/current.json"
+    grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
+    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+}
+
+@test "a rejected update, corrected and rerun, brings both services and the pin to the target" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=78 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v1.0.0 ]
+    # The operator corrects the mode and reruns the full update.
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$tmp/state/backend")" = v2.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v2.0.0 ]
+    grep -q '^BIOAF_IMAGE_TAG=v2.0.0$' "$tmp/.env"
+    grep -q '"status": "completed"' "$tmp/update-status/current.json"
+}
+
+@test "update recovers a target backend an older updater left restarting with a bad mode" {
+    # The older updater pinned v2.0.0 and started it; the backend rejects its mode and restarts, so
+    # its status exec fails. After the operator corrects docker/.env, the new updater must apply
+    # the env with up before the upgrade exec, which the restarting container cannot serve.
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 \
+        FAKE_UPGRADE_NEEDS_UP=1 bash -c "source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(check|backup|up|schema_upgrade)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'check\nbackup\nup\nschema_upgrade')" ]
+    ! grep -q 'exec refused' "$tmp/log"
+    ! grep -q -- '--force-recreate' "$tmp/log"
+    ! grep -q '^pull\|^git ' "$tmp/log"
+    [ "$(cat "$tmp/state/backend")" = v2.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v2.0.0 ]
+    grep -q '"status": "completed"' "$tmp/update-status/current.json"
+    [[ "$output" != *"database upgrade did not complete"* ]]
+}
+
+@test "the unsettled retry does not reconcile services when its backup fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 bash -c "
+        source '$tmp/harness.sh'; backup_database() { return 1; }; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"step": "backup"' "$tmp/update-status/current.json"
+    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+}
+
+@test "the unsettled retry records a failed restart and does not migrate when up fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 FAKE_UP_STATUS=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+    grep -q '"step": "restart"' "$tmp/update-status/current.json"
+    ! grep -q '^schema_upgrade' "$tmp/log"
+}
+
+@test "the unsettled retry stops at a rejected check before the backup" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 FAKE_CHECK_STATUS=78 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"step": "settings_preflight"' "$tmp/update-status/current.json"
+    ! grep -qE '^(backup|up|schema_upgrade)' "$tmp/log"
+}
+
+@test "migrate stops at rejected settings before waiting for the database or upgrading" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_CHECK_STATUS=78 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; SCRIPT_DIR='$tmp'
+        wait_for_db() { echo wait_for_db >> '$tmp/log'; }; cmd_migrate"
+    [ "$status" -ne 0 ]
+    grep -q '^check ' "$tmp/log"
+    ! grep -qE '^(wait_for_db|schema_upgrade)' "$tmp/log"
+    [[ "$output" == *"BIOAF_COMPUTE_MODE"* ]]
+    [[ "$output" == *"up -d backend"* ]]
+    [[ "$output" != *"Database upgrade failed"* ]]
+    [ ! -e "$tmp/update-status/current.json" ]
+}
+
+@test "migrate reports a settings check that could not run, without claiming invalid settings" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_CHECK_STATUS=1 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; wait_for_db() { :; }; cmd_migrate"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not be checked"* ]]
+    [[ "$output" != *"rejected"* ]]
+    ! grep -q '^schema_upgrade' "$tmp/log"
+}
+
+@test "migrate with valid settings still reports a genuine upgrade failure as one" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_RUN_STATUS=1 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; wait_for_db() { :; }; cmd_migrate"
+    [ "$status" -ne 0 ]
+    [ "$(cut -d' ' -f1 "$tmp/log")" = "$(printf 'check\nschema_upgrade')" ]
+    [[ "$output" == *"Database upgrade failed"* ]]
+}
+
+@test "update with valid settings still records a genuine upgrade failure at migrate" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_RUN_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    grep -q '"step": "migrate"' "$tmp/update-status/current.json"
 }

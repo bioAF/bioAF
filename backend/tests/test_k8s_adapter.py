@@ -6,15 +6,15 @@ Verifies get_cluster_status and get_cluster_metrics return data using mocked GKE
 from unittest.mock import MagicMock, patch
 
 import pytest
+from app.settings_contract import ComputeMode
 
 
 @pytest.mark.asyncio
-async def test_k8s_adapter_get_cluster_status_with_mock():
+async def test_k8s_adapter_get_cluster_status_with_mock(mode_adapter_factory):
     """Adapter get_cluster_status returns pool info from mocked GKE API."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
-    provider = KubernetesComputeProvider()
-    provider._mode = "production"
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     # Seed cluster identity so _k8s_get_cluster_status passes its sanity check.
     # Also seed an endpoint so load_cluster_config considers the cache valid
     # (otherwise it overwrites with {} when no session_factory is configured).
@@ -76,15 +76,14 @@ async def test_k8s_adapter_get_cluster_status_with_mock():
 
 
 @pytest.mark.asyncio
-async def test_k8s_adapter_get_cluster_detail_with_mock():
+async def test_k8s_adapter_get_cluster_detail_with_mock(mode_adapter_factory):
     """get_cluster_detail returns the stack-view ClusterDetail (name/status/
     node-count + per-pool detail), with status mapped to the uppercase enum-name
     contract the stack view expects (distinct from get_cluster_status's lowercase
     controller_status)."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
-    provider = KubernetesComputeProvider()
-    provider._mode = "production"
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._cluster_config = {
         "gke_cluster_endpoint": "https://10.0.0.1",
         "gke_cluster_name": "bioaf-test",
@@ -130,13 +129,12 @@ async def test_k8s_adapter_get_cluster_detail_with_mock():
 
 
 @pytest.mark.asyncio
-async def test_k8s_adapter_cluster_lifecycle_management():
+async def test_k8s_adapter_cluster_lifecycle_management(mode_adapter_factory):
     """list_cluster_names / probe_cluster / delete_cluster own the orphan
     scan/recovery/teardown GKE calls drained from orphaned_resource (Stage 3b.5)."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
-    provider = KubernetesComputeProvider()
-    provider._mode = "production"
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
     c1 = MagicMock()
     c1.name = "bioaf-a"
@@ -169,12 +167,11 @@ async def test_k8s_adapter_cluster_lifecycle_management():
 
 
 @pytest.mark.asyncio
-async def test_k8s_adapter_probe_cluster_not_found():
+async def test_k8s_adapter_probe_cluster_not_found(mode_adapter_factory):
     """A cluster that can't be fetched probes as NOT_FOUND (orphan already gone)."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
-    provider = KubernetesComputeProvider()
-    provider._mode = "production"
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
     mock_client = MagicMock()
     mock_client.get_cluster.side_effect = Exception("404 not found")
@@ -190,12 +187,11 @@ async def test_k8s_adapter_probe_cluster_not_found():
 
 
 @pytest.mark.asyncio
-async def test_k8s_adapter_get_cluster_metrics_with_mock():
+async def test_k8s_adapter_get_cluster_metrics_with_mock(mode_adapter_factory):
     """Adapter get_cluster_metrics returns metrics from mocked GKE API."""
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
 
-    provider = KubernetesComputeProvider()
-    provider._mode = "production"
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
     mock_cluster = MagicMock()
     mock_cluster.name = "bioaf-test"

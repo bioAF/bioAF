@@ -17,6 +17,9 @@ services:
       - BIOAF_DEBUG=true
       - BIOAF_ENVIRONMENT=development
       - BIOAF_USE_SECRET_MANAGER=false
+      # Required. local simulates the mode-aware compute, notebook, storage and work-node adapters
+      # (not a full offline mode: cellxgene, for one, has no simulation).
+      - BIOAF_COMPUTE_MODE=local
     # The same shutdown budget as docker-compose.yml (this file is used on its own). Under --reload
     # the reloader supervises the worker, so the 60 s hard stop is the container's, not uvicorn's.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-access-log --timeout-graceful-shutdown 10

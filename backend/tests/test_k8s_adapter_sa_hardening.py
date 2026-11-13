@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.adapters.cluster_auth import gcp as cluster_auth_gcp
 from app.adapters.compute import kubernetes as compute_k8s
 
@@ -81,7 +82,7 @@ def test_compute_adapter_resolve_cfg_treats_null_string_as_missing():
     assert compute_k8s._resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME") == "bioaf-prod"
 
 
-def test_compute_get_cluster_metrics_returns_fallback_on_null_cluster_name(monkeypatch):
+def test_compute_get_cluster_metrics_returns_fallback_on_null_cluster_name(mode_adapter_factory, monkeypatch):
     """When gke_cluster_name is the literal 'null', skip the GKE call entirely.
 
     Pre-fix this caused 'projects/.../clusters/null' to be sent to the GKE API,
@@ -89,8 +90,7 @@ def test_compute_get_cluster_metrics_returns_fallback_on_null_cluster_name(monke
     """
     import asyncio
 
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = compute_k8s.KubernetesComputeProvider()
+    provider = mode_adapter_factory(compute_k8s.KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._cluster_config = {
         "gke_cluster_name": "null",
         "gcp_project_id": "my-project",
@@ -114,7 +114,7 @@ def test_compute_get_cluster_metrics_returns_fallback_on_null_cluster_name(monke
 
 
 @pytest.mark.asyncio
-async def test_k8s_submit_job_reloads_cluster_config_before_sync_helpers():
+async def test_k8s_submit_job_reloads_cluster_config_before_sync_helpers(mode_adapter_factory):
     """Regression: pipeline launch failed with "No GKE cluster endpoint in
     platform_config" when the backend started before compute deploy. The
     sync _get_api_client used by ensure_pipeline_namespace etc. does NOT
@@ -122,8 +122,7 @@ async def test_k8s_submit_job_reloads_cluster_config_before_sync_helpers():
     must call _ensure_cluster_config_fresh() first so subsequent sync
     helpers see the freshly-loaded config.
     """
-    provider = compute_k8s.KubernetesComputeProvider()
-    provider._mode = "k8s"
+    provider = mode_adapter_factory(compute_k8s.KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._cluster_config = None
     provider._namespace_ready = True
 

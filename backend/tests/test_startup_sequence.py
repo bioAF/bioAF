@@ -215,3 +215,17 @@ async def test_source_pacing_state_does_not_survive_into_the_next_lifespan(start
         request_pacing.registry().pacer(("semanticscholar", "service")).cool_down(600)
     async with main_module.lifespan(FastAPI()):
         assert request_pacing.registry().pacer(("semanticscholar", "service")).cooldown_remaining() == 0
+
+
+async def test_startup_logs_the_effective_compute_configuration_once(startup, monkeypatch, caplog):
+    from app.config import settings
+    from app.settings_contract import ComputeMode
+
+    monkeypatch.setattr(settings, "compute_mode", ComputeMode.LOCAL)
+    application = FastAPI()
+    with caplog.at_level(logging.INFO, logger="bioaf"):
+        async with main_module.lifespan(application):
+            pass
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Compute configuration:")]
+    assert lines == ["Compute configuration: mode=local simulation=enabled active_compute_stack=kubernetes"]
+    assert settings.jwt_secret_key not in caplog.text

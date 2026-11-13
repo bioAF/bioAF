@@ -9,12 +9,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
+from app.settings_contract import ComputeMode
 
 
 @pytest.fixture
-def adapter(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    return KubernetesComputeProvider()
+def adapter(mode_adapter_factory):
+    return mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
 
 class TestNamespaceSetupCreatesResources:

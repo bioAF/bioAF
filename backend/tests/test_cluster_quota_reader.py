@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
 from app.adapters.compute.slurm import SlurmComputeProvider
 
 
 @pytest.fixture
-def adapter(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    provider = KubernetesComputeProvider()
+def adapter(mode_adapter_factory):
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
     provider._cluster_config = {
         "gcp_project_id": "bioaf-495400",
         "gcp_region": "us-central1",
@@ -137,9 +137,9 @@ async def test_an_explicit_region_overrides_the_configured_one(adapter):
 # -- capability declaration --------------------------------------------------
 
 
-def test_kubernetes_declares_quota_introspection(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    assert KubernetesComputeProvider().capabilities().quota_introspection is True
+def test_kubernetes_declares_quota_introspection(mode_adapter_factory):
+    provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
+    assert provider.capabilities().quota_introspection is True
 
 
 def test_a_stub_backend_does_not_declare_quota_introspection():

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
 from app.exceptions import ValidationError
 
 from app.adapters.models import ObjectMetadata, StorageStore, StorageObjectNotFound
@@ -34,9 +35,8 @@ def local_adapter(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def gcs_adapter(monkeypatch):
-    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-    adapter = GcsStorageProvider(org_slug="testorg")
+def gcs_adapter(mode_adapter_factory, monkeypatch):
+    adapter = mode_adapter_factory(GcsStorageProvider, org_slug="testorg", mode=ComputeMode.KUBERNETES)
     # Credentials resolution hits the DB; stub it for unit tests.
     monkeypatch.setattr(adapter, "_get_credentials", _async_none)
     return adapter
@@ -658,12 +658,11 @@ class TestBucketEnumeration:
         bucket.delete.assert_called_once_with(force=True)
 
     @pytest.mark.asyncio
-    async def test_query_bucket_stats_passes_resolved_credentials(self, monkeypatch):
+    async def test_query_bucket_stats_passes_resolved_credentials(self, mode_adapter_factory, monkeypatch):
         """Security: the adapter must build the GCS client with the impersonated
         bootstrap creds so project-level list_buckets is authorized (bioaf-app's
         storage.admin is bucket-name-conditioned and never matches at the project)."""
-        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
-        adapter = GcsStorageProvider(org_slug="testorg")
+        adapter = mode_adapter_factory(GcsStorageProvider, org_slug="testorg", mode=ComputeMode.KUBERNETES)
 
         fake_creds = MagicMock(name="impersonated_creds")
 

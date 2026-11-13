@@ -42,6 +42,8 @@ _notebook_adapter: NotebookProvider | None = None
 _cellxgene_adapter: CellxgeneProvider | None = None
 _work_node_adapter: WorkNodeProvider | None = None
 _initialized: bool = False
+# The compute stack the current adapters were built for; published only by a successful initialization.
+_active_compute_stack: str | None = None
 
 
 def _create_compute_notebook_adapters(
@@ -138,8 +140,11 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
     the read-then-assign of the singleton state.
     """
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
+    global _active_compute_stack
 
     async with _init_lock:
+        # A failed (re)initialization must not leave an earlier stack published beside new adapters.
+        _active_compute_stack = None
         cfg = await PlatformConfigService.get_many(session, ["compute_stack", "cellxgene_backend"])
         compute_stack = cfg.get("compute_stack") or "kubernetes"
         cellxgene_backend = cfg.get("cellxgene_backend") or DEFAULT_CELLXGENE_BACKEND
@@ -180,6 +185,7 @@ async def initialize_adapters(session: AsyncSession, session_factory=None) -> No
         await _work_node_adapter.load_config()
 
         _initialized = True
+        _active_compute_stack = compute_stack
 
 
 def initialize_adapters_sync(
@@ -189,7 +195,10 @@ def initialize_adapters_sync(
 ) -> None:
     """Initialize adapters synchronously from known values (for testing)."""
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
+    global _active_compute_stack
 
+    # As in initialize_adapters: a failed reinitialization must not leave an earlier stack published.
+    _active_compute_stack = None
     # Sync init is the local/test path (no DB to read cloud_provider from); clear
     # the resolved-backend cache so backend_for falls back to the gcp defaults
     # (kubernetes -> gcs), preserving today's behavior.
@@ -200,6 +209,15 @@ def initialize_adapters_sync(
     _cellxgene_adapter = _create_cellxgene_adapter(cellxgene_backend)
     _work_node_adapter = _create_work_node_adapter(work_node_backend)
     _initialized = True
+    _active_compute_stack = compute_stack
+
+
+def get_active_compute_stack() -> str | None:
+    """The compute stack of the initialized adapters, or None when no initialization has succeeded.
+
+    Restart-bound: a later change to platform_config.compute_stack is not active until the next
+    initialization. BIOAF_COMPUTE_MODE never selects it."""
+    return _active_compute_stack if _initialized else None
 
 
 def get_compute_adapter() -> ComputeProvider:
@@ -276,10 +294,12 @@ def require_capability(flag: str) -> None:
 def reset_registry() -> None:
     """Reset the registry (for testing)."""
     global _compute_adapter, _storage_adapter, _notebook_adapter, _cellxgene_adapter, _work_node_adapter, _initialized
+    global _active_compute_stack
     _compute_adapter = None
     _storage_adapter = None
     _notebook_adapter = None
     _cellxgene_adapter = None
     _work_node_adapter = None
     _initialized = False
+    _active_compute_stack = None
     reset_resolved_backends()

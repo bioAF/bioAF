@@ -86,6 +86,8 @@ def test_production_services_hash_at_twelve_in_a_fresh_process(tmp_path):
     env["PYTHONPATH"] = str(BACKEND_DIR)
     # Importing the services needs an encryption key; it has no bearing on hashing cost.
     env["BIOAF_ENCRYPTION_KEYS"] = os.environ["BIOAF_ENCRYPTION_KEYS"]
+    # Settings require a compute mode; local has no bearing on hashing cost either.
+    env["BIOAF_COMPUTE_MODE"] = "local"
     result = subprocess.run(
         [sys.executable, "-c", probe], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60
     )

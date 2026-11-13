@@ -352,7 +352,6 @@ class TestCellxgeneOutOfClusterClientAuthHeader:
     """
 
     def test_builds_client_with_authorization_default_header(self, monkeypatch):
-        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
         provider = KubernetesCellxgeneProvider()
         provider._cluster_config = {
             "gke_cluster_endpoint": "1.2.3.4",
@@ -413,7 +412,6 @@ class TestCellxgeneClusterChangeRebuild:
 
     @pytest.mark.asyncio
     async def test_cluster_endpoint_change_rebuilds_client(self, monkeypatch):
-        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
         provider = KubernetesCellxgeneProvider()
         fake_creds = self._setup(monkeypatch, token="tok-A")
         ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()
@@ -437,7 +435,6 @@ class TestCellxgeneClusterChangeRebuild:
 
     @pytest.mark.asyncio
     async def test_unchanged_cluster_reuses_cached_client(self, monkeypatch):
-        monkeypatch.delenv("BIOAF_COMPUTE_MODE", raising=False)
         provider = KubernetesCellxgeneProvider()
         self._setup(monkeypatch)
         ca_b64 = base64.b64encode(_DUMMY_CA_PEM).decode()

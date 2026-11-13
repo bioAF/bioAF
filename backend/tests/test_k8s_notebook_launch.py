@@ -7,15 +7,15 @@ DB updates, GCS sync init, terminate, status, namespace setup.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.settings_contract import ComputeMode
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 
 
 @pytest.fixture
-def adapter():
+def adapter(mode_adapter_factory):
     import time
 
-    provider = KubernetesNotebookProvider()
-    provider._mode = "k8s"
+    provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
     provider._namespace_ready = False
     # Pre-set a mock API client so _get_api_client_async() is a no-op
     provider._api_client = MagicMock()
@@ -414,10 +414,9 @@ class TestOutOfClusterFallback:
     """Tests for out-of-cluster K8s client initialization."""
 
     @pytest.mark.asyncio
-    async def test_incluster_config_used_when_available(self):
+    async def test_incluster_config_used_when_available(self, mode_adapter_factory):
         """When running inside a K8s pod, incluster config is used."""
-        provider = KubernetesNotebookProvider()
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
 
         with (
             patch("app.adapters.kubernetes.connection.config") as mock_config,
@@ -433,7 +432,7 @@ class TestOutOfClusterFallback:
             assert result == mock_api_client
 
     @pytest.mark.asyncio
-    async def test_fallback_to_platform_config_when_not_in_cluster(self):
+    async def test_fallback_to_platform_config_when_not_in_cluster(self, mode_adapter_factory):
         """When not in a K8s pod, falls back to platform_config credentials."""
         mock_session = AsyncMock()
         mock_result = MagicMock()
@@ -448,8 +447,9 @@ class TestOutOfClusterFallback:
         mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        provider = KubernetesNotebookProvider(session_factory=mock_session_factory)
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(
+            KubernetesNotebookProvider, session_factory=mock_session_factory, mode=ComputeMode.KUBERNETES
+        )
 
         with (
             patch("app.adapters.kubernetes.connection.config") as mock_config,
@@ -471,7 +471,7 @@ class TestOutOfClusterFallback:
             assert result == mock_api_client
 
     @pytest.mark.asyncio
-    async def test_raises_when_no_cluster_endpoint(self):
+    async def test_raises_when_no_cluster_endpoint(self, mode_adapter_factory):
         """Raises RuntimeError when no cluster endpoint is configured."""
         mock_session = AsyncMock()
         mock_result = MagicMock()
@@ -482,8 +482,9 @@ class TestOutOfClusterFallback:
         mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        provider = KubernetesNotebookProvider(session_factory=mock_session_factory)
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(
+            KubernetesNotebookProvider, session_factory=mock_session_factory, mode=ComputeMode.KUBERNETES
+        )
 
         with patch("app.adapters.kubernetes.connection.config") as mock_config:
             mock_config.load_incluster_config.side_effect = Exception("not in cluster")
@@ -494,10 +495,9 @@ class TestOutOfClusterFallback:
                 await provider._get_api_client_async()
 
     @pytest.mark.asyncio
-    async def test_cached_client_reused(self):
+    async def test_cached_client_reused(self, mode_adapter_factory):
         """Cached API client is reused on subsequent calls."""
-        provider = KubernetesNotebookProvider()
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
         mock_client = MagicMock()
         provider._api_client = mock_client
         provider._client_created_at = 1.0  # recent enough
@@ -509,10 +509,9 @@ class TestOutOfClusterFallback:
 
         assert result == mock_client
 
-    def test_core_client_uses_api_client(self):
+    def test_core_client_uses_api_client(self, mode_adapter_factory):
         """_get_k8s_core_client passes the shared ApiClient."""
-        provider = KubernetesNotebookProvider()
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
         mock_api_client = MagicMock()
         provider._api_client = mock_api_client
         provider._client_created_at = 1.0
@@ -526,10 +525,9 @@ class TestOutOfClusterFallback:
 
             mock_k8s.CoreV1Api.assert_called_once_with(api_client=mock_api_client)
 
-    def test_rbac_client_uses_api_client(self):
+    def test_rbac_client_uses_api_client(self, mode_adapter_factory):
         """_get_k8s_rbac_client passes the shared ApiClient."""
-        provider = KubernetesNotebookProvider()
-        provider._mode = "k8s"
+        provider = mode_adapter_factory(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
         mock_api_client = MagicMock()
         provider._api_client = mock_api_client
         provider._client_created_at = 1.0

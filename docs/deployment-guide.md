@@ -172,8 +172,11 @@ From the CLI:
 ```
 
 This backs up the database, fetches the target version tag from GitHub,
-pulls pre-built images, restarts services, upgrades the database, and
-waits until the backend reports ready.
+pulls pre-built images, checks the new backend's configuration, restarts
+services, upgrades the database, and waits until the backend reports ready.
+The new release's image tag is written to `docker/.env` only after its
+configuration check passes, so a rejected check leaves the current release
+pinned and running.
 
 From the UI, admins can click the **Install Update** button on the
 **Settings > Information** page when a new version is available. This
@@ -212,10 +215,86 @@ Until the upgrade has completed, the backend answers every request with a
 "finishing an upgrade" message and does no background work. The web app
 shows that message and picks up by itself when the backend is ready.
 
+### Compute mode
+
+`BIOAF_COMPUTE_MODE` decides whether the compute, notebook, storage and
+work-node adapters simulate their work or contact their real backends. It does
+not choose the cloud or the compute stack (those come from the platform
+configuration).
+
+| Value | Meaning |
+| --- | --- |
+| `kubernetes` (alias `k8s`) | Real backends. The bundled Compose file supplies it when `docker/.env` leaves the mode unset or empty. |
+| `local` | Simulation, for development. Not a full offline mode: cellxgene, for example, has no simulation. |
+| `slurm` | Legacy value, treated as real backends. It does not select the SLURM stack or start SLURM polling. |
+
+Case and surrounding spaces are ignored. Any other value, or an empty value
+given to the backend directly, stops it at startup with a message naming the
+setting. Each start logs the effective value:
+`Compute configuration: mode=kubernetes simulation=disabled active_compute_stack=kubernetes`
+(`./bioaf logs backend`). The mode and the active stack are read once at
+startup; a change applies after the backend is recreated.
+
+Outside the bundled Compose file (custom launchers, `uvicorn` by hand, Alembic
+or CLI commands), the setting has no default and must be supplied. The host's
+`docker/.env` is mounted at `/host/.env`; the backend does not read it as its
+own `.env`.
+
+#### If the backend rejects its configuration
+
+The backend checks its settings before touching the database, and `./bioaf
+update` and `./bioaf migrate` check them in a one-off container first. A
+configuration problem is reported as one: the database is not changed and no
+backup is needed. Correct the value in `docker/.env` (or wherever your
+launcher sets it, and make sure an exported shell variable is not overriding
+the file), then:
+
+- **During an update** (status step `settings_preflight`): run the same
+  `./bioaf update <version>` again. It recreates both the backend and the
+  frontend. Do not recreate only the backend to resume an update: the frontend
+  could stay on the old release while the updater considers the update done.
+  The current release keeps running until the check passes, so no image
+  rollback is needed.
+- **Otherwise** (`./bioaf migrate`, a manual start): recreate the backend so
+  it receives the new value (a restart keeps the old one), from the
+  repository root:
+  `docker compose -f docker/docker-compose.yml --env-file docker/.env up -d backend`
+
+An updater from an older release that is already running when it checks out
+this one keeps its old messages: it can pin the new release, start a backend
+that rejects its mode, and report a database upgrade failure. Correct the
+mode and run `./bioaf update <version>` again; the new updater checks the
+settings, backs up, applies the corrected configuration to the services and
+then completes the upgrade. A release older than this check has no checker;
+`./bioaf update` and `./bioaf migrate` then report that the configuration could
+not be checked (not that it is invalid). Use that release's own `./bioaf` for
+it.
+
+#### Configuration-only rollback
+
+To return to the previous release after a configuration failure outside an
+update, keep the database, the volumes and `docker/.env`'s encryption keys as
+they are. Set `BIOAF_IMAGE_TAG` in `docker/.env` to the previous release's tag,
+including its `v` (for example `BIOAF_IMAGE_TAG=v2026.11.20`), make sure no
+exported `BIOAF_IMAGE_TAG` overrides it, and recreate only the backend:
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d --no-deps --force-recreate backend
+```
+
+This change adds no database migration, so no restore, reset or Alembic
+downgrade is involved. Both the older `${BIOAF_COMPUTE_MODE:-k8s}` and the
+current `${BIOAF_COMPUTE_MODE:-kubernetes}` Compose spellings give either
+release a valid mode. Do not follow the database-restore steps below for a
+configuration failure.
+
 ### If an update fails
 
 1. Read `update-status/schema-upgrade.json` (and `./bioaf logs backend`).
    It names the step that failed (`backup`, `migrate`, `validate`) and why.
+   If the update stopped at `settings_preflight` (Checking backend
+   configuration), the database was not touched: see
+   [If the backend rejects its configuration](#if-the-backend-rejects-its-configuration).
 2. Fix the cause (for example free disk space), then retry with
    `./bioaf migrate` or `./bioaf update <version>`. Retrying works when the
    new version's images are already installed; a completed upgrade is never

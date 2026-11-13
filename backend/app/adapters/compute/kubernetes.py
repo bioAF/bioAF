@@ -1,7 +1,7 @@
 """Kubernetes compute adapter.
 
 Supports local/mock mode for development and real K8s API for production.
-Mode is controlled by the BIOAF_COMPUTE_MODE environment variable.
+Mode is the resolved settings.compute_mode (BIOAF_COMPUTE_MODE), fixed when the adapter is built.
 
 When running outside the cluster (e.g., Docker Compose on a VM), the adapter
 builds a K8s client from platform_config credentials (gke_cluster_endpoint,
@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 from kubernetes import client
 
+from app.config import compute_mode_for
+from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import ComputeProvider
 from app.adapters.compute.k8s_manifest import ManifestInputs, NextflowLaunch, build_job_manifest, builds_nextflow
 from app.adapters.job_specs import CustomCommandJobSpec, JobSpec, NextflowJobSpec, job_spec_from_dict
@@ -194,8 +196,8 @@ class KubernetesComputeProvider(ComputeProvider):
         "k8s_pipeline_disk_size_gb",
     ]
 
-    def __init__(self, session_factory=None):
-        self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+    def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
+        self._mode = compute_mode_for(mode)
         self._gke = GkeConnection(
             config_keys=self._CONFIG_KEYS,
             session_factory=session_factory,
@@ -248,7 +250,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
     @property
     def is_local(self) -> bool:
-        return self._mode == "local"
+        return is_simulated(self._mode)
 
     def capabilities(self) -> ProviderCapabilities:
         """Kubernetes compute supports cost estimation, autoscaling, exec,

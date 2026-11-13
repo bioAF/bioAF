@@ -30,6 +30,8 @@ def _cost(hashed: str) -> int:
 def _scrubbed_env(**extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("BIOAF_")}
     env["PYTHONPATH"] = str(BACKEND_DIR)
+    # Settings require a compute mode; local has no bearing on hashing cost.
+    env["BIOAF_COMPUTE_MODE"] = "local"
     env.update(extra)
     return env
 

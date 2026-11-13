@@ -21,11 +21,12 @@ providers); no explicit credentials object is threaded.
 
 import asyncio
 import logging
-import os
 import posixpath
 import uuid
 from datetime import datetime, timezone
 
+from app.config import compute_mode_for
+from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import VmInstance, WorkNodeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
@@ -297,8 +298,8 @@ class Ec2VmInstance(VmInstance):
     this under the WorkNodeProvider names, exactly as GCE does.
     """
 
-    def __init__(self, session_factory=None):
-        self._mode = os.environ.get("BIOAF_COMPUTE_MODE", "local")
+    def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
+        self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         self._aws_config: dict | None = None
         # Sync SSH private keys keyed by session_id (generated at launch, used at
@@ -307,7 +308,7 @@ class Ec2VmInstance(VmInstance):
 
     @property
     def is_local(self) -> bool:
-        return self._mode == "local"
+        return is_simulated(self._mode)
 
     async def load_config(self, force: bool = False) -> dict:
         """Read AWS work-node config from platform_config. Caches the result.

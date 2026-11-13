@@ -129,10 +129,19 @@ EOF
 # run_database_upgrade (plan 9)
 # ---------------------------------------------------------------------------
 
+# The settings preflight (python -m app.cli.check_settings) and the upgrade have independent outcomes:
+# STUB_PREFLIGHT_STATUS and STUB_STATUS, so a settings rejection never stands in for an upgrade failure.
 stub_python() {
     mkdir -p "$TEST_DIR/bin"
-    printf '%s\n' '#!/bin/sh' "echo \"python \$*\" >> \"$TEST_DIR/calls\"" "exit \${STUB_STATUS:-0}" > "$TEST_DIR/bin/python"
+    printf '%s\n' '#!/bin/sh' "echo \"python \$*\" >> \"$TEST_DIR/calls\"" \
+        'case "$*" in *app.cli.check_settings*) exit ${STUB_PREFLIGHT_STATUS:-0} ;; esac' \
+        "exit \${STUB_STATUS:-0}" > "$TEST_DIR/bin/python"
     chmod +x "$TEST_DIR/bin/python"
+}
+
+stub_uvicorn() {
+    printf '%s\n' '#!/bin/sh' "echo \"uvicorn \$*\" >> \"$TEST_DIR/calls\"" > "$TEST_DIR/bin/uvicorn"
+    chmod +x "$TEST_DIR/bin/uvicorn"
 }
 
 @test "upgrade: the application server's start runs the shared database upgrade" {
@@ -164,10 +173,55 @@ stub_python() {
 
 @test "upgrade: the entrypoint upgrades before starting the server, even with an old RUN_MIGRATIONS=false" {
     stub_python
-    printf '%s\n' '#!/bin/sh' "echo \"uvicorn \$*\" >> \"$TEST_DIR/calls\"" > "$TEST_DIR/bin/uvicorn"
-    chmod +x "$TEST_DIR/bin/uvicorn"
+    stub_uvicorn
     run env PATH="$TEST_DIR/bin:$PATH" RUN_MIGRATIONS=false BIOAF_ENCRYPTION_KEYS=abc \
         BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh "$ENTRYPOINT" uvicorn app.main:app
     [ "$status" -eq 0 ]
-    [ "$(cat "$TEST_DIR/calls")" = "$(printf 'python -m app.schema_upgrade run\nuvicorn app.main:app')" ]
+    [ "$(cat "$TEST_DIR/calls")" = "$(printf 'python -m app.cli.check_settings\npython -m app.schema_upgrade run\nuvicorn app.main:app')" ]
+}
+
+# ---------------------------------------------------------------------------
+# run_settings_preflight (plan 21): rejected settings stop before the upgrade and the server
+# ---------------------------------------------------------------------------
+
+@test "preflight: rejected settings stop the entrypoint before the upgrade and the server" {
+    stub_python
+    stub_uvicorn
+    run env PATH="$TEST_DIR/bin:$PATH" STUB_PREFLIGHT_STATUS=78 BIOAF_ENCRYPTION_KEYS=abc \
+        BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh "$ENTRYPOINT" uvicorn app.main:app
+    [ "$status" -eq 78 ]
+    [ "$(cat "$TEST_DIR/calls")" = "python -m app.cli.check_settings" ]
+    [[ "$output" == *"settings were rejected"* ]]
+    [[ "$output" != *"maintenance"* ]]
+    [[ "$output" != *"./bioaf migrate"* ]]
+}
+
+@test "preflight: a check that cannot run also stops, without claiming the settings are invalid" {
+    stub_python
+    stub_uvicorn
+    run env PATH="$TEST_DIR/bin:$PATH" STUB_PREFLIGHT_STATUS=1 BIOAF_ENCRYPTION_KEYS=abc \
+        BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh "$ENTRYPOINT" uvicorn app.main:app
+    [ "$status" -ne 0 ]
+    [ "$(cat "$TEST_DIR/calls")" = "python -m app.cli.check_settings" ]
+    [[ "$output" == *"could not check its settings"* ]]
+    [[ "$output" != *"rejected"* ]]
+    [[ "$output" != *"./bioaf migrate"* ]]
+}
+
+@test "preflight: valid settings and a failed upgrade still start the server, in maintenance" {
+    stub_python
+    stub_uvicorn
+    run env PATH="$TEST_DIR/bin:$PATH" STUB_STATUS=1 BIOAF_ENCRYPTION_KEYS=abc \
+        BIOAF_UPGRADE_BACKUPS_DIR="$TEST_DIR/none" sh "$ENTRYPOINT" uvicorn app.main:app
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_DIR/calls")" = "$(printf 'python -m app.cli.check_settings\npython -m app.schema_upgrade run\nuvicorn app.main:app')" ]
+    [[ "$output" == *"maintenance"* ]]
+    [[ "$output" == *"./bioaf migrate"* ]]
+}
+
+@test "preflight: one-off commands do not run it" {
+    stub_python
+    run env PATH="$TEST_DIR/bin:$PATH" BIOAF_ENCRYPTION_KEYS=abc sh "$ENTRYPOINT" python -m app.cli.export_openapi --check
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_DIR/calls")" = "python -m app.cli.export_openapi --check" ]
 }

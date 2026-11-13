@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.settings_contract import ComputeMode
+from tests.support.mode_adapters import build_mode_adapter
 from app.adapters.storage.gcs import GcsStorageProvider
 from app.adapters.storage.s3 import S3StorageProvider
 from app.exceptions import ValidationError
@@ -56,8 +58,7 @@ def _mapped(script: str, tmp_path, *dirs: str) -> str:
 def _notebook_adapter():
     from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 
-    provider = KubernetesNotebookProvider()
-    provider._mode = "k8s"
+    provider = build_mode_adapter(KubernetesNotebookProvider, mode=ComputeMode.KUBERNETES)
     return provider
 
 

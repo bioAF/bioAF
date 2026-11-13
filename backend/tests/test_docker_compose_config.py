@@ -1,13 +1,20 @@
 """Tests that docker-compose.yml configures the backend for real pipeline execution.
 
-The backend service must set BIOAF_COMPUTE_MODE so the K8s compute adapter
-runs in k8s mode rather than the local mock mode.
+Production Compose supplies BIOAF_COMPUTE_MODE=kubernetes when the host leaves it unset or empty, so
+the mode-aware adapters contact their real backends; other host values reach the application's own
+validation. The standalone development file always supplies local.
 """
 
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+from app.settings_contract import ComputeMode, parse_compute_mode
 
 
 COMPOSE_FILE = Path(__file__).parent.parent.parent / "docker" / "docker-compose.yml"
@@ -19,13 +26,10 @@ def compose_config():
 
 
 class TestBackendComputeConfig:
-    def test_compute_mode_set_to_k8s(self, compose_config):
-        """Backend service must set BIOAF_COMPUTE_MODE to k8s."""
+    def test_compute_mode_falls_back_to_the_canonical_real_mode(self, compose_config):
+        """The deployment boundary's fallback is spelled canonically (the app has no default)."""
         backend_env = compose_config["services"]["backend"]["environment"]
-        assert "BIOAF_COMPUTE_MODE" in backend_env, "BIOAF_COMPUTE_MODE not set in backend environment"
-        value = backend_env["BIOAF_COMPUTE_MODE"]
-        # The value may use variable substitution like ${BIOAF_COMPUTE_MODE:-k8s}
-        assert "k8s" in str(value), f"Expected BIOAF_COMPUTE_MODE to default to k8s, got {value}"
+        assert backend_env["BIOAF_COMPUTE_MODE"] == "${BIOAF_COMPUTE_MODE:-kubernetes}"
 
     def test_gcp_project_id_passed(self, compose_config):
         """Backend service must pass GCP_PROJECT_ID for GKE cluster access."""
@@ -58,3 +62,77 @@ class TestBackendShutdownBudget:
     def test_development_command_bounds_uvicorns_request_grace(self):
         backend = yaml.safe_load(DEV_COMPOSE_FILE.read_text())["services"]["backend"]
         assert "--timeout-graceful-shutdown 10" in backend["command"]
+
+
+# --- Effective compute mode, rendered by Compose itself -------------------------------------------
+
+needs_compose = pytest.mark.skipif(shutil.which("docker") is None, reason="docker compose CLI not installed")
+
+
+def _render(compose: Path, tmp_path: Path, env_lines: list[str], shell: dict[str, str] | None = None) -> dict:
+    """``docker compose config`` with a synthetic host env file and a shell holding nothing else."""
+    env_file = tmp_path / "host.env"
+    env_file.write_text("".join(f"{line}\n" for line in env_lines))
+    proc = subprocess.run(
+        ["docker", "compose", "-f", str(compose), "--env-file", str(env_file), "config", "--format", "json"],
+        # Only what docker needs to find its compose plugin: no inherited value can be interpolated.
+        env={k: os.environ[k] for k in ("PATH", "HOME", "DOCKER_CONFIG") if k in os.environ} | (shell or {}),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)["services"]["backend"]
+
+
+def _effective(raw: str | None) -> ComputeMode | None:
+    try:
+        return parse_compute_mode(raw)
+    except ValueError:
+        return None
+
+
+@needs_compose
+@pytest.mark.parametrize(
+    ("host_lines", "rendered", "effective"),
+    [
+        ([], "kubernetes", ComputeMode.KUBERNETES),
+        (["BIOAF_COMPUTE_MODE="], "kubernetes", ComputeMode.KUBERNETES),
+        (["BIOAF_COMPUTE_MODE=local"], "local", ComputeMode.LOCAL),
+        (["BIOAF_COMPUTE_MODE=kubernetes"], "kubernetes", ComputeMode.KUBERNETES),
+        (["BIOAF_COMPUTE_MODE=k8s"], "k8s", ComputeMode.KUBERNETES),
+        (["BIOAF_COMPUTE_MODE=K8S"], "K8S", ComputeMode.KUBERNETES),
+        (["BIOAF_COMPUTE_MODE=LOCAL"], "LOCAL", ComputeMode.LOCAL),
+        (["BIOAF_COMPUTE_MODE=slurm"], "slurm", ComputeMode.SLURM),
+        (["BIOAF_COMPUTE_MODE=typo"], "typo", None),
+    ],
+)
+def test_production_compose_supplies_real_mode_unless_the_host_sets_one(tmp_path, host_lines, rendered, effective):
+    backend = _render(COMPOSE_FILE, tmp_path, host_lines)
+    assert backend["environment"]["BIOAF_COMPUTE_MODE"] == rendered
+    assert _effective(rendered) is effective
+
+
+@needs_compose
+@pytest.mark.parametrize("host_lines", [[], ["BIOAF_COMPUTE_MODE=kubernetes"]])
+def test_development_compose_always_supplies_local(tmp_path, host_lines):
+    backend = _render(DEV_COMPOSE_FILE, tmp_path, host_lines)
+    assert backend["environment"]["BIOAF_COMPUTE_MODE"] == "local"
+
+
+@needs_compose
+def test_the_host_env_file_is_mounted_beside_not_as_the_application_dotenv(tmp_path):
+    # The image works in /app; Pydantic reads /app/.env. The host file is only /host/.env.
+    targets = {v["target"] for v in _render(COMPOSE_FILE, tmp_path, [])["volumes"]}
+    assert "/host/.env" in targets
+    assert "/app/.env" not in targets
+
+
+@needs_compose
+def test_a_previous_release_tag_in_the_env_file_renders_that_backend_image(tmp_path):
+    """Configuration-only rollback: the pinned tag picks the image whatever this checkout's spelling."""
+    backend = _render(COMPOSE_FILE, tmp_path, ["BIOAF_IMAGE_TAG=v2026.11.20"])
+    assert backend["image"] == "ghcr.io/bioaf/bioaf-backend:v2026.11.20"
+    # An exported shell tag overrides the env file: the rollback note tells operators to unset it.
+    shadowed = _render(COMPOSE_FILE, tmp_path, ["BIOAF_IMAGE_TAG=v2026.11.20"], {"BIOAF_IMAGE_TAG": "v2026.11.21"})
+    assert shadowed["image"] == "ghcr.io/bioaf/bioaf-backend:v2026.11.21"
