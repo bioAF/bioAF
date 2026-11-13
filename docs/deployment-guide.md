@@ -186,10 +186,12 @@ them, including during a collector outage.
 
 `./bioaf setup`, `start` and `update` read the value Compose will give the backend (from
 `docker compose config`, so `docker/.env` and your shell environment both count). In `direct` mode
-they install and reconfigure no agent, and they stop with an error if an Ops Agent config on the
-host has any path (glob patterns included) that matches Docker's container log files, or if that
-config cannot be read or its `include_paths` are not literal paths. Remove that collection or use
-`stdout`.
+they install and reconfigure no agent. They accept direct delivery only when the agent config
+(`/etc/google-cloud-ops-agent/config.yaml`) is absent, contains only comments, or contains the line
+`# bioaf-log-delivery: no-container-logs`, which you add after checking that your config reads no
+container logs. A bioAF-managed or previously shipped config, any other config, and a config that
+cannot be read all stop the command with an error. bioAF does not try to work out what an arbitrary
+agent config collects.
 
 In `stdout` mode the backend builds no Cloud Logging client and reads no credentials for logging.
 In `direct` mode stdout is still written; a direct sink that cannot be built is reported once by
