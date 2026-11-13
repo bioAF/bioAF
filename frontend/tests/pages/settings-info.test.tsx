@@ -66,6 +66,31 @@ describe("Settings Info page -- update flow", () => {
     expect(screen.getByText(/Rebuilding containers/i)).toBeInTheDocument();
   });
 
+  it("labels the settings preflight step while an update checks the backend configuration", async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url === "/api/upgrades/check") return Promise.resolve(versionCheck);
+      if (url === "/api/upgrades/history") return Promise.resolve(historyEmpty);
+      if (url === "/api/upgrades/status") {
+        return Promise.resolve({
+          status: "in_progress",
+          step: "settings_preflight",
+          to_version: "0.7.4",
+          started_at: new Date().toISOString(),
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    await act(async () => {
+      render(<SettingsInfoPage />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Checking backend configuration/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/settings_preflight/)).not.toBeInTheDocument();
+  });
+
   it("shows a 60-second reboot countdown during the warn step", async () => {
     jest.useFakeTimers({ doNotFake: ["nextTick"] });
     const warnStartedAt = new Date("2026-04-15T12:00:00.000Z");

@@ -583,11 +583,34 @@ cmd_logs() {
     fi
 }
 
+check_backend_settings() {
+    # Validate the backend's settings in a one-off container (backend/app/cli/check_settings.py), so
+    # the check works while the backend service is stopped or restarting on bad settings. --no-deps
+    # starts nothing else; the command starts with python, so the entrypoint runs neither its server
+    # preflight nor the database upgrade. Uses the env file's tag unless the caller scopes
+    # BIOAF_IMAGE_TAG to this call. Returns 0 valid, 78 rejected, anything else: could not check
+    # (Docker failed, or an image older than the checker).
+    $DC run --rm --no-deps -T backend python -m app.cli.check_settings
+}
+
 cmd_migrate() {
     # The backend's shared upgrade lifecycle (backend/app/schema_upgrade.py): lock, verified recovery
     # backup in backups/, migrate, validate, record. Safe to repeat; a no-op once done. A backend
     # serving maintenance responses restarts into normal service once this succeeds.
     bold "=== Running Database Migrations ==="
+    local check_status=0
+    check_backend_settings || check_status=$?
+    if [ "$check_status" -ne 0 ]; then
+        if [ "$check_status" -eq 78 ]; then
+            red "The backend's settings were rejected (see above, e.g. BIOAF_COMPUTE_MODE). Nothing was migrated."
+            echo "  Correct docker/.env, recreate the backend so it receives the new value, then run ./bioaf migrate again:"
+        else
+            red "The backend's settings could not be checked (Docker failed, or this image predates the check). Nothing was migrated."
+            echo "  For an older release, use that release's ./bioaf. Otherwise fix Docker, then recreate the backend and retry:"
+        fi
+        echo "  docker compose -f docker/docker-compose.yml --env-file docker/.env up -d backend"
+        return 1
+    fi
     wait_for_db
     if ! $DC exec -T backend python -m app.schema_upgrade run; then
         red "Database upgrade failed. Details: update-status/schema-upgrade.json"
@@ -943,6 +966,22 @@ update_failed() {
     exit 1
 }
 
+update_settings_preflight() {
+    # update_settings_preflight <target>: check the target's settings in a one-off container, under a
+    # tag scoped to this call (never the env file, the caller's shell, or the running services).
+    # Persisted messages are fixed text: the checker's own output stays in the terminal.
+    local target="$1" check_status=0
+    write_update_status in_progress settings_preflight
+    echo ""
+    bold "Checking backend configuration..."
+    BIOAF_IMAGE_TAG="v${target}" check_backend_settings || check_status=$?
+    case "$check_status" in
+        0) green "Backend configuration is valid." ;;
+        78) update_failed settings_preflight "The v${target} backend rejected its configuration (for example BIOAF_COMPUTE_MODE in docker/.env). The running services were not changed. Correct the configuration, then run ./bioaf update ${target} again." ;;
+        *) update_failed settings_preflight "The v${target} backend configuration could not be checked (Docker failed, or the image predates the check). The running services were not changed. Fix the cause, then run ./bioaf update ${target} again." ;;
+    esac
+}
+
 cmd_update() {
     local target_version="${1:-}"
     local current_version
@@ -983,7 +1022,7 @@ cmd_update() {
     echo "  Current version:  $current_version"
     echo "  Target version:   $target_version"
     if [ "$retry_only" = true ]; then
-        yellow "  Version $target_version is installed but its database upgrade did not complete; retrying it."
+        yellow "  Version $target_version is installed but has not finished starting and upgrading; retrying that."
     fi
     echo ""
 
@@ -1023,6 +1062,12 @@ cmd_update() {
         green "All release images are available."
     fi
 
+    # Retrying an installed target: check its configuration before anything else. A backend restarting
+    # on a bad mode cannot answer exec, but this one-off container can.
+    if [ "$retry_only" = true ]; then
+        update_settings_preflight "$target_version"
+    fi
+
     # Back up the database before updating. A failed backup stops the update: nothing has been
     # changed yet, and an update without recovery material is not safe to continue (the backend
     # also makes its own verified backup before migrating).
@@ -1059,14 +1104,21 @@ cmd_update() {
             update_failed ensure_encryption_key "encryption key bootstrap failed"
 
         # Pull pre-built images while old containers are still running,
-        # so the only downtime is the restart + migrate window.
+        # so the only downtime is the restart + migrate window. The target tag is scoped to the
+        # pull and the check: docker/.env keeps the old pin until both succeed.
         write_update_status in_progress pull
         echo ""
-        # Pin the new tag in docker/.env so this version sticks for any future
-        # start/restart, not just this $DC up call.
-        pin_image_tag "v${target_version}"
         bold "Pulling pre-built images..."
-        $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
+        BIOAF_IMAGE_TAG="v${target_version}" $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
+
+        update_settings_preflight "$target_version"
+    fi
+
+    # Pin the target in docker/.env (and this process) only now that its settings passed, so this
+    # version sticks for any future start/restart and the up below uses it.
+    pin_image_tag "v${target_version}"
+
+    if [ "$retry_only" = false ]; then
 
         # Warning window before restart: give the UI time to show a countdown
         # so users know the app is about to go offline briefly. Skipped when
@@ -1078,13 +1130,18 @@ cmd_update() {
             yellow "Restarting in ${warn_seconds}s (notifying active users)..."
             sleep "$warn_seconds"
         fi
+    fi
 
-        # Restart services with new images. The new backend runs the database upgrade before
-        # serving (backend/entrypoint.sh) and answers 503 until it has completed.
-        write_update_status in_progress restart
-        $DC up -d || update_failed restart "Could not start the v${target_version} containers."
-        wait_for_db
+    # Bring the services to the pinned target with the current env file, on a fresh update and on a
+    # retry alike: a backend restarting on bad settings keeps its old environment until Compose
+    # recreates it. No --force-recreate: unchanged, running containers are left alone. The new
+    # backend runs the database upgrade before serving (backend/entrypoint.sh) and answers 503 until
+    # it has completed.
+    write_update_status in_progress restart
+    $DC up -d || update_failed restart "Could not start the v${target_version} containers."
+    wait_for_db
 
+    if [ "$retry_only" = false ]; then
         # Cloud Logging (GCE only, idempotent) -- run after restart so it
         # does not block the update while containers are down.
         ensure_cloud_logging

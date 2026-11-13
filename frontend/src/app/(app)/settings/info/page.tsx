@@ -39,6 +39,7 @@ interface UpdateStatus {
 const STEP_LABELS: Record<string, string> = {
   backup: "Backing up database",
   checkout: "Fetching new version",
+  settings_preflight: "Checking backend configuration",
   build: "Rebuilding containers",
   warn: "Preparing to restart",
   restart: "Restarting services",
