@@ -184,6 +184,11 @@ them, including during a collector outage.
 | `stdout` (default, both Compose files) | The Ops Agent on the VM reads Docker's log files | Supported GCE installs (`./bioaf setup` installs and configures the agent) |
 | `direct` | The backend itself, with the GCP project and credentials in platform config | Nothing collects container output (no agent). Never together with the agent, or every backend record is ingested twice |
 
+`./bioaf setup`, `start` and `update` read the value Compose will give the backend (from
+`docker compose config`, so `docker/.env` and your shell environment both count). In `direct` mode
+they install and reconfigure no agent, and they stop with an error if an Ops Agent on the host
+already collects container logs; remove that collection or use `stdout`.
+
 In `stdout` mode the backend builds no Cloud Logging client and reads no credentials for logging.
 In `direct` mode stdout is still written; a direct sink that cannot be built is reported once by
 error class and the backend keeps running with stdout only.

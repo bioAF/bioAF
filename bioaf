@@ -138,15 +138,55 @@ ops_agent_activate() {
     done
 }
 
+effective_log_delivery() {
+    # The BIOAF_LOG_DELIVERY Compose will give the backend (selected Compose and env files and the
+    # caller's environment, resolved by Compose itself), lowercased and trimmed. Fails when Compose
+    # cannot render its configuration.
+    local rendered
+    rendered=$($DC config --format json 2>/dev/null) || return 1
+    printf '%s' "$rendered" | python3 -c '
+import json, sys
+env = json.load(sys.stdin).get("services", {}).get("backend", {}).get("environment") or {}
+print(str(env.get("BIOAF_LOG_DELIVERY") or "stdout").strip().lower())
+'
+}
+
+ops_agent_collects_containers() {
+    # True when the installed agent config reads Docker container log files.
+    sudo grep -q '/var/lib/docker/containers' "$OPS_AGENT_CONFIG" 2>/dev/null
+}
+
 ensure_cloud_logging() {
-    # GCE only: install the Ops Agent if missing and reconcile its config with the one this release
-    # ships, so the backend's JSON stdout is parsed before it becomes the centralized route. Safe to
+    # GCE only, stdout delivery only: install the Ops Agent if missing and reconcile its config with
+    # the one this release ships, so the backend's JSON stdout is parsed before it becomes the centralized route. Safe to
     # call on every setup, start and update. Fails (non-zero) when the config could not be brought to
     # this release's version: a custom file, a rejected candidate, or an agent that did not come back
     # (the previous config is then restored). Never disables collection.
     if ! is_gce; then
         return 0
     fi
+
+    # One centralized path (plan 22, D1). Direct delivery ships from the backend itself, so the host
+    # must not also collect its stdout: install and reconcile nothing, and refuse an agent that
+    # already reads container logs rather than ingest every backend record twice.
+    local delivery
+    if ! delivery=$(effective_log_delivery); then
+        red "Could not read the Compose configuration to find BIOAF_LOG_DELIVERY; the Ops Agent was not changed."
+        return 1
+    fi
+    case "$delivery" in
+        stdout) ;;
+        direct)
+            if [ -f "$OPS_AGENT_CONFIG" ] && ops_agent_collects_containers; then
+                red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent on this host also collects container logs ($OPS_AGENT_CONFIG), so every backend record would be ingested twice."
+                red "Use BIOAF_LOG_DELIVERY=stdout, or remove container collection from the agent config."
+                return 1
+            fi
+            return 0 ;;
+        *)
+            red "BIOAF_LOG_DELIVERY must be stdout or direct; the Ops Agent was not changed."
+            return 1 ;;
+    esac
 
     if [ ! -x "$OPS_AGENT_ENGINE" ] && ! command -v google_cloud_ops_agent_engine &>/dev/null; then
         bold "Installing Google Cloud Ops Agent..."

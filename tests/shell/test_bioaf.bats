@@ -757,7 +757,17 @@ echo "engine $*" >> "$FAKE_LOG"
 echo "ENGINE-DETAIL-MARKER"
 exit "${FAKE_ENGINE_STATUS:-0}"
 STUB
-    chmod +x "$tmp/bin/sudo" "$tmp/bin/curl" "$tmp/bin/systemctl" "$tmp/engine"
+    # The effective Compose configuration: FAKE_DELIVERY is what Compose resolves for the backend.
+    cat > "$tmp/fake-config" <<'STUB'
+#!/bin/sh
+[ "${FAKE_CONFIG_STATUS:-0}" = 0 ] || exit "$FAKE_CONFIG_STATUS"
+case "$*" in
+    *"config --format json"*)
+        printf '{"services": {"backend": {"environment": {"BIOAF_LOG_DELIVERY": "%s"}}}}' "${FAKE_DELIVERY-stdout}" ;;
+    *) exit 1 ;;
+esac
+STUB
+    chmod +x "$tmp/bin/sudo" "$tmp/bin/curl" "$tmp/bin/systemctl" "$tmp/engine" "$tmp/fake-config"
     cat > "$tmp/cloud.sh" <<HARNESS
 source '$BIOAF_SCRIPT' >/dev/null
 export PATH='$tmp/bin':"\$PATH"
@@ -766,6 +776,7 @@ OPS_AGENT_CONFIG='$tmp/etc/config.yaml'
 OPS_AGENT_ENGINE='$tmp/engine'
 OPS_AGENT_DETAIL_DIR='$tmp/host-only'
 OPS_AGENT_ACTIVE_WAIT=0
+DC='$tmp/fake-config'
 HARNESS
 }
 
@@ -885,4 +896,65 @@ HARNESS
     [ "$status" -ne 0 ]
     ! grep -q '^up' "$tmp/log"
     [[ "$output" != *"All services started"* ]]
+}
+
+@test "direct delivery on a GCE host without an agent installs and configures nothing" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct bash -c "source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/absent'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/etc/config.yaml" ]
+    ! grep -qE '^(curl|engine|systemctl)' "$tmp/log" 2>/dev/null
+}
+
+@test "direct delivery is rejected while the agent collects container logs" {
+    for existing in legacy managed; do
+        tmp="$(mktemp -d)"; cloud_env "$tmp"
+        if [ "$existing" = legacy ]; then
+            cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+        else
+            run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+            [ "$status" -eq 0 ]
+        fi
+        cp "$tmp/etc/config.yaml" "$tmp/before"; : > "$tmp/log"
+        run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=" Direct " bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"BIOAF_LOG_DELIVERY=direct"* ]]
+        cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+        ! grep -qE '^(engine|systemctl restart)' "$tmp/log"
+    done
+}
+
+@test "direct delivery with an agent that does not collect container logs is accepted unchanged" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'metrics:\n  receivers: {}\n' > "$tmp/etc/config.yaml"
+    cp "$tmp/etc/config.yaml" "$tmp/before"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+}
+
+@test "an unknown delivery value or an unreadable Compose configuration stops before touching the agent" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=agent bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"BIOAF_LOG_DELIVERY"* ]]
+    run env FAKE_LOG="$tmp/log" FAKE_CONFIG_STATUS=1 bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/etc/config.yaml" ]
+    ! grep -qE '^(curl|engine|systemctl)' "$tmp/log" 2>/dev/null
+}
+
+@test "the delivery comes from the effective Compose configuration, env file and shell override included" {
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/docker"
+    cp "$BATS_TEST_DIRNAME/../../docker/docker-compose.yml" "$tmp/docker/"
+    if ! docker compose version >/dev/null 2>&1; then skip "docker compose is not available"; fi
+    printf 'BIOAF_LOG_DELIVERY=direct\n' > "$tmp/.env"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = direct ]
+    run env BIOAF_LOG_DELIVERY=stdout bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = stdout ]
+    : > "$tmp/.env"
+    run env -u BIOAF_LOG_DELIVERY bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='docker compose -f $tmp/docker/docker-compose.yml --env-file $tmp/.env'; effective_log_delivery"
+    [ "$output" = stdout ]
 }
