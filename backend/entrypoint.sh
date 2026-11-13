@@ -100,6 +100,34 @@ bootstrap_encryption_key() {
 }
 
 # ---------------------------------------------------------------------------
+# Check the application settings before anything else touches the database.
+#
+# Settings are validated when the application is imported (backend/app/config.py), so a missing or
+# invalid BIOAF_COMPUTE_MODE would also fail the upgrade below, which would then wrongly claim a
+# database problem and start the server in maintenance. backend/app/cli/check_settings.py runs that
+# same validation on its own: exit 0 valid, 78 settings rejected, anything else the check could not
+# run. Either failure stops here: no upgrade, no server. Compose may restart the container, and each
+# attempt reports the configuration problem. Like the upgrade, it runs only for the server.
+# ---------------------------------------------------------------------------
+
+run_settings_preflight() {
+    [ "${1:-}" = "uvicorn" ] || return 0
+
+    preflight_status=0
+    python -m app.cli.check_settings || preflight_status=$?
+    [ "$preflight_status" -eq 0 ] && return 0
+
+    if [ "$preflight_status" -eq 78 ]; then
+        echo "FATAL: bioAF settings were rejected (above); the server was not started and the database was not changed." >&2
+    else
+        echo "FATAL: bioAF could not check its settings; the server was not started and the database was not changed." >&2
+    fi
+    echo "  Correct the setting where this container is configured (docker/.env for the bundled Compose stack)." >&2
+    echo "  During ./bioaf update, rerun the update; otherwise recreate the backend container." >&2
+    exit "$preflight_status"
+}
+
+# ---------------------------------------------------------------------------
 # Upgrade the database before the application serves (plan 9).
 #
 # Runs on every start of the application server, so the first start of a new
@@ -134,6 +162,7 @@ run_database_upgrade() {
 }
 
 bootstrap_encryption_key
+run_settings_preflight "$@"
 run_database_upgrade "$@"
 
 exec "$@"
