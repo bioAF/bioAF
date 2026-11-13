@@ -242,6 +242,7 @@ UPDATE_AGENT_SERVICE="bioaf-update-agent"
 UPDATE_AGENT_UNIT="/etc/systemd/system/bioaf-update-agent.service"
 UPDATE_AGENT_DETAIL_DIR=""   # host-only; defaults to $SCRIPT_DIR/host-only (never a backend mount)
 UPDATE_AGENT_ACTIVE_WAIT=10  # seconds to wait for the agent to be active after a start or restart
+UPDATE_AGENT_SETTLE=3        # then it must still be active this many seconds later (not crash-looping)
 
 update_agent_render() {
     # update_agent_render <template> <dir> <user> <group>: the unit text, placeholders replaced.
@@ -298,18 +299,22 @@ update_agent_restart_when_idle() {
 }
 
 update_agent_wait_active() {
+    # Active, and still active a moment later: a Type=simple service reports active as soon as it is
+    # started, even when its process exits at once and systemd is about to restart it.
     local waited=0
     until sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE"; do
         [ "$waited" -ge "$UPDATE_AGENT_ACTIVE_WAIT" ] && return 1
         sleep 1; waited=$((waited + 1))
     done
+    sleep "$UPDATE_AGENT_SETTLE"
+    sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE"
 }
 
 update_agent_restart() {
     # Restart the agent so it runs the unit and code on disk. Restarting it from inside its own
     # update would kill that update (the updater is in the agent's cgroup), so while it is busy a
-    # transient unit waits for it to be idle and restarts it then. The waiter's program is fixed
-    # text; the agent PID is its only argument.
+    # transient unit (scripts/update-agent-activate.sh, the agent PID its only argument) waits for it
+    # to be idle and restarts it then.
     local main
     if ! update_agent_busy; then
         sudo systemctl restart "$UPDATE_AGENT_SERVICE" && update_agent_wait_active
@@ -320,10 +325,8 @@ update_agent_restart() {
         return 0
     fi
     main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || return 1
-    # shellcheck disable=SC2016  # $1 is expanded by the waiter's shell, not here.
-    sudo systemd-run --unit="$UPDATE_AGENT_SERVICE-activation" --collect --quiet /bin/bash -c \
-        "UPDATE_AGENT_SERVICE=$UPDATE_AGENT_SERVICE; $(declare -f update_agent_busy update_agent_restart_when_idle); update_agent_restart_when_idle \"\$1\"" \
-        _ "$main" || return 1
+    sudo systemd-run --unit="$UPDATE_AGENT_SERVICE-activation" --collect --quiet \
+        /bin/bash "$SCRIPT_DIR/scripts/update-agent-activate.sh" "$main" || return 1
     echo "The update agent will restart when its current update finishes."
 }
 

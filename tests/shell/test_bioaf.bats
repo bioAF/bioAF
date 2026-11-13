@@ -1082,6 +1082,7 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 #   FAKE_<OP>_STATUS        exit of systemctl daemon-reload/enable/start/restart (OP upper-cased,
 #                           RELOAD for daemon-reload); FAKE_RESTART_FAILS_ONCE=1 fails only the first
 #   FAKE_VERIFY_STATUS      exit of systemd-analyze verify;  FAKE_RUN_STATUS  exit of systemd-run
+#   FAKE_DIES_AFTER_START=1  the agent is active on the first check after a start, then not
 #   FAKE_RESTART_MARK=<file>  restart also logs whether <file> existed at that moment
 #   FAKE_WAITER_ACTIVE_STATUS  exit of `systemctl is-active` for the waiter unit (default 3: none)
 agent_env() {
@@ -1098,7 +1099,15 @@ case "$1" in
     show) echo "${FAKE_MAINPID:-0}" ;;
     is-active)
         [ "$3" = bioaf-update-agent-activation ] && exit "${FAKE_WAITER_ACTIVE_STATUS:-3}"
-        [ -e "$FAKE_LOG.started" ] && exit 0; exit "${FAKE_ACTIVE_STATUS:-0}" ;;
+        if [ -e "$FAKE_LOG.started" ]; then
+            # FAKE_DIES_AFTER_START=1: active on the first check after a start, then gone.
+            if [ "${FAKE_DIES_AFTER_START:-0}" = 1 ]; then
+                [ -e "$FAKE_LOG.checked" ] && exit 3
+                : > "$FAKE_LOG.checked"
+            fi
+            exit 0
+        fi
+        exit "${FAKE_ACTIVE_STATUS:-0}" ;;
     daemon-reload) exit "${FAKE_RELOAD_STATUS:-0}" ;;
     enable) exit "${FAKE_ENABLE_STATUS:-0}" ;;
     start) [ "${FAKE_START_STATUS:-0}" = 0 ] && : > "$FAKE_LOG.started"; exit "${FAKE_START_STATUS:-0}" ;;
@@ -1129,6 +1138,7 @@ export PATH='$tmp/bin':"\$PATH"
 SCRIPT_DIR='$tmp/repo'
 UPDATE_AGENT_UNIT='$tmp/etc/bioaf-update-agent.service'
 UPDATE_AGENT_ACTIVE_WAIT=0
+UPDATE_AGENT_SETTLE=0
 HARNESS
 }
 
@@ -1139,7 +1149,7 @@ legacy_unit() {
 }
 
 ensure_agent() {
-    rm -f "$tmp/log.started"
+    rm -f "$tmp/log.started" "$tmp/log.checked"
     run env FAKE_LOG="$tmp/log" "$@" bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null
 }
 
@@ -1330,8 +1340,7 @@ busy_agent() {
     head -1 "$tmp/etc/bioaf-update-agent.service" | grep -q '^# bioaf-managed: update-agent-unit/v1'
     grep -q '^systemctl daemon-reload' "$tmp/log"
     ! grep -q '^systemctl restart' "$tmp/log"
-    grep -q '^systemd-run --unit=bioaf-update-agent-activation ' "$tmp/log"
-    [ "$(tail -1 "$tmp/log")" = "_ $AGENT_PID" ] || [[ "$(tail -1 "$tmp/log")" == *" _ $AGENT_PID" ]]
+    grep -q "^systemd-run --unit=bioaf-update-agent-activation .*/scripts/update-agent-activate.sh $AGENT_PID\$" "$tmp/log"
 }
 
 @test "the waiter restarts the agent only after its in-flight updater has ended" {
@@ -1351,7 +1360,7 @@ busy_agent() {
     ! grep -q '^systemctl restart' "$tmp/log"
 }
 
-@test "the scheduled waiter carries no data in its program text" {
+@test "the scheduled waiter is a fixed script that systemd can store: one line per argument, no \$ or %" {
     tmp="$(mktemp -d)"; agent_env "$tmp"
     busy_agent "$tmp" 30
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/run-args"\n' "$tmp" > "$tmp/bin/systemd-run"
@@ -1359,9 +1368,35 @@ busy_agent() {
     ensure_agent FAKE_MAINPID="$AGENT_PID"
     kill "$AGENT_PID" 2>/dev/null || true
     [ "$status" -eq 0 ]
-    # The last argument is the agent PID; the program before it is the same for any PID.
+    # systemd stores a transient unit's command in a unit file and re-reads it on daemon-reload: a
+    # newline in an argument breaks it, and $ or % would be expanded. So: options, the interpreter,
+    # the script, and the agent PID last; no argument spans lines.
     [ "$(tail -1 "$tmp/run-args")" = "$AGENT_PID" ]
-    ! sed '$d' "$tmp/run-args" | grep -q "$AGENT_PID"
+    [ "$(sed -n '$=' "$tmp/run-args")" -eq "$(grep -c . "$tmp/run-args")" ]
+    ! grep -q '[$%]' "$tmp/run-args"
+    grep -qx "$tmp/repo/scripts/update-agent-activate.sh" "$tmp/run-args"
+}
+
+@test "the waiter script restarts the agent once it is idle" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    cp "$BIOAF_SCRIPT" "$tmp/repo/bioaf"
+    cp "$REPO_ROOT/scripts/update-agent-activate.sh" "$tmp/repo/scripts/"
+    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
+    busy_agent "$tmp" 2
+    run env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_MARK="$tmp/updater-done" PATH="$tmp/bin:$PATH" \
+        perl -e 'alarm 30; exec @ARGV' /bin/bash "$tmp/repo/scripts/update-agent-activate.sh" "$AGENT_PID"
+    kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    grep -q '^restart-after-updater$' "$tmp/log"
+}
+
+@test "an agent that exits right after it starts is a failed activation, and the previous unit is restored" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_DIES_AFTER_START=1
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
 }
 
 # ---------------------------------------------------------------------------
