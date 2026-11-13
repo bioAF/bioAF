@@ -289,3 +289,62 @@ def test_the_log_sink_close_fits_the_container_stop_grace():
         + startup.RESOURCE_SECONDS
     )
     assert total <= stop_grace - 10
+
+
+class _RawCapture(logging.Handler):
+    """No sanitizer, and the marker is not a registered secret: proves exclusion at the source."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(logging.Formatter("%(levelname)s %(message)s %(exc_text)s").format(record))
+
+
+@pytest.mark.parametrize("failing", ["session", "project", "credentials_config", "credentials", "attach"])
+@pytest.mark.asyncio
+async def test_every_direct_startup_failure_is_reported_by_operation_and_class_only(
+    monkeypatch, offline, platform_config, failing
+):
+    from app.adapters.credentials import credential_injector
+    from app.config import settings
+    from app.platform.platform_config_service import PlatformConfigService
+
+    monkeypatch.setattr(settings, "log_delivery", "direct")
+    marker = "unregistered-startup-marker-93"
+
+    def boom(*args, **kwargs):
+        raise LookupError(f"detail {marker}")
+
+    async def aboom(*args, **kwargs):
+        boom()
+
+    if failing == "session":
+        monkeypatch.setattr("app.database.async_session_factory", boom)
+    elif failing == "project":
+        monkeypatch.setattr(PlatformConfigService, "get", staticmethod(aboom))
+    elif failing == "credentials_config":
+        monkeypatch.setattr(PlatformConfigService, "get_many", staticmethod(aboom))
+    elif failing == "credentials":
+        monkeypatch.setattr(credential_injector, "load_gcp_credentials", boom)
+    else:
+        monkeypatch.setattr("app.adapters.observability.create_log_sink_provider", boom)
+    capture = _RawCapture()
+    logging.getLogger("bioaf").addHandler(capture)
+
+    ctx = _ctx()
+    with patch("app.adapters.observability.gcp.cloud_logging.Client") as client_cls:
+        client_cls.return_value.get_default_handler.side_effect = lambda: log_sinks.real_handler()
+        async with ctx.stack, ctx.subscriptions:
+            await startup.run_steps([s for s in startup.NORMAL_STEPS if s.name == "cloud_logging"], ctx)
+        await ctx.after_work.aclose()
+
+    text = "\n".join(capture.lines)
+    assert marker not in text
+    if failing == "credentials":
+        # Credentials are optional (the provider falls back to its defaults); the sink still attaches.
+        assert "Cloud Logging enabled" in text
+    else:
+        assert _direct_handlers() == []
+        assert "LookupError" in text and "stdout only" in text

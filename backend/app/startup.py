@@ -205,34 +205,41 @@ async def cloud_logging(ctx: StartupContext) -> None:
         logger.info("Log delivery: stdout (a host collector ships container output)")
         return
 
-    from app.adapters.credentials import credential_injector
-    from app.database import async_session_factory
-    from app.logging_config import attach_cloud_logging
-    from app.platform.platform_config_service import PlatformConfigService
+    operation = "read_platform_config"
+    try:
+        from app.adapters.credentials import credential_injector
+        from app.database import async_session_factory
+        from app.logging_config import attach_cloud_logging
+        from app.platform.platform_config_service import PlatformConfigService
 
-    async with async_session_factory() as session:
-        project_value = await PlatformConfigService.get(session, "gcp_project_id")
-        gcp_project_id = project_value if project_value and project_value != "null" else ""
-        if not gcp_project_id:
-            logger.warning("Log delivery: direct, but no GCP project is configured; stdout only")
-            return
-        cred_config = await PlatformConfigService.get_many(
-            session,
-            [
-                "gcp_credential_source",
-                "gcp_service_account_key",
-                "gcp_service_account_email",
-                "gcp_bootstrap_sa_email",
-            ],
-        )
-    try:
-        credentials = credential_injector.load_gcp_credentials(cred_config)
-    except Exception:
-        credentials = None
-    try:
+        async with async_session_factory() as session:
+            project_value = await PlatformConfigService.get(session, "gcp_project_id")
+            gcp_project_id = project_value if project_value and project_value != "null" else ""
+            if not gcp_project_id:
+                logger.warning("Log delivery: direct, but no GCP project is configured; stdout only")
+                return
+            cred_config = await PlatformConfigService.get_many(
+                session,
+                [
+                    "gcp_credential_source",
+                    "gcp_service_account_key",
+                    "gcp_service_account_email",
+                    "gcp_bootstrap_sa_email",
+                ],
+            )
+        try:
+            credentials = credential_injector.load_gcp_credentials(cred_config)
+        except Exception:
+            credentials = None  # the provider falls back to its default credentials
+        operation = "attach"
         cleanup = attach_cloud_logging(gcp_project_id, credentials, debug=settings.debug)
     except Exception as exc:
-        logger.warning("Log delivery: direct sink unavailable, stdout only (error_type=%s)", type(exc).__name__)
+        # Configuration and credential errors can carry provider detail: the class only, never the text.
+        logger.warning(
+            "Log delivery: direct sink unavailable, stdout only (operation=%s error_type=%s)",
+            operation,
+            type(exc).__name__,
+        )
         return
     if cleanup is not None:
         ctx.after_work.push_async_callback(_close_log_sink, cleanup)
