@@ -296,6 +296,49 @@ From the UI, admins can click the **Install Update** button on the
 **Settings > Information** page when a new version is available. This
 triggers the same update process through a host-side update agent.
 
+### The update agent
+
+The agent is the `bioaf-update-agent` systemd service. It runs as the
+account that owns the checkout and watches `update-requests/`, which the
+backend container can write. It treats every file there as untrusted: a
+trigger is read once without following links, must be a regular JSON file
+with a `version` like `1.2.3` (optional integer `upgrade_id`, optional
+string `requested_at`), and anything else is removed without running an
+update. Only `./bioaf update <version>` is ever run.
+
+- **Status.** `update-status/current.json` is written by `./bioaf update`
+  and, when the update stopped without recording why, by the agent. Both
+  write a complete JSON record through a private staging directory
+  (`host-state/`, never mounted) and rename it into place at mode 0644; a
+  link planted in `update-status/` is replaced, not followed.
+- **Log.** The agent and the update it runs log to `host-only/agent.log`
+  (directory 0700, file 0600, never mounted). If that log cannot be opened
+  safely (wrong owner, permissions, or a link), they log to the service
+  output instead: `sudo journalctl -u bioaf-update-agent`. The older
+  `update-status/agent.log` is no longer written; you can delete it.
+- **Unit.** `./bioaf setup` (after any `--version` checkout), `./bioaf
+  start` and every update reconcile `/etc/systemd/system/bioaf-update-agent.service`
+  with the release's template, rendered with the checkout path and account.
+  The installed unit starts with `# bioaf-managed: update-agent-unit/v1 sha256=...`.
+  A current unit is left alone; a unit an earlier release wrote for this
+  checkout is replaced after `systemd-analyze verify`, then reloaded,
+  enabled and restarted, and restored if that fails. Any other unit is left
+  unchanged and the step fails, with the candidate saved to
+  `host-only/update-agent-unit-v1.candidate`; add the line
+  `# bioaf-managed: operator` to keep managing it yourself. The checkout
+  path may contain only letters, digits and `. _ / + @ -`.
+- **Restart timing.** A stopped agent is started. A running agent whose
+  code differs from the code on disk is restarted, but never in the middle
+  of an update it is running (that would stop the update): a transient
+  `bioaf-update-agent-activation` unit waits until the agent is idle, then
+  restarts it. A failure here is reported and does not stop `./bioaf start`
+  or an update; `./bioaf setup` stops.
+- **From an older release.** The first update from a release before this
+  one runs that release's agent and updater, so that update's own status
+  and log writes still use the older code. The new release's
+  `install.sh ensure-encryption-key` step installs the new unit and
+  schedules the agent restart, so later updates use the new agent.
+
 ### How the database is upgraded
 
 Every way of upgrading the database (the backend starting a new version,

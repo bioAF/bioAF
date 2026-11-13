@@ -91,7 +91,7 @@ managed_file_reconcile() {
         current) MF_OUTCOME=unchanged; rm -f "$rendered"; return 0 ;;
         operator)
             MF_OUTCOME=operator_managed
-            echo "$dest is marked operator-managed; bioAF left it unchanged. It must keep the parser this release expects."
+            echo "$dest is marked operator-managed; bioAF left it unchanged. It must stay compatible with what this release expects."
             rm -f "$rendered"; return 0 ;;
         custom)
             MF_OUTCOME=custom
