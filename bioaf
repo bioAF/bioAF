@@ -151,9 +151,28 @@ print(str(env.get("BIOAF_LOG_DELIVERY") or "stdout").strip().lower())
 '
 }
 
-ops_agent_collects_containers() {
-    # True when the installed agent config reads Docker container log files.
-    sudo grep -q '/var/lib/docker/containers' "$OPS_AGENT_CONFIG" 2>/dev/null
+ops_agent_container_collection() {
+    # Whether the installed agent config can read Docker's container log files: prints none, overlap
+    # or unknown. Every absolute path in the config is matched, as a glob, against a container log
+    # path under Docker's actual root directory. Anything that cannot be read or interpreted is
+    # unknown, never none.
+    local config root sample token tokens
+    if ! sudo test -e "$OPS_AGENT_CONFIG"; then echo none; return; fi
+    if ! config=$(sudo cat "$OPS_AGENT_CONFIG"); then echo unknown; return; fi
+    if ! root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) || [ -z "$root" ]; then echo unknown; return; fi
+    sample="${root%/}/containers/0123456789ab/0123456789ab-json.log"
+    tokens=$(printf '%s\n' "$config" | grep -oE "/[^][[:space:],'\"{}]+" || true)
+    while IFS= read -r token; do
+        [ -n "$token" ] || continue
+        # shellcheck disable=SC2053  # the token is a glob pattern on purpose
+        if [[ "$sample" == $token ]]; then echo overlap; return; fi
+    done <<< "$tokens"
+    # include_paths whose entries are not literal paths (an alias, a variable, ...): cannot tell.
+    if printf '%s\n' "$config" | grep -q 'include_paths' \
+        && ! printf '%s\n' "$config" | grep -A20 'include_paths' | grep -qE "^[[:space:]]*(- *)?['\"]?/|\[ *['\"]?/"; then
+        echo unknown; return
+    fi
+    echo none
 }
 
 ensure_cloud_logging() {
@@ -177,12 +196,16 @@ ensure_cloud_logging() {
     case "$delivery" in
         stdout) ;;
         direct)
-            if [ -f "$OPS_AGENT_CONFIG" ] && ops_agent_collects_containers; then
-                red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent on this host also collects container logs ($OPS_AGENT_CONFIG), so every backend record would be ingested twice."
-                red "Use BIOAF_LOG_DELIVERY=stdout, or remove container collection from the agent config."
-                return 1
-            fi
-            return 0 ;;
+            case "$(ops_agent_container_collection)" in
+                none) return 0 ;;
+                overlap)
+                    red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent on this host also collects container logs ($OPS_AGENT_CONFIG), so every backend record would be ingested twice."
+                    red "Use BIOAF_LOG_DELIVERY=stdout, or remove container collection from the agent config." ;;
+                *)
+                    red "BIOAF_LOG_DELIVERY=direct, but the Ops Agent config ($OPS_AGENT_CONFIG) could not be inspected for container log collection, so direct delivery was not accepted."
+                    red "Make it readable with plain include_paths, or use BIOAF_LOG_DELIVERY=stdout." ;;
+            esac
+            return 1 ;;
         *)
             red "BIOAF_LOG_DELIVERY must be stdout or direct; the Ops Agent was not changed."
             return 1 ;;

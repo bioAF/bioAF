@@ -740,7 +740,10 @@ LEGACY_OPS_CONFIG="$BATS_TEST_DIRNAME/fixtures/ops-agent-config.v0.6.3.yaml"
 cloud_env() {
     local tmp="$1"
     mkdir -p "$tmp/bin" "$tmp/etc"
-    printf '#!/bin/sh\n"$@"\n' > "$tmp/bin/sudo"
+    # FAKE_SUDO_FAIL names one privileged command that fails (e.g. cat: an unreadable config).
+    printf '#!/bin/sh\n[ -n "$FAKE_SUDO_FAIL" ] && [ "$1" = "$FAKE_SUDO_FAIL" ] && exit 2\n"$@"\n' > "$tmp/bin/sudo"
+    # docker info reports Docker's root directory, where container logs live.
+    printf '#!/bin/sh\n[ "$1" = info ] || exit 1\n[ "${FAKE_DOCKER_STATUS:-0}" = 0 ] || exit "$FAKE_DOCKER_STATUS"\necho "${FAKE_DOCKER_ROOT:-/var/lib/docker}"\n' > "$tmp/bin/docker"
     # Never fetch or run the real agent installer from a test.
     printf '#!/bin/sh\necho "curl $*" >> "$FAKE_LOG"\nexit 1\n' > "$tmp/bin/curl"
     cat > "$tmp/bin/systemctl" <<'STUB'
@@ -767,7 +770,7 @@ case "$*" in
     *) exit 1 ;;
 esac
 STUB
-    chmod +x "$tmp/bin/sudo" "$tmp/bin/curl" "$tmp/bin/systemctl" "$tmp/engine" "$tmp/fake-config"
+    chmod +x "$tmp/bin/sudo" "$tmp/bin/docker" "$tmp/bin/curl" "$tmp/bin/systemctl" "$tmp/engine" "$tmp/fake-config"
     cat > "$tmp/cloud.sh" <<HARNESS
 source '$BIOAF_SCRIPT' >/dev/null
 export PATH='$tmp/bin':"\$PATH"
@@ -1019,4 +1022,40 @@ STUB
     run env PATH="$tmp/bin:$PATH" bash "$BIOAF_SCRIPT" ensure-cloud-logging
     [ "$status" -eq 0 ]
     [[ "$output" != *"Unknown command"* ]]
+}
+
+@test "direct delivery is rejected when the agent config cannot be inspected" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct FAKE_SUDO_FAIL=cat bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not be inspected"* ]]
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct FAKE_DOCKER_STATUS=1 bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+}
+
+@test "direct delivery is rejected for any include path that matches a container log, glob or not" {
+    for path in "/var/lib/docker/*/*/*.log" "/var/lib/docker/**" "'/var/lib/docker/containers/*/*-json.log'" "/srv/docker/containers/*/*.log"; do
+        tmp="$(mktemp -d)"; cloud_env "$tmp"
+        root=/var/lib/docker; [[ "$path" == /srv/* ]] && root=/srv/docker
+        printf 'logging:\n  receivers:\n    mine:\n      type: files\n      include_paths:\n        - %s\n' "$path" > "$tmp/etc/config.yaml"
+        run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct FAKE_DOCKER_ROOT="$root" bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"ingested twice"* ]]
+    done
+}
+
+@test "direct delivery accepts a files receiver that cannot read container logs" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'logging:\n  receivers:\n    app:\n      type: files\n      include_paths: [/var/log/myapp/*.log, "/opt/x/*.log"]\n' > "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+}
+
+@test "direct delivery is rejected when include paths are present but cannot be read as paths" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'paths: &p [/var/log/x.log]\nlogging:\n  receivers:\n    app:\n      type: files\n      include_paths: *p\n' > "$tmp/etc/config.yaml"
+    run env FAKE_LOG="$tmp/log" FAKE_DELIVERY=direct bash -c "source '$tmp/cloud.sh'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not be inspected"* ]]
 }

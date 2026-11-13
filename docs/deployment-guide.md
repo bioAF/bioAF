@@ -186,8 +186,10 @@ them, including during a collector outage.
 
 `./bioaf setup`, `start` and `update` read the value Compose will give the backend (from
 `docker compose config`, so `docker/.env` and your shell environment both count). In `direct` mode
-they install and reconfigure no agent, and they stop with an error if an Ops Agent on the host
-already collects container logs; remove that collection or use `stdout`.
+they install and reconfigure no agent, and they stop with an error if an Ops Agent config on the
+host has any path (glob patterns included) that matches Docker's container log files, or if that
+config cannot be read or its `include_paths` are not literal paths. Remove that collection or use
+`stdout`.
 
 In `stdout` mode the backend builds no Cloud Logging client and reads no credentials for logging.
 In `direct` mode stdout is still written; a direct sink that cannot be built is reported once by
