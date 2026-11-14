@@ -21,14 +21,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.exceptions import DomainError, ExportContentUnavailableError, ExportTimeoutError, NotFoundError
+from app.exceptions import (
+    DomainError,
+    ExportContentUnavailableError,
+    ExportLimitError,
+    ExportTimeoutError,
+    NotFoundError,
+)
+from app.models.experiment import Experiment
+from app.models.file import File
+from app.models.pipeline_run import PipelineRun
+from app.models.sample import Sample
 from app.services.data_export import naming, resources, selection
 from app.services.data_export.archive import ArchivePlan, ExportJob, check_available
 from app.services.data_export.selection import ExperimentContent, ProjectContent
@@ -123,9 +135,9 @@ async def prepare_experiment_export(
     if content is None:
         raise NotFoundError(f"Experiment {experiment_id} not found")
 
-    async def plan(archive: ArchivePlan) -> None:
+    async def plan(archive: ArchivePlan, job: ExportJob) -> None:
         await _plan_experiment(
-            session, archive, content, content.root, org_id, user_email, include_fastq, include_provenance
+            session, archive, job, content, content.root, org_id, user_email, include_fastq, include_provenance
         )
 
     return await _prepare(
@@ -157,17 +169,17 @@ async def prepare_project_export(
         raise NotFoundError(f"Project {project_id} not found")
     root = content.root
 
-    async def plan(archive: ArchivePlan) -> None:
+    async def plan(archive: ArchivePlan, job: ExportJob) -> None:
         archive.add_generated(f"{root}/README.txt", _build_project_readme(content, user_email))
         for experiment in content.experiments:
             exp_root = f"{root}/experiments/{experiment.root}"
             await _plan_experiment(
-                session, archive, experiment, exp_root, org_id, user_email, include_fastq, include_provenance
+                session, archive, job, experiment, exp_root, org_id, user_email, include_fastq, include_provenance
             )
         for file in content.files:
             archive.add_file(root, file)
         if include_provenance:
-            archive.add_generated(*await _provenance(session, "project", content.id, org_id, user_email, root))
+            archive.add_generated(*await _provenance(session, job, "project", content.id, org_id, user_email, root))
 
     return await _prepare(
         session, list(content.all_files), include_fastq, plan, _filename(content.name, "project"), started
@@ -195,7 +207,7 @@ async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, file
     archive = ArchivePlan()
     try:
         async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
-            await plan(archive)
+            await plan(archive, job)
             # Nothing below needs the database until the audit: end the read transaction rather
             # than hold a pooled connection idle through a build that may take many minutes.
             await session.commit()
@@ -213,6 +225,7 @@ async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, file
 async def _plan_experiment(
     session: AsyncSession,
     archive: ArchivePlan,
+    job: ExportJob,
     content: ExperimentContent,
     root: str,
     org_id: int,
@@ -226,30 +239,83 @@ async def _plan_experiment(
     for file in content.files:
         archive.add_file(root, file)
     if include_provenance:
-        archive.add_generated(*await _provenance(session, "experiment", content.id, org_id, user_email, root))
+        archive.add_generated(*await _provenance(session, job, "experiment", content.id, org_id, user_email, root))
+
+
+_PROVENANCE_FAILED = (
+    "The provenance report could not be generated, so the export was stopped. "
+    "Try again, or export without the provenance report."
+)
+
+
+def _report_too_large(entity_type: str, what: str) -> ExportLimitError:
+    return ExportLimitError(
+        f"The provenance report for this {entity_type} is too large to generate with an export ({what}). "
+        "Export without the provenance report, or export a smaller scope.",
+    )
+
+
+async def _report_records(session: AsyncSession, entity_type: str, entity_id: int, org_id: int) -> int:
+    """Samples, files and pipeline runs the report would cover: counted, never loaded."""
+    if entity_type == "experiment":
+        experiments = select(Experiment.id).where(Experiment.id == entity_id, Experiment.organization_id == org_id)
+        runs = PipelineRun.experiment_id.in_(experiments)
+    else:
+        experiments = select(Experiment.id).where(
+            Experiment.project_id == entity_id, Experiment.organization_id == org_id
+        )
+        runs = or_(PipelineRun.project_id == entity_id, PipelineRun.experiment_id.in_(experiments))
+    counts = [
+        select(func.count()).select_from(Sample).where(Sample.experiment_id.in_(experiments)),
+        select(func.count()).select_from(File).where(File.experiment_id.in_(experiments)),
+        select(func.count()).select_from(PipelineRun).where(runs, PipelineRun.organization_id == org_id),
+    ]
+    return sum([(await session.execute(q)).scalar_one() for q in counts])
 
 
 async def _provenance(
-    session: AsyncSession, entity_type: str, entity_id: int, org_id: int, user_email: str, root: str
+    session: AsyncSession,
+    job: ExportJob,
+    entity_type: str,
+    entity_id: int,
+    org_id: int,
+    user_email: str,
+    root: str,
 ) -> tuple[str, bytes]:
-    """The requested provenance report as an archive member; failing to make it fails the export."""
-    try:
-        report = await ProvenanceReportService.generate(
-            session=session,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            org_id=org_id,
-            user_email=user_email,
-            format="all",
+    """The requested provenance report as an archive member; failing to make it fails the export.
+
+    Bounded before the expensive work (records before gathering, the report's size before
+    rendering) and rendered in the job's owned worker thread, off the event loop.
+    """
+    records = await _report_records(session, entity_type, entity_id, org_id)
+    if records > resources.PROVENANCE_MAX_RECORDS:
+        raise _report_too_large(
+            entity_type, f"{records:,} samples, files and runs; the limit is {resources.PROVENANCE_MAX_RECORDS:,}"
         )
+    try:
+        gathered = await ProvenanceReportService.gather_report(session, entity_type, entity_id, org_id, user_email)
     except Exception as exc:
         if isinstance(exc, DomainError) and not isinstance(exc, NotFoundError):
             raise
-        logger.warning("Export provenance report failed for %s %d (%s)", entity_type, entity_id, type(exc).__name__)
-        raise ExportContentUnavailableError(
-            "The provenance report could not be generated, so the export was stopped. "
-            "Try again, or export without the provenance report."
-        ) from exc
+        logger.warning("Export provenance gathering failed for %s %d (%s)", entity_type, entity_id, type(exc).__name__)
+        raise ExportContentUnavailableError(_PROVENANCE_FAILED) from exc
+    size = len(json.dumps(gathered, default=str).encode("utf-8"))
+    if size > resources.PROVENANCE_MAX_REPORT_BYTES:
+        raise _report_too_large(
+            entity_type,
+            f"{size // 1024:,} KiB of report data; the limit is {resources.PROVENANCE_MAX_REPORT_BYTES // 1024:,} KiB",
+        )
+
+    def render():
+        try:
+            return ProvenanceReportService.render(entity_type, entity_id, gathered, "all")
+        except Exception as exc:
+            logger.warning(
+                "Export provenance rendering failed for %s %d (%s)", entity_type, entity_id, type(exc).__name__
+            )
+            raise ExportContentUnavailableError(_PROVENANCE_FAILED) from exc
+
+    report = await job.render(render, deadline=resources.BUILD_DEADLINE)
     content = report.content.encode("utf-8") if isinstance(report.content, str) else report.content
     name = naming.safe_component(report.filename, fallback=f"provenance_{entity_type}")
     return naming.join(*root.split("/"), "provenance", name), content

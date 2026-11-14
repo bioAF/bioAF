@@ -37,6 +37,13 @@ GiB = 1024 * MiB
 MAX_SOURCE_BYTES = 2 * GiB
 MAX_FILES = 10_000
 MAX_ENTRIES = 20_000
+# A requested provenance report's input envelope (measured, plan 24 learnings): the PDF renderer's
+# peak allocation grows ~280x the report's JSON size, so the gathered report's serialized size is
+# checked before rendering (256 KiB rendered with at most 70 MiB RSS growth). Gathering runs on the
+# event loop (~125 ms at 1,500 records), so records (samples, files, pipeline runs) are counted
+# first; 1,500 is about the most that can still fit 256 KiB (~211 B per file, ~505 B per sample).
+PROVENANCE_MAX_RECORDS = 1_500
+PROVENANCE_MAX_REPORT_BYTES = 256 * 1024
 # Each experiment adds at least a README and a sample manifest to a project archive.
 MAX_PROJECT_EXPERIMENTS = MAX_ENTRIES // 2
 GENERATED_ALLOWANCE = 64 * MiB

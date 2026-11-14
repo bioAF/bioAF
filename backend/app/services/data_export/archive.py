@@ -294,6 +294,19 @@ class ExportJob:
             timeout_message="The export took too long to prepare and was stopped. Try a smaller export.",
         )
 
+    async def render(self, render, *, deadline: float):
+        """Run a CPU-bound ``render()`` in a worker thread as the job's owned worker.
+
+        A thread cannot be interrupted, so abandoning (cancellation, the deadline) leaves the
+        render running; the job keeps its scratch and the slot until it returns, as for the build.
+        """
+        return await self._owned(
+            lambda: asyncio.to_thread(render),
+            role="data-export-render",
+            deadline=deadline,
+            timeout_message="The export's provenance report took too long to generate. Export without it, or try a smaller export.",
+        )
+
     async def upload(self, adapter, uri: str, *, deadline: float, undo) -> None:
         """Upload the archive to ``uri``; a failed or abandoned upload's object is removed by ``undo``.
 

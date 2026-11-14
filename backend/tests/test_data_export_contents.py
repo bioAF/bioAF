@@ -251,10 +251,10 @@ async def test_a_failed_requested_provenance_report_fails_the_export(
 ):
     from app.services.provenance.report_service import ProvenanceReportService
 
-    async def broken(**kwargs):
+    async def broken(*args, **kwargs):
         raise RuntimeError("renderer exploded")
 
-    monkeypatch.setattr(ProvenanceReportService, "generate", broken)
+    monkeypatch.setattr(ProvenanceReportService, "gather_report", broken)
     org = admin_user.organization_id
     await _project(session, org)
     await _experiment(session, org)

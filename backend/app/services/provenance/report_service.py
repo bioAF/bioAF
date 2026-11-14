@@ -27,12 +27,24 @@ class ProvenanceReportService:
         user_email: str,
         format: str = "json",
     ) -> ReportOutput:
-        # 1. Gather data
+        json_report = await ProvenanceReportService.gather_report(session, entity_type, entity_id, org_id, user_email)
+        return ProvenanceReportService.render(entity_type, entity_id, json_report, format)
+
+    @staticmethod
+    async def gather_report(
+        session: AsyncSession, entity_type: str, entity_id: int, org_id: int, user_email: str
+    ) -> dict:
+        """The canonical JSON report: database reads plus a cheap transform, as plain data."""
         data = await ProvenanceDataGatherer.gather(session, entity_type, entity_id, org_id)
+        return JsonRenderer.render(entity_type, data, user_email)
 
-        # 2. Render JSON (always -- canonical format)
-        json_report = JsonRenderer.render(entity_type, data, user_email)
+    @staticmethod
+    def render(entity_type: str, entity_id: int, json_report: dict, format: str = "json") -> ReportOutput:
+        """Render a gathered report. Pure and synchronous: safe to run in a worker thread.
 
+        The PDF renderer dominates cost (time and memory grow with the report's size); callers that
+        must stay responsive run this off the event loop and bound ``json_report`` first.
+        """
         base = f"provenance_{entity_type}_{entity_id}"
 
         if format == "json":

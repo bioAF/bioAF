@@ -339,10 +339,10 @@ async def test_slow_report_generation_counts_against_the_preparation_deadline(
     from app.services import export_service
     from app.services.provenance.report_service import ProvenanceReportService
 
-    async def slow(**kwargs):
+    async def slow(*args, **kwargs):
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(ProvenanceReportService, "generate", slow)
+    monkeypatch.setattr(ProvenanceReportService, "gather_report", slow)
     monkeypatch.setattr(resources, "BUILD_DEADLINE", 0.3)
     monkeypatch.setattr(settings, "export_scratch_dir", str(tmp_path))
     await _seed_experiment(session, admin_user.organization_id)
