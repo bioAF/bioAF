@@ -22,7 +22,7 @@ import io
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
@@ -33,6 +33,8 @@ from app.services import file_scope
 from app.services.data_export import naming
 
 FASTQ_TYPES = frozenset({"fastq", "fastq.gz", "fq", "fq.gz"})
+# File ids per association query (well under PostgreSQL's bind-parameter limit).
+_ID_BATCH = 5000
 
 
 @dataclass(frozen=True)
@@ -150,34 +152,41 @@ def build_sample_manifest(samples: list[Sample]) -> str:
 
 
 async def write_sample_manifest(session: AsyncSession, experiment_id: int, *, limit_bytes: int) -> bytes:
-    """The experiment's sample manifest, read in batches and refused once it passes ``limit_bytes``.
+    """The experiment's sample manifest, read in batches and refused before it passes ``limit_bytes``.
 
-    Byte-identical to ``build_sample_manifest`` over the same samples; never holds more than the
-    limit plus one batch.
+    Byte-identical to ``build_sample_manifest`` over the same samples. Each row is encoded and
+    counted in UTF-8 bytes before it is kept, so the result never holds more than the allowance.
     """
     from app.exceptions import ExportLimitError
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=_MANIFEST_FIELDS, extrasaction="ignore")
-    rows = 0
-    query = select(Sample).where(Sample.experiment_id == experiment_id).order_by(Sample.id)
-    async for sample in await session.stream_scalars(query.execution_options(yield_per=500)):
-        if rows == 0:
-            writer.writeheader()
-        writer.writerow({f: getattr(sample, f, None) for f in _MANIFEST_FIELDS})
-        rows += 1
-        if buf.tell() > limit_bytes:
+    out = bytearray()
+    line = io.StringIO()
+    writer = csv.DictWriter(line, fieldnames=_MANIFEST_FIELDS, extrasaction="ignore")
+
+    def keep(text: str) -> None:
+        if len(text) > limit_bytes - len(out) or len(out) + len(encoded := text.encode("utf-8")) > limit_bytes:
             raise ExportLimitError(
                 "This export's sample manifests and reports are too large to include. "
                 "Export one experiment at a time, or without the provenance report.",
             )
-    data = (buf.getvalue() if rows else build_sample_manifest([])).encode("utf-8")
-    if len(data) > limit_bytes:
-        raise ExportLimitError(
-            "This export's sample manifests and reports are too large to include. "
-            "Export one experiment at a time, or without the provenance report.",
-        )
-    return data
+        out.extend(encoded)
+
+    def take(write) -> str:
+        line.seek(0)
+        line.truncate()
+        write()
+        return line.getvalue()
+
+    rows = 0
+    query = select(Sample).where(Sample.experiment_id == experiment_id).order_by(Sample.id)
+    async for sample in await session.stream_scalars(query.execution_options(yield_per=500)):
+        if rows == 0:
+            keep(take(writer.writeheader))
+        keep(take(lambda: writer.writerow({f: getattr(sample, f, None) for f in _MANIFEST_FIELDS})))
+        rows += 1
+    if rows == 0:
+        keep(build_sample_manifest([]))
+    return bytes(out)
 
 
 async def _experiment_row(session: AsyncSession, experiment_id: int, org_id: int) -> Experiment | None:
@@ -214,6 +223,28 @@ async def select_experiment(
     )
 
 
+async def _lowest_linked_experiment(
+    session: AsyncSession, file_ids: list[int], project_id: int, org_id: int
+) -> dict[int, str]:
+    """For each file, the lowest UUID (as text) among the project's experiments its samples belong to."""
+    out: dict[int, str] = {}
+    for start in range(0, len(file_ids), _ID_BATCH):
+        batch = file_ids[start : start + _ID_BATCH]
+        rows = await session.execute(
+            select(sample_files.c.file_id, func.min(cast(Experiment.uuid, String)))
+            .join(Sample, Sample.id == sample_files.c.sample_id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(
+                Experiment.project_id == project_id,
+                Experiment.organization_id == org_id,
+                sample_files.c.file_id.in_(batch),
+            )
+            .group_by(sample_files.c.file_id)
+        )
+        out.update({file_id: lowest for file_id, lowest in rows})
+    return out
+
+
 async def select_project(
     session: AsyncSession,
     project_id: int,
@@ -221,25 +252,36 @@ async def select_project(
     *,
     include_fastq: bool,
     limit: int | None = None,
+    max_experiments: int | None = None,
 ) -> ProjectContent | None:
-    """The project's content with each file assigned once, or None for an unknown project."""
+    """The project's content with each file assigned once, or None for an unknown project.
+
+    ``max_experiments`` refuses (by count, before reading them) a project with too many experiments.
+    """
     project = (
         await session.execute(select(Project).where(Project.id == project_id, Project.organization_id == org_id))
     ).scalar_one_or_none()
     if project is None:
         return None
 
-    experiments = (
-        (
-            await session.execute(
-                select(Experiment)
-                .where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
-                .order_by(Experiment.uuid)
+    in_project = (Experiment.project_id == project_id, Experiment.organization_id == org_id)
+    if max_experiments is not None:
+        count = (await session.execute(select(func.count()).select_from(Experiment).where(*in_project))).scalar_one()
+        if count > max_experiments:
+            from app.exceptions import ExportLimitError
+
+            raise ExportLimitError(
+                f"This project has more than {max_experiments:,} experiments, the most one export can hold. "
+                "Export its experiments individually instead.",
+                details={"limit_experiments": max_experiments},
             )
+    experiments = (
+        await session.execute(
+            select(Experiment.id, Experiment.uuid, Experiment.name, Experiment.status)
+            .where(*in_project)
+            .order_by(Experiment.uuid)
         )
-        .scalars()
-        .all()
-    )
+    ).all()
     rank = {e.id: e.uuid for e in experiments}
 
     membership = file_scope.project_files(project_id, org_id)
@@ -255,26 +297,19 @@ async def select_project(
         .scalars()
         .all()
     )
-    links = (
-        await session.execute(
-            select(sample_files.c.file_id, Sample.experiment_id)
-            .join(Sample, Sample.id == sample_files.c.sample_id)
-            .where(
-                Sample.experiment_id.in_(file_scope.project_experiments(project_id, org_id)),
-                sample_files.c.file_id.in_(select(File.id).where(file_scope.live_files(org_id), membership)),
-            )
-        )
-    ).all()
-    linked: dict[int, set[int]] = {}
-    for file_id, experiment_id in links:
-        linked.setdefault(file_id, set()).add(experiment_id)
+    # Only selected files not attached to an in-project experiment need their sample links, and
+    # only the lowest associated experiment per file: one row per file, never every association.
+    lowest = await _lowest_linked_experiment(
+        session, [r.id for r in rows if r.experiment_id not in rank], project_id, org_id
+    )
+    by_uuid = {str(e.uuid): e.id for e in experiments}
 
     assigned: dict[int | None, list[SelectedFile]] = {}
     for row in rows:
         if row.experiment_id in rank:
             owner: int | None = row.experiment_id
-        elif linked.get(row.id):
-            owner = min(linked[row.id], key=lambda eid: rank[eid])
+        elif row.id in lowest:
+            owner = by_uuid[lowest[row.id]]
         else:
             owner = None
         assigned.setdefault(owner, []).append(_selected(row))

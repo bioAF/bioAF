@@ -37,6 +37,8 @@ GiB = 1024 * MiB
 MAX_SOURCE_BYTES = 2 * GiB
 MAX_FILES = 10_000
 MAX_ENTRIES = 20_000
+# Each experiment adds at least a README and a sample manifest to a project archive.
+MAX_PROJECT_EXPERIMENTS = MAX_ENTRIES // 2
 GENERATED_ALLOWANCE = 64 * MiB
 MAX_ARCHIVE_BYTES = 2304 * MiB
 SCRATCH_CEILING = 5 * GiB
@@ -311,6 +313,9 @@ class SlotLease:
         self._release()
 
 
+_BUSY = "Another data export is in progress. Exports run one at a time; try again in a few minutes."
+
+
 class ExportSlot:
     """One active data export per serving process, across users, organizations and delivery modes.
 
@@ -321,11 +326,14 @@ class ExportSlot:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
+    def refuse_if_busy(self) -> None:
+        """A cheap early refusal before any selection work; ``try_acquire`` remains the atomic check."""
+        if self._lock.locked():
+            raise ExportBusyError(_BUSY)
+
     def try_acquire(self) -> SlotLease:
         if not self._lock.acquire(blocking=False):
-            raise ExportBusyError(
-                "Another data export is in progress. Exports run one at a time; try again in a few minutes."
-            )
+            raise ExportBusyError(_BUSY)
         return SlotLease(self._lock.release)
 
     @property

@@ -41,6 +41,8 @@ class IssuedLink:
     uri: str
     url: str
     expires_at: datetime
+    # Event-loop time when the issuance budget (upload, signing, audit, commit) runs out.
+    issue_deadline: float
 
     def remaining_seconds(self) -> float:
         return (self.expires_at - datetime.now(timezone.utc)).total_seconds()
@@ -51,8 +53,13 @@ class IssuedLink:
         return math.floor(max(seconds, 0) / 36) / 100
 
     def handoff_deadline(self) -> float:
-        """The event-loop time by which the link must be handed over to still meet the minimum."""
-        return asyncio.get_running_loop().time() + self.remaining_seconds() - _min_ttl()
+        """The event-loop time by which the link must be handed over.
+
+        The earliest of: the issuance budget, the handoff allowance from now, and the last moment
+        the link still meets the minimum lifetime. Never derived from the link's lifetime alone.
+        """
+        now = asyncio.get_running_loop().time()
+        return min(self.issue_deadline, now + HANDOFF_SECONDS, now + self.remaining_seconds() - _min_ttl())
 
 
 def _min_ttl() -> int:
@@ -83,21 +90,25 @@ async def issue_signed_link(prepared, *, org_id: int) -> IssuedLink:
 
     adapter = get_storage_adapter()
     loop = asyncio.get_running_loop()
-    started = loop.time()
-    uri = await adapter.resolve_uri(StorageStore.CONFIG_BACKUPS, export_key(org_id))
+    deadline = loop.time() + resources.ISSUE_DEADLINE
     try:
-        await prepared.job.upload(adapter, uri, deadline=resources.ISSUE_DEADLINE, undo=lambda: _delete(uri))
+        async with asyncio.timeout_at(deadline):
+            uri = await adapter.resolve_uri(StorageStore.CONFIG_BACKUPS, export_key(org_id))
+    except TimeoutError:
+        raise StorageUnavailableError("Preparing the download link took too long. Try again later.") from None
+    try:
+        await prepared.job.upload(adapter, uri, deadline=max(deadline - loop.time(), 0), undo=lambda: _delete(uri))
     except (DomainError, asyncio.CancelledError):
         raise
     except Exception as exc:
         logger.error("Export upload failed (%s)", type(exc).__name__)
         raise StorageUnavailableError("The export could not be uploaded for a download link. Try again later.") from exc
     try:
-        async with asyncio.timeout_at(started + resources.ISSUE_DEADLINE):
+        async with asyncio.timeout_at(deadline):
             signed = await adapter.sign_download(
                 uri, max_ttl_seconds=SIGNED_MAX_TTL_SECONDS, min_ttl_seconds=_min_ttl()
             )
-        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at)
+        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at, issue_deadline=deadline)
         ensure_usable(link, handoff=HANDOFF_SECONDS)
     except BaseException as exc:
         await runtime.shielded(_delete(uri), role="data-export-withdraw")

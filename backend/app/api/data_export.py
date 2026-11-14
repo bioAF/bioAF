@@ -15,7 +15,7 @@ from app.api.dependencies import require_permission
 from app.api.streaming_responses import GuardedFileResponse
 from app.config import settings
 from app.database import get_session
-from app.exceptions import StorageUnavailableError
+from app.exceptions import ExportTimeoutError, StorageUnavailableError
 from app.services import export_service, export_delivery
 from app.services.audit_service import log_action
 from app.services.data_export import resources
@@ -134,7 +134,7 @@ async def _deliver(session, current_user, entity_type, entity_id, body, prepared
         if body.delivery_method == "gcs":
             link = await export_delivery.issue_signed_link(prepared, org_id=int(current_user["org_id"]))
             try:
-                # The commit must finish while the link can still meet the minimum lifetime.
+                # Within the issuance budget and handoff allowance, while the link still meets the minimum.
                 async with asyncio.timeout_at(link.handoff_deadline()):
                     await _audit(
                         session,
@@ -171,10 +171,20 @@ async def _deliver(session, current_user, entity_type, entity_id, body, prepared
             stall_seconds=settings.export_transfer_stall_seconds,
             deadline_seconds=resources.TRANSFER_DEADLINE,
         )
-        await _audit(
-            session, current_user, entity_type, entity_id, body, stage="archive_prepared", archive_bytes=prepared.size
-        )
-        await session.commit()
+        try:
+            async with asyncio.timeout(export_delivery.HANDOFF_SECONDS):
+                await _audit(
+                    session,
+                    current_user,
+                    entity_type,
+                    entity_id,
+                    body,
+                    stage="archive_prepared",
+                    archive_bytes=prepared.size,
+                )
+                await session.commit()
+        except TimeoutError:
+            raise ExportTimeoutError("Recording the export took too long, so it was not sent. Try again.") from None
     except BaseException:
         prepared.release()
         raise

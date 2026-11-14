@@ -495,3 +495,236 @@ async def test_credential_discovery_failures_are_storage_unavailable(mode_adapte
         else:
             await adapter.sign_download("s3://b/k", max_ttl_seconds=86400, min_ttl_seconds=3600)
     assert "metadata service" not in str(exc.value)
+
+
+async def _exports(store) -> list:
+    return await store.list_objects(await store.resolve_uri(StorageStore.CONFIG_BACKUPS, "exports/"))
+
+
+def _full_day_signer(store, monkeypatch):
+    async def sign(uri, *, max_ttl_seconds, min_ttl_seconds):
+        return SignedDownload(url="https://signed.test/x", expires_at=datetime.now(UTC) + timedelta(hours=24))
+
+    monkeypatch.setattr(store, "sign_download", sign)
+
+
+def _slow_audit(monkeypatch, delay: float) -> None:
+    from app.api import data_export
+
+    real_audit = data_export.log_action
+
+    async def slow(**kwargs):
+        await asyncio.sleep(delay)
+        await real_audit(**kwargs)
+
+    monkeypatch.setattr(data_export, "log_action", slow)
+
+
+@pytest.mark.parametrize("budget", ["issuance", "handoff"])
+@pytest.mark.asyncio
+async def test_a_full_day_links_audit_is_bounded_by_the_operation_budgets(
+    client, session, admin_user, headers, store, monkeypatch, budget
+):
+    from app.services import export_delivery
+
+    _full_day_signer(store, monkeypatch)
+    if budget == "issuance":
+        monkeypatch.setattr(resources, "ISSUE_DEADLINE", 0.5)
+    else:
+        monkeypatch.setattr(export_delivery, "HANDOFF_SECONDS", 0.2)
+    _slow_audit(monkeypatch, 1.0)
+    await _seed(session, admin_user.organization_id)
+
+    resp = await _post(client, headers, method="gcs")
+
+    assert resp.status_code != 200
+    assert await _exports(store) == []
+
+
+@pytest.mark.asyncio
+async def test_a_direct_exports_audit_commit_is_bounded(client, session, admin_user, headers, store, monkeypatch):
+    from app.services import export_delivery
+
+    monkeypatch.setattr(export_delivery, "HANDOFF_SECONDS", 0.2)
+    _slow_audit(monkeypatch, 1.0)
+    await _seed(session, admin_user.organization_id)
+
+    resp = await _post(client, headers)
+
+    assert resp.status_code == 504
+    assert resp.json()["code"] == "export_timed_out"
+
+
+@pytest.mark.asyncio
+async def test_the_preparation_commit_is_inside_the_preparation_deadline(
+    session, admin_user, store, tmp_path, monkeypatch
+):
+    from app.exceptions import ExportTimeoutError
+    from app.services import export_service
+
+    await _seed(session, admin_user.organization_id)
+    monkeypatch.setattr(resources, "BUILD_DEADLINE", 0.3)
+    real_commit = session.commit
+
+    async def slow_commit():
+        await asyncio.sleep(1)
+        await real_commit()
+
+    monkeypatch.setattr(session, "commit", slow_commit)
+
+    started = time.monotonic()
+    with pytest.raises(ExportTimeoutError):
+        await export_service.prepare_experiment_export(
+            session, 1, admin_user.organization_id, include_fastq=False, include_provenance=False, user_email="a@b"
+        )
+
+    assert time.monotonic() - started < 0.9  # refused at the deadline, not after the slow commit
+
+
+# -- F3: project metadata before admission -------------------------------------------------------
+
+
+async def _project_with_fastq_links(session, org: int) -> None:
+    await session.execute(
+        text("INSERT INTO projects (id, organization_id, name, status) VALUES (1, :o, 'P', 'active')"), {"o": org}
+    )
+    await session.execute(
+        text(
+            "INSERT INTO experiments (id, uuid, organization_id, project_id, name, status) VALUES "
+            "(1, 'aaaaaaaa-0000-0000-0000-000000000001', :o, 1, 'A', 'x'), "
+            "(2, 'bbbbbbbb-0000-0000-0000-000000000002', :o, 1, 'B', 'x')"
+        ),
+        {"o": org},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO samples (id, experiment_id, external_id, status) VALUES (11, 2, 'B1', 'r'), (12, 1, 'A1', 'r')"
+        )
+    )
+    for fid, ftype in ((1, "txt"), (2, "fastq.gz"), (3, "fastq.gz")):
+        await session.execute(
+            text(
+                "INSERT INTO files (id, organization_id, filename, gcs_uri, storage_uri, file_type, size_bytes,"
+                " source_type) VALUES (:f, :o, :n, 'gs://b/x', 'gs://b/x', :t, 1, 'upload')"
+            ),
+            {"f": fid, "o": org, "n": f"f{fid}", "t": ftype},
+        )
+        for sid in (11, 12):
+            await session.execute(
+                text("INSERT INTO sample_files (sample_id, file_id) VALUES (:s, :f)"), {"s": sid, "f": fid}
+            )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_associations_are_read_only_for_the_selected_files(session, admin_user, monkeypatch):
+    from app.services.data_export import selection
+
+    seen = []
+    real = selection._lowest_linked_experiment
+
+    async def spy(session_, file_ids, project_id, org_id):
+        seen.append(sorted(file_ids))
+        return await real(session_, file_ids, project_id, org_id)
+
+    monkeypatch.setattr(selection, "_lowest_linked_experiment", spy)
+    await _project_with_fastq_links(session, admin_user.organization_id)
+
+    content = await selection.select_project(session, 1, admin_user.organization_id, include_fastq=False, limit=1)
+
+    assert seen == [[1]]
+    assert {e.name: [f.id for f in e.files] for e in content.experiments} == {"A": [1], "B": []}
+
+
+@pytest.mark.asyncio
+async def test_a_busy_project_export_selects_nothing(client, session, admin_user, headers, store, monkeypatch):
+    from app.services.data_export import selection
+
+    calls = []
+
+    async def spy(*a, **k):
+        calls.append(1)
+
+    monkeypatch.setattr(selection, "select_project", spy)
+    await _project_with_fastq_links(session, admin_user.organization_id)
+
+    lease = resources.SLOT.try_acquire()
+    try:
+        resp = await client.post(
+            "/api/projects/1/export/data",
+            json={"delivery_method": "direct", "include_fastq": False, "include_provenance": False},
+            headers=headers,
+        )
+    finally:
+        lease.release()
+
+    assert resp.status_code == 429
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_too_many_experiments_are_refused_before_they_are_read(
+    client, session, admin_user, headers, store, monkeypatch
+):
+    monkeypatch.setattr(resources, "MAX_PROJECT_EXPERIMENTS", 1)
+    await _project_with_fastq_links(session, admin_user.organization_id)
+
+    resp = await client.post(
+        "/api/projects/1/export/data",
+        json={"delivery_method": "direct", "include_fastq": False, "include_provenance": False},
+        headers=headers,
+    )
+
+    assert resp.status_code == 413
+    assert "experiments" in resp.json()["detail"]
+
+
+# -- F4: the manifest allowance is in bytes ------------------------------------------------------
+
+
+async def _samples(session, org: int, notes: list[str]) -> None:
+    await _seed(session, org)
+    for i, note in enumerate(notes):
+        await session.execute(
+            text("INSERT INTO samples (experiment_id, external_id, status, prep_notes) VALUES (1, :e, 'r', :n)"),
+            {"e": f"S{i:05d}", "n": note},
+        )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_multibyte_rows_are_refused_at_the_byte_limit_before_more_are_read(session, admin_user, monkeypatch):
+    from app.exceptions import ExportLimitError
+    from app.services.data_export import selection
+
+    written = []
+    real = selection.csv.DictWriter
+
+    class Counting(real):
+        def writerow(self, row):
+            written.append(1)
+            return super().writerow(row)
+
+    monkeypatch.setattr(selection.csv, "DictWriter", Counting)
+    await _samples(session, admin_user.organization_id, ["😀" * 300] * 3)  # 1,200 bytes but 300 characters each
+
+    with pytest.raises(ExportLimitError):
+        await selection.write_sample_manifest(session, 1, limit_bytes=1_000)
+
+    assert len(written) == 2  # the header (written through writerow) and the first sample only
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_multibyte_manifest_matches_the_reference_across_batches(session, admin_user):
+    from sqlalchemy import select
+
+    from app.models.sample import Sample
+    from app.services.data_export import selection
+
+    await _samples(session, admin_user.organization_id, [f"é{i}实验😀" for i in range(1100)])
+    samples = (await session.execute(select(Sample).where(Sample.experiment_id == 1).order_by(Sample.id))).scalars()
+
+    expected = selection.build_sample_manifest(list(samples)).encode("utf-8")
+    streamed = await selection.write_sample_manifest(session, 1, limit_bytes=len(expected))
+
+    assert streamed == expected

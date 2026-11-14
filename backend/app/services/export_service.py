@@ -114,6 +114,7 @@ async def prepare_experiment_export(
     user_email: str,
 ) -> PreparedExport:
     started = asyncio.get_running_loop().time()
+    resources.SLOT.refuse_if_busy()
     content = await selection.select_experiment(
         session, experiment_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
     )
@@ -140,8 +141,14 @@ async def prepare_project_export(
     user_email: str,
 ) -> PreparedExport:
     started = asyncio.get_running_loop().time()
+    resources.SLOT.refuse_if_busy()
     content = await selection.select_project(
-        session, project_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
+        session,
+        project_id,
+        org_id,
+        include_fastq=include_fastq,
+        limit=resources.MAX_FILES + 1,
+        max_experiments=resources.MAX_PROJECT_EXPERIMENTS,
     )
     if content is None:
         raise NotFoundError(f"Project {project_id} not found")
@@ -176,9 +183,9 @@ async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, file
     try:
         async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
             await plan(archive)
-        # Nothing below needs the database until the audit: end the read transaction rather than
-        # hold a pooled connection idle through a build that may take many minutes.
-        await session.commit()
+            # Nothing below needs the database until the audit: end the read transaction rather
+            # than hold a pooled connection idle through a build that may take many minutes.
+            await session.commit()
     except TimeoutError:
         job.release()
         raise ExportTimeoutError("The export took too long to prepare and was stopped. Try a smaller export.") from None
