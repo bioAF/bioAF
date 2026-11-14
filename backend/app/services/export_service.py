@@ -21,6 +21,7 @@ from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.project import Project
 from app.models.sample import Sample
+from app.services.data_export import selection
 from app.services.provenance.report_service import ProvenanceReportService
 
 logger = logging.getLogger("bioaf.export")
@@ -38,29 +39,12 @@ async def estimate_experiment_export(
     experiment_id: int,
     org_id: int,
     include_fastq: bool = False,
-) -> dict:
+) -> dict | None:
     """Return total_bytes and per-category breakdown for an experiment export."""
-    experiment = await _get_experiment(session, experiment_id, org_id)
-    if experiment is None:
-        return None  # type: ignore[return-value]
-
-    rows = (
-        await session.execute(
-            select(File.file_type, File.size_bytes).where(
-                File.experiment_id == experiment_id,
-                File.organization_id == org_id,
-            )
-        )
-    ).fetchall()
-
-    breakdown: dict[str, int] = {}
-    for file_type, size in rows:
-        ftype = (file_type or "other").lower()
-        if ftype in _FASTQ_TYPES and not include_fastq:
-            continue
-        breakdown[ftype] = breakdown.get(ftype, 0) + (size or 0)
-
-    return {"total_bytes": sum(breakdown.values()), "breakdown": breakdown}
+    content = await selection.select_experiment(
+        session, experiment_id, org_id, include_fastq=include_fastq, manifests=False
+    )
+    return None if content is None else selection.experiment_estimate(content)
 
 
 async def estimate_project_export(
@@ -69,36 +53,12 @@ async def estimate_project_export(
     org_id: int,
     include_fastq: bool = False,
 ) -> dict | None:
-    """Return total_bytes, per-category breakdown, and per-experiment breakdown."""
-    project = await _get_project(session, project_id, org_id)
-    if project is None:
-        return None
+    """Return total_bytes, per-category breakdown, and per-experiment breakdown.
 
-    experiments = (
-        await session.execute(
-            select(Experiment.id, Experiment.name).where(
-                Experiment.project_id == project_id,
-                Experiment.organization_id == org_id,
-            )
-        )
-    ).fetchall()
-
-    per_experiment: list[dict] = []
-    grand_total = 0
-    grand_breakdown: dict[str, int] = {}
-
-    for exp_id, exp_name in experiments:
-        est = await estimate_experiment_export(session, exp_id, org_id, include_fastq)
-        per_experiment.append({"experiment_id": exp_id, "name": exp_name, **est})
-        grand_total += est["total_bytes"]
-        for k, v in est["breakdown"].items():
-            grand_breakdown[k] = grand_breakdown.get(k, 0) + v
-
-    return {
-        "total_bytes": grand_total,
-        "breakdown": grand_breakdown,
-        "experiments": per_experiment,
-    }
+    Files in the project but in none of its experiments count toward the totals without a row.
+    """
+    content = await selection.select_project(session, project_id, org_id, include_fastq=include_fastq, manifests=False)
+    return None if content is None else selection.project_estimate(content)
 
 
 # ---------------------------------------------------------------------------
