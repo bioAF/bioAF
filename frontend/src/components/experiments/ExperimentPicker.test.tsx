@@ -156,3 +156,16 @@ test("no access says so instead of an empty list", async () => {
   await settle();
   expect(screen.getByText(/do not have access to experiments/)).toBeInTheDocument();
 });
+
+test("a session ending drops the experiments shown", async () => {
+  const { startSession, endSession } = jest.requireActual("@/lib/session");
+  startSession("first.jwt");
+  serveMany(3);
+  render(<Harness />);
+  await settle();
+  expect(options()).toContain("Exp 3");
+  mockGet.mockImplementation(() => new Promise(() => {}));
+  await act(async () => endSession());
+  await settle();
+  expect(options()).not.toContain("Exp 3");
+});

@@ -22,3 +22,7 @@
   experiment's project, so its outputs and Recreate keep it (#103). Notebook and work-node launches refuse a
   project, experiment or template version from another organization, or an experiment outside the chosen
   project, before anything is created.
+- Experiment pickers (AI Lit Review, Library filter, work-node and notebook launch, Data & Files filter and
+  Associate dialog, Plot Archive, glossary scans) now search by name and page through every experiment instead of
+  stopping at the first 100 or 500 (#104, #105). Deleted experiments no longer appear in experiment lists unless
+  the deleted status is chosen.
