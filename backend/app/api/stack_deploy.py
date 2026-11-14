@@ -23,7 +23,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
-from app.api.terraform_streaming import ClosingStreamingResponse, client_event
+from app.api.streaming_responses import ClosingStreamingResponse
+from app.api.terraform_streaming import client_event
 from app.database import async_session_factory, get_session
 from app.exceptions import DomainError, NotFoundError, ValidationError
 from app.platform.cloud_provider import get_cloud_provider

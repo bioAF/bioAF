@@ -40,6 +40,10 @@ services:
       # One centralized log path. stdout: the host's Ops Agent ships the backend's JSON lines (setup
       # and start configure it on GCE). Set direct only where nothing collects container output.
       BIOAF_LOG_DELIVERY: ${BIOAF_LOG_DELIVERY:-stdout}
+      # Data exports: a direct download stalled this long is closed (nginx send_timeout matches);
+      # a signed link that cannot stay valid this long is refused rather than issued short.
+      BIOAF_EXPORT_TRANSFER_STALL_SECONDS: ${BIOAF_EXPORT_TRANSFER_STALL_SECONDS:-60}
+      BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS: ${BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS:-3600}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
     volumes:

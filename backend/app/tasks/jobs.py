@@ -252,25 +252,10 @@ async def _backup_health_check(session) -> None:
 
 
 async def _export_cleanup(session) -> None:
-    """Delete export ZIPs older than 24 hours from the exports/ prefix."""
-    from datetime import datetime, timedelta, timezone
+    """Retire signed-export objects past retention (app/services/data_export/retention.py)."""
+    from app.services.data_export import retention
 
-    from app.adapters.registry import get_storage_adapter
-    from app.platform.platform_config_service import PlatformConfigService
-
-    bucket_name = await PlatformConfigService.get(session, "config_backups_bucket_name")
-    if not bucket_name or bucket_name == "null":
-        return
-    adapter = get_storage_adapter()
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    deleted = 0
-    for obj in await adapter.list_objects(adapter.build_uri(bucket_name, "exports/")):
-        created = obj.provider_details.get("time_created")
-        if created and created < cutoff:
-            await adapter.delete(obj.storage_uri)
-            deleted += 1
-    if deleted:
-        logger.info("Export cleanup: deleted %d expired ZIP(s) from the %s exports/ prefix", deleted, bucket_name)
+    await retention.run(session)
 
 
 def _idempotency_cleanup() -> Iteration:

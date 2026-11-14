@@ -21,7 +21,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
-from app.api.terraform_streaming import INTERRUPTED_MESSAGE, ClosingStreamingResponse, client_event
+from app.api.streaming_responses import ClosingStreamingResponse
+from app.api.terraform_streaming import INTERRUPTED_MESSAGE, client_event
 from app.database import get_session
 from app.models.component import TerraformRun
 from app.platform.cloud_provider import get_cloud_provider

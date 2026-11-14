@@ -194,6 +194,15 @@ class Settings(BaseSettings):
     # Bcrypt
     bcrypt_rounds: int = 12
 
+    # Data exports (app/services/data_export). Scratch shares the host disk with Docker and
+    # PostgreSQL; exports refuse to build below a free-space floor (data_export/resources.py).
+    export_scratch_dir: str = "/tmp/bioaf-exports"
+    # A direct download whose client accepts no bytes for this long is closed (nginx's own
+    # client send_timeout is pinned to the same 60 s in docker/nginx.conf).
+    export_transfer_stall_seconds: int = 60
+    # A signed export link must stay usable at least this long after it is issued; shorter is refused.
+    export_signed_min_ttl_seconds: int = 3600
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

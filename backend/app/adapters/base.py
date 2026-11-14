@@ -23,6 +23,7 @@ from app.adapters.models import (
     ObjectMetadata,
     SessionInfo,
     SessionStatus,
+    SignedDownload,
     StorageMetrics,
     StoredObject,
     StorageStore,
@@ -472,6 +473,23 @@ class StorageProvider(ABC):
         and raise CapabilityNotSupported. GCS/S3 support it.
         """
         raise NotImplementedError
+
+    async def sign_download(self, uri: str, *, max_ttl_seconds: int, min_ttl_seconds: int) -> SignedDownload:
+        """A GET link for ``uri`` valid for at most ``max_ttl_seconds``, with its truthful expiry.
+
+        The link may be shorter than the maximum when the signing identity expires sooner, but
+        never shorter than ``min_ttl_seconds`` plus the backend's handoff allowance: the backend
+        raises ``StorageUnavailableError`` rather than issue a link that dies early. Backends that
+        cannot sign (NFS) raise CapabilityNotSupported.
+        """
+        raise NotImplementedError
+
+    async def check_signed_download(self, *, min_ttl_seconds: int) -> None:
+        """Raise ``StorageUnavailableError`` now if a link of ``min_ttl_seconds`` cannot be signed.
+
+        An early, cheap eligibility check before expensive work; ``sign_download`` checks again.
+        """
+        return None
 
     async def create_resumable_upload_url(
         self,

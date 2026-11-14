@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.registry import require_capability
 from app.api.dependencies import require_permission
+from app.api.streaming_responses import GuardedFileResponse
+from app.config import settings
 from app.database import get_session
+from app.exceptions import ExportTimeoutError, StorageUnavailableError
+from app.services import export_service, export_delivery
 from app.services.audit_service import log_action
-from app.services import export_service
+from app.services.data_export import resources
 
 logger = logging.getLogger("bioaf.data_export.api")
 
@@ -21,7 +26,8 @@ router = APIRouter(tags=["data-export"])
 
 
 class ExportRequest(BaseModel):
-    delivery_method: str  # "direct" or "gcs"
+    # "gcs" is the signed-link delivery on any store that can sign links (the name predates S3).
+    delivery_method: Literal["direct", "gcs"]
     include_fastq: bool = False
     include_provenance: bool = True
 
@@ -71,52 +77,18 @@ async def export_experiment(
     current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
-    org_id = int(current_user["org_id"])
-    user_id = int(current_user["sub"])
-    user_email = current_user.get("email", "")
-
-    zip_bytes = await export_service.export_experiment(
-        session=session,
-        experiment_id=experiment_id,
-        org_id=org_id,
+    if body.delivery_method == "gcs":
+        require_capability("signed_url_upload")
+        await export_delivery.check_signing_available()
+    prepared = await export_service.prepare_experiment_export(
+        session,
+        experiment_id,
+        int(current_user["org_id"]),
         include_fastq=body.include_fastq,
         include_provenance=body.include_provenance,
-        user_email=user_email,
+        user_email=current_user.get("email", ""),
     )
-
-    await log_action(
-        session=session,
-        user_id=user_id,
-        entity_type="experiment",
-        entity_id=experiment_id,
-        action="data_exported",
-        details={
-            "delivery_method": body.delivery_method,
-            "include_fastq": body.include_fastq,
-            "include_provenance": body.include_provenance,
-        },
-    )
-
-    if body.delivery_method == "gcs":
-        try:
-            signed_url = await export_service._upload_zip_to_gcs(
-                zip_bytes, org_id, f"experiment_{experiment_id}", session
-            )
-        except Exception as exc:
-            logger.error("GCS upload failed for experiment %d: %s", experiment_id, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Export upload failed")
-        await session.commit()
-        return {"signed_url": signed_url, "expires_in_hours": 24}
-
-    await session.commit()
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"experiment_{experiment_id}_export_{ts}.zip"
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return await _deliver(session, current_user, "experiment", experiment_id, body, prepared)
 
 
 @router.post("/api/projects/{project_id}/export/data")
@@ -126,45 +98,95 @@ async def export_project(
     current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
-    org_id = int(current_user["org_id"])
-    user_id = int(current_user["sub"])
-    user_email = current_user.get("email", "")
-
-    zip_bytes, filename = await export_service.export_project(
-        session=session,
-        project_id=project_id,
-        org_id=org_id,
+    if body.delivery_method == "gcs":
+        require_capability("signed_url_upload")
+        await export_delivery.check_signing_available()
+    prepared = await export_service.prepare_project_export(
+        session,
+        project_id,
+        int(current_user["org_id"]),
         include_fastq=body.include_fastq,
         include_provenance=body.include_provenance,
-        user_email=user_email,
+        user_email=current_user.get("email", ""),
     )
+    return await _deliver(session, current_user, "project", project_id, body, prepared)
 
+
+async def _audit(session, current_user: dict, entity_type: str, entity_id: int, body: ExportRequest, **stage) -> None:
+    """The ``data_exported`` event: what the server prepared or issued, never what the client received."""
     await log_action(
         session=session,
-        user_id=user_id,
-        entity_type="project",
-        entity_id=project_id,
+        user_id=int(current_user["sub"]),
+        entity_type=entity_type,
+        entity_id=entity_id,
         action="data_exported",
         details={
             "delivery_method": body.delivery_method,
             "include_fastq": body.include_fastq,
             "include_provenance": body.include_provenance,
+            **stage,
         },
     )
 
-    if body.delivery_method == "gcs":
+
+async def _deliver(session, current_user, entity_type, entity_id, body, prepared: export_service.PreparedExport):
+    try:
+        if body.delivery_method == "gcs":
+            link = await export_delivery.issue_signed_link(prepared, org_id=int(current_user["org_id"]))
+            try:
+                # Within the issuance budget and handoff allowance, while the link still meets the minimum.
+                async with asyncio.timeout_at(link.handoff_deadline()):
+                    await _audit(
+                        session,
+                        current_user,
+                        entity_type,
+                        entity_id,
+                        body,
+                        stage="link_issued",
+                        archive_bytes=prepared.size,
+                        link_expires_at=link.expires_at.isoformat(),
+                    )
+                    await session.commit()
+                export_delivery.ensure_usable(link)
+            except BaseException as exc:
+                await export_delivery.withdraw(link)
+                if isinstance(exc, TimeoutError):
+                    raise StorageUnavailableError(export_delivery.TOO_SHORT) from None
+                raise
+            prepared.release()
+            return {"signed_url": link.url, "expires_in_hours": link.expires_in_hours()}
+
+        async def finished(outcome: str | None) -> None:
+            prepared.release()
+            if outcome != "sent":
+                logger.warning("Data export transfer ended: %s", outcome)
+
+        response = GuardedFileResponse(
+            prepared.path,
+            size=prepared.size,
+            filename=prepared.filename,
+            media_type="application/zip",
+            on_close=finished,
+            on_start=prepared.claim,
+            stall_seconds=settings.export_transfer_stall_seconds,
+            deadline_seconds=resources.TRANSFER_DEADLINE,
+        )
         try:
-            signed_url = await export_service._upload_zip_to_gcs(zip_bytes, org_id, f"project_{project_id}", session)
-        except Exception as exc:
-            logger.error("GCS upload failed for project %d: %s", project_id, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail="Export upload failed")
-        await session.commit()
-        return {"signed_url": signed_url, "expires_in_hours": 24}
-
-    await session.commit()
-
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+            async with asyncio.timeout(export_delivery.HANDOFF_SECONDS):
+                await _audit(
+                    session,
+                    current_user,
+                    entity_type,
+                    entity_id,
+                    body,
+                    stage="archive_prepared",
+                    archive_bytes=prepared.size,
+                )
+                await session.commit()
+        except TimeoutError:
+            raise ExportTimeoutError("Recording the export took too long, so it was not sent. Try again.") from None
+    except BaseException:
+        prepared.release()
+        raise
+    export_delivery.watch_unclaimed(prepared)
+    return response

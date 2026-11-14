@@ -77,6 +77,10 @@ async def _seed_file(
             "owner": owner_id,
         },
     )
+    # The seeded row's stored object exists with its recorded size: exports read real bytes.
+    from app.adapters.registry import get_storage_adapter
+
+    await get_storage_adapter().write_bytes(f"gs://bucket/file_{file_id}.txt", b"x" * size_bytes)
 
 
 async def _seed_full_experiment(session, org_id: int, owner_id: int) -> dict:
@@ -89,6 +93,16 @@ async def _seed_full_experiment(session, org_id: int, owner_id: int) -> dict:
     await session.execute(text("INSERT INTO sample_files (id, sample_id, file_id) VALUES (1, 1, 1)"))
     await session.commit()
     return {"project_id": 1, "experiment_id": 1}
+
+
+@pytest.fixture(autouse=True)
+def _private_object_store(tmp_path, monkeypatch):
+    """Seeded objects and export scratch live in this test's own directories."""
+    from app.adapters.storage import gcs
+    from app.config import settings
+
+    monkeypatch.setattr(gcs, "LOCAL_DATA_ROOT", str(tmp_path / "objects"))
+    monkeypatch.setattr(settings, "export_scratch_dir", str(tmp_path / "scratch"))
 
 
 @pytest.fixture
@@ -305,13 +319,19 @@ class TestExperimentGcsExport:
     ):
         await _seed_full_experiment(session, admin_user.organization_id, admin_user.id)
 
-        # Patch GCS upload + signed URL generation
-        from app.services import export_service as svc
+        # Fake the storage adapter's signing boundary (local mode cannot sign links).
+        from datetime import datetime, timedelta, timezone
 
-        async def _fake_upload(zip_bytes, org_id, experiment_name, session):
-            return "https://storage.googleapis.com/signed-url-token"
+        from app.adapters.models import SignedDownload
+        from app.adapters.registry import get_storage_adapter
 
-        monkeypatch.setattr(svc, "_upload_zip_to_gcs", _fake_upload)
+        adapter = get_storage_adapter()
+
+        async def _fake_sign(uri, *, max_ttl_seconds, min_ttl_seconds):
+            expires = datetime.now(timezone.utc) + timedelta(seconds=max_ttl_seconds)
+            return SignedDownload(url="https://storage.googleapis.com/signed-url-token", expires_at=expires)
+
+        monkeypatch.setattr(adapter, "sign_download", _fake_sign)
 
         resp = await client.post(
             "/api/experiments/1/export/data",

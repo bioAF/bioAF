@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials import get_credentials_provider
 from app.api.dependencies import require_permission
-from app.api.terraform_streaming import ClosingStreamingResponse, client_event
+from app.api.streaming_responses import ClosingStreamingResponse
+from app.api.terraform_streaming import client_event
 from app.database import get_session
 from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app.platform.platform_config_service import PlatformConfigService

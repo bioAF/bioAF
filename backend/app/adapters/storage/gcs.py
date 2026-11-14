@@ -7,6 +7,7 @@ Mode is the resolved settings.compute_mode (BIOAF_COMPUTE_MODE), fixed when the 
 import asyncio
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import BinaryIO
 
 from app.config import compute_mode_for
@@ -23,6 +24,7 @@ from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
     StorageMetrics,
+    SignedDownload,
     StorageObjectNotFound,
     StorageStore,
     StoredObject,
@@ -524,6 +526,13 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_generate_signed_url, uri, method, expiry_seconds, content_type, creds)
 
+    async def sign_download(self, uri: str, *, max_ttl_seconds: int, min_ttl_seconds: int) -> SignedDownload:
+        # A V4 link's lifetime is its own X-Goog-Expires, not the signing token's. The clock is
+        # read before signing, so the advertised expiry is never later than the real one.
+        issued = datetime.now(timezone.utc)
+        url = await self.generate_signed_url(uri, method="GET", expiry_seconds=max_ttl_seconds)
+        return SignedDownload(url=url, expires_at=issued + timedelta(seconds=max_ttl_seconds))
+
     async def create_resumable_upload_url(
         self,
         uri: str,
@@ -641,6 +650,7 @@ class GcsStorageProvider(StorageProvider):
                         "updated": blob.updated,
                         "generation": blob.generation,
                     },
+                    uploaded_at=blob.time_created,
                 )
             )
         return results
