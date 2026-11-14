@@ -42,29 +42,35 @@ log() {
     echo "$msg"
 }
 
-_log_dir_safe() {
-    # A real directory (not a link) owned by this user and closed to group and other writes.
-    [ -d "$LOG_DIR" ] && [ ! -L "$LOG_DIR" ] && [ -O "$LOG_DIR" ] && [ -w "$LOG_DIR" ] && [ -x "$LOG_DIR" ] \
-        && [ -z "$(find "$LOG_DIR" -maxdepth 0 \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]
+_no_foreign_write() {
+    # Neither group nor other has write permission on this entry.
+    [ -z "$(find "$1" -maxdepth 0 \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]
 }
 
 open_agent_log() {
-    # Open host-only/agent.log on fd 3. The directory is created private, and an existing one is
-    # used only when it is already private to this user, so no other user can swap the entry between
-    # the checks below and the open. Any problem leaves the agent on its inherited stdout/stderr;
-    # permissions are never relaxed and the old shared update-status/agent.log is never used.
+    # Open host-only/agent.log on fd 3, the directory 0700 and the file 0600. The directory is
+    # created private. An existing directory or log is used only if it is a real entry (not a link)
+    # owned by this user that no one else could have written to; any read or search access others
+    # have is then removed (never adding access). Inside a directory only this user can change, the
+    # entry cannot be swapped between these checks and the open. Any problem leaves the agent on its
+    # inherited stdout/stderr; the old shared update-status/agent.log is never used.
     AGENT_LOG_OPEN=false
+    local old_umask
+    old_umask=$(umask)
     if [ ! -e "$LOG_DIR" ] && [ ! -L "$LOG_DIR" ]; then
         mkdir -m 700 "$LOG_DIR" 2>/dev/null || true
     fi
-    if _log_dir_safe \
-        && { [ ! -e "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ] || { [ -f "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ] && [ -O "$LOG_FILE" ]; }; } \
-        && { local old_umask; old_umask=$(umask); umask 077; exec 3>>"$LOG_FILE"; } 2>/dev/null; then
+    if [ -d "$LOG_DIR" ] && [ ! -L "$LOG_DIR" ] && [ -O "$LOG_DIR" ] && _no_foreign_write "$LOG_DIR" \
+        && chmod go-rwx "$LOG_DIR" 2>/dev/null && [ -w "$LOG_DIR" ] && [ -x "$LOG_DIR" ] \
+        && { { [ ! -e "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ]; } \
+            || { [ -f "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ] && [ -O "$LOG_FILE" ] && _no_foreign_write "$LOG_FILE" \
+                && chmod go-rwx "$LOG_FILE" 2>/dev/null; }; } \
+        && { umask 077; exec 3>>"$LOG_FILE"; } 2>/dev/null; then
         umask "$old_umask"
         AGENT_LOG_OPEN=true
         return 0
     fi
-    [ -n "${old_umask:-}" ] && umask "$old_umask"
+    umask "$old_umask"
     echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] The private log $LOG_FILE is unavailable or unsafe; logging to the service output instead." >&2
     return 0
 }

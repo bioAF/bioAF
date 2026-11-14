@@ -452,3 +452,39 @@ unsafe_log() {
     done
     chmod -R u+rwx "$REPO/host-only" 2>/dev/null || true
 }
+
+mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$1"; }
+
+@test "an existing log readable by others is tightened to 0700/0600 before it is used" {
+    local dir_mode file_mode
+    for dir_mode in 755 750 711; do
+        for file_mode in 644 640 604; do
+            rm -rf "$REPO/host-only" "$REPO/updater-calls"
+            mkdir "$REPO/host-only"; chmod "$dir_mode" "$REPO/host-only"
+            printf 'old line\n' > "$REPO/host-only/agent.log"; chmod "$file_mode" "$REPO/host-only/agent.log"
+            stub_updater 0
+            printf '{"version": "9.9.9", "upgrade_id": 7}' > "$REPO/update-requests/update_7.json"
+            agent_round
+            [ "$(mode_of "$REPO/host-only")" = 0o700 ]
+            [ "$(mode_of "$REPO/host-only/agent.log")" = 0o600 ]
+            grep -q 'UPDATER-STDOUT 9.9.9' "$REPO/host-only/agent.log"
+            [[ "$output" != *"private log"* ]]
+        done
+    done
+}
+
+@test "a log file others could have written is not used or changed" {
+    local file_mode
+    for file_mode in 662 646 666; do
+        rm -rf "$REPO/host-only" "$REPO/updater-calls"
+        mkdir -m 700 "$REPO/host-only"
+        : > "$REPO/host-only/agent.log"; chmod "$file_mode" "$REPO/host-only/agent.log"
+        stub_updater 0
+        printf '{"version": "9.9.9", "upgrade_id": 7}' > "$REPO/update-requests/update_7.json"
+        agent_round
+        [[ "$output" == *"private log"* ]]
+        [ "$(mode_of "$REPO/host-only/agent.log")" = "0o$file_mode" ]
+        [ ! -s "$REPO/host-only/agent.log" ]
+        [ "$(cat "$REPO/updater-calls")" = "update 9.9.9 --yes" ]
+    done
+}
