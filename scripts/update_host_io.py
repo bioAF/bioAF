@@ -49,15 +49,21 @@ class Refused(Exception):
 
 
 def open_subdir(repo_fd: int, name: str, create: bool = False, private: bool = False) -> int:
+    created = False
     if create:
         try:
-            os.mkdir(name, 0o700 if private else 0o755, dir_fd=repo_fd)
+            os.mkdir(name, 0o700, dir_fd=repo_fd)
+            created = True
         except FileExistsError:
             pass
     try:
         fd = os.open(name, DIR_FLAGS, dir_fd=repo_fd)
     except OSError:
         raise Refused(f"{name}/ is missing, not a directory, or a symlink") from None
+    if created:
+        # Exact modes, whatever the caller's umask: the backend's reader (possibly another UID) must
+        # traverse update-status/; host-state/ stays private.
+        os.fchmod(fd, 0o700 if private else 0o755)
     if private:
         st = os.fstat(fd)
         if st.st_uid != os.geteuid() or st.st_mode & 0o077:

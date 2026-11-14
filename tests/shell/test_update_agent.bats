@@ -60,7 +60,7 @@ STUB
 # run from a scratch working directory.
 agent_round() {
     mkdir -p "$REPO/cwd"
-    run env "$@" bash -c "cd '$REPO/cwd' && source '$REPO/scripts/update-agent.sh' && open_agent_log && process_pending" </dev/null
+    run env "$@" bash -c "umask ${WRITE_UMASK:-022}; cd '$REPO/cwd' && source '$REPO/scripts/update-agent.sh' && open_agent_log && process_pending" </dev/null
 }
 
 # python_shim <body>: a python3 first on PATH that runs <body> (shell) and then the real interpreter.
@@ -189,7 +189,7 @@ write_status_with() {
         printf '{"version": "9.9.9", "upgrade_id": 7}' > "$REPO/update-requests/update_7.json"
         agent_round "$@"
     else
-        run env "$@" bash -c "source '$BIOAF' >/dev/null; SCRIPT_DIR='$REPO'; _update_from=1.0.0; _update_to=9.9.9
+        run env "$@" bash -c "umask ${WRITE_UMASK:-022}; source '$BIOAF' >/dev/null; SCRIPT_DIR='$REPO'; _update_from=1.0.0; _update_to=9.9.9
             write_update_status failed backup 'it \"failed\"
 here'" </dev/null
     fi
@@ -319,13 +319,25 @@ as_other_user() {
     else return 99; fi
 }
 
-@test "a different non-root user reads and parses the published status" {
-    if ! as_other_user true; then skip "cannot switch to another user here (needs root or passwordless sudo)"; fi
-    chmod 755 "$REPO" "$REPO/update-status"
+@test "a status directory a writer creates is open to the backend's reader even under umask 077" {
     local writer
     for writer in agent bioaf; do
-        rm -f "$REPO/update-status/current.json"
-        write_status_with "$writer"
+        rm -rf "$REPO/update-status"
+        WRITE_UMASK=077 write_status_with "$writer"
+        [ "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$REPO/update-status")" = 0o755 ]
+        [ "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$REPO/update-status/current.json")" = 0o644 ]
+    done
+}
+
+@test "a different non-root user reads and parses the published status" {
+    if ! as_other_user true; then skip "cannot switch to another user here (needs root or passwordless sudo)"; fi
+    # Only the checkout is opened up (mktemp makes it 0700); the container sees update-status/ itself,
+    # which each writer creates here under a restrictive umask.
+    chmod 755 "$REPO"
+    local writer
+    for writer in agent bioaf; do
+        rm -rf "$REPO/update-status"
+        WRITE_UMASK=077 write_status_with "$writer"
         run as_other_user python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$REPO/update-status/current.json"
         [ "$status" -eq 0 ]
         [ "$output" = failed ]

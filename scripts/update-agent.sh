@@ -26,7 +26,9 @@ POLL_INTERVAL=2
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
 AGENT_LOG_OPEN=false
 
-mkdir -p "$TRIGGER_DIR" "$STATUS_DIR"
+mkdir -p "$TRIGGER_DIR"
+# 0755 whatever the umask: the backend reads current.json from here, possibly as another UID.
+[ -d "$STATUS_DIR" ] || mkdir -m 755 "$STATUS_DIR"
 
 host_io() {
     # host_io <command> [args...]: the in-memory host I/O program, run against this checkout.
