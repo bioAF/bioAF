@@ -112,6 +112,12 @@ process_trigger() {
 
     if [ $exit_code -eq 0 ]; then
         log "Update to $version completed successfully"
+    elif [ $exit_code -eq 75 ]; then
+        # ./bioaf refused before changing anything: another update, build or setup holds the deployment lock
+        # (installer/deployments.sh). Its status is the current one, so it is left alone, and the trigger is
+        # kept for the next polling round.
+        log "Another bioAF update, build or setup is running; the update to $version will be tried again"
+        return 0
     else
         log "ERROR: Update to $version failed with exit code $exit_code"
 

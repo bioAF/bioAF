@@ -37,6 +37,16 @@ teardown() {
     grep -q "exited with code 3" "$REPO/update-status/current.json"
 }
 
+@test "an update refused because another one is running keeps its trigger and the running status" {
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 75' > "$REPO/bioaf"
+    chmod +x "$REPO/bioaf"
+    mkdir -p "$REPO/update-status"
+    printf '{"status": "in_progress", "step": "pull"}' > "$REPO/update-status/current.json"
+    run bash -c "source '$REPO/scripts/update-agent.sh'; process_trigger '$REPO/update-requests/update_7.json'"
+    [ -e "$REPO/update-requests/update_7.json" ]
+    grep -q '"status": "in_progress"' "$REPO/update-status/current.json"
+}
+
 # ---------------------------------------------------------------------------
 # The trigger boundary (plan 23). update-requests/ is writable from the backend container, so every
 # name and payload there is untrusted. These run the actual agent with a stub updater.
