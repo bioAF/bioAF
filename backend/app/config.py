@@ -197,6 +197,9 @@ class Settings(BaseSettings):
     # Data exports (app/services/data_export). Scratch shares the host disk with Docker and
     # PostgreSQL; exports refuse to build below a free-space floor (data_export/resources.py).
     export_scratch_dir: str = "/tmp/bioaf-exports"
+    # Database backup creation and restore (app/services/backup_resources.py): one private workspace per
+    # operation, removed when it ends.
+    backup_scratch_dir: str = "/tmp/bioaf-backups"
     # A direct download whose client accepts no bytes for this long is closed (nginx's own
     # client send_timeout is pinned to the same 60 s in docker/nginx.conf).
     export_transfer_stall_seconds: int = 60
