@@ -14,6 +14,7 @@ restore before review; the primary is never swapped.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -355,3 +356,123 @@ async def test_the_scratch_floor_is_enforced_during_the_download(harness, monkey
     assert Writes.written < len(big)
     assert _ddl(harness) == []
     del real_download
+
+
+# --- database-volume headroom (review follow-up 3) -----------------------------------------------------------
+
+
+def _disk(monkeypatch, *, scratch_free_gib: float, db_free_gib: float, db_dir: str, after_bytes=None):
+    """Path-aware disk usage: the database volume and the scratch disk report their own free space."""
+    from app.services import backup_resources as br
+
+    gib = 1024**3
+    state = {"db_free": db_free_gib}
+
+    def usage(path):
+        free = state["db_free"] if str(path).startswith(db_dir) else scratch_free_gib
+        return br.shutil._ntuple_diskusage(100 * gib, int((100 - free) * gib), int(free * gib))
+
+    monkeypatch.setattr(br.shutil, "disk_usage", usage)
+    return state
+
+
+@pytest.fixture
+def db_volume(monkeypatch, tmp_path):
+    path = tmp_path / "db-volume"
+    path.mkdir()
+    monkeypatch.setattr(settings, "restore_db_volume_dir", str(path))
+    monkeypatch.setattr(backup_service, "_primary_database_bytes", _const(2 * 1024**3))
+    return str(path)
+
+
+def _const(value):
+    async def f():
+        return value
+
+    return f
+
+
+async def test_a_database_volume_without_room_is_refused_before_ddl(harness, monkeypatch, children, db_volume):  # noqa: F811
+    _use(monkeypatch, FakeBackupStorage())
+    # 100 GiB volume, floor 10 GiB; needs 2 x 2 GiB = 4 GiB: 12 GiB free is short.
+    _disk(monkeypatch, scratch_free_gib=80, db_free_gib=12, db_dir=db_volume)
+    result = await _start()
+    assert result["status"] == "error" and result["reason"] == "limit" and "database" in result["message"]
+    assert _ddl(harness) == []
+
+
+async def test_a_database_volume_with_room_restores(harness, monkeypatch, children, db_volume):  # noqa: F811
+    _use(monkeypatch, FakeBackupStorage())
+    _disk(monkeypatch, scratch_free_gib=80, db_free_gib=20, db_dir=db_volume)
+    assert (await _start())["status"] == "reviewing"
+
+
+async def test_a_configured_volume_that_is_not_visible_is_refused(harness, monkeypatch, children, tmp_path):  # noqa: F811
+    _use(monkeypatch, FakeBackupStorage())
+    monkeypatch.setattr(settings, "restore_db_volume_dir", str(tmp_path / "not-mounted"))
+    result = await _start()
+    assert result["status"] == "error" and result["reason"] == "limit"
+    assert _ddl(harness) == []
+
+
+async def test_an_unconfigured_volume_is_reported_as_not_measured(harness, monkeypatch, children, caplog):  # noqa: F811
+    _use(monkeypatch, FakeBackupStorage())
+    monkeypatch.setattr(settings, "restore_db_volume_dir", "")
+    caplog.set_level(logging.WARNING)
+    assert (await _start())["status"] == "reviewing"
+    assert "not measured" in caplog.text
+
+
+async def test_the_import_stops_when_the_database_volume_runs_low(harness, monkeypatch, db_volume):  # noqa: F811
+    """Free space can fall while pg_restore runs (WAL, other writers): the import is stopped above the floor."""
+    import asyncio
+
+    from app.services import backup_resources as br
+
+    _use(monkeypatch, FakeBackupStorage())
+    state = _disk(monkeypatch, scratch_free_gib=80, db_free_gib=20, db_dir=db_volume)
+    monkeypatch.setattr(br, "WATCH_SECONDS", 0.05)
+    real_exec = asyncio.subprocess.create_subprocess_exec
+
+    async def slow_import(*argv, **kwargs):
+        if "--single-transaction" in argv:
+            state["db_free"] = 5  # the volume fills while the import runs
+            return await real_exec(sys.executable, "-c", "import time; time.sleep(30)", **kwargs)
+        return await real_exec(sys.executable, "-c", "pass", **kwargs)
+
+    monkeypatch.setattr(backup_service.asyncio, "create_subprocess_exec", slow_import)
+    result = await asyncio.wait_for(_start(), 20)
+    assert result["status"] == "error" and result["reason"] == "limit"
+    assert _ddl(harness)[-1] == "DROP DATABASE IF EXISTS bioaf_restore"
+    assert not any(c[0] == "swap" for c in harness.calls)
+
+
+@needs_initdb
+async def test_the_database_volume_check_reads_the_real_primary_size(monkeypatch, tmp_path):
+    """On a real server: the primary's size is read and a restore with room proceeds; without room it is refused."""
+    from tests.support import disposable_pg as dpg
+
+    provisioned = dpg.provision()
+    server = await asyncio.to_thread(provisioned.__enter__)
+    try:
+        dump = await _real_primary(server, monkeypatch, tmp_path)
+        _use(monkeypatch, FakeBackupStorage(str(dump)))
+        volume = tmp_path / "db-volume"
+        volume.mkdir()
+        monkeypatch.setattr(settings, "restore_db_volume_dir", str(volume))
+        size = await backup_service._primary_database_bytes()
+        assert size > 1024 * 1024
+        try:
+            _disk(monkeypatch, scratch_free_gib=80, db_free_gib=10.5, db_dir=str(volume))  # floor 10 GiB
+            monkeypatch.setattr(settings, "restore_scratch_floor_min_bytes", 0)
+            monkeypatch.setattr(settings, "restore_scratch_floor_percent", 10)
+            assert (await _start())["status"] == "reviewing"
+            assert (await RestoreService.reject())["status"] == "reverted"
+            _disk(monkeypatch, scratch_free_gib=80, db_free_gib=10.0, db_dir=str(volume))
+            refused = await _start()
+            assert refused["status"] == "error" and refused["reason"] == "limit"
+            assert "bioaf_restore" not in await _databases(server)
+        finally:
+            await database_module.engine.dispose()
+    finally:
+        await asyncio.to_thread(provisioned.__exit__, None, None, None)

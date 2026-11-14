@@ -209,6 +209,9 @@ class Settings(BaseSettings):
     restore_toc_timeout_seconds: int = 60
     restore_pg_restore_timeout_seconds: int = 30 * 60
     restore_preparation_timeout_seconds: int = 45 * 60
+    # The PostgreSQL data volume, mounted read-only into the backend (docker-compose.yml) so a restore can check
+    # the restored copy and its WAL fit there. Empty: not mounted, and the headroom is reported as not measured.
+    restore_db_volume_dir: str = ""
     # A direct download whose client accepts no bytes for this long is closed (nginx's own
     # client send_timeout is pinned to the same 60 s in docker/nginx.conf).
     export_transfer_stall_seconds: int = 60

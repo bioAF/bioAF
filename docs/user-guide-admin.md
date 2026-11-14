@@ -91,6 +91,10 @@ Navigate to **Infrastructure > Backup & Recovery**:
   review copy and traffic stays on the current database. Time limits: download 15 minutes, archive check
   1 minute, import 30 minutes, the whole preparation 45 minutes (`BIOAF_RESTORE_*_SECONDS`). These limits are
   provisional starting values.
+- A restore also checks that the database's own disk has room for the restored copy and its transaction log
+  (twice the larger of the current database and the backup) above the same floor, before creating it, and keeps
+  watching while the import runs: if that disk runs low, the import is stopped and nothing is committed. The
+  backend sees the database volume read-only for this (`BIOAF_RESTORE_DB_VOLUME_DIR` in `docker-compose.yml`).
 - If a restore reports that its database import could not be stopped, no new restore can start. Restart bioAF
   (`./bioaf restart`), confirm the application is using the `bioaf` database, then drop the leftover review copy
   with `DROP DATABASE IF EXISTS bioaf_restore;` in `psql`. The leftover dump directory is removed by the next restore.

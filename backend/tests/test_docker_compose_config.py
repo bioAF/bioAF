@@ -157,3 +157,14 @@ class TestBackendLogDelivery:
         from app.config import Settings
 
         assert Settings.model_fields["log_delivery"].default == "stdout"
+
+
+class TestRestoreDatabaseVolume:
+    """A restore checks the PostgreSQL volume has room before creating the review copy (review follow-up 3)."""
+
+    def test_the_backend_sees_the_database_volume_read_only_where_it_checks(self, compose_config):
+        services = compose_config["services"]
+        db_volume = next(v.split(":")[0] for v in services["db"]["volumes"] if v.endswith(":/var/lib/postgresql/data"))
+        backend = services["backend"]
+        path = backend["environment"]["BIOAF_RESTORE_DB_VOLUME_DIR"]
+        assert f"{db_volume}:{path}:ro" in backend["volumes"]

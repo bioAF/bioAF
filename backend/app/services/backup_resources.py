@@ -46,6 +46,8 @@ STDERR_TAIL_BYTES = 64 * 1024
 STOP_GRACE_SECONDS = 10.0
 # A download rechecks free space each time this many more bytes have been written (and before the first).
 SPACE_CHECK_BYTES = 8 * 1024 * 1024
+# A running child's ``watch`` (e.g. the database volume's free space) is called this often.
+WATCH_SECONDS = 5.0
 KILL_WAIT_SECONDS = 5.0
 
 T = TypeVar("T")
@@ -174,8 +176,13 @@ async def run_child(
     timeout: float | None = None,
     stop_grace: float = STOP_GRACE_SECONDS,
     kill_wait: float = KILL_WAIT_SECONDS,
+    watch: Callable[[], None] | None = None,
 ) -> ChildResult:
-    """Run one child to completion (or stop it on timeout or cancellation); see the module docstring."""
+    """Run one child to completion (or stop it on timeout or cancellation); see the module docstring.
+
+    ``watch`` runs every WATCH_SECONDS while the child runs; a ``ResourceLimit`` it raises stops the child and
+    is raised to the caller.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -200,8 +207,26 @@ async def run_child(
 
     # An owned task, waited on without cancelling it: a timeout or our own cancellation stops the child first.
     waiter = runtime.spawn(collect(), role="backup-child")
+    loop = asyncio.get_running_loop()
+    deadline = None if timeout is None else loop.time() + timeout
+    done: set = set()
     try:
-        done, _ = await asyncio.wait({waiter}, timeout=timeout)
+        while not done:
+            remaining = None if deadline is None else max(deadline - loop.time(), 0)
+            step = (
+                remaining
+                if watch is None
+                else min(WATCH_SECONDS, remaining if remaining is not None else WATCH_SECONDS)
+            )
+            done, _ = await asyncio.wait({waiter}, timeout=step)
+            if done or (deadline is not None and loop.time() >= deadline):
+                break
+            if watch is not None:
+                try:
+                    watch()
+                except ResourceLimit:
+                    await _stop(proc, waiter, stop_grace, kill_wait)
+                    raise
     except asyncio.CancelledError:
         await _stop(proc, waiter, stop_grace, kill_wait)
         raise

@@ -1205,6 +1205,7 @@ _LIMIT_MESSAGES = {
     "dump_too_large": "This backup is larger than a restore may download ({limit}).",
     "scratch_space": "The server does not have enough free disk space to prepare this restore.",
     "download_timeout": "Downloading the backup took longer than a restore allows. Try again later.",
+    "db_volume_space": "The database disk does not have enough free space for a restored copy of the database.",
 }
 
 
@@ -1250,6 +1251,61 @@ def _check_scratch(needed: int) -> None:
         floor_min=settings.restore_scratch_floor_min_bytes,
         floor_percent=settings.restore_scratch_floor_percent,
     )
+
+
+async def _primary_database_bytes() -> int:
+    """The primary database's size, read through the maintenance connection."""
+    import asyncpg
+
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    conn = await asyncpg.connect(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 5432,
+        user=parsed.username or "bioaf_app",
+        password=parsed.password or "",
+        database="postgres",
+    )
+    try:
+        return int(await conn.fetchval("SELECT pg_database_size($1)", parsed.path.lstrip("/") or "bioaf"))
+    finally:
+        await conn.close()
+
+
+async def _db_volume_check(dump_bytes: int, reference: str):
+    """Require room for the restored copy and its WAL (2 x max(primary size, dump size)) above the floor on the
+    database volume; return a watch for the import.
+
+    Unconfigured (no mount, e.g. development) is reported as not measured. Configured but not visible refuses:
+    a restore cannot claim room it could not see.
+    """
+    directory = settings.restore_db_volume_dir
+    if not directory:
+        logger.warning(
+            "Restore %s: database volume headroom not measured (BIOAF_RESTORE_DB_VOLUME_DIR unset)", reference
+        )
+        return None
+    if not os.path.isdir(directory):
+        raise _Refused(
+            "limit",
+            "The database disk is not visible to the backend, so the restore could not check it has room.",
+            "db_volume_unavailable",
+        )
+
+    needed = 2 * max(await _primary_database_bytes(), dump_bytes)
+
+    def require(more: int) -> None:
+        try:
+            backup_resources.require_scratch(
+                directory,
+                more,
+                floor_min=settings.restore_scratch_floor_min_bytes,
+                floor_percent=settings.restore_scratch_floor_percent,
+            )
+        except backup_resources.ResourceLimit:
+            raise backup_resources.ResourceLimit("db_volume_space") from None
+
+    require(needed)
+    return lambda: require(0)
 
 
 async def _audit_unverified(session: AsyncSession | None, user_id: int | None, filename: str, reference: str) -> None:
@@ -1338,6 +1394,9 @@ async def _prepare_review(
                         "archive_unreadable",
                     )
 
+                phase = "database_volume"
+                watch = await _db_volume_check(size, reference)
+
                 phase = "create_database"
                 created = True
                 await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore", "CREATE DATABASE bioaf_restore"])
@@ -1360,6 +1419,7 @@ async def _prepare_review(
                     ],
                     env=env,
                     timeout=settings.restore_pg_restore_timeout_seconds,
+                    watch=watch,
                 )
             except backup_resources.ChildNotStopped:
                 workspace.retain()
