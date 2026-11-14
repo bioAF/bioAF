@@ -69,7 +69,8 @@ class GuardedFileResponse(StreamingResponse):
     runs for a generator that never started.
 
     A body send that does not complete within ``stall_seconds`` (the downstream accepted nothing)
-    closes the stream, as does reaching ``deadline_seconds`` while still progressing. Progress is a
+    closes the stream, as do the client disconnecting and reaching ``deadline_seconds`` while still
+    progressing. The outcome passed to ``on_close`` says which. Progress is a
     completed non-empty body send; an empty message never resets it. After the headers are sent a
     failure can only close the stream; ``Content-Length`` lets the client see it was cut short.
     """
@@ -126,18 +127,45 @@ class GuardedFileResponse(StreamingResponse):
 
         return guarded
 
+    async def _stream(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Send the body while watching for the client going away.
+
+        A server may keep accepting sends after the peer has gone (uvicorn drops them silently), so
+        a completed send loop alone does not mean the body was delivered; ``http.disconnect`` stops
+        the stream and is recorded as such.
+        """
+        error: Exception | None = None
+        async with anyio.create_task_group() as group:
+
+            async def watch() -> None:
+                while (await receive())["type"] != "http.disconnect":
+                    pass
+                self.outcome = "disconnected"
+                group.cancel_scope.cancel()
+
+            group.start_soon(watch)
+            try:
+                await super().__call__(scope, receive, self._guard(send))
+                if self.outcome != "disconnected":
+                    self.outcome = "sent"
+            except TransferStalled:
+                self.outcome = "stalled"
+            except Exception as exc:
+                error = exc
+            finally:
+                group.cancel_scope.cancel()
+        if error is not None:
+            raise error
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         self.outcome = "incomplete"
         if self._on_start is not None:
             self._on_start()
         try:
             with anyio.move_on_after(self._deadline_seconds) as deadline:
-                await super().__call__(scope, receive, self._guard(send))
-                self.outcome = "sent"
+                await self._stream(scope, receive, send)
             if deadline.cancelled_caught:
                 self.outcome = "deadline"
-        except TransferStalled:
-            self.outcome = "stalled"
         except BaseException:
             self.outcome = "failed"
             raise

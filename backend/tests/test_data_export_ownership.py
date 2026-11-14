@@ -395,3 +395,27 @@ async def test_the_backstop_releases_only_an_export_no_response_started(tmp_path
 
     assert resources.SLOT.busy is claimed
     prepared.release()
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_with_silently_dropped_sends_is_not_reported_as_sent(tmp_path):
+    """uvicorn drops sends after the peer goes away (no error); the disconnect message is the signal."""
+    closed: list = []
+    gone = asyncio.Event()
+    sent = {"bytes": 0}
+
+    async def receive():
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            sent["bytes"] += len(message["body"])
+            if sent["bytes"] >= 3 * 64 * 1024:
+                gone.set()  # the proxy hung up; later sends vanish without an error
+            await asyncio.sleep(0.001)
+
+    await asyncio.wait_for(_response(tmp_path, closed, stall=5)(SCOPE, receive, send), timeout=5)
+
+    assert closed == ["disconnected"]
+    assert sent["bytes"] < 5 * 1024 * 1024
