@@ -5,6 +5,16 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 
 load network
 
+# Stand-in update agents (AGENT_PID) are background processes a test may stop; a failed assertion
+# must never leave one stopped, or Bats waits on it forever.
+teardown() {
+    if [ -n "${AGENT_PID:-}" ]; then
+        kill -CONT "$AGENT_PID" 2>/dev/null || true
+        pkill -P "$AGENT_PID" 2>/dev/null || true
+        kill "$AGENT_PID" 2>/dev/null || true
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Help / dispatch
 # ---------------------------------------------------------------------------
@@ -973,6 +983,7 @@ old_update_env() {
     cat > "$tmp/bioaf" <<'STUB'
 #!/usr/bin/env bash
 echo "target-bioaf $*" >> "$FAKE_LOG"
+[ "$1" = ensure-update-agent ] && exit "${FAKE_AGENT_HOOK_STATUS:-${FAKE_HOOK_STATUS:-0}}"
 exit "${FAKE_HOOK_STATUS:-0}"
 STUB
     chmod +x "$tmp/bioaf"
@@ -985,7 +996,7 @@ STUB
         source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
     [ "$status" -eq 0 ]
     [ "$(grep -E '^(git .* checkout |target-bioaf|pull|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
-      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\npull tag=v2.0.0\nup args=[--env-file')" ]
+      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\ntarget-bioaf ensure-update-agent\npull tag=v2.0.0\nup args=[--env-file')" ]
 }
 
 @test "a failed reconciliation stops the previous release's update before the services restart" {
@@ -1004,7 +1015,7 @@ STUB
     run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
         source '$tmp/harness.sh'; ensure_cloud_logging() { echo cloud_logging >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
     [ "$status" -eq 0 ]
-    ! grep -q '^target-bioaf' "$tmp/log"
+    ! grep -q '^target-bioaf ensure-cloud-logging' "$tmp/log"
     [ "$(grep -c '^cloud_logging' "$tmp/log")" -eq 1 ]
 }
 
@@ -1065,4 +1076,520 @@ direct_run() {
     chmod 755 "$tmp/etc"
     [ "$status" -ne 0 ]
     [[ "$output" == *"could not be inspected"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Update-agent unit reconciliation and activation (plan 23). sudo, systemctl, systemd-analyze and
+# systemd-run are stubs, so these prove outcomes and ordering on this machine, not systemd itself.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT="$BATS_TEST_DIRNAME/../.."
+
+# agent_env <tmp>: a checkout at <tmp>/repo (the files the reconciliation reads), stub privileged
+# tools on PATH, and <tmp>/agent.sh, a harness that sources ./bioaf and points it at them.
+#   FAKE_MAINPID            what `systemctl show -p MainPID` reports (default 0: not running)
+#   FAKE_SHOW_STATUS        exit of `systemctl show` (default 0: it reports FAKE_MAINPID)
+#   FAKE_ACTIVE_STATUS      exit of `systemctl is-active` (default 0)
+#   FAKE_<OP>_STATUS        exit of systemctl daemon-reload/enable/start/restart (OP upper-cased,
+#                           RELOAD for daemon-reload); FAKE_RESTART_FAILS_ONCE=1 fails only the first
+#   FAKE_VERIFY_STATUS      exit of systemd-analyze verify;  FAKE_RUN_STATUS  exit of systemd-run
+#   FAKE_DIES_AFTER_START=1  the agent is active on the first check after a start, then not
+#   FAKE_RESTART_HOOK=<file>  restart first runs <file> with bash (to interleave events)
+#   FAKE_RESTART_MARK=<file>  restart also logs whether <file> existed at that moment
+#   FAKE_WAITER_ACTIVE_STATUS  exit of `systemctl is-active` for the waiter unit (default 3: none)
+agent_env() {
+    local tmp="$1"
+    mkdir -p "$tmp/bin" "$tmp/etc" "$tmp/repo/docker" "$tmp/repo/scripts" "$tmp/repo/installer"
+    cp "$REPO_ROOT/docker/bioaf-update-agent.service" "$tmp/repo/docker/"
+    cp "$REPO_ROOT/scripts/update-agent.sh" "$REPO_ROOT/scripts/update_host_io.py" "$tmp/repo/scripts/"
+    cp -R "$REPO_ROOT/installer/update-agent-legacy" "$tmp/repo/installer/"
+    printf '#!/bin/sh\n"$@"\n' > "$tmp/bin/sudo"
+    cat > "$tmp/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+echo "systemctl $*" >> "$FAKE_LOG"
+case "$1" in
+    show) [ "${FAKE_SHOW_STATUS:-0}" = 0 ] || exit "$FAKE_SHOW_STATUS"; echo "${FAKE_MAINPID:-0}" ;;
+    is-active)
+        [ "$3" = bioaf-update-agent-activation ] && exit "${FAKE_WAITER_ACTIVE_STATUS:-3}"
+        if [ -e "$FAKE_LOG.started" ]; then
+            # FAKE_DIES_AFTER_START=1: active on the first check after a start, then gone.
+            if [ "${FAKE_DIES_AFTER_START:-0}" = 1 ]; then
+                [ -e "$FAKE_LOG.checked" ] && exit 3
+                : > "$FAKE_LOG.checked"
+            fi
+            exit 0
+        fi
+        exit "${FAKE_ACTIVE_STATUS:-0}" ;;
+    daemon-reload) exit "${FAKE_RELOAD_STATUS:-0}" ;;
+    enable) exit "${FAKE_ENABLE_STATUS:-0}" ;;
+    start) [ "${FAKE_START_STATUS:-0}" = 0 ] && : > "$FAKE_LOG.started"; exit "${FAKE_START_STATUS:-0}" ;;
+    restart)
+        if [ -n "${FAKE_RESTART_HOOK:-}" ]; then bash "$FAKE_RESTART_HOOK"; fi
+        if [ -n "${FAKE_RESTART_MARK:-}" ]; then
+            if [ -e "$FAKE_RESTART_MARK" ]; then echo restart-after-updater; else echo restart-during-updater; fi >> "$FAKE_LOG"
+        fi
+        if [ "${FAKE_RESTART_FAILS_ONCE:-0}" = 1 ] && [ ! -e "$FAKE_LOG.restarted" ]; then : > "$FAKE_LOG.restarted"; exit 1; fi
+        [ "${FAKE_RESTART_STATUS:-0}" = 0 ] && : > "$FAKE_LOG.started"
+        exit "${FAKE_RESTART_STATUS:-0}" ;;
+esac
+STUB
+    cat > "$tmp/bin/systemd-analyze" <<'STUB'
+#!/usr/bin/env bash
+echo "systemd-analyze $* name=${2##*/} first=$(head -1 "$2")" >> "$FAKE_LOG"
+echo "VERIFY-DETAIL-MARKER"
+exit "${FAKE_VERIFY_STATUS:-0}"
+STUB
+    cat > "$tmp/bin/systemd-run" <<'STUB'
+#!/usr/bin/env bash
+echo "systemd-run $*" >> "$FAKE_LOG"
+exit "${FAKE_RUN_STATUS:-0}"
+STUB
+    chmod +x "$tmp/bin"/*
+    cat > "$tmp/agent.sh" <<HARNESS
+source '$BIOAF_SCRIPT' >/dev/null
+export PATH='$tmp/bin':"\$PATH"
+SCRIPT_DIR='$tmp/repo'
+UPDATE_AGENT_UNIT='$tmp/etc/bioaf-update-agent.service'
+UPDATE_AGENT_ACTIVE_WAIT=0
+UPDATE_AGENT_SETTLE=0
+HARNESS
+}
+
+# legacy_unit <tmp> <version>: the unit an earlier release's setup wrote for this checkout.
+legacy_unit() {
+    sed -e "s|__BIOAF_DIR__|$1/repo|g" -e "s|__BIOAF_USER__|$(whoami)|g" -e "s|__BIOAF_GROUP__|$(id -gn)|g" \
+        "$REPO_ROOT/installer/update-agent-legacy/$2.service"
+}
+
+ensure_agent() {
+    rm -f "$tmp/log.started" "$tmp/log.checked"
+    run env FAKE_LOG="$tmp/log" "$@" bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null
+}
+
+record_agent_code() {
+    python3 -I "$tmp/repo/scripts/update_host_io.py" record-agent-code "$tmp/repo"
+}
+
+@test "a fresh host gets the rendered unit verified, installed, enabled and started" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    ensure_agent
+    [ "$status" -eq 0 ]
+    unit="$tmp/etc/bioaf-update-agent.service"
+    head -1 "$unit" | grep -q '^# bioaf-managed: update-agent-unit/v1 sha256='
+    grep -qx "ExecStart=$tmp/repo/scripts/update-agent.sh" "$unit"
+    grep -qx "WorkingDirectory=$tmp/repo" "$unit"
+    grep -qx "User=$(whoami)" "$unit" && grep -qx "Group=$(id -gn)" "$unit"
+    ! grep -q '__BIOAF_' "$unit"
+    grep -q '^systemd-analyze verify .* name=bioaf-update-agent.service first=# bioaf-managed: update-agent-unit/v1' "$tmp/log"
+    [ "$(grep -E '^systemctl (daemon-reload|enable|restart)' "$tmp/log")" = \
+      "$(printf 'systemctl daemon-reload\nsystemctl enable bioaf-update-agent\nsystemctl restart bioaf-update-agent')" ]
+}
+
+@test "a unit an earlier release wrote for this checkout is migrated, not accepted for its paths" {
+    local v
+    for v in v0.6.5 v0.11.5; do
+        tmp="$(mktemp -d)"; agent_env "$tmp"
+        legacy_unit "$tmp" "$v" > "$tmp/etc/bioaf-update-agent.service"
+        ensure_agent
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"migrated"* ]]
+        head -1 "$tmp/etc/bioaf-update-agent.service" | grep -q '^# bioaf-managed: update-agent-unit/v1'
+        grep -q '^systemctl restart bioaf-update-agent' "$tmp/log"
+    done
+}
+
+@test "a current unit with a current running agent is neither rewritten nor restarted" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    ensure_agent
+    record_agent_code
+    cp -p "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    : > "$tmp/log"
+    ensure_agent
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^(systemd-analyze|systemctl (daemon-reload|enable|start|restart))' "$tmp/log"
+}
+
+@test "a stopped agent with a current unit is started without rewriting the unit" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    ensure_agent; record_agent_code
+    : > "$tmp/log"
+    ensure_agent FAKE_ACTIVE_STATUS=3
+    grep -q '^systemctl start bioaf-update-agent' "$tmp/log"
+    ! grep -qE '^(systemd-analyze|systemctl daemon-reload)' "$tmp/log"
+}
+
+@test "a stopped agent that cannot be started fails the step" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    ensure_agent; record_agent_code
+    ensure_agent FAKE_ACTIVE_STATUS=3 FAKE_START_STATUS=1
+    [ "$status" -ne 0 ]
+}
+
+@test "a running agent older than the code on disk is restarted even when the unit is unchanged" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    ensure_agent; record_agent_code
+    echo '# newer agent code' >> "$tmp/repo/scripts/update-agent.sh"
+    : > "$tmp/log"
+    ensure_agent
+    [ "$status" -eq 0 ]
+    grep -q '^systemctl restart bioaf-update-agent' "$tmp/log"
+    ! grep -q '^systemctl daemon-reload' "$tmp/log"
+}
+
+@test "a custom unit is kept, fails the step, and its content is not printed" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 | sed 's|^RestartSec=5|RestartSec=30 # CUSTOM-MARKER|' > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    [[ "$output" != *"CUSTOM-MARKER"* ]] && [[ "$output" != *"ExecStart"* ]]
+    [ -f "$tmp/repo/host-only/update-agent-unit-v1.candidate" ]
+    ! grep -qE '^systemctl (daemon-reload|restart|start)' "$tmp/log"
+}
+
+@test "a unit rendered for another checkout or user is custom, not recognized" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 | sed "s|$tmp/repo|/opt/other-bioaf|g" > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+}
+
+@test "an operator-managed unit is kept, and a stopped agent is still started" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    { echo '# bioaf-managed: operator'; legacy_unit "$tmp" v0.11.5; } > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    record_agent_code
+    ensure_agent FAKE_ACTIVE_STATUS=3
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    grep -q '^systemctl start bioaf-update-agent' "$tmp/log"
+}
+
+@test "a checkout path or account name the unit cannot carry safely is refused before anything is written" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    mv "$tmp/repo" "$tmp/my repo"
+    sed -i.bak "s|$tmp/repo|$tmp/my repo|" "$tmp/agent.sh"
+    ensure_agent
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/etc/bioaf-update-agent.service" ]
+    ! grep -q '^systemctl' "$tmp/log" 2>/dev/null
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    printf '#!/bin/sh\nprintf "evil\\nUser=root\\n"\n' > "$tmp/bin/whoami"; chmod +x "$tmp/bin/whoami"
+    ensure_agent
+    [ "$status" -ne 0 ]
+    [ ! -e "$tmp/etc/bioaf-update-agent.service" ]
+}
+
+@test "a unit systemd-analyze rejects is not installed and the agent is not restarted" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_VERIFY_STATUS=1
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^systemctl (daemon-reload|restart)' "$tmp/log"
+    [[ "$output" != *"VERIFY-DETAIL-MARKER"* ]]
+    grep -q VERIFY-DETAIL-MARKER "$tmp/repo/host-only/update-agent-unit-v1.log"
+}
+
+@test "a failed reload, enable or restart restores the previous unit and reactivates it" {
+    local fail
+    for fail in FAKE_RELOAD_STATUS=1 FAKE_ENABLE_STATUS=1 FAKE_RESTART_FAILS_ONCE=1; do
+        tmp="$(mktemp -d)"; agent_env "$tmp"
+        legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+        cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+        ensure_agent "$fail"
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"activation_failed"* ]] || [[ "$output" == *"rollback_failed"* ]]
+        cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    done
+    # Only the restart failed once: the previous unit came back.
+    [[ "$output" == *"activation_failed"* ]]
+}
+
+@test "when reactivating the previous unit also fails, the step reports a failed rollback" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    ensure_agent FAKE_RESTART_STATUS=1
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"rollback_failed"* ]]
+}
+
+@test "the step's failure reaches callers that use it in a condition" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    run env FAKE_LOG="$tmp/log" FAKE_VERIFY_STATUS=1 bash -c "source '$tmp/agent.sh'
+        if ensure_update_agent >/dev/null; then echo IF-SAW-SUCCESS; fi
+        ensure_update_agent >/dev/null || echo OR-SAW-FAILURE" </dev/null
+    [[ "$output" != *"IF-SAW-SUCCESS"* ]]
+    [[ "$output" == *"OR-SAW-FAILURE"* ]]
+}
+
+@test "off systemd nothing is installed" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$tmp/agent.sh'; command() { [ \"\$2\" = systemctl ] && return 1; builtin command \"\$@\"; }; ensure_update_agent" </dev/null
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/etc/bioaf-update-agent.service" ]
+}
+
+# busy_agent <tmp> <seconds>: a stand-in agent process whose only child is an updater for <seconds>,
+# then its poll sleep; touches <tmp>/updater-done when the updater ends. Sets AGENT_PID.
+busy_agent() {
+    bash -c "perl -e 'sleep $2'; : > '$1/updater-done'; while :; do sleep 1; done" </dev/null >/dev/null 2>&1 &
+    AGENT_PID=$!
+    sleep 0.3
+}
+
+# polling_agent <tmp>: a stand-in agent that polls every second and starts an updater (perl, 5 s) as
+# soon as <tmp>/trigger appears, the way the real agent picks up a trigger. Sets AGENT_PID. (macOS
+# pgrep does not list an exited, unreaped child, so a short poll sleep could vanish while held.)
+polling_agent() {
+    bash -c "while :; do if [ -e '$1/trigger' ]; then rm -f '$1/trigger'; perl -e 'sleep 5'; fi; sleep 1; done" </dev/null >/dev/null 2>&1 &
+    AGENT_PID=$!
+    sleep 0.3
+}
+
+# A restart hook that delivers a trigger at the worst moment (after any idle check, before the
+# restart) and records whether the agent got to start an updater before being restarted.
+race_hook() {
+    cat > "$tmp/race-hook" <<HOOK
+: > '$tmp/trigger'
+sleep 1.5
+if pgrep -P $AGENT_PID -x perl >/dev/null; then echo updater-started-before-restart; else echo no-updater-before-restart; fi >> '$tmp/log'
+case "\$(ps -o stat= -p $AGENT_PID)" in *T*) echo restart-while-held ;; *) echo restart-while-running ;; esac >> '$tmp/log'
+# A real restart replaces the agent, leaving the trigger to the new one; the stand-in is not replaced.
+rm -f '$tmp/trigger'
+HOOK
+}
+
+not_stopped() { case "$(ps -o stat= -p "$1")" in *T*) return 1 ;; esac; }
+
+waiter_env() {
+    # The checkout's own ./bioaf, with the unit path and wait times pointed at the test.
+    sed -e "s|^UPDATE_AGENT_UNIT=.*|UPDATE_AGENT_UNIT='$tmp/etc/bioaf-update-agent.service'|" \
+        -e "s|^UPDATE_AGENT_ACTIVE_WAIT=.*|UPDATE_AGENT_ACTIVE_WAIT=0|" -e "s|^UPDATE_AGENT_SETTLE=.*|UPDATE_AGENT_SETTLE=0|" \
+        "$BIOAF_SCRIPT" > "$tmp/repo/bioaf"
+    cp "$REPO_ROOT/scripts/update-agent-activate.sh" "$tmp/repo/scripts/"
+    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
+}
+
+# run_waiter [env...]: the transient unit's command, as systemd runs it, against the stubs.
+run_waiter() {
+    rm -f "$tmp/log.started" "$tmp/log.checked"
+    run env FAKE_LOG="$tmp/log" PATH="$tmp/bin:$PATH" "$@" \
+        perl -e 'alarm 40; exec @ARGV' /bin/bash "$tmp/repo/scripts/update-agent-activate.sh" </dev/null
+}
+
+@test "an agent with an update in flight is left alone: nothing changes now and a waiter is scheduled" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    busy_agent "$tmp" 30
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_MAINPID="$AGENT_PID"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^(systemd-analyze|systemctl (daemon-reload|restart|start))' "$tmp/log"
+    grep -q "^systemd-run --unit=bioaf-update-agent-activation .*--uid=$(whoami) --gid=$(id -gn) .*/scripts/update-agent-activate.sh\$" "$tmp/log"
+    [[ "$output" == *"when that update finishes"* ]]
+}
+
+@test "a trigger arriving after the idle check cannot start an update before the restart" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    ensure_agent FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    grep -qx no-updater-before-restart "$tmp/log"
+    grep -qx restart-while-held "$tmp/log"
+    ! grep -q updater-started-before-restart "$tmp/log"
+}
+
+@test "an agent whose state cannot be read is not treated as stopped: nothing changes" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_SHOW_STATUS=1
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^(systemd-analyze|systemctl (daemon-reload|restart|start))|^systemd-run' "$tmp/log"
+    [[ "$output" == *"state"* ]]
+}
+
+@test "concurrent reconciliations are serialized: neither can resume the agent during the other's hold" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    rm -f "$tmp/log.started" "$tmp/log.checked"
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook" \
+        bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null > "$tmp/first.out" 2>&1 &
+    first=$!
+    sleep 0.5
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook" \
+        bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null > "$tmp/second.out" 2>&1
+    second_status=$?
+    wait "$first"; first_status=$?
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$first_status" -eq 0 ] && [ "$second_status" -eq 0 ]
+    [ "$(grep -c '^restart-while-held$' "$tmp/log")" -eq 2 ]
+    ! grep -q 'updater-started-before-restart\|restart-while-running' "$tmp/log"
+}
+
+@test "a reconciliation interrupted while acquiring its hold leaves the agent running" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    # A slow pgrep: the interruption lands after the agent is stopped, before the hold is decided.
+    real_pgrep="$(command -v pgrep)"
+    printf '#!/usr/bin/env bash\n: > "%s/in-pgrep"\nsleep 2\nexec %q "$@"\n' "$tmp" "$real_pgrep" > "$tmp/bin/pgrep"
+    chmod +x "$tmp/bin/pgrep"
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null >/dev/null 2>&1 &
+    caller=$!
+    for _ in $(seq 1 50); do [ -e "$tmp/in-pgrep" ] && break; sleep 0.1; done
+    [ -e "$tmp/in-pgrep" ]
+    ! not_stopped "$AGENT_PID"
+    # Interrupt everything the caller started, as a terminal or systemd would.
+    pkill -TERM -P "$caller" 2>/dev/null || true
+    kill -TERM "$caller" 2>/dev/null || true
+    sleep 3
+    not_stopped "$AGENT_PID"
+    ! grep -q '^systemctl restart' "$tmp/log"
+}
+
+@test "the agent is never left stopped, whether reconciliation succeeds or fails" {
+    local fail
+    for fail in "" FAKE_VERIFY_STATUS=1 FAKE_RESTART_STATUS=1; do
+        tmp="$(mktemp -d)"; agent_env "$tmp"
+        polling_agent "$tmp"
+        legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+        ensure_agent FAKE_MAINPID="$AGENT_PID" $fail
+        not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    done
+}
+
+@test "the waiter reconciles once the update has ended, holding the agent through the restart" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    busy_agent "$tmp" 3
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_MARK="$tmp/updater-done"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    head -1 "$tmp/etc/bioaf-update-agent.service" | grep -q '^# bioaf-managed: update-agent-unit/v1'
+    grep -q '^systemd-analyze verify' "$tmp/log"
+    grep -qx restart-after-updater "$tmp/log"
+    ! grep -q restart-during-updater "$tmp/log"
+}
+
+@test "the waiter's restart is health-checked and a unit that does not stay up is rolled back" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    busy_agent "$tmp" 1
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_DIES_AFTER_START=1
+    kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"activation_failed"* ]] || [[ "$output" == *"rollback_failed"* ]]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+}
+
+@test "the waiter's restart cannot race a trigger either" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    grep -qx no-updater-before-restart "$tmp/log"
+}
+
+@test "the scheduled waiter is a fixed script that systemd can store: one line per argument, no \$ or %" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    busy_agent "$tmp" 30
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/run-args"\n' "$tmp" > "$tmp/bin/systemd-run"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    ensure_agent FAKE_MAINPID="$AGENT_PID"
+    kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    # systemd stores a transient unit's command in a unit file and re-reads it on daemon-reload: a
+    # newline in an argument breaks it, and $ or % would be expanded.
+    [ "$(tail -1 "$tmp/run-args")" = "$tmp/repo/scripts/update-agent-activate.sh" ]
+    [ "$(sed -n '$=' "$tmp/run-args")" -eq "$(grep -c . "$tmp/run-args")" ]
+    ! grep -q '[$%]' "$tmp/run-args"
+}
+
+@test "an agent that exits right after it starts is a failed activation, and the previous unit is restored" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_DIES_AFTER_START=1
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+}
+
+# ---------------------------------------------------------------------------
+# Where the update-agent unit is reconciled (plan 23): setup after any checkout, start, and every
+# updater through the target's install.sh hook. The unit is the agent's, not the services': its
+# failure is reported but stops neither start nor an update.
+# ---------------------------------------------------------------------------
+
+@test "every updater runs the target's update-agent reconciliation, and its failure does not stop the update" {
+    local updater
+    for updater in "$OLD_BIOAF" "$BIOAF_SCRIPT"; do
+        tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
+        sed -i.bak "s|source '$OLD_BIOAF'|source '$updater'|" "$tmp/harness.sh"
+        run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_AGENT_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+            source '$tmp/harness.sh'; ensure_cloud_logging() { :; }; cmd_update 2.0.0 --yes"
+        [ "$status" -eq 0 ]
+        [ "$(grep -E '^(git .* checkout |target-bioaf ensure-update-agent|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
+          "$(printf 'git -C\ntarget-bioaf ensure-update-agent\nup args=[--env-file')" ]
+        [ "$(cat "$tmp/state/backend")" = v2.0.0 ]
+        [[ "$output" == *"update agent"* ]]
+    done
+}
+
+@test "ensure-update-agent is a host command of ./bioaf" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    cp "$BIOAF_SCRIPT" "$tmp/repo/bioaf"
+    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
+    # The real unit path is not writable here, so the reconciliation runs and reports its failure.
+    run env FAKE_LOG="$tmp/log" PATH="$tmp/bin:$PATH" FAKE_VERIFY_STATUS=1 bash "$tmp/repo/bioaf" ensure-update-agent </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Update agent unit not updated"* ]]
+    [[ "$output" != *"Unknown command"* ]]
+    run bash "$BIOAF_SCRIPT" help
+    [[ "$output" != *"ensure-update-agent"* ]]
+}
+
+@test "start reconciles the update agent and still starts the services when that fails" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    stubs="DC='$tmp/fake-dc --env-file $tmp/.env'; ensure_pinned_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }; cmd_status() { :; }; sleep() { :; }; ensure_cloud_logging() { :; }"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs
+        ensure_update_agent() { echo update_agent >> '$tmp/log'; return 1; }; cmd_start"
+    [ "$status" -eq 0 ]
+    grep -q '^update_agent' "$tmp/log"
+    grep -q '^up' "$tmp/log"
+    [[ "$output" == *"update agent"* ]]
+}
+
+@test "setup reconciles the update agent after checking out the requested version" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    mkdir -p "$tmp/docker/certs"; : > "$tmp/.env"; : > "$tmp/docker/certs/tls.crt"
+    printf '#!/bin/sh\nexit 0\n' > "$tmp/install.sh"; chmod +x "$tmp/install.sh"
+    printf '#!/bin/sh\necho Linux\n' > "$tmp/uname"; chmod +x "$tmp/uname"
+    run env FAKE_LOG="$tmp/log" PATH="$tmp:$PATH" HOME="$tmp" bash -c "source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc --env-file $tmp/.env'; ENV_FILE='$tmp/.env'; SCRIPT_DIR='$tmp'
+        io_init() { :; }; section() { :; }; io_finish() { :; }; fail_line() { echo \"\$*\"; }
+        step() { echo \"step \$1\" >> '$tmp/log'; shift; [ \"\$1\" = -- ] && shift; \"\$@\"; }
+        maybe_step() { step \"\$@\"; }
+        docker() { return 0; }
+        git() { [ \"\$3\" = checkout ] && echo checkout >> '$tmp/log'; return 0; }
+        ensure_cloud_logging() { :; }; ensure_update_agent() { echo update_agent >> '$tmp/log'; }
+        resolve_and_pull_images() { :; }; pin_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }
+        get_access_url() { echo https://x; }
+        cmd_setup --version 9.9.9" </dev/null
+    [ "$(grep -E '^(checkout|update_agent)' "$tmp/log")" = "$(printf 'checkout\nupdate_agent')" ]
 }

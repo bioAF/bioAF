@@ -52,9 +52,10 @@ STRUCTURAL_DIFFS = {"add_table", "remove_table", "add_column", "remove_column"}
 # chain still builds but no model declares any more. `remove_*` reads as "the
 # database has it, the models do not".
 #
-#   batches            superseded by sample_batches + sequencing_batches. Its
-#                      model file (app/models/batch.py) is not imported by
-#                      app/models/__init__.py, so it is dead either way.
+#   batches            superseded by sample_batches + sequencing_batches. No
+#                      model declares it (its unreachable model, route, service
+#                      and schema were removed by plan 23); the table and its
+#                      production rows are kept.
 #   *.github_repo_name  columns on experiments/projects; the live one lives on
 #                      gitops_repos.
 #   samples.batch_id   left over from the batch split above.

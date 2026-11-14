@@ -123,11 +123,15 @@ esac
 exit 0
 STUB
 
-    # curl: serves the Homebrew and Google installers; everything else fails.
+    # curl: serves the Homebrew and Google installers, and the installers' own helpers (from this
+    # checkout, at main: a piped installer downloads them); everything else fails.
+    export BIOAF_TEST_HELPERS="$REPO/installer"
     cat > "$STUBS_DIR/curl" <<'STUB'
 #!/usr/bin/env bash
 echo "curl $*" >> "$CALL_LOG"
 case "$*" in
+    *raw.githubusercontent.com/bioAF/bioAF/main/installer/*)
+        url="${*: -1}"; cat "$BIOAF_TEST_HELPERS/${url##*/installer/}" ;;
     *Homebrew/install*)
         cat <<'INSTALLER'
 mkdir -p "$BREW_PREFIX/bin"
