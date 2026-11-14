@@ -145,7 +145,9 @@ class GuardedFileResponse(StreamingResponse):
 
             group.start_soon(watch)
             try:
-                await super().__call__(scope, receive, self._guard(send))
+                # Not super().__call__: under ASGI < 2.4 Starlette runs its own disconnect listener,
+                # which would race this one and end the stream looking complete.
+                await self.stream_response(self._guard(send))
                 if self.outcome != "disconnected":
                     self.outcome = "sent"
             except TransferStalled:

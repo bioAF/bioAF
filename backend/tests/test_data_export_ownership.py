@@ -397,8 +397,9 @@ async def test_the_backstop_releases_only_an_export_no_response_started(tmp_path
     prepared.release()
 
 
+@pytest.mark.parametrize("spec", ["2.3", "2.4"])
 @pytest.mark.asyncio
-async def test_a_disconnect_with_silently_dropped_sends_is_not_reported_as_sent(tmp_path):
+async def test_a_disconnect_with_silently_dropped_sends_is_not_reported_as_sent(tmp_path, spec):
     """uvicorn drops sends after the peer goes away (no error); the disconnect message is the signal."""
     closed: list = []
     gone = asyncio.Event()
@@ -415,7 +416,8 @@ async def test_a_disconnect_with_silently_dropped_sends_is_not_reported_as_sent(
                 gone.set()  # the proxy hung up; later sends vanish without an error
             await asyncio.sleep(0.001)
 
-    await asyncio.wait_for(_response(tmp_path, closed, stall=5)(SCOPE, receive, send), timeout=5)
+    scope = {**SCOPE, "asgi": {"spec_version": spec}}  # uvicorn 0.54 advertises 2.3
+    await asyncio.wait_for(_response(tmp_path, closed, stall=5)(scope, receive, send), timeout=5)
 
     assert closed == ["disconnected"]
     assert sent["bytes"] < 5 * 1024 * 1024
