@@ -728,3 +728,47 @@ async def test_a_streamed_multibyte_manifest_matches_the_reference_across_batche
     streamed = await selection.write_sample_manifest(session, 1, limit_bytes=len(expected))
 
     assert streamed == expected
+
+
+# == Third review (2026-11-14, through 53f428c5) ==================================================
+
+
+@pytest.mark.parametrize("kind", ["experiment", "project"])
+@pytest.mark.asyncio
+async def test_a_blocked_selection_query_is_bounded_by_the_preparation_deadline(
+    session, admin_user, store, monkeypatch, kind
+):
+    from app import database
+    from app.exceptions import ExportTimeoutError
+    from app.services import export_service
+
+    await _seed(session, admin_user.organization_id)
+    monkeypatch.setattr(resources, "BUILD_DEADLINE", 0.1)
+    prepare = {
+        "experiment": export_service.prepare_experiment_export,
+        "project": export_service.prepare_project_export,
+    }[kind]
+
+    async with database.async_session_factory() as locker:
+        await locker.execute(text("LOCK TABLE files, experiments IN ACCESS EXCLUSIVE MODE"))
+        started = time.monotonic()
+        try:
+            with pytest.raises(ExportTimeoutError):
+                # The outer bound only keeps a regression from hanging on the lock; it is not the contract.
+                await asyncio.wait_for(
+                    prepare(
+                        session,
+                        1,
+                        admin_user.organization_id,
+                        include_fastq=False,
+                        include_provenance=False,
+                        user_email="a@b",
+                    ),
+                    timeout=3,
+                )
+            elapsed = time.monotonic() - started
+        finally:
+            await locker.rollback()
+        await session.rollback()
+
+    assert elapsed < 0.35

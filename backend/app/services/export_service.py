@@ -20,6 +20,7 @@ The order of work is the contract (plan 24):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -115,9 +116,10 @@ async def prepare_experiment_export(
 ) -> PreparedExport:
     started = asyncio.get_running_loop().time()
     resources.SLOT.refuse_if_busy()
-    content = await selection.select_experiment(
-        session, experiment_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
-    )
+    async with _preparation_deadline(started):
+        content = await selection.select_experiment(
+            session, experiment_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
+        )
     if content is None:
         raise NotFoundError(f"Experiment {experiment_id} not found")
 
@@ -142,14 +144,15 @@ async def prepare_project_export(
 ) -> PreparedExport:
     started = asyncio.get_running_loop().time()
     resources.SLOT.refuse_if_busy()
-    content = await selection.select_project(
-        session,
-        project_id,
-        org_id,
-        include_fastq=include_fastq,
-        limit=resources.MAX_FILES + 1,
-        max_experiments=resources.MAX_PROJECT_EXPERIMENTS,
-    )
+    async with _preparation_deadline(started):
+        content = await selection.select_project(
+            session,
+            project_id,
+            org_id,
+            include_fastq=include_fastq,
+            limit=resources.MAX_FILES + 1,
+            max_experiments=resources.MAX_PROJECT_EXPERIMENTS,
+        )
     if content is None:
         raise NotFoundError(f"Project {project_id} not found")
     root = content.root
@@ -169,6 +172,16 @@ async def prepare_project_export(
     return await _prepare(
         session, list(content.all_files), include_fastq, plan, _filename(content.name, "project"), started
     )
+
+
+@contextlib.asynccontextmanager
+async def _preparation_deadline(started: float):
+    """The one absolute preparation budget: selection, planning and the build all spend it."""
+    try:
+        async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
+            yield
+    except TimeoutError:
+        raise ExportTimeoutError("The export took too long to prepare and was stopped. Try a smaller export.") from None
 
 
 async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, filename: str, started: float):
