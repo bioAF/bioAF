@@ -8,8 +8,10 @@
 #   previous   the generation before it (the rollback images)
 #   candidate  an operation that started and has not yet run its images (update, build or setup, and its tag);
 #              still present at the next operation means that one was interrupted or failed
-#   recovery   on a generation an update installed: the updater backups made since that update started (the
-#              database as the generation before had it). Retention never removes current's or previous's set.
+#   recovery   on a generation an update installed: the updater backups made since the first unfinished operation
+#              before it started (the database as the generation before had it, and any partial attempt's).
+#              Retention never removes current's or previous's set, nor anything made since a pending
+#              candidate's protect_since: an unfinished or retried update keeps its backups.
 #
 # A tag is not identity: a same-tag rebuild or a one-service build is a new generation. The record is written
 # atomically (a reader never sees half a file) and privately (0700 directory, 0600 file). A damaged record is
@@ -108,7 +110,9 @@ if change == "candidate":
     earlier = record.get("candidate") or {}
     if earlier.get("operation") == operation and earlier.get("tag") == tag:
         sys.exit(0)  # a retry of the same operation keeps its first start (its backups stay attributable)
-    record["candidate"] = {"operation": operation, "tag": tag, "started_at": now}
+    # Replacing an unfinished operation keeps protecting what it backed up: the database may be partly upgraded.
+    since = earlier.get("protect_since") or earlier.get("started_at") or now
+    record["candidate"] = {"operation": operation, "tag": tag, "started_at": now, "protect_since": since}
 elif change == "running":
     tag, backend, frontend = args
     current = record.get("current")
@@ -117,7 +121,8 @@ elif change == "running":
             sys.exit(0)  # nothing changed: the file is not rewritten
     else:
         candidate = record.get("candidate") or {}
-        recovery = made_since(candidate["started_at"]) if candidate.get("operation") == "update" else []
+        since = candidate.get("protect_since") or candidate.get("started_at")
+        recovery = made_since(since) if since else []
         record["previous"] = current
         record["current"] = {
             "tag": tag, "backend": backend, "frontend": frontend, "recorded_at": now, "recovery": recovery,
@@ -299,7 +304,7 @@ deploy_rotate_dumps() {
     local dir="$SCRIPT_DIR/backups"
     [ -d "$dir" ] || return 0
     python3 -I - "$dir" "$(deploy_state_dir)/deployments.json" "$DEPLOY_KEEP_DUMP_SETS" <<'PY'
-import json, sys
+import datetime, json, sys
 from pathlib import Path
 
 directory, record_path, keep = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
@@ -308,12 +313,20 @@ try:
     protected = set()
     for generation in ("current", "previous"):
         protected.update((record.get(generation) or {}).get("recovery") or [])
-except (OSError, ValueError, AttributeError):
+    candidate = record.get("candidate") or {}
+    since = candidate.get("protect_since") or candidate.get("started_at")
+    pending_since = datetime.datetime.fromisoformat(since).timestamp() if since else None
+except (OSError, ValueError, AttributeError, TypeError):
     print("The deployment record could not be read, so old updater backups were left in place.", file=sys.stderr)
     sys.exit(0)
 for pattern in ("bioaf_pre_update_*.sql.gz", "bioaf_pre_upgrade_*.dump"):
     dumps = [
-        p for p in directory.glob(pattern) if p.is_file() and not p.is_symlink() and p.name not in protected
+        p
+        for p in directory.glob(pattern)
+        if p.is_file()
+        and not p.is_symlink()
+        and p.name not in protected
+        and (pending_since is None or p.stat().st_mtime < pending_since)  # a pending update's backups stay
     ]
     dumps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     for old in dumps[keep:]:

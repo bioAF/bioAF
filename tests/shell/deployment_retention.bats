@@ -297,3 +297,32 @@ STUB
     lib deploy_mark_candidate update v3.0.0
     [ "$(state "d['candidate']['started_at']")" != "$first" ]
 }
+
+@test "a pending update's backups are protected from rotation through failed retries (review follow-up 2)" {
+    b="$WORK/backups"; mkdir -p "$b"
+    mkdir -m 700 "$WORK/host-state"
+    running b1 f1; lib deploy_record_running v1.0.0
+    lib deploy_mark_candidate update v2.0.0
+    for attempt in a1 a2 a3; do   # three attempts that each backed up and then failed
+        touch "$b/bioaf_pre_update_1_to_2_${attempt}.sql.gz" "$b/bioaf_pre_upgrade_r1_to_r2_${attempt}.dump" "$b/bioaf_pre_upgrade_r1_to_r2_${attempt}.json"
+        sleep 1
+        lib deploy_mark_candidate update v2.0.0
+    done
+    run lib deploy_rotate_dumps
+    [ "$status" -eq 0 ]
+    [ "$(ls "$b" | wc -l | tr -d ' ')" = 9 ]
+}
+
+@test "a replaced unfinished update keeps its backups protected until a generation activates" {
+    b="$WORK/backups"; mkdir -p "$b"
+    mkdir -m 700 "$WORK/host-state"
+    running b1 f1; lib deploy_record_running v1.0.0
+    lib deploy_mark_candidate update v2.0.0
+    touch "$b/bioaf_pre_update_1_to_2_first.sql.gz"; sleep 1
+    lib deploy_mark_candidate update v3.0.0          # a different update replaces the unfinished one
+    for n in 1 2 3; do touch "$b/bioaf_pre_update_1_to_3_${n}.sql.gz"; sleep 1; done
+    lib deploy_rotate_dumps
+    [ -e "$b/bioaf_pre_update_1_to_2_first.sql.gz" ]
+    running b3 f3; lib deploy_record_running v3.0.0
+    [[ "$(state "d['current']['recovery']")" == *"bioaf_pre_update_1_to_2_first.sql.gz"* ]]
+}
