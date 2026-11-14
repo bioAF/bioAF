@@ -13,9 +13,9 @@ import { useResource } from "@/hooks/useResource";
 import type {
   PlotArchiveResponse,
   PlotArchiveListResponse,
-  ExperimentListResponse,
   PipelineRunListResponse,
 } from "@/lib/types";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
 
 export default function PlotArchivePage() {
   const [query, setQuery] = useState("");
@@ -29,29 +29,11 @@ export default function PlotArchivePage() {
   const [expandedPlot, setExpandedPlot] = useState<PlotArchiveResponse | null>(null);
   const pageSize = 24;
 
-  const [experiments, setExperiments] = useState<
-    { id: number; name: string }[]
-  >([]);
   const [pipelineRuns, setPipelineRuns] = useState<
     { id: number; label: string }[]
   >([]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await api.get<ExperimentListResponse>(
-          "/api/experiments?page_size=200"
-        );
-        setExperiments(
-          data.experiments.map((e) => ({
-            id: e.id,
-            name: e.name ?? `Experiment #${e.id}`,
-          }))
-        );
-      } catch {
-        // ignore
-      }
-    })();
     (async () => {
       try {
         const data = await api.get<PipelineRunListResponse>(
@@ -138,21 +120,17 @@ export default function PlotArchivePage() {
             <label htmlFor="experiment" className="block text-xs text-gray-500 mb-1">
               Experiment
             </label>
-            <select id="experiment"
-              value={experimentId}
-              onChange={(e) => {
-                setExperimentId(e.target.value);
+            <ExperimentPicker
+              id="experiment"
+              label="Experiment"
+              value={experimentId ? Number(experimentId) : null}
+              onChange={(id) => {
+                setExperimentId(id == null ? "" : String(id));
                 resetPage();
               }}
+              noneLabel="All experiments"
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-            >
-              <option value="">All experiments</option>
-              {experiments.map((exp) => (
-                <option key={exp.id} value={exp.id}>
-                  {exp.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <div className="min-w-[180px]">
             <label htmlFor="pipeline-run" className="block text-xs text-gray-500 mb-1">
