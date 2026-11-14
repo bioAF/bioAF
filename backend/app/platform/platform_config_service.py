@@ -94,3 +94,15 @@ class PlatformConfigService:
             ),
             {"k": key, "v": stored},
         )
+
+    @staticmethod
+    async def insert_if_absent(session: AsyncSession, key: str, value: str) -> str | None:
+        """Store ``value`` only if ``key`` has none; return what is stored afterwards.
+
+        An existing value, valid or not, is never replaced. The caller commits.
+        """
+        await session.execute(
+            text("INSERT INTO platform_config (key, value) VALUES (:k, :v) ON CONFLICT (key) DO NOTHING"),
+            {"k": key, "v": PlatformConfigService._maybe_encrypt(key, value)},
+        )
+        return await PlatformConfigService.get(session, key)
