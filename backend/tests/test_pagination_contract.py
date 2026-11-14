@@ -1,9 +1,10 @@
-"""Pagination on the ten list routes that declare no application bound.
+"""Pagination on the list routes that declare no application bound.
 
 Recorded decision (owner decision pending): these keep their currently accepted
 range. Defaults stay per route, page_size 0 answers an empty page, and an
 oversized page_size is honored, not clamped or rejected. Routes that already
-declare bounds, and the assistant's 1-100 clamp, keep them.
+declare bounds, and the assistant's 1-100 clamp, keep them. /api/experiments is bounded
+1-100 by owner decision (2026-11-14, issues #104/#105; tests/test_experiment_list_paging.py).
 """
 
 import pytest
@@ -15,7 +16,6 @@ from app.models.experiment import Experiment
 UNBOUNDED = [
     ("/api/datasets", 25),
     ("/api/documents", 25),
-    ("/api/experiments", 25),
     ("/api/experiments/{e}/files", 25),
     ("/api/experiments/{e}/audit", 25),
     ("/api/files", 25),
@@ -26,7 +26,6 @@ UNBOUNDED = [
 OPENAPI_UNBOUNDED = {
     ("/api/datasets", 25),
     ("/api/documents", 25),
-    ("/api/experiments", 25),
     ("/api/experiments/{experiment_id}/files", 25),
     ("/api/experiments/{experiment_id}/audit", 25),
     ("/api/files", 25),
