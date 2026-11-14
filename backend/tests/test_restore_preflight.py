@@ -320,3 +320,38 @@ async def test_an_intact_backup_restores_every_row(monkeypatch, tmp_path):
             await database_module.engine.dispose()
     finally:
         await asyncio.to_thread(provisioned.__exit__, None, None, None)
+
+
+async def test_the_scratch_floor_is_enforced_during_the_download(harness, monkeypatch, children):  # noqa: F811
+    """Free space that falls below the floor mid-download stops it before the disk is exhausted, before DDL."""
+    from app.services import backup_resources as br
+
+    big = b"PGDMP" + b"x" * (3 * br.SPACE_CHECK_BYTES)
+    storage = _use(monkeypatch, FakeBackupStorage(content=big))
+
+    class Writes:
+        written = 0
+
+    real_download = storage.download_to_file
+
+    async def chunked(uri, file_obj):
+        storage.downloads.append(uri)
+        for i in range(0, len(big), br.SPACE_CHECK_BYTES // 2):
+            chunk = big[i : i + br.SPACE_CHECK_BYTES // 2]
+            file_obj.write(chunk)
+            Writes.written += len(chunk)
+
+    storage.download_to_file = chunked
+    gib = 1024**3
+
+    def usage(_path):
+        # 100 GiB disk, floor 10 GiB: plenty before the download, nearly none once a few MiB have landed.
+        free = 50 * gib if Writes.written < br.SPACE_CHECK_BYTES else 5 * gib
+        return br.shutil._ntuple_diskusage(100 * gib, 100 * gib - free, free)
+
+    monkeypatch.setattr(br.shutil, "disk_usage", usage)
+    result = await _start()
+    assert result["status"] == "error" and result["reason"] == "limit"
+    assert Writes.written < len(big)
+    assert _ddl(harness) == []
+    del real_download

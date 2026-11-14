@@ -313,3 +313,22 @@ async def test_a_refusal_wrapped_by_the_sdk_is_still_the_limit(tmp_path):
     with pytest.raises(br.ResourceLimit) as exc:
         await br.bounded_download(Wrapping(100), "u", path, max_bytes=5000, timeout=5)
     assert exc.value.category == "dump_too_large"
+
+
+async def test_free_space_is_rechecked_while_the_download_writes(tmp_path):
+    """Understated metadata or other writers can eat the disk mid-download: the floor is rechecked as bytes land."""
+    path = tmp_path / "d"
+    path.touch(mode=0o600)
+    checks: list[int] = []
+
+    def space(written: int) -> None:
+        checks.append(written)
+        if written >= 3 * br.SPACE_CHECK_BYTES:
+            raise br.ResourceLimit("scratch_space")
+
+    source = _Chunks(10, size=br.SPACE_CHECK_BYTES)
+    with pytest.raises(br.ResourceLimit) as exc:
+        await br.bounded_download(source, "u", path, max_bytes=10**12, timeout=30, space_check=space)
+    assert exc.value.category == "scratch_space"
+    assert path.stat().st_size <= 3 * br.SPACE_CHECK_BYTES
+    assert len(checks) >= 3 and source.finished.is_set()

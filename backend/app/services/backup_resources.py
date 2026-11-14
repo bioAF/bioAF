@@ -30,7 +30,7 @@ import os
 import shutil
 import tempfile
 import threading
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +44,8 @@ logger = logging.getLogger("bioaf.backup_resources")
 KINDS = frozenset({"backup", "restore"})
 STDERR_TAIL_BYTES = 64 * 1024
 STOP_GRACE_SECONDS = 10.0
+# A download rechecks free space each time this many more bytes have been written (and before the first).
+SPACE_CHECK_BYTES = 8 * 1024 * 1024
 KILL_WAIT_SECONDS = 5.0
 
 T = TypeVar("T")
@@ -226,8 +228,10 @@ async def finish_before_cleanup(work: Coroutine[Any, Any, T]) -> T:
 class _CappedWriter:
     """A write-only file that refuses bytes past ``max_bytes`` or once stopped (from any thread)."""
 
-    def __init__(self, path: Path, max_bytes: int):
+    def __init__(self, path: Path, max_bytes: int, space_check: Callable[[int], None] | None = None):
         self.name = str(path)
+        self._space_check = space_check
+        self._next_check = 0
         self._file = open(path, "wb")  # the workspace created it 0600; truncating keeps the mode
         self._max = max_bytes
         self._stopped = threading.Event()
@@ -252,6 +256,14 @@ class _CappedWriter:
                 self.refused = "dump_too_large"
                 self._stopped.set()
                 raise ResourceLimit("dump_too_large")
+            if self._space_check is not None and self.written + len(view) > self._next_check:
+                try:
+                    self._space_check(self.written)
+                except ResourceLimit as exc:
+                    self.refused = exc.category
+                    self._stopped.set()
+                    raise
+                self._next_check = self.written + SPACE_CHECK_BYTES
             self._file.write(view)
             self.written += len(view)
             return len(view)
@@ -263,9 +275,21 @@ class _CappedWriter:
         self._file.close()
 
 
-async def bounded_download(adapter, uri: str, path: Path, *, max_bytes: int, timeout: float) -> int:
-    """Download ``uri`` into ``path`` (an existing private file); the bytes written, or ``ResourceLimit``."""
-    writer = _CappedWriter(Path(path), max_bytes)
+async def bounded_download(
+    adapter,
+    uri: str,
+    path: Path,
+    *,
+    max_bytes: int,
+    timeout: float,
+    space_check: Callable[[int], None] | None = None,
+) -> int:
+    """Download ``uri`` into ``path`` (an existing private file); the bytes written, or ``ResourceLimit``.
+
+    ``space_check(bytes_written)`` runs before the first write and every SPACE_CHECK_BYTES after; it raises
+    ``ResourceLimit`` to stop the download while the disk still has room.
+    """
+    writer = _CappedWriter(Path(path), max_bytes, space_check)
     work = runtime.spawn(adapter.download_to_file(uri, writer), role="backup-download")
 
     async def settle(category: str) -> None:

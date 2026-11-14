@@ -1260,6 +1260,8 @@ async def _prepare_review(
                         dump,
                         max_bytes=settings.restore_max_dump_bytes,
                         timeout=settings.restore_download_timeout_seconds,
+                        # Bytes still to come must keep fitting above the floor as the dump lands.
+                        space_check=lambda written: _check_scratch(max(needed - written, 0)),
                     )
                 except StorageObjectNotFound:
                     return {"status": "error", "message": f"Backup file not found: {filename}"}
