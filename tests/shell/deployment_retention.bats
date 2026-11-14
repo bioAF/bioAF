@@ -42,6 +42,7 @@ teardown() {
 running() { echo "sha256:$1" > "$FAKE_IDS/backend"; echo "sha256:$2" > "$FAKE_IDS/frontend"; }
 state() { python3 -c "import json,sys; d=json.load(open('$WORK/host-state/deployments.json')); print(eval(sys.argv[1]))" "$1"; }
 lib() { bash -c "source '$LIB'; $*"; }
+mode() { python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$1"; }
 
 @test "the first record makes the running pair the current generation, privately" {
     running b1 f1
@@ -51,8 +52,8 @@ lib() { bash -c "source '$LIB'; $*"; }
     [ "$(state "d['current']['frontend']")" = "sha256:f1" ]
     [ "$(state "d['current']['tag']")" = "v1.0.0" ]
     [ "$(state "d['previous']")" = "None" ]
-    [ "$(stat -f %Lp "$WORK/host-state" 2>/dev/null || stat -c %a "$WORK/host-state")" = 700 ]
-    [ "$(stat -f %Lp "$WORK/host-state/deployments.json" 2>/dev/null || stat -c %a "$WORK/host-state/deployments.json")" = 600 ]
+    [ "$(mode "$WORK/host-state")" = 700 ]
+    [ "$(mode "$WORK/host-state/deployments.json")" = 600 ]
 }
 
 @test "a new pair becomes current and the old current becomes previous" {

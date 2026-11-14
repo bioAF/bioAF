@@ -512,6 +512,6 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
     grep -q "round-3" "$REPO/host-only/agent.log.1"
     grep -q "round-2" "$REPO/host-only/agent.log.2"
     [ ! -e "$REPO/host-only/agent.log.3" ]
-    [ "$(stat -f %Lp "$REPO/host-only/agent.log.1" 2>/dev/null || stat -c %a "$REPO/host-only/agent.log.1")" = 600 ]
+    [ "$(python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$REPO/host-only/agent.log.1")" = 0o600 ]
     ! grep -q "round" "$REPO/host-only/agent.log"
 }
