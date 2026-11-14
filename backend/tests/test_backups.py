@@ -1008,3 +1008,15 @@ async def test_a_backup_is_refused_before_pg_dump_when_scratch_space_is_short(mo
     assert result["status"] == "error" and result["reason"] == "limit"
     assert spawned == []
     adapter.upload_filename.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_backup_refused_for_space_is_a_client_error(monkeypatch, client, admin_token):
+    from app.services.backup_service import BackupService
+
+    async def refused(session, org_id):
+        return {"status": "error", "reason": "limit", "reference": "backup-1", "message": "no space"}
+
+    monkeypatch.setattr(BackupService, "run_postgres_backup", staticmethod(refused))
+    response = await client.post("/api/backups/trigger/postgres", headers={"Authorization": f"Bearer {admin_token}"})
+    assert response.status_code == 400

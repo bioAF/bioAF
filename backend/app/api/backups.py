@@ -100,7 +100,7 @@ async def trigger_postgres_backup(
     """Trigger a manual PostgreSQL backup to GCS."""
     result = await BackupService.run_postgres_backup(session, current_user["org_id"])
     if result["status"] == "error":
-        status_code = 409 if result.get("reason") == "busy" else 500
+        status_code = {"busy": 409, "limit": 400}.get(result.get("reason", ""), 500)
         raise HTTPException(status_code, detail=result.get("message", "Backup failed"))
     return result
 
