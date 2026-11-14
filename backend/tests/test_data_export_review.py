@@ -417,3 +417,81 @@ async def test_the_archive_reader_uploads_through_s3transfer_and_stops_when_canc
             await adapter.upload_file("s3://b/exports/1/x.zip", CancellableReader(raw, budget))
 
     assert received.get("body") == (None if cancel else payload)
+
+
+# == Follow-up review (2026-11-14) ===============================================================
+
+
+def _resolver_extended_expiry(monkeypatch, raw_seconds: int) -> dict:
+    """Credential data as the default resolver's own IMDS fetcher would stretch it (longest jitter)."""
+    import botocore.credentials
+    import botocore.session
+    import botocore.utils
+
+    monkeypatch.setattr(botocore.utils.random, "randint", lambda a, b: b)
+    resolver = botocore.credentials.create_credential_resolver(botocore.session.get_session())
+    fetcher = resolver.get_provider("iam-role")._role_fetcher
+    raw = (datetime.now(UTC) + timedelta(seconds=raw_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = {"access_key": "AKIA", "secret_key": "s", "token": "t", "expiry_time": raw}
+    fetcher._evaluate_expiration(data)
+    return data
+
+
+def test_the_ceiling_covers_the_resolvers_real_extension(monkeypatch):
+    from app.adapters.storage import s3_signing
+
+    data = _resolver_extended_expiry(monkeypatch, 300)
+    extended = (datetime.fromisoformat(data["expiry_time"].replace("Z", "+00:00")) - datetime.now(UTC)).total_seconds()
+
+    assert extended > 24 * 60  # the resolver's window is 15 min, plus up to 10 min of jitter
+    assert s3_signing.EXTENSION_CEILING_SECONDS >= extended
+
+
+def test_a_fifteen_minute_minimum_refuses_the_resolvers_extended_credentials(monkeypatch):
+    from botocore.credentials import RefreshableCredentials
+
+    from app.adapters.storage import s3_signing
+    from app.exceptions import StorageUnavailableError
+
+    data = _resolver_extended_expiry(monkeypatch, 300)
+    creds = RefreshableCredentials(
+        access_key="AKIA",
+        secret_key="s",
+        token="t",
+        expiry_time=datetime.now(UTC),
+        refresh_using=lambda: dict(data),
+        method="iam-role",
+    )
+
+    with pytest.raises(StorageUnavailableError):
+        snap = s3_signing.signing_snapshot(creds, required_seconds=15 * 60 + 120)
+        s3_signing.link_lifetime(snap, max_ttl_seconds=86400, min_ttl_seconds=15 * 60)
+
+
+@pytest.mark.parametrize("call", ["check", "sign"])
+@pytest.mark.asyncio
+async def test_credential_discovery_failures_are_storage_unavailable(mode_adapter_factory, monkeypatch, call):
+    from botocore.exceptions import CredentialRetrievalError
+
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.exceptions import StorageUnavailableError
+    from app.settings_contract import ComputeMode
+
+    adapter = mode_adapter_factory(S3StorageProvider, mode=ComputeMode.KUBERNETES)
+    adapter._region = "us-east-1"
+
+    async def none(*a, **k):
+        return None
+
+    def broken():
+        raise CredentialRetrievalError(provider="iam-role", error_msg="metadata service timed out")
+
+    monkeypatch.setattr(adapter, "_get_credentials", none)
+    monkeypatch.setattr(adapter, "_signing_credentials", broken)
+
+    with pytest.raises(StorageUnavailableError) as exc:
+        if call == "check":
+            await adapter.check_signed_download(min_ttl_seconds=3600)
+        else:
+            await adapter.sign_download("s3://b/k", max_ttl_seconds=86400, min_ttl_seconds=3600)
+    assert "metadata service" not in str(exc.value)

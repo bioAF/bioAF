@@ -38,9 +38,20 @@ TESTED_BOTOCORE_VERSION = "1.43.126"
 SAFETY_MARGIN_SECONDS = 60
 # Signing, the audit commit and the response all happen inside this, after the expiry is measured.
 HANDOFF_SECONDS = 60
-# botocore's IMDS fetcher stretches a nearly expired credential to now + refresh window (default
-# 10 min) + jitter (up to 10 min). Remaining validity at or under this is never trusted.
-EXTENSION_CEILING_SECONDS = 20 * 60
+# botocore's IMDS fetcher stretches a nearly expired credential to now + refresh window + jitter.
+# The default credential resolver configures that window as ``_DEFAULT_ADVISORY_REFRESH_TIMEOUT``
+# (15 min in the locked SDK; the fetcher's own 10 min fallback is not what runs), and the jitter is
+# at most 10 min. Remaining validity at or under this ceiling is never trusted.
+_MAX_EXTENSION_JITTER_SECONDS = 10 * 60
+
+
+def _extension_ceiling() -> int:
+    from botocore import credentials
+
+    return int(credentials._DEFAULT_ADVISORY_REFRESH_TIMEOUT) + _MAX_EXTENSION_JITTER_SECONDS
+
+
+EXTENSION_CEILING_SECONDS = _extension_ceiling()
 
 _REFUSED = (
     "Download links are not available right now: the server's storage credentials are close to "
@@ -72,6 +83,17 @@ def _aware(value) -> datetime | None:
 
 def _remaining(expires_at: datetime) -> float:
     return (expires_at - datetime.now(timezone.utc)).total_seconds()
+
+
+def discover(get_credentials):
+    """Run the SDK's credential discovery; any discovery failure is a refusal, never a raw SDK error."""
+    try:
+        return get_credentials()
+    except StorageUnavailableError:
+        raise
+    except Exception as exc:
+        logger.warning("Signing credentials could not be discovered (%s)", type(exc).__name__)
+        raise StorageUnavailableError(_REFUSED) from None
 
 
 def signing_snapshot(credentials, *, required_seconds: float) -> SigningSnapshot:

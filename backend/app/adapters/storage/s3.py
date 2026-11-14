@@ -506,7 +506,7 @@ class S3StorageProvider(StorageProvider):
         def check() -> None:
             # Credential discovery may be an IMDS or SSO round trip: it runs in the thread too.
             s3_signing.signing_snapshot(
-                self._signing_credentials(),
+                s3_signing.discover(self._signing_credentials),
                 required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
             )
 
@@ -821,7 +821,7 @@ class S3StorageProvider(StorageProvider):
     def _s3_sign_download(self, uri: str, max_ttl_seconds: int, min_ttl_seconds: int) -> SignedDownload:
         bucket, key = self._parse_uri(uri)
         snapshot = s3_signing.signing_snapshot(
-            self._signing_credentials(),
+            s3_signing.discover(self._signing_credentials),
             required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
         )
         issued = datetime.now(timezone.utc)
