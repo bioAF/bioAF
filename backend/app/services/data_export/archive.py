@@ -339,8 +339,8 @@ class ExportJob:
         """Stop the build; release now if its worker settles in time, else when it finishes."""
         self.budget.cancel()
         self._abandoned = True
-        if self.worker_running:
-            done, _ = await asyncio.wait({self._task}, timeout=resources.SETTLE_SECONDS)  # type: ignore[arg-type]
+        if self._task is not None and self.worker_running:
+            done, _ = await asyncio.wait({self._task}, timeout=resources.SETTLE_SECONDS)
             if not done:
                 logger.warning("Export worker still running after cancellation; it will release on exit")
                 return

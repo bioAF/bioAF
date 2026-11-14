@@ -168,6 +168,11 @@ def _metadata(expires_in: float, key: str) -> dict:
     }
 
 
+def _expiry(snap) -> datetime:
+    assert snap.expires_at is not None
+    return snap.expires_at
+
+
 REQUIRED = HOUR + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS
 
 
@@ -178,7 +183,7 @@ def test_credentials_covering_the_minimum_are_used_without_a_refresh():
 
     assert calls == []
     assert snap.access_key == "AKIAOLD"
-    assert abs((snap.expires_at - datetime.now(UTC)).total_seconds() - 6 * HOUR) < 5
+    assert abs((_expiry(snap) - datetime.now(UTC)).total_seconds() - 6 * HOUR) < 5
 
 
 def test_short_credentials_are_refreshed_once_and_the_new_pair_is_used():
@@ -188,7 +193,7 @@ def test_short_credentials_are_refreshed_once_and_the_new_pair_is_used():
 
     assert calls == [1]
     assert snap.access_key == "AKIANEW" and snap.token == "token2"
-    assert (snap.expires_at - datetime.now(UTC)).total_seconds() > 5 * HOUR
+    assert (_expiry(snap) - datetime.now(UTC)).total_seconds() > 5 * HOUR
 
 
 def test_a_provider_returning_the_same_short_credentials_is_refused():
@@ -219,7 +224,7 @@ def test_recurring_short_credentials_refuse_until_the_provider_rotates():
     snap = s3_signing.signing_snapshot(creds, required_seconds=REQUIRED)
 
     assert calls == [1, 1, 1, 1]
-    assert (snap.expires_at - datetime.now(UTC)).total_seconds() > 5 * HOUR
+    assert (_expiry(snap) - datetime.now(UTC)).total_seconds() > 5 * HOUR
 
 
 def test_static_keys_without_a_token_use_the_configured_maximum():

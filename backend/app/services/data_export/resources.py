@@ -95,11 +95,13 @@ def check_source_limits(sizes: list[int | None], *, fastq_omitted: bool) -> None
 
 def reservation_for(sizes: Iterable[int | None]) -> int:
     """Scratch bytes to reserve for these source sizes (see the module docstring)."""
-    sizes = list(sizes)
-    if any(not isinstance(s, int) or isinstance(s, bool) or s < 0 for s in sizes):
-        return SCRATCH_CEILING
-    total = sum(sizes)
-    largest = max(sizes, default=0)
+    known: list[int] = []
+    for s in sizes:
+        if not isinstance(s, int) or isinstance(s, bool) or s < 0:
+            return SCRATCH_CEILING
+        known.append(s)
+    total = sum(known)
+    largest = max(known, default=0)
     overhead = max(MIN_ZIP_OVERHEAD, -(-(total + GENERATED_ALLOWANCE) // 20))
     reservation = total + max(largest, GENERATED_ALLOWANCE) + GENERATED_ALLOWANCE + overhead
     if reservation > SCRATCH_CEILING:

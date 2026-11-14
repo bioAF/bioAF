@@ -75,19 +75,17 @@ class GatherBudget:
         """Measure ``query``'s rows and width without reading them; refuse past the budget."""
         sub = query.order_by(None).set_label_style(LABEL_STYLE_TABLENAME_PLUS_COL).subquery("budgeted")
         width = func.octet_length(cast(func.row_to_json(literal_column("budgeted")), Text))
-        rows, total = (
-            await session.execute(select(func.count(), func.coalesce(func.sum(width), 0)).select_from(sub))
-        ).one()
-        self._charge(int(rows), int(total))
+        row = (await session.execute(select(func.count(), func.coalesce(func.sum(width), 0)).select_from(sub))).one()
+        self._charge(int(row[0]), int(row[1]))
 
     async def admit_text(self, session: AsyncSession, from_where: str) -> None:
         """The same measurement for a raw ``FROM ... WHERE ...`` clause aliased ``a``."""
-        rows, total = (
+        row = (
             await session.execute(
                 text(f"SELECT count(*), coalesce(sum(octet_length(row_to_json(a)::text)), 0) {from_where}")  # noqa: S608
             )
         ).one()
-        self._charge(int(rows), int(total))
+        self._charge(int(row[0]), int(row[1]))
 
 
 async def _read(session: AsyncSession, query, budget: GatherBudget | None) -> list:

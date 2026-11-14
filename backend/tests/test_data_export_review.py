@@ -700,7 +700,7 @@ async def test_multibyte_rows_are_refused_at_the_byte_limit_before_more_are_read
     written = []
     real = selection.csv.DictWriter
 
-    class Counting(real):
+    class Counting(real):  # type: ignore[valid-type,misc]
         def writerow(self, row):
             written.append(1)
             return super().writerow(row)

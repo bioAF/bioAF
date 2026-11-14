@@ -241,7 +241,7 @@ async def _lowest_linked_experiment(
             )
             .group_by(sample_files.c.file_id)
         )
-        out.update({file_id: lowest for file_id, lowest in rows})
+        out.update({int(file_id): str(lowest) for file_id, lowest in rows.tuples()})
     return out
 
 
