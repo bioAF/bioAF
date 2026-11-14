@@ -270,9 +270,12 @@ update_agent_validate() {
 }
 
 update_agent_main_pid() {
+    # The agent's main PID (0: not running). Fails when systemd cannot be asked: an unknown state is
+    # never taken for a stopped agent.
     local main
-    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || main=0
-    echo "${main:-0}"
+    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || return 1
+    [[ "$main" =~ ^[0-9]+$ ]] || return 1
+    echo "$main"
 }
 
 update_agent_between_polls() {
@@ -296,17 +299,21 @@ update_agent_hold() {
     # Stop (SIGSTOP) the running agent, then keep it stopped only if it was between polls. A stopped
     # agent cannot pick up a trigger, so nothing can start between this check and the restart: no
     # cooperation from the agent is needed, so this holds an older release's agent too. systemd
-    # sends SIGCONT with SIGTERM when it stops a unit. Fails, with the agent running again, when it
-    # is busy. Nothing to hold when the agent is not running.
+    # sends SIGCONT with SIGTERM when it stops a unit. Returns UPDATE_AGENT_BUSY, with the agent
+    # running again, when it is busy; 1 when its state cannot be read. Nothing to hold when it is not
+    # running. The caller's EXIT trap (update_agent_release) must already be set: the target is
+    # recorded before it is stopped, so an interruption at any point resumes it.
     local main
-    UPDATE_AGENT_HELD=""
-    main=$(update_agent_main_pid)
+    if ! main=$(update_agent_main_pid); then
+        red "Could not read the update agent's state from systemd; nothing was changed."
+        return 1
+    fi
     [ "$main" = 0 ] && return 0
-    _update_agent_signal STOP "$main" || return 1
     UPDATE_AGENT_HELD="$main"
+    _update_agent_signal STOP "$main" || { update_agent_release; return "$UPDATE_AGENT_BUSY"; }
     update_agent_between_polls "$main" && return 0
     update_agent_release
-    return 1
+    return "$UPDATE_AGENT_BUSY"
 }
 
 update_agent_release() {
@@ -398,11 +405,43 @@ update_agent_reconcile_now() {
 
 # Status of update_agent_reconcile_held when the agent is busy (nothing was changed).
 UPDATE_AGENT_BUSY=75
+UPDATE_AGENT_LOCK_WAIT=300   # seconds to wait for another caller's hold to finish
+
+update_agent_lock() {
+    # Take the activation lock on fd 8 (host-state/agent-activation.lock), waiting up to
+    # UPDATE_AGENT_LOCK_WAIT for another caller (a manual command or the waiter). The lock belongs
+    # to the open file, so it is held until fd 8 is closed: when the calling (sub)shell exits, however
+    # it exits. Python takes it because macOS has no flock(1).
+    local dir="$SCRIPT_DIR/host-state"
+    [ -d "$dir" ] || mkdir -m 700 "$dir" || return 1
+    exec 8>>"$dir/agent-activation.lock" || return 1
+    python3 -I -c '
+import fcntl, sys, time
+deadline = time.monotonic() + float(sys.argv[1])
+while True:
+    try:
+        fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            sys.exit(1)
+        time.sleep(0.2)
+' "$UPDATE_AGENT_LOCK_WAIT"
+}
 
 update_agent_reconcile_held() (
-    # In a subshell, so the agent is resumed on every way out, including an error exit.
-    update_agent_hold || exit "$UPDATE_AGENT_BUSY"
+    # One caller at a time (manual commands and the waiter alike), so no caller can resume the agent
+    # during another's hold. In a subshell whose cleanup is in place before anything is stopped:
+    # the agent is resumed on every way out (return, error, SIGTERM/INT/HUP), and the lock is
+    # released when the subshell's fd 8 closes, after that.
+    UPDATE_AGENT_HELD=""
     trap update_agent_release EXIT
+    trap 'exit 143' TERM INT HUP
+    if ! update_agent_lock; then
+        yellow "Another bioAF command is updating the update agent."
+        exit "$UPDATE_AGENT_BUSY"
+    fi
+    update_agent_hold || exit $?
     update_agent_reconcile_now
 )
 

@@ -5,6 +5,16 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 
 load network
 
+# Stand-in update agents (AGENT_PID) are background processes a test may stop; a failed assertion
+# must never leave one stopped, or Bats waits on it forever.
+teardown() {
+    if [ -n "${AGENT_PID:-}" ]; then
+        kill -CONT "$AGENT_PID" 2>/dev/null || true
+        pkill -P "$AGENT_PID" 2>/dev/null || true
+        kill "$AGENT_PID" 2>/dev/null || true
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Help / dispatch
 # ---------------------------------------------------------------------------
@@ -1078,6 +1088,7 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 # agent_env <tmp>: a checkout at <tmp>/repo (the files the reconciliation reads), stub privileged
 # tools on PATH, and <tmp>/agent.sh, a harness that sources ./bioaf and points it at them.
 #   FAKE_MAINPID            what `systemctl show -p MainPID` reports (default 0: not running)
+#   FAKE_SHOW_STATUS        exit of `systemctl show` (default 0: it reports FAKE_MAINPID)
 #   FAKE_ACTIVE_STATUS      exit of `systemctl is-active` (default 0)
 #   FAKE_<OP>_STATUS        exit of systemctl daemon-reload/enable/start/restart (OP upper-cased,
 #                           RELOAD for daemon-reload); FAKE_RESTART_FAILS_ONCE=1 fails only the first
@@ -1097,7 +1108,7 @@ agent_env() {
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$FAKE_LOG"
 case "$1" in
-    show) echo "${FAKE_MAINPID:-0}" ;;
+    show) [ "${FAKE_SHOW_STATUS:-0}" = 0 ] || exit "$FAKE_SHOW_STATUS"; echo "${FAKE_MAINPID:-0}" ;;
     is-active)
         [ "$3" = bioaf-update-agent-activation ] && exit "${FAKE_WAITER_ACTIVE_STATUS:-3}"
         if [ -e "$FAKE_LOG.started" ]; then
@@ -1349,6 +1360,8 @@ race_hook() {
 sleep 1.5
 if pgrep -P $AGENT_PID -x perl >/dev/null; then echo updater-started-before-restart; else echo no-updater-before-restart; fi >> '$tmp/log'
 case "\$(ps -o stat= -p $AGENT_PID)" in *T*) echo restart-while-held ;; *) echo restart-while-running ;; esac >> '$tmp/log'
+# A real restart replaces the agent, leaving the trigger to the new one; the stand-in is not replaced.
+rm -f '$tmp/trigger'
 HOOK
 }
 
@@ -1394,6 +1407,57 @@ run_waiter() {
     grep -qx no-updater-before-restart "$tmp/log"
     grep -qx restart-while-held "$tmp/log"
     ! grep -q updater-started-before-restart "$tmp/log"
+}
+
+@test "an agent whose state cannot be read is not treated as stopped: nothing changes" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ensure_agent FAKE_SHOW_STATUS=1
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^(systemd-analyze|systemctl (daemon-reload|restart|start))|^systemd-run' "$tmp/log"
+    [[ "$output" == *"state"* ]]
+}
+
+@test "concurrent reconciliations are serialized: neither can resume the agent during the other's hold" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    rm -f "$tmp/log.started" "$tmp/log.checked"
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook" \
+        bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null > "$tmp/first.out" 2>&1 &
+    first=$!
+    sleep 0.5
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook" \
+        bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null > "$tmp/second.out" 2>&1
+    second_status=$?
+    wait "$first"; first_status=$?
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$first_status" -eq 0 ] && [ "$second_status" -eq 0 ]
+    [ "$(grep -c '^restart-while-held$' "$tmp/log")" -eq 2 ]
+    ! grep -q 'updater-started-before-restart\|restart-while-running' "$tmp/log"
+}
+
+@test "a reconciliation interrupted while acquiring its hold leaves the agent running" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    # A slow pgrep: the interruption lands after the agent is stopped, before the hold is decided.
+    real_pgrep="$(command -v pgrep)"
+    printf '#!/usr/bin/env bash\n: > "%s/in-pgrep"\nsleep 2\nexec %q "$@"\n' "$tmp" "$real_pgrep" > "$tmp/bin/pgrep"
+    chmod +x "$tmp/bin/pgrep"
+    env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" bash -c "source '$tmp/agent.sh'; ensure_update_agent" </dev/null >/dev/null 2>&1 &
+    caller=$!
+    for _ in $(seq 1 50); do [ -e "$tmp/in-pgrep" ] && break; sleep 0.1; done
+    [ -e "$tmp/in-pgrep" ]
+    ! not_stopped "$AGENT_PID"
+    # Interrupt everything the caller started, as a terminal or systemd would.
+    pkill -TERM -P "$caller" 2>/dev/null || true
+    kill -TERM "$caller" 2>/dev/null || true
+    sleep 3
+    not_stopped "$AGENT_PID"
+    ! grep -q '^systemctl restart' "$tmp/log"
 }
 
 @test "the agent is never left stopped, whether reconciliation succeeds or fails" {
