@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -45,6 +46,11 @@ class PostgresSnapshot(BaseModel):
     filename: str
     date: str
     size_bytes: int | None = None
+    # checksummed: stored with the SHA-256 recorded at creation, checked again before a restore uses it.
+    # unverified: older than checksums (in the cutover inventory); restorable only with an explicit opt-in.
+    # invalid: a damaged or unrecognized checksum record, or an unrecorded backup made after checksums began.
+    # unknown: the record could not be read just now.
+    integrity: Literal["checksummed", "unverified", "invalid", "unknown"] = "unknown"
 
 
 class PostgresSnapshotListResponse(BaseModel):

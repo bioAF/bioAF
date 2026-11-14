@@ -13165,6 +13165,12 @@ export interface components {
             date: string;
             /** Filename */
             filename: string;
+            /**
+             * Integrity
+             * @default unknown
+             * @enum {string}
+             */
+            integrity: "checksummed" | "unverified" | "invalid" | "unknown";
             /** Size Bytes */
             size_bytes?: number | null;
         };

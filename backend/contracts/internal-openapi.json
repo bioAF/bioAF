@@ -14370,6 +14370,17 @@
             "title": "Filename",
             "type": "string"
           },
+          "integrity": {
+            "default": "unknown",
+            "enum": [
+              "checksummed",
+              "unverified",
+              "invalid",
+              "unknown"
+            ],
+            "title": "Integrity",
+            "type": "string"
+          },
           "size_bytes": {
             "anyOf": [
               {

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.platform.platform_config_service import PlatformConfigService
-from app.services import backup_resources
+from app.services import backup_integrity, backup_resources
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
@@ -407,11 +407,13 @@ class BackupService:
             return [], 0
 
         total = len(files)
+        integrity = await _snapshot_integrity(bucket_name, [f["filename"] for f in files])
         snapshots = [
             {
                 "filename": f["filename"],
                 "date": f["timestamp"].isoformat(),
                 "size_bytes": f["size_bytes"],
+                "integrity": integrity[f["filename"]],
             }
             for f in files
         ]
@@ -775,6 +777,88 @@ async def _record_backup_failure(session: AsyncSession, reference: str, details:
     await session.commit()
 
 
+async def _snapshot_integrity(bucket_name: str, names: list[str]) -> dict[str, str]:
+    """Each backup's integrity state (backup_integrity.classify), or ``unknown`` when it could not be read."""
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+    try:
+        legacy = await _legacy_inventory(adapter, bucket_name)
+    except Exception as exc:
+        logger.warning("Backup integrity inventory unavailable (%s)", type(exc).__name__)
+        return {n: "unknown" for n in names}
+    states = {}
+    for name in names:
+        try:
+            stored = await adapter.get_object_metadata(adapter.build_uri(bucket_name, f"postgres/{name}"))
+            states[name] = backup_integrity.classify(name, stored.metadata, legacy=legacy)[0]
+        except Exception as exc:
+            logger.warning("Backup integrity of %s unavailable (%s)", name, type(exc).__name__)
+            states[name] = "unknown"
+    return states
+
+
+def _backup_failure(reference: str) -> dict:
+    return {
+        "status": "error",
+        "reference": reference,
+        "message": f"The database backup failed (reference {reference}). "
+        "The server log has the details under that reference.",
+    }
+
+
+async def _unusable_archive(dump, size: int) -> str | None:
+    """Why a fresh dump cannot be kept (``empty_dump``/``archive_unreadable``), or None. Reads the TOC only."""
+    if size == 0:
+        return "empty_dump"
+    listing = await backup_resources.run_child(
+        ["pg_restore", "--list", str(dump)], env=dict(os.environ), timeout=settings.restore_toc_timeout_seconds
+    )
+    return None if listing.returncode == 0 and not listing.timed_out else "archive_unreadable"
+
+
+async def _legacy_inventory(adapter, bucket_name: str) -> frozenset[str]:
+    """The backups older than integrity markers, recording the inventory the first time it is needed.
+
+    A listing that fails raises: an inventory written from a failed listing would silently disqualify every
+    older backup.
+    """
+    from app.adapters.models import StorageObjectNotFound
+
+    uri = adapter.build_uri(bucket_name, backup_integrity.CUTOVER_KEY)
+    try:
+        return backup_integrity.parse_cutover(await adapter.read_bytes(uri))
+    except StorageObjectNotFound:
+        pass
+    objects = await adapter.list_objects(adapter.build_uri(bucket_name, "postgres/"))
+    names = [o.storage_uri.rsplit("/", 1)[-1] for o in objects]
+    names = [n for n in names if _PG_FILENAME_RE.match(n)]
+    await adapter.write_bytes(
+        uri,
+        backup_integrity.cutover_document(names, created_at=_now().isoformat()),
+        content_type="application/json",
+    )
+    logger.info("Backup integrity cutover recorded: %d earlier backups are unverified", len(names))
+    return frozenset(names)
+
+
+async def _marker_confirmed(adapter, uri: str, filename: str, digest: str, size: int) -> bool:
+    try:
+        stored = await adapter.get_object_metadata(uri)
+    except Exception as exc:
+        logger.error("Reading back a new backup's metadata failed (%s)", type(exc).__name__)
+        return False
+    state, expected = backup_integrity.classify(filename, stored.metadata, legacy=frozenset())
+    return state == "checksummed" and expected == digest and stored.size_bytes in (None, size)
+
+
+async def _discard_upload(adapter, uri: str, reference: str) -> None:
+    try:
+        await adapter.delete(uri)
+    except Exception as exc:
+        logger.error("Backup %s: removing the unmarked upload failed (%s)", reference, type(exc).__name__)
+
+
 async def _run_postgres_backup(session: AsyncSession) -> dict:
     from app.adapters.registry import get_storage_adapter
 
@@ -808,16 +892,21 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
                     reference,
                     {"phase": phase, "exit_status": child.returncode, "category": child.category},
                 )
-                return {
-                    "status": "error",
-                    "reference": reference,
-                    "message": f"The database backup failed (reference {reference}). "
-                    "The server log has the details under that reference.",
-                }
+                return _backup_failure(reference)
 
             size = dump.stat().st_size
+            phase = "verify"
+            unusable = await _unusable_archive(dump, size)
+            if unusable:
+                logger.error("Backup %s failed: the dump is not a usable archive (%s)", reference, unusable)
+                await _record_backup_failure(session, reference, {"phase": phase, "category": unusable})
+                return _backup_failure(reference)
+            digest = await asyncio.to_thread(backup_integrity.file_sha256, dump)
+
             adapter = get_storage_adapter()
             uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
+            phase = "cutover"
+            await _legacy_inventory(adapter, bucket_name)  # recorded before the first marked backup exists
             phase = "upload"
             if await adapter.exists(uri):
                 logger.error("Backup %s: %s already exists; it was not replaced", reference, filename)
@@ -827,7 +916,15 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
                     "reference": reference,
                     "message": f"A backup named {filename} already exists, so it was not replaced. Try again.",
                 }
-            await backup_resources.finish_before_cleanup(adapter.upload_filename(uri, str(dump)))
+            await backup_resources.finish_before_cleanup(
+                adapter.upload_filename(uri, str(dump), metadata=backup_integrity.marker(filename, digest))
+            )
+            phase = "confirm"
+            if not await _marker_confirmed(adapter, uri, filename, digest, size):
+                logger.error("Backup %s failed: the stored backup does not carry its checksum marker", reference)
+                await _discard_upload(adapter, uri, reference)
+                await _record_backup_failure(session, reference, {"phase": phase, "category": "marker_missing"})
+                return _backup_failure(reference)
 
         # Rotate old backups (use DB-stored retention, not config default). The new backup is already stored,
         # so a rotation failure is logged and does not turn a completed backup into a failed one.
@@ -868,12 +965,7 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
     except Exception as exc:
         logger.error("Backup %s failed during %s (%s)", reference, phase, type(exc).__name__)
         await _record_backup_failure(session, reference, {"phase": phase, "category": type(exc).__name__})
-        return {
-            "status": "error",
-            "reference": reference,
-            "message": f"The database backup failed (reference {reference}). "
-            "The server log has the details under that reference.",
-        }
+        return _backup_failure(reference)
 
 
 # ---------------------------------------------------------------------------

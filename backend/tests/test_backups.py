@@ -628,12 +628,24 @@ async def test_gcs_status_terraform_state_real_versioning_check():
 SENTINEL = "sentinel-5e02-ssn-987-65-4321"
 
 
-def _fake_pg_dump(monkeypatch, *, exit_code: int = 0, stderr: str = "", content: bytes = b"PGDMP fake dump", gate=None):
-    """Replace pg_dump with a real child that writes ``content`` to its -f path, prints ``stderr`` and exits."""
+def _fake_pg_dump(
+    monkeypatch,
+    *,
+    exit_code: int = 0,
+    stderr: str = "",
+    content: bytes = b"PGDMP fake dump",
+    gate=None,
+    list_exit: int = 0,
+):
+    """Replace pg_dump with a real child that writes ``content`` to its -f path, prints ``stderr`` and exits; the
+    archive check (``pg_restore --list``) exits ``list_exit``. Returns the pg_dump command lines."""
     real_exec = asyncio_mod.subprocess.create_subprocess_exec
     spawned: list[list[str]] = []
 
     async def exec_(*argv, **kwargs):
+        if Path(argv[0]).name == "pg_restore":
+            assert "--list" in argv
+            return await real_exec(sys.executable, "-c", f"import sys; sys.exit({list_exit})", **kwargs)
         spawned.append(list(argv))
         if gate is not None:
             await gate.wait()
@@ -656,23 +668,51 @@ def _backup_session():
     return session
 
 
-def _backup_adapter(*, exists: bool = False):
-    seen: dict = {}
+def _backup_adapter(*, exists: bool = False, existing: list[str] | None = None, keep_metadata: bool = True):
+    """A storage adapter that records the upload, keeps (or drops) its metadata, and holds the cutover record."""
+    from app.adapters.models import ObjectMetadata, StorageObjectNotFound, StoredObject
+
+    seen: dict = {"writes": {}, "deleted": []}
     adapter = AsyncMock()
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
-    adapter.list_objects.return_value = []  # rotation finds nothing to delete
+    adapter.list_objects.return_value = [
+        StoredObject(filename=n, storage_uri=f"gs://my-backups-bucket/postgres/{n}") for n in (existing or [])
+    ]
     adapter.exists.return_value = exists
 
     async def upload(uri, path, **kwargs):
         p = Path(path)
         seen.update(
+            uri=uri,
             path=p,
             bytes=p.read_bytes(),
             mode=stat.S_IMODE(p.stat().st_mode),
             dir_mode=stat.S_IMODE(p.parent.stat().st_mode),
+            metadata=kwargs.get("metadata"),
         )
 
+    async def metadata(uri):
+        if uri != seen.get("uri"):
+            raise StorageObjectNotFound(uri)
+        kept = (seen.get("metadata") or {}) if keep_metadata else {}
+        return ObjectMetadata(uri=uri, size_bytes=len(seen["bytes"]), metadata=kept)
+
+    async def read_bytes(uri):
+        if uri not in seen["writes"]:
+            raise StorageObjectNotFound(uri)
+        return seen["writes"][uri]
+
+    async def write_bytes(uri, data, **kwargs):
+        seen["writes"][uri] = data
+
+    async def delete(uri, **kwargs):
+        seen["deleted"].append(uri)
+
     adapter.upload_filename.side_effect = upload
+    adapter.get_object_metadata.side_effect = metadata
+    adapter.read_bytes.side_effect = read_bytes
+    adapter.write_bytes.side_effect = write_bytes
+    adapter.delete.side_effect = delete
     return adapter, seen
 
 
@@ -791,7 +831,7 @@ async def test_a_second_backup_while_one_runs_is_refused(monkeypatch, backup_db_
         assert (await first)["status"] == "completed"
     assert second["status"] == "error" and second["reason"] == "busy"
     assert response.status_code == 409
-    assert len(spawned) == 1
+    assert len(spawned) == 1  # pg_dump ran once
 
 
 @pytest.mark.asyncio
@@ -808,3 +848,108 @@ async def test_run_postgres_backup_no_bucket_configured():
 
     assert result["status"] == "error"
     assert "bucket" in result["message"].lower()
+
+
+# --- the integrity marker and the legacy cutover ---
+
+CUTOVER = "gs://my-backups-bucket/postgres/.integrity-cutover.json"
+
+
+@pytest.mark.asyncio
+async def test_a_backup_is_stored_with_its_own_name_and_digest(monkeypatch, backup_db_url):
+    import hashlib
+
+    from app.services import backup_integrity as bi
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch, content=b"PGDMP real enough")
+    adapter, seen = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "completed"
+    assert seen["metadata"] == bi.marker(result["filename"], hashlib.sha256(b"PGDMP real enough").hexdigest())
+
+
+@pytest.mark.asyncio
+async def test_the_cutover_lists_earlier_backups_before_the_first_marked_one(monkeypatch, backup_db_url):
+    import json
+
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    old = ["pgdump-20261101-000000.dump", "pgdump-20261102-000000.dump"]
+    adapter, seen = _backup_adapter(existing=[*old, "notes.txt"])
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        assert (await BackupService.run_postgres_backup(_backup_session(), org_id=1))["status"] == "completed"
+        first = seen["writes"][CUTOVER]
+        adapter.list_objects.return_value = []  # a later run must not rewrite the inventory from a new listing
+        assert (await BackupService.run_postgres_backup(_backup_session(), org_id=1))["status"] in (
+            "completed",
+            "error",
+        )
+    assert json.loads(first)["legacy"] == old
+    assert seen["writes"][CUTOVER] == first
+
+
+@pytest.mark.asyncio
+async def test_a_backup_whose_marker_did_not_persist_fails_and_is_removed(monkeypatch, backup_db_url):
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    adapter, seen = _backup_adapter(keep_metadata=False)
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error"
+    assert seen["deleted"] == [seen["uri"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("content", "list_exit"), [(b"", 0), (b"not an archive", 1)])
+async def test_an_empty_or_unreadable_dump_is_never_uploaded(monkeypatch, backup_db_url, content, list_exit):
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch, content=content, list_exit=list_exit)
+    adapter, _ = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error"
+    adapter.upload_filename.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_listing_never_writes_an_empty_cutover(monkeypatch, backup_db_url):
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    adapter, seen = _backup_adapter()
+    adapter.list_objects.side_effect = RuntimeError("listing failed")
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error"
+    assert CUTOVER not in seen["writes"]
+    adapter.upload_filename.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_snapshots_report_their_integrity(monkeypatch, client, admin_token):
+    from app.adapters.models import ObjectMetadata, StoredObject
+    from app.services import backup_integrity as bi
+
+    names = ["pgdump-20261101-000000.dump", "pgdump-20261113-000000.dump", "pgdump-20261114-000000.dump"]
+    marked = bi.marker(names[2], "b" * 64)
+    adapter = AsyncMock()
+    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    adapter.list_objects.return_value = [
+        StoredObject(filename=n, storage_uri=f"gs://bk/postgres/{n}", size_bytes=1) for n in names
+    ]
+    adapter.read_bytes.return_value = bi.cutover_document([names[0]], created_at="2026-11-12T00:00:00+00:00")
+    adapter.get_object_metadata.side_effect = lambda uri: ObjectMetadata(
+        uri=uri, metadata=marked if uri.endswith(names[2]) else {}
+    )
+    monkeypatch.setattr("app.services.backup_service._get_backups_bucket", AsyncMock(return_value="bk"))
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        response = await client.get(
+            "/api/backups/postgres-snapshots", headers={"Authorization": f"Bearer {admin_token}"}
+        )
+    states = {s["filename"]: s["integrity"] for s in response.json()["snapshots"]}
+    assert states == {names[0]: "unverified", names[1]: "invalid", names[2]: "checksummed"}
