@@ -30,12 +30,13 @@ import os
 import shutil
 import tempfile
 import threading
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
+from app import runtime
 from app.config import settings
 
 logger = logging.getLogger("bioaf.backup_resources")
@@ -121,7 +122,7 @@ async def private_workspace(kind: str, *, root: Path | str | None = None) -> Asy
         if workspace.retained:
             logger.error("A %s workspace was retained for recovery; it is removed by the next %s", kind, kind)
         else:
-            await asyncio.shield(asyncio.to_thread(_remove, path))
+            await runtime.shielded(asyncio.to_thread(_remove, path), role=f"{kind}-workspace-cleanup")
 
 
 # Ordered: the first match names the category. Matching is on lowercased stderr and keeps nothing else.
@@ -195,23 +196,26 @@ async def run_child(
                 del tail[:-STDERR_TAIL_BYTES]
         return await proc.wait()
 
-    waiter = asyncio.ensure_future(collect())
+    # An owned task, waited on without cancelling it: a timeout or our own cancellation stops the child first.
+    waiter = runtime.spawn(collect(), role="backup-child")
     try:
-        await asyncio.wait_for(asyncio.shield(waiter), timeout)
-    except asyncio.TimeoutError:
-        await _stop(proc, waiter, stop_grace, kill_wait)
-        return ChildResult(proc.returncode, classify_stderr(bytes(tail)), timed_out=True)
+        done, _ = await asyncio.wait({waiter}, timeout=timeout)
     except asyncio.CancelledError:
         await _stop(proc, waiter, stop_grace, kill_wait)
         raise
+    if not done:
+        await _stop(proc, waiter, stop_grace, kill_wait)
+        return ChildResult(proc.returncode, classify_stderr(bytes(tail)), timed_out=True)
+    waiter.result()
     return ChildResult(proc.returncode, classify_stderr(bytes(tail)))
 
 
-async def finish_before_cleanup(work: Awaitable[T]) -> T:
+async def finish_before_cleanup(work: Coroutine[Any, Any, T]) -> T:
     """Await ``work``; if cancelled meanwhile, wait for it to finish first, then propagate the cancellation."""
-    task = asyncio.ensure_future(work)
+    task = runtime.spawn(work, role="backup-storage-io")
     try:
-        return await asyncio.shield(task)
+        await asyncio.wait({task})
+        return task.result()
     except asyncio.CancelledError:
         await asyncio.wait({task})
         if not task.cancelled():
@@ -262,7 +266,7 @@ class _CappedWriter:
 async def bounded_download(adapter, uri: str, path: Path, *, max_bytes: int, timeout: float) -> int:
     """Download ``uri`` into ``path`` (an existing private file); the bytes written, or ``ResourceLimit``."""
     writer = _CappedWriter(Path(path), max_bytes)
-    work = asyncio.ensure_future(adapter.download_to_file(uri, writer))
+    work = runtime.spawn(adapter.download_to_file(uri, writer), role="backup-download")
 
     async def settle(category: str) -> None:
         # After stop() returns no write is in progress and none can start, so the file is safe to remove even if
@@ -275,13 +279,14 @@ async def bounded_download(adapter, uri: str, path: Path, *, max_bytes: int, tim
 
     try:
         try:
-            await asyncio.wait_for(asyncio.shield(work), timeout)
-        except asyncio.TimeoutError:
-            await settle("download_timeout")
-            raise ResourceLimit("download_timeout") from None
+            done, _ = await asyncio.wait({work}, timeout=timeout)
         except asyncio.CancelledError:
             await settle("cancelled")
             raise
+        if not done:
+            await settle("download_timeout")
+            raise ResourceLimit("download_timeout")
+        work.result()
         if writer.refused:
             raise ResourceLimit(writer.refused)
         return writer.written

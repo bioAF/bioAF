@@ -1096,7 +1096,7 @@ async def _undo_activation(reference: str) -> None:
         active=False, phase="preparing", _decision=None, started_at=None, expires_at=None, backup_filename=""
     )
     try:
-        await asyncio.shield(swap_database(original_url))
+        await runtime.shielded(swap_database(original_url), role="restore-swap-back")
     except Exception as exc:
         logger.error(
             "Restore %s: the swap failed and returning to the primary also failed (%s)", reference, type(exc).__name__
@@ -1106,7 +1106,7 @@ async def _undo_activation(reference: str) -> None:
 
 async def _drop_review_copy(reference: str) -> None:
     try:
-        await asyncio.shield(_run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"]))
+        await runtime.shielded(_run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"]), role="restore-drop-copy")
     except Exception as exc:
         logger.error("Restore %s: dropping bioaf_restore failed (%s)", reference, type(exc).__name__)
 
