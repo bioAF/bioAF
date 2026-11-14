@@ -819,6 +819,18 @@ async def _snapshot_integrity(bucket_name: str, names: list[str]) -> dict[str, s
     return states
 
 
+async def _database_bytes(session: AsyncSession) -> int:
+    """The database's size, or 0 when it cannot be read (the floor alone then applies)."""
+    from sqlalchemy import text
+
+    try:
+        value = (await session.execute(text("SELECT pg_database_size(current_database())"))).scalar()
+        return int(value) if isinstance(value, int) else 0
+    except Exception as exc:
+        logger.warning("Could not read the database size for the backup space check (%s)", type(exc).__name__)
+        return 0
+
+
 def _backup_failure(reference: str) -> dict:
     return {
         "status": "error",
@@ -922,6 +934,18 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
     try:
         async with backup_resources.private_workspace("backup") as workspace:
             try:
+                # The same scratch floor as restores: the dump (at most about the database's size) must fit.
+                try:
+                    _check_scratch(await _database_bytes(session))
+                except backup_resources.ResourceLimit:
+                    logger.error("Backup %s refused: not enough free scratch space for the dump", reference)
+                    await _record_backup_failure(session, reference, {"phase": "prepare", "category": "scratch_space"})
+                    return {
+                        "status": "error",
+                        "reason": "limit",
+                        "reference": reference,
+                        "message": "The server does not have enough free disk space to make a backup.",
+                    }
                 dump = workspace.new_file("backup.dump")
                 conn_args, env = _pg_connection()
                 phase = "dump"

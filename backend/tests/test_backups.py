@@ -987,3 +987,24 @@ async def test_a_backup_child_that_cannot_be_stopped_keeps_its_workspace_and_adm
     assert len(spawned) == count
     adapter.upload_filename.assert_not_awaited()
     assert first["reference"] in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_backup_is_refused_before_pg_dump_when_scratch_space_is_short(monkeypatch, backup_db_url):
+    """Backup creation honors the same scratch floor as restore (consistency with review finding 4)."""
+    from app.services import backup_resources
+    from app.services.backup_service import BackupService
+
+    spawned = _fake_pg_dump(monkeypatch)
+    gib = 1024**3
+    monkeypatch.setattr(
+        backup_resources.shutil,
+        "disk_usage",
+        lambda _p: backup_resources.shutil._ntuple_diskusage(100 * gib, 98 * gib, 2 * gib),
+    )
+    adapter, _ = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error" and result["reason"] == "limit"
+    assert spawned == []
+    adapter.upload_filename.assert_not_awaited()
