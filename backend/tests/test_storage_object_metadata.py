@@ -308,3 +308,58 @@ async def test_a_symlink_in_the_metadata_area_never_reaches_outside_the_root(loc
     with pytest.raises(ValidationError):
         await adapter.upload_file(uri, io.BytesIO(b"y"), metadata=MARK)
     assert victim.read_text() == '{"bioaf-sha256": "planted"}'
+
+
+@pytest.mark.parametrize("operation", ["read", "delete", "write"])
+async def test_a_parent_swapped_for_a_link_mid_operation_is_never_followed(
+    local_store, tmp_path, monkeypatch, operation
+):
+    """Review follow-up: checking the path and then opening it by name is a race. Operations are anchored to the
+    directory descriptors that were checked, so a directory swapped for a link after the check is not followed."""
+    import pathlib
+    import shutil
+
+    from app.adapters.storage import local_fs
+
+    adapter, root = local_store
+    uri = _uri(adapter, "postgres/a.dump")
+    await adapter.upload_file(uri, io.BytesIO(b"x"), metadata=MARK)
+    meta_dir = _metadata_root(root) / "bk" / "postgres"
+    outside = tmp_path.parent / f"swap-{operation}-{tmp_path.name}"
+    outside.mkdir()
+    victim = outside / "a.dump"
+    victim.write_text('{"bioaf-sha256": "planted"}')
+
+    swapped = {"done": False}
+
+    def swap_first(real):
+        def call(*args, **kwargs):
+            # Just before the record is first touched by name, swap its directory for a link to the outside.
+            names = [os.fspath(a) for a in args if isinstance(a, (str, os.PathLike))]
+            if not swapped["done"] and any(
+                n == "a.dump" or n.endswith(os.path.join("postgres", "a.dump")) for n in names
+            ):
+                swapped["done"] = True
+                shutil.move(str(meta_dir), str(meta_dir) + ".moved")
+                pathlib.Path(meta_dir).symlink_to(outside)
+            return real(*args, **kwargs)
+
+        return call
+
+    for name in ("open", "unlink", "rename", "replace"):
+        monkeypatch.setattr(local_fs.os, name, swap_first(getattr(os, name)))
+    try:
+        if operation == "read":
+            metadata = (await adapter.get_object_metadata(uri)).metadata
+            assert metadata.get("bioaf-sha256") != "planted"
+        elif operation == "delete":
+            await adapter.delete(uri)
+        else:
+            await adapter.upload_file(uri, io.BytesIO(b"y"), metadata={"bioaf-backup-format": "2"})
+    except (ValidationError, OSError, StorageObjectNotFound):
+        pass
+    finally:
+        monkeypatch.undo()
+    assert swapped["done"], "the probe never ran: the record was not opened"
+    assert victim.read_text() == '{"bioaf-sha256": "planted"}'
+    assert sorted(p.name for p in outside.iterdir()) == ["a.dump"]
