@@ -19,6 +19,7 @@ The order of work is the contract (plan 24):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.exceptions import DomainError, ExportContentUnavailableError, NotFoundError
+from app.exceptions import DomainError, ExportContentUnavailableError, ExportTimeoutError, NotFoundError
 from app.services.data_export import naming, resources, selection
 from app.services.data_export.archive import ArchivePlan, ExportJob
 from app.services.data_export.selection import ExperimentContent, ProjectContent
@@ -78,6 +79,8 @@ class PreparedExport:
     job: ExportJob
     size: int
     filename: str
+    # Set when a response starts streaming it; from then on the response alone releases it.
+    claimed: bool = False
 
     @property
     def path(self) -> str:
@@ -96,6 +99,7 @@ async def prepare_experiment_export(
     include_provenance: bool,
     user_email: str,
 ) -> PreparedExport:
+    started = asyncio.get_running_loop().time()
     content = await selection.select_experiment(
         session, experiment_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
     )
@@ -108,7 +112,9 @@ async def prepare_experiment_export(
         if include_provenance:
             plan.add_generated(*await _provenance(session, "experiment", content.id, org_id, user_email, content.root))
 
-    return await _prepare(plan, list(content.files), include_fastq, reports, _filename(content.name, "experiment"))
+    return await _prepare(
+        session, plan, list(content.files), include_fastq, reports, _filename(content.name, "experiment"), started
+    )
 
 
 async def prepare_project_export(
@@ -120,6 +126,7 @@ async def prepare_project_export(
     include_provenance: bool,
     user_email: str,
 ) -> PreparedExport:
+    started = asyncio.get_running_loop().time()
     content = await selection.select_project(
         session, project_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
     )
@@ -143,21 +150,33 @@ async def prepare_project_export(
             plan.add_generated(*await _provenance(session, "experiment", experiment.id, org_id, user_email, exp_root))
         plan.add_generated(*await _provenance(session, "project", content.id, org_id, user_email, root))
 
-    return await _prepare(plan, list(content.all_files), include_fastq, reports, _filename(content.name, "project"))
+    return await _prepare(
+        session, plan, list(content.all_files), include_fastq, reports, _filename(content.name, "project"), started
+    )
 
 
-async def _prepare(plan: ArchivePlan, files, include_fastq: bool, reports, filename: str) -> PreparedExport:
+async def _prepare(
+    session: AsyncSession, plan: ArchivePlan, files, include_fastq: bool, reports, filename: str, started: float
+) -> PreparedExport:
     from app.adapters.registry import get_storage_adapter
 
     sizes = [f.size_bytes for f in files]
     resources.check_source_limits(sizes, fastq_omitted=not include_fastq)
     job = ExportJob.admit(sizes, scratch_dir=settings.export_scratch_dir)
     try:
-        await reports()
+        async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
+            await reports()
+        # Nothing below needs the database until the audit: end the read transaction rather than
+        # hold a pooled connection idle through a build that may take many minutes.
+        await session.commit()
+    except TimeoutError:
+        job.release()
+        raise ExportTimeoutError("The export took too long to prepare and was stopped. Try a smaller export.") from None
     except BaseException:
         job.release()
         raise
-    size = await job.build(plan, get_storage_adapter())
+    remaining = started + resources.BUILD_DEADLINE - asyncio.get_running_loop().time()
+    size = await job.build(plan, get_storage_adapter(), deadline=max(remaining, 0))
     return PreparedExport(job=job, size=size, filename=filename)
 
 

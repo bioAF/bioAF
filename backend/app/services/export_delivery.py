@@ -108,10 +108,12 @@ async def _delete(uri: str) -> None:
 
 
 def watch_unclaimed(prepared) -> None:
-    """Release a direct export whose response never ran (its own close is idempotent)."""
+    """Release a direct export whose response never started; a started response releases itself."""
 
     async def backstop() -> None:
         await asyncio.sleep(resources.TRANSFER_DEADLINE + 2 * resources.SETTLE_SECONDS)
-        prepared.release()
+        if not prepared.claimed:
+            logger.warning("A prepared data export was never sent; releasing it")
+            prepared.release()
 
     runtime.spawn(backstop(), role="data-export-backstop")

@@ -160,6 +160,7 @@ async def _deliver(session, current_user, entity_type, entity_id, body, prepared
             filename=prepared.filename,
             media_type="application/zip",
             on_close=finished,
+            on_start=lambda: setattr(prepared, "claimed", True),
             stall_seconds=settings.export_transfer_stall_seconds,
             deadline_seconds=resources.TRANSFER_DEADLINE,
         )

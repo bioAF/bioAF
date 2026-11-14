@@ -311,7 +311,9 @@ class ExportSlot:
 
     def try_acquire(self) -> SlotLease:
         if not self._lock.acquire(blocking=False):
-            raise ExportBusyError("Another data export is being prepared. Try again in a few minutes.")
+            raise ExportBusyError(
+                "Another data export is in progress. Exports run one at a time; try again in a few minutes."
+            )
         return SlotLease(self._lock.release)
 
     @property

@@ -83,6 +83,7 @@ class GuardedFileResponse(StreamingResponse):
         media_type: str,
         on_close,
         stall_seconds: float,
+        on_start=None,
         deadline_seconds: float,
         cleanup_seconds: float = 10,
         chunk_size: int = 256 * 1024,
@@ -90,6 +91,7 @@ class GuardedFileResponse(StreamingResponse):
         self._path = path
         self._chunk_size = chunk_size
         self._on_close = on_close
+        self._on_start = on_start
         self._stall_seconds = stall_seconds
         self._deadline_seconds = deadline_seconds
         self._cleanup_seconds = cleanup_seconds
@@ -126,6 +128,8 @@ class GuardedFileResponse(StreamingResponse):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         self.outcome = "incomplete"
+        if self._on_start is not None:
+            self._on_start()
         try:
             with anyio.move_on_after(self._deadline_seconds) as deadline:
                 await super().__call__(scope, receive, self._guard(send))

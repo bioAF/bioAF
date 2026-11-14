@@ -313,3 +313,85 @@ async def test_the_response_advertises_length_and_disables_proxy_buffering(tmp_p
     assert headers["content-length"] == "1234"
     assert headers["x-accel-buffering"] == "no"
     assert "filename*=UTF-8''%E5%AE%9E%E9%AA%8C.zip" in headers["content-disposition"]
+
+
+# -- Deadlines, connections and the unclaimed backstop -------------------------------------------
+
+
+async def _seed_experiment(session, org: int) -> None:
+    from sqlalchemy import text
+
+    await session.execute(
+        text("INSERT INTO projects (id, organization_id, name, status) VALUES (1, :o, 'P', 'active')"), {"o": org}
+    )
+    await session.execute(
+        text("INSERT INTO experiments (id, organization_id, project_id, name, status) VALUES (1, :o, 1, 'E', 'x')"),
+        {"o": org},
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_slow_report_generation_counts_against_the_preparation_deadline(
+    session, admin_user, tmp_path, monkeypatch
+):
+    from app.config import settings
+    from app.services import export_service
+    from app.services.provenance.report_service import ProvenanceReportService
+
+    async def slow(**kwargs):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(ProvenanceReportService, "generate", slow)
+    monkeypatch.setattr(resources, "BUILD_DEADLINE", 0.3)
+    monkeypatch.setattr(settings, "export_scratch_dir", str(tmp_path))
+    await _seed_experiment(session, admin_user.organization_id)
+
+    with pytest.raises(ExportTimeoutError):
+        await export_service.prepare_experiment_export(
+            session, 1, admin_user.organization_id, include_fastq=False, include_provenance=True, user_email="a@b"
+        )
+
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_the_build_runs_without_holding_a_database_transaction(session, admin_user, tmp_path, monkeypatch):
+    from app.config import settings
+    from app.services import export_service
+
+    seen = {}
+    real_build = ExportJob.build
+
+    async def build(self, plan, adapter, **kwargs):
+        seen["in_transaction"] = session.in_transaction()
+        return await real_build(self, plan, adapter, **kwargs)
+
+    monkeypatch.setattr(ExportJob, "build", build)
+    monkeypatch.setattr(settings, "export_scratch_dir", str(tmp_path))
+    await _seed_experiment(session, admin_user.organization_id)
+
+    prepared = await export_service.prepare_experiment_export(
+        session, 1, admin_user.organization_id, include_fastq=False, include_provenance=False, user_email="a@b"
+    )
+    prepared.release()
+
+    assert seen == {"in_transaction": False}
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+@pytest.mark.asyncio
+async def test_the_backstop_releases_only_an_export_no_response_started(tmp_path, monkeypatch, claimed):
+    from app.services import export_delivery
+    from app.services.export_service import PreparedExport
+
+    monkeypatch.setattr(resources, "TRANSFER_DEADLINE", 0.05)
+    monkeypatch.setattr(resources, "SETTLE_SECONDS", 0.01)
+    job = ExportJob.admit([], scratch_dir=str(tmp_path))
+    prepared = PreparedExport(job=job, size=0, filename="x.zip", claimed=claimed)
+
+    export_delivery.watch_unclaimed(prepared)
+    await asyncio.sleep(0.3)
+
+    assert resources.SLOT.busy is claimed
+    prepared.release()
