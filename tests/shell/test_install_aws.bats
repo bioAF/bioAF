@@ -191,7 +191,7 @@ PY
 
 @test "failed, empty or malformed IP detection opens no SSH rule and asks for --ssh-cidr" {
     local case
-    for case in fail empty html partial multi v6; do
+    for case in fail empty html partial multi v6 transfer-error; do
         : > "$CALL_LOG"; answers n
         case "$case" in
             fail) export FAKE_IP_STATUS=6 FAKE_MY_IP="" ;;
@@ -200,6 +200,8 @@ PY
             partial) export FAKE_IP_STATUS=0 FAKE_MY_IP="203.0.11" ;;
             multi) export FAKE_IP_STATUS=0 FAKE_MY_IP=$'203.0.113.7\n198.51.100.1' ;;
             v6) export FAKE_IP_STATUS=0 FAKE_MY_IP="2001:db8::1" ;;
+            # A valid-looking address from a lookup that did not succeed (curl: partial transfer).
+            transfer-error) export FAKE_IP_STATUS=18 FAKE_MY_IP="203.0.113.7" ;;
         esac
         install --region us-east-1
         [ "$status" -ne 0 ]

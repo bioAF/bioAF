@@ -327,7 +327,11 @@ step "Using region ${REGION}" -- true
 # is this machine's public IPv4 /32; if that cannot be detected the install stops
 # rather than opening SSH wider than asked.
 if [ -z "$SSH_CIDR" ]; then
-    MY_IP="$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]' || true)"
+    # Only a lookup that succeeded counts: a failed or partial transfer may still print an address.
+    MY_IP=""
+    if MY_IP_BODY="$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null)"; then
+        MY_IP="$(printf '%s' "$MY_IP_BODY" | tr -d '[:space:]')"
+    fi
     if ! ipv4_valid "$MY_IP"; then
         red "  Could not detect this machine's public IPv4 address, so nothing was created."
         red "  Re-run with the range allowed to SSH to the VM, e.g. --ssh-cidr 203.0.113.7/32"
