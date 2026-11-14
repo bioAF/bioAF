@@ -105,7 +105,13 @@ class LocalObjectFilesystem:
         segments = [seg for seg in key.split("/") if seg]
         parts, name = [METADATA_DIR, container, *segments[:-1]], segments[-1]
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        fd = os.open(self._base(), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fd = os.open(self._base(), os.O_RDONLY | os.O_DIRECTORY)
+        except FileNotFoundError:
+            if not create:
+                return None, name  # no store yet, so nothing is recorded
+            os.makedirs(self._base(), exist_ok=True)
+            fd = os.open(self._base(), os.O_RDONLY | os.O_DIRECTORY)
         try:
             for depth, part in enumerate(parts):
                 try:

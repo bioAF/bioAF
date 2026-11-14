@@ -363,3 +363,8 @@ async def test_a_parent_swapped_for_a_link_mid_operation_is_never_followed(
     assert swapped["done"], "the probe never ran: the record was not opened"
     assert victim.read_text() == '{"bioaf-sha256": "planted"}'
     assert sorted(p.name for p in outside.iterdir()) == ["a.dump"]
+
+
+async def test_a_store_that_does_not_exist_yet_has_no_metadata(tmp_path):
+    adapter = NfsStorageProvider(root=str(tmp_path / "not-yet"))
+    await adapter.delete(adapter.build_uri("bk", "postgres/a.dump"))  # missing object, missing store: not an error
