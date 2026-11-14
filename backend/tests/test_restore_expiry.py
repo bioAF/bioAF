@@ -24,6 +24,7 @@ from app.config import settings
 from app.services import backup_service
 from app.services.backup_service import RestoreService
 from tests.support import disposable_pg as dpg
+from tests.support.backup_storage import FakeBackupStorage
 
 PRIMARY = "postgresql+asyncpg://bioaf:pw@db:5432/bioaf"
 # A backup file name unique per test process (the service downloads into a private workspace, not by this name).
@@ -40,20 +41,8 @@ async def _until(predicate, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.01)
 
 
-class _FakeStorage:
-    def __init__(self, source: str | None = None):
-        self.source = source
-
-    def build_uri(self, bucket: str, key: str) -> str:
-        return f"fake://{bucket}/{key}"
-
-    async def download_to_filename(self, uri: str, path: str) -> None:
-        if self.source:
-            with open(self.source, "rb") as src, open(path, "wb") as dst:
-                dst.write(src.read())
-        else:
-            with open(path, "wb") as dst:
-                dst.write(b"dump")
+# The backups bucket: a dump with a valid integrity marker (tests/support/backup_storage.py).
+_FakeStorage = FakeBackupStorage
 
 
 def _fake_external_start(monkeypatch, source: str | None = None) -> None:

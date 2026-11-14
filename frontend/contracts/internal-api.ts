@@ -15949,6 +15949,11 @@ export interface components {
         };
         /** StartPostgresRestoreRequest */
         StartPostgresRestoreRequest: {
+            /**
+             * Allow Unverified
+             * @default false
+             */
+            allow_unverified: boolean;
             /** Filename */
             filename: string;
         };

@@ -192,10 +192,21 @@ async def start_postgres_restore(
     session: AsyncSession = Depends(get_session),
 ):
     """Start a database restore from a pg_dump backup. Enters review mode."""
-    result = await RestoreService.start(session, current_user["org_id"], body.filename)
+    result = await RestoreService.start(
+        session,
+        current_user["org_id"],
+        body.filename,
+        allow_unverified=body.allow_unverified,
+        user_id=int(current_user["sub"]),
+    )
     if result["status"] == "error":
-        conflict = result.get("reason") == "busy" or "already active" in result["message"]
-        status_code = 409 if conflict else 500
+        reason = result.get("reason")
+        if reason == "busy" or "already active" in result["message"]:
+            status_code = 409
+        elif reason in ("unverified", "integrity", "limit") or result["message"] == "Invalid backup filename":
+            status_code = 400
+        else:
+            status_code = 500
         raise HTTPException(status_code, detail=result["message"])
     return result
 

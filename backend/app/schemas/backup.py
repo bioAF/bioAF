@@ -70,6 +70,8 @@ class RestoreResponse(BaseModel):
 
 class StartPostgresRestoreRequest(BaseModel):
     filename: str
+    # Required to restore a backup made before bioAF recorded checksums ("unverified"); the restore is audited.
+    allow_unverified: bool = False
 
 
 class RestoreStatusResponse(BaseModel):

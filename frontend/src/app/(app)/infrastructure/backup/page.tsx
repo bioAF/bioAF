@@ -33,7 +33,16 @@ interface PostgresSnapshot {
   filename: string;
   date: string;
   size_bytes: number | null;
+  integrity?: "checksummed" | "unverified" | "invalid" | "unknown";
 }
+
+// What the backend recorded about each backup's checksum (PostgresSnapshot.integrity in the API).
+const INTEGRITY_LABELS: Record<NonNullable<PostgresSnapshot["integrity"]>, string> = {
+  checksummed: "Checksum recorded",
+  unverified: "Unverified (made before checksums)",
+  invalid: "Checksum missing or damaged",
+  unknown: "Not checked",
+};
 
 interface TfstateFile {
   name: string;
@@ -228,12 +237,17 @@ export default function InfraBackupPage() {
     }
   };
 
-  const handleStartRestore = (filename: string) => {
+  const handleStartRestore = (snapshot: PostgresSnapshot) => {
+    const filename = snapshot.filename;
+    const unverified = snapshot.integrity === "unverified";
+    const review = `The current database will remain available as a fallback. You will have 1 hour to review the restored data before accepting or rejecting.`;
     setConfirmDialog({
       open: true,
-      title: "Restore Database",
-      message: `This will restore the database from "${filename}". The current database will remain available as a fallback. You will have 1 hour to review the restored data before accepting or rejecting.`,
-      confirmLabel: "Restore",
+      title: unverified ? "Restore Unverified Backup" : "Restore Database",
+      message: unverified
+        ? `"${filename}" was made before bioAF recorded checksums, so its contents cannot be verified before it is restored. The restore will be recorded in the audit log. ${review}`
+        : `This will restore the database from "${filename}". ${review}`,
+      confirmLabel: unverified ? "Restore unverified backup" : "Restore",
       variant: "danger",
       onConfirm: async () => {
         setConfirmDialog((prev) => ({ ...prev, open: false }));
@@ -242,7 +256,7 @@ export default function InfraBackupPage() {
         try {
           const data = await api.post<{ status: string; message: string }>(
             "/api/backups/restore/postgres",
-            { filename }
+            unverified ? { filename, allow_unverified: true } : { filename }
           );
           setActionMessage(data.message);
           await loadData();
@@ -685,6 +699,7 @@ export default function InfraBackupPage() {
                     <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Filename</th>
                     <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Date</th>
                     <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Size</th>
+                    <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700">Checksum</th>
                     {canAccess("backups", "restore") && (
                       <th scope="col" className="text-left px-4 py-3 font-medium text-gray-700"></th>
                     )}
@@ -693,7 +708,7 @@ export default function InfraBackupPage() {
                 <tbody>
                   {pageLoadError ? null : pgSnapshots.length === 0 ? (
                     <tr>
-                      <td colSpan={canAccess("backups", "restore") ? 4 : 3} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={canAccess("backups", "restore") ? 5 : 4} className="px-4 py-8 text-center text-gray-500">
                         No snapshots available
                       </td>
                     </tr>
@@ -703,10 +718,11 @@ export default function InfraBackupPage() {
                         <td className="px-4 py-2.5 text-gray-900 font-mono text-xs">{s.filename}</td>
                         <td className="px-4 py-2.5 text-gray-600">{new Date(s.date).toLocaleString()}</td>
                         <td className="px-4 py-2.5 text-gray-600">{formatBytes(s.size_bytes, "backup", { missing: "N/A", zeroIsMissing: true })}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{INTEGRITY_LABELS[s.integrity ?? "unknown"]}</td>
                         {canAccess("backups", "restore") && (
                           <td className="px-4 py-2.5">
                             <button
-                              onClick={() => handleStartRestore(s.filename)}
+                              onClick={() => handleStartRestore(s)}
                               disabled={restoreStatus.active || restoringFile !== ""}
                               className="text-xs text-amber-700 hover:text-amber-900 disabled:opacity-50 disabled:cursor-not-allowed"
                             >

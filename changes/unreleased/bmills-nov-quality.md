@@ -9,3 +9,7 @@
   database tool's raw output, which could contain research data. Only one backup and one restore run at a time,
   a backup never replaces an existing one of the same name, and dump files are private and removed when the
   operation ends.
+- Database backups record a checksum when they are made, and a restore checks it, the backup's size, free disk
+  space and archive readability before touching any database. A restore now succeeds or fails as a whole: an
+  import error no longer opens a review of a partly restored copy. Backups made before this release are listed as
+  unverified and need an explicit, audited confirmation to restore.

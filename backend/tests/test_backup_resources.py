@@ -236,3 +236,80 @@ async def test_adapter_work_returns_its_result_and_raises_its_error():
     assert await br.finish_before_cleanup(ok()) == 7
     with pytest.raises(LookupError):
         await br.finish_before_cleanup(bad())
+
+
+# --- bounded downloads and scratch space -------------------------------------------------------------------
+
+
+class _Chunks:
+    """An adapter whose download writes chunks from a thread, like the SDKs do."""
+
+    def __init__(self, chunks: int, size: int = 1024, pause: float = 0.0):
+        self.chunks, self.size, self.pause = chunks, size, pause
+        self.written = 0
+        self.finished = threading.Event()
+
+    async def download_to_file(self, uri, file_obj):
+        def run():
+            try:
+                for _ in range(self.chunks):
+                    file_obj.write(b"x" * self.size)
+                    self.written += self.size
+                    if self.pause:
+                        time.sleep(self.pause)
+            finally:
+                self.finished.set()
+
+        await asyncio.to_thread(run)
+
+
+async def test_a_download_is_written_privately_and_counted(tmp_path):
+    async with br.private_workspace("restore", root=tmp_path) as ws:
+        path = ws.new_file("backup.dump")
+        n = await br.bounded_download(_Chunks(4), "u", path, max_bytes=10_000, timeout=5)
+        assert n == 4096 and path.stat().st_size == 4096 and _mode(path) == 0o600
+
+
+async def test_a_download_past_the_cap_stops_before_the_bytes_land(tmp_path):
+    path = tmp_path / "d"
+    path.touch(mode=0o600)
+    source = _Chunks(100)
+    with pytest.raises(br.ResourceLimit) as exc:
+        await br.bounded_download(source, "u", path, max_bytes=5000, timeout=5)
+    assert exc.value.category == "dump_too_large"
+    assert path.stat().st_size <= 5000 and source.finished.is_set()
+
+
+async def test_a_slow_download_times_out_and_its_thread_has_stopped(tmp_path):
+    path = tmp_path / "d"
+    path.touch(mode=0o600)
+    source = _Chunks(10_000, pause=0.01)
+    with pytest.raises(br.ResourceLimit) as exc:
+        await br.bounded_download(source, "u", path, max_bytes=10**9, timeout=0.2)
+    assert exc.value.category == "download_timeout"
+    assert source.finished.is_set()  # the writer refused further bytes, so the thread ended
+
+
+async def test_scratch_admission_keeps_the_floor(tmp_path, monkeypatch):
+    gib = 1024**3
+    monkeypatch.setattr(br.shutil, "disk_usage", lambda p: br.shutil._ntuple_diskusage(100 * gib, 80 * gib, 20 * gib))
+    # floor = max(3 GiB, 10% of 100 GiB) = 10 GiB; 20 free - 9 needed = 11 >= 10
+    br.require_scratch(tmp_path, 9 * gib, floor_min=3 * gib, floor_percent=10)
+    with pytest.raises(br.ResourceLimit) as exc:
+        br.require_scratch(tmp_path, 11 * gib, floor_min=3 * gib, floor_percent=10)
+    assert exc.value.category == "scratch_space"
+
+
+async def test_a_refusal_wrapped_by_the_sdk_is_still_the_limit(tmp_path):
+    class Wrapping(_Chunks):
+        async def download_to_file(self, uri, file_obj):
+            try:
+                await super().download_to_file(uri, file_obj)
+            except br.ResourceLimit as exc:
+                raise RuntimeError("sdk transport error") from exc
+
+    path = tmp_path / "d"
+    path.touch(mode=0o600)
+    with pytest.raises(br.ResourceLimit) as exc:
+        await br.bounded_download(Wrapping(100), "u", path, max_bytes=5000, timeout=5)
+    assert exc.value.category == "dump_too_large"

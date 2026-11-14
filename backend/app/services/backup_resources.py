@@ -13,6 +13,10 @@ A database dump holds the whole installation, so one operation owns everything i
   reaches a log, an audit record or a response. On cancellation or timeout the child is sent TERM, given
   ``stop_grace`` seconds, then KILL and ``kill_wait`` seconds; a child that still has not exited raises
   ``ChildNotStopped`` so the caller keeps its exclusion instead of deleting files under a live process.
+- **Download.** ``bounded_download`` streams an object into a workspace file through a writer that counts the
+  bytes actually written and refuses past ``max_bytes`` or after its deadline, so the SDK's thread stops at its
+  next write. ``require_scratch`` refuses unless the free space left after ``needed`` bytes stays above
+  ``max(floor_min, floor_percent% of the filesystem)``.
 - **Adapter work.** Storage adapters run blocking SDK calls in threads, which cancellation cannot stop.
   ``finish_before_cleanup`` waits for such work to finish before a cancellation propagates, so files are not deleted
   under a thread still writing them.
@@ -25,6 +29,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -41,6 +46,14 @@ STOP_GRACE_SECONDS = 10.0
 KILL_WAIT_SECONDS = 5.0
 
 T = TypeVar("T")
+
+
+class ResourceLimit(RuntimeError):
+    """A bound was reached (``category``: dump_too_large, download_timeout, scratch_space)."""
+
+    def __init__(self, category: str):
+        super().__init__(category)
+        self.category = category
 
 
 class ChildNotStopped(RuntimeError):
@@ -204,3 +217,89 @@ async def finish_before_cleanup(work: Awaitable[T]) -> T:
         if not task.cancelled():
             task.exception()  # retrieved, so an error after cancellation is not reported as unhandled
         raise
+
+
+class _CappedWriter:
+    """A write-only file that refuses bytes past ``max_bytes`` or once stopped (from any thread)."""
+
+    def __init__(self, path: Path, max_bytes: int):
+        self.name = str(path)
+        self._file = open(path, "wb")  # the workspace created it 0600; truncating keeps the mode
+        self._max = max_bytes
+        self._stopped = threading.Event()
+        self._lock = threading.Lock()
+        self.written = 0
+        self.refused: str | None = None
+
+    def stop(self, category: str) -> None:
+        with self._lock:
+            self.refused = self.refused or category
+        self._stopped.set()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, data) -> int:
+        view = memoryview(data)
+        with self._lock:
+            if self._stopped.is_set():
+                raise ResourceLimit(self.refused or "download_timeout")
+            if self.written + len(view) > self._max:
+                self.refused = "dump_too_large"
+                self._stopped.set()
+                raise ResourceLimit("dump_too_large")
+            self._file.write(view)
+            self.written += len(view)
+            return len(view)
+
+    def flush(self) -> None:
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
+async def bounded_download(adapter, uri: str, path: Path, *, max_bytes: int, timeout: float) -> int:
+    """Download ``uri`` into ``path`` (an existing private file); the bytes written, or ``ResourceLimit``."""
+    writer = _CappedWriter(Path(path), max_bytes)
+    work = asyncio.ensure_future(adapter.download_to_file(uri, writer))
+
+    async def settle(category: str) -> None:
+        # After stop() returns no write is in progress and none can start, so the file is safe to remove even if
+        # the adapter's thread has not noticed yet; give it a moment to end on its own, then cancel what remains.
+        writer.stop(category)
+        await asyncio.wait({work}, timeout=STOP_GRACE_SECONDS)
+        if not work.done():
+            work.cancel()
+            await asyncio.wait({work})
+
+    try:
+        try:
+            await asyncio.wait_for(asyncio.shield(work), timeout)
+        except asyncio.TimeoutError:
+            await settle("download_timeout")
+            raise ResourceLimit("download_timeout") from None
+        except asyncio.CancelledError:
+            await settle("cancelled")
+            raise
+        if writer.refused:
+            raise ResourceLimit(writer.refused)
+        return writer.written
+    except (ResourceLimit, asyncio.CancelledError):
+        if work.done() and not work.cancelled():
+            work.exception()
+        raise
+    except Exception:
+        if writer.refused:  # an SDK may wrap the writer's refusal in its own error type
+            raise ResourceLimit(writer.refused) from None
+        raise
+    finally:
+        writer.close()
+
+
+def require_scratch(path: Path | str, needed: int, *, floor_min: int, floor_percent: int) -> None:
+    """Refuse unless ``needed`` more bytes still leave the filesystem above its floor."""
+    usage = shutil.disk_usage(path)
+    floor = max(floor_min, usage.total * floor_percent // 100)
+    if usage.free - needed < floor:
+        raise ResourceLimit("scratch_space")

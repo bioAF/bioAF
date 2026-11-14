@@ -23433,6 +23433,11 @@
       },
       "StartPostgresRestoreRequest": {
         "properties": {
+          "allow_unverified": {
+            "default": false,
+            "title": "Allow Unverified",
+            "type": "boolean"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"

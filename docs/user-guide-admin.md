@@ -81,6 +81,16 @@ Navigate to **Infrastructure > Backup & Recovery**:
   refused; try again.
 - The dump file lives in a private directory under `/tmp/bioaf-backups` inside the backend container
   (`BIOAF_BACKUP_SCRATCH_DIR`) only while the operation runs, and is removed when it ends, succeeded or not.
+- Every backup made by bioAF records a SHA-256 checksum. The snapshot table shows it as **Checksum recorded**;
+  backups made before checksums existed show **Unverified (made before checksums)** and can be restored only
+  through a confirmation that says so (the restore is recorded in the audit log). **Checksum missing or damaged**
+  backups cannot be restored.
+- Before anything changes, a restore checks the backup's size (at most 10 GiB, `BIOAF_RESTORE_MAX_DUMP_BYTES`),
+  the free disk space it leaves (at least 3 GiB or 10% of the disk), the downloaded bytes against the recorded
+  checksum, and that the file is a readable archive. The import itself is all or nothing: any error leaves no
+  review copy and traffic stays on the current database. Time limits: download 15 minutes, archive check
+  1 minute, import 30 minutes, the whole preparation 45 minutes (`BIOAF_RESTORE_*_SECONDS`). These limits are
+  provisional starting values.
 - If a restore reports that its database import could not be stopped, no new restore can start. Restart bioAF
   (`./bioaf restart`), confirm the application is using the `bioaf` database, then drop the leftover review copy
   with `DROP DATABASE IF EXISTS bioaf_restore;` in `psql`. The leftover dump directory is removed by the next restore.

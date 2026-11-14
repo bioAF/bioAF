@@ -1109,8 +1109,89 @@ async def _drop_review_copy(reference: str) -> None:
         logger.error("Restore %s: dropping bioaf_restore failed (%s)", reference, type(exc).__name__)
 
 
-async def _prepare_review(session: AsyncSession, filename: str, reference: str) -> dict:
-    """The admitted part of a restore start; the caller releases or keeps the admission."""
+class _Refused(Exception):
+    """A preflight refusal: ``reason`` for the route, ``message`` for the administrator; nothing was changed."""
+
+    def __init__(self, reason: str, message: str, category: str):
+        super().__init__(category)
+        self.reason, self.message, self.category = reason, message, category
+
+
+_LIMIT_MESSAGES = {
+    "dump_too_large": "This backup is larger than a restore may download ({limit}).",
+    "scratch_space": "The server does not have enough free disk space to prepare this restore.",
+    "download_timeout": "Downloading the backup took longer than a restore allows. Try again later.",
+}
+
+
+def _pg_tool(name: str) -> str:
+    """The image's pinned PostgreSQL 16 client when present (Dockerfile.backend), else the one on PATH."""
+    pinned = os.path.join(settings.upgrade_pg_bin_dir, name)
+    return pinned if os.path.exists(pinned) else name
+
+
+async def _expected_backup(
+    adapter, bucket_name: str, uri: str, filename: str, allow_unverified: bool
+) -> tuple[str | None, int]:
+    """The SHA-256 recorded at creation (None for an opted-in legacy backup) and the bytes to make room for, read
+    before any byte is downloaded. An unknown size reserves the whole limit."""
+    stored = await adapter.get_object_metadata(uri)
+    legacy = await _legacy_inventory(adapter, bucket_name)
+    state, expected = backup_integrity.classify(filename, stored.metadata, legacy=legacy)
+    if state == "unverified" and not allow_unverified:
+        raise _Refused(
+            "unverified",
+            "This backup was made before bioAF recorded checksums, so its contents cannot be verified. "
+            "Confirm the unverified restore to use it anyway.",
+            "unverified",
+        )
+    if state not in ("checksummed", "unverified"):
+        raise _Refused(
+            "integrity", "This backup's checksum record is missing or damaged, so it cannot be restored.", "invalid"
+        )
+    limit = settings.restore_max_dump_bytes
+    if stored.size_bytes is not None and stored.size_bytes > limit:
+        raise _Refused("limit", _LIMIT_MESSAGES["dump_too_large"].format(limit=_human_bytes(limit)), "dump_too_large")
+    return expected, stored.size_bytes if stored.size_bytes is not None else limit
+
+
+def _human_bytes(n: int) -> str:
+    return f"{n / 1024**3:g} GiB" if n >= 1024**3 else f"{n} bytes"
+
+
+def _check_scratch(needed: int) -> None:
+    backup_resources.require_scratch(
+        settings.backup_scratch_dir,
+        needed,
+        floor_min=settings.restore_scratch_floor_min_bytes,
+        floor_percent=settings.restore_scratch_floor_percent,
+    )
+
+
+async def _audit_unverified(session: AsyncSession | None, user_id: int | None, filename: str, reference: str) -> None:
+    logger.warning("Restore %s: %s is an unverified backup; restoring it on explicit request", reference, filename)
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="backup",
+        entity_id=0,
+        action="restore_unverified_authorized",
+        details={"tier": "postgres", "filename": filename, "reference": reference},
+    )
+    if session is not None:
+        await session.commit()
+
+
+async def _prepare_review(
+    session: AsyncSession, filename: str, reference: str, *, allow_unverified: bool = False, user_id: int | None = None
+) -> dict:
+    """The admitted part of a restore start; the caller releases or keeps the admission.
+
+    Nothing touches bioaf_restore until the backup passed preflight: its recorded checksum and identity (read
+    before the download), the size and scratch limits, the downloaded bytes against that checksum, and a readable
+    table of contents. The import is all or nothing (--single-transaction, --exit-on-error); any nonzero exit
+    fails the restore before review.
+    """
     from app.adapters.models import StorageObjectNotFound
     from app.adapters.registry import get_storage_adapter
 
@@ -1118,21 +1199,58 @@ async def _prepare_review(session: AsyncSession, filename: str, reference: str) 
     if not bucket_name:
         return {"status": "error", "message": "No backups bucket configured"}
 
-    phase = "download"
+    phase = "preflight"
     created = False
     started = time.monotonic()
     try:
         async with backup_resources.private_workspace("restore") as workspace:
             try:
-                dump = workspace.new_file("backup.dump")
                 adapter = get_storage_adapter()
+                uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
                 try:
-                    await backup_resources.finish_before_cleanup(
-                        adapter.download_to_filename(adapter.build_uri(bucket_name, f"postgres/{filename}"), str(dump))
+                    expected, needed = await _expected_backup(adapter, bucket_name, uri, filename, allow_unverified)
+                except StorageObjectNotFound:
+                    return {"status": "error", "message": f"Backup file not found: {filename}"}
+                if expected is None:
+                    await _audit_unverified(session, user_id, filename, reference)
+
+                phase = "download"
+                _check_scratch(needed)
+                dump = workspace.new_file("backup.dump")
+                try:
+                    size = await backup_resources.bounded_download(
+                        adapter,
+                        uri,
+                        dump,
+                        max_bytes=settings.restore_max_dump_bytes,
+                        timeout=settings.restore_download_timeout_seconds,
                     )
                 except StorageObjectNotFound:
                     return {"status": "error", "message": f"Backup file not found: {filename}"}
-                logger.info("Restore %s: downloaded %s (%d bytes)", reference, filename, dump.stat().st_size)
+                _check_scratch(0)
+                logger.info("Restore %s: downloaded %s (%d bytes)", reference, filename, size)
+
+                phase = "verify"
+                if expected is not None:
+                    if await asyncio.to_thread(backup_integrity.file_sha256, dump) != expected:
+                        raise _Refused(
+                            "integrity",
+                            "The downloaded backup does not match the checksum recorded when it was made, so it "
+                            "was not restored.",
+                            "checksum_mismatch",
+                        )
+                    logger.info("Restore %s: checksum matches the one recorded at creation", reference)
+                listing = await backup_resources.run_child(
+                    [_pg_tool("pg_restore"), "--list", str(dump)],
+                    env=dict(os.environ),
+                    timeout=settings.restore_toc_timeout_seconds,
+                )
+                if listing.returncode != 0 or listing.timed_out:
+                    raise _Refused(
+                        "integrity",
+                        "The backup file is not a readable database archive, so it was not restored.",
+                        "archive_unreadable",
+                    )
 
                 phase = "create_database"
                 created = True
@@ -1142,23 +1260,36 @@ async def _prepare_review(session: AsyncSession, filename: str, reference: str) 
                 phase = "pg_restore"
                 conn_args, env = _pg_connection()
                 child = await backup_resources.run_child(
-                    ["pg_restore", *conn_args, "-d", "bioaf_restore", "-Fc", "--no-owner", "--no-acl", str(dump)],
+                    [
+                        _pg_tool("pg_restore"),
+                        *conn_args,
+                        "-d",
+                        "bioaf_restore",
+                        "-Fc",
+                        "--exit-on-error",
+                        "--single-transaction",
+                        "--no-owner",
+                        "--no-acl",
+                        str(dump),
+                    ],
                     env=env,
+                    timeout=settings.restore_pg_restore_timeout_seconds,
                 )
             except backup_resources.ChildNotStopped:
                 workspace.retain()
                 raise
         if child.returncode is None:
             raise FileNotFoundError("pg_restore")
-        if child.returncode != 0:
-            # pg_restore exits nonzero for warnings (e.g. "role does not exist") as well as errors; it is
-            # logged by exit status and category only, and the review proceeds as before.
-            logger.warning(
-                "Restore %s: pg_restore exited %d (%s); continuing to review",
+        if child.returncode != 0 or child.timed_out:
+            logger.error(
+                "Restore %s failed: pg_restore exited %s (%s%s); nothing was committed to bioaf_restore",
                 reference,
                 child.returncode,
                 child.category,
+                ", timed out" if child.timed_out else "",
             )
+            await _drop_review_copy(reference)
+            return _restore_failure(reference)
 
         # Pause automatic work and wait for in-flight work to settle: during the
         # review, nothing automatic may write the review copy, and nothing external may start.
@@ -1215,6 +1346,14 @@ async def _prepare_review(session: AsyncSession, filename: str, reference: str) 
 
     except (backup_resources.ChildNotStopped, PreparationUncertain):
         raise
+    except (_Refused, backup_resources.ResourceLimit) as refusal:
+        if isinstance(refusal, backup_resources.ResourceLimit):
+            message = _LIMIT_MESSAGES[refusal.category].format(limit=_human_bytes(settings.restore_max_dump_bytes))
+            refusal = _Refused("limit", message, refusal.category)
+        logger.warning("Restore %s refused during %s (%s)", reference, phase, refusal.category)
+        if created:
+            await _drop_review_copy(reference)
+        return {"status": "error", "reason": refusal.reason, "reference": reference, "message": refusal.message}
     except asyncio.CancelledError:
         logger.warning("Restore %s cancelled during %s", reference, phase)
         if not _restore_state["active"]:
@@ -1250,7 +1389,14 @@ class RestoreService:
         }
 
     @staticmethod
-    async def start(session: AsyncSession, org_id: int, filename: str) -> dict:
+    async def start(
+        session: AsyncSession,
+        org_id: int,
+        filename: str,
+        *,
+        allow_unverified: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
         """Download a backup, restore it into bioaf_restore, and swap traffic to it for review.
 
         Admission is taken before the first await: one restore prepares or is reviewed at a time, installation
@@ -1263,7 +1409,13 @@ class RestoreService:
         reference = _reference("restore")
         keep_admission = False
         try:
-            return await _prepare_review(session, filename, reference)
+            async with asyncio.timeout(settings.restore_preparation_timeout_seconds):
+                return await _prepare_review(
+                    session, filename, reference, allow_unverified=allow_unverified, user_id=user_id
+                )
+        except TimeoutError:
+            logger.error("Restore %s failed: preparation exceeded its time limit", reference)
+            return _restore_failure(reference)
         except (backup_resources.ChildNotStopped, PreparationUncertain):
             keep_admission = True
             _restore_state["phase"] = "preparation_stuck"

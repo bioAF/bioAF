@@ -26,6 +26,7 @@ import pytest
 from app.config import settings
 from app.services import backup_resources, backup_service
 from app.services.backup_service import RestoreService
+from tests.support.backup_storage import FakeBackupStorage
 from tests.test_restore_expiry import FILENAME, harness  # noqa: F401 -- fixture
 
 pytestmark = pytest.mark.asyncio
@@ -33,36 +34,9 @@ pytestmark = pytest.mark.asyncio
 SENTINEL = "sentinel-7c41-ssn-123-45-6789"
 
 
-class _Storage:
-    """Records downloads; can hold one open until released, and checks where and how it writes."""
-
-    def __init__(self):
-        self.downloads: list[str] = []
-        self.paths: list[Path] = []
-        self.modes: list[int] = []
-        self.started = asyncio.Event()
-        self.release: asyncio.Event | None = None
-        self.fail: Exception | None = None
-
-    def build_uri(self, bucket: str, key: str) -> str:
-        return f"fake://{bucket}/{key}"
-
-    async def download_to_filename(self, uri: str, path: str) -> None:
-        self.downloads.append(uri)
-        self.paths.append(Path(path))
-        self.modes.append(stat.S_IMODE(os.stat(Path(path).parent).st_mode))
-        self.started.set()
-        if self.release is not None:
-            await self.release.wait()
-        if self.fail is not None:
-            raise self.fail
-        with open(path, "wb") as f:
-            f.write(b"PGDMP fake dump")
-
-
 @pytest.fixture
 def storage(monkeypatch, harness):  # noqa: F811
-    s = _Storage()
+    s = FakeBackupStorage()
     monkeypatch.setattr("app.adapters.registry.get_storage_adapter", lambda: s)
     return s
 
@@ -116,7 +90,7 @@ async def test_the_dump_is_private_named_by_the_code_and_removed_after_success(h
     root = Path(settings.backup_scratch_dir)
     assert path.parent.parent == root and path.parent.name.startswith("restore-")
     assert FILENAME not in str(path)
-    assert storage.modes == [0o700]
+    assert stat.S_IMODE(os.stat(root).st_mode) == 0o700
     assert not path.parent.exists()
 
 
@@ -137,6 +111,8 @@ async def test_restore_stderr_never_reaches_the_response_or_the_logs(harness, st
     )
 
     async def noisy_exec(*args, **kwargs):
+        if "--list" in args:  # the archive preflight passes; the import fails noisily
+            return await real_exec(sys.executable, "-c", "pass", **kwargs)
         return await real_exec(sys.executable, "-c", script, **kwargs)
 
     monkeypatch.setattr(backup_service.asyncio, "create_subprocess_exec", noisy_exec)
@@ -177,6 +153,8 @@ async def test_a_cancelled_start_stops_its_child_drops_the_copy_and_releases_adm
     stopped = []
 
     async def hanging_child(argv, **kwargs):
+        if "--list" in argv:  # the archive preflight passes; the import hangs
+            return backup_resources.ChildResult(0, "none")
         started.set()
         try:
             await asyncio.Event().wait()
@@ -190,7 +168,7 @@ async def test_a_cancelled_start_stops_its_child_drops_the_copy_and_releases_adm
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert stopped == ["pg_restore"]
+    assert [Path(a).name for a in stopped] == ["pg_restore"]
     assert ("sql", "DROP DATABASE IF EXISTS bioaf_restore") in harness.calls[-1:]
     assert list(Path(settings.backup_scratch_dir).iterdir()) == []
     assert RestoreService.get_status() == {"active": False}
@@ -198,6 +176,8 @@ async def test_a_cancelled_start_stops_its_child_drops_the_copy_and_releases_adm
 
 async def test_a_child_that_cannot_be_stopped_keeps_admission(harness, storage, monkeypatch):  # noqa: F811
     async def unstoppable(argv, **kwargs):
+        if "--list" in argv:
+            return backup_resources.ChildResult(0, "none")
         raise backup_resources.ChildNotStopped("pid 1")
 
     monkeypatch.setattr(backup_resources, "run_child", unstoppable)
