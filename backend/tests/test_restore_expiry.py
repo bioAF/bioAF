@@ -26,7 +26,7 @@ from app.services.backup_service import RestoreService
 from tests.support import disposable_pg as dpg
 
 PRIMARY = "postgresql+asyncpg://bioaf:pw@db:5432/bioaf"
-# The service downloads to /tmp/<filename>; unique per test process so xdist workers never share it.
+# A backup file name unique per test process (the service downloads into a private workspace, not by this name).
 FILENAME = f"pgdump-{os.getpid() % 10**8:08d}-{random.randrange(10**6):06d}.dump"
 
 pytestmark = pytest.mark.asyncio
@@ -85,9 +85,14 @@ def harness(monkeypatch):
 
     class _Proc:
         returncode = 0
+        pid = 0
+        stderr = None
 
         async def communicate(self):
             return b"", b""
+
+        async def wait(self):
+            return self.returncode
 
     async def restore_exec(*args, **kwargs):
         return _Proc()

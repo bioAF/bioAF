@@ -1,4 +1,8 @@
 import asyncio as asyncio_mod
+import logging
+import stat
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -619,43 +623,175 @@ async def test_gcs_status_terraform_state_real_versioning_check():
     assert tf_default["versioning_enabled"] is True
 
 
-@pytest.mark.asyncio
-async def test_run_postgres_backup_uploads_to_gcs():
-    """pg_dump runs, uploads to GCS, and cleans up the temp file."""
-    from app.services.backup_service import BackupService
+# --- pg_dump at the process boundary ---
 
-    mock_process = AsyncMock()
-    mock_process.returncode = 0
-    mock_process.communicate = AsyncMock(return_value=(b"", b""))
+SENTINEL = "sentinel-5e02-ssn-987-65-4321"
 
+
+def _fake_pg_dump(monkeypatch, *, exit_code: int = 0, stderr: str = "", content: bytes = b"PGDMP fake dump", gate=None):
+    """Replace pg_dump with a real child that writes ``content`` to its -f path, prints ``stderr`` and exits."""
+    real_exec = asyncio_mod.subprocess.create_subprocess_exec
+    spawned: list[list[str]] = []
+
+    async def exec_(*argv, **kwargs):
+        spawned.append(list(argv))
+        if gate is not None:
+            await gate.wait()
+        out = argv[argv.index("-f") + 1]
+        script = (
+            "import sys; open(sys.argv[1], 'wb').write(sys.argv[2].encode()); "
+            "sys.stderr.write(sys.argv[3]); sys.exit(int(sys.argv[4]))"
+        )
+        return await real_exec(sys.executable, "-c", script, out, content.decode(), stderr, str(exit_code), **kwargs)
+
+    monkeypatch.setattr(asyncio_mod, "create_subprocess_exec", exec_)
+    return spawned
+
+
+def _backup_session():
+    session = AsyncMock()
+    result = MagicMock()
+    result.fetchall.return_value = [("config_backups_bucket_name", "my-backups-bucket")]
+    session.execute = AsyncMock(return_value=result)
+    return session
+
+
+def _backup_adapter(*, exists: bool = False):
+    seen: dict = {}
     adapter = AsyncMock()
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
     adapter.list_objects.return_value = []  # rotation finds nothing to delete
+    adapter.exists.return_value = exists
 
-    mock_session = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [("config_backups_bucket_name", "my-backups-bucket")]
-    mock_session.execute = AsyncMock(return_value=mock_result)
+    async def upload(uri, path, **kwargs):
+        p = Path(path)
+        seen.update(
+            path=p,
+            bytes=p.read_bytes(),
+            mode=stat.S_IMODE(p.stat().st_mode),
+            dir_mode=stat.S_IMODE(p.parent.stat().st_mode),
+        )
 
-    with (
-        patch("app.services.backup_service.settings") as mock_settings,
-        patch("app.services.backup_service.asyncio") as mock_asyncio,
-        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
-        patch("app.services.backup_service.os.path.getsize", return_value=5000),
-        patch("app.services.backup_service.os.path.exists", return_value=True),
-        patch("app.services.backup_service.os.remove"),
-    ):
-        mock_settings.database_url = "postgresql+asyncpg://bioaf_app:devpassword@postgres:5432/bioaf"
-        mock_settings.backup_postgres_retention_days = 14
-        mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_process)
-        mock_asyncio.subprocess = asyncio_mod.subprocess
-        result = await BackupService.run_postgres_backup(mock_session, org_id=1)
+    adapter.upload_filename.side_effect = upload
+    return adapter, seen
+
+
+@pytest.fixture
+def backup_db_url(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://bioaf_app:devpassword@postgres:5432/bioaf")
+
+
+@pytest.mark.asyncio
+async def test_run_postgres_backup_uploads_to_gcs(monkeypatch, backup_db_url):
+    """pg_dump runs, uploads to GCS, and cleans up the temp file."""
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    adapter, seen = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
 
     assert result["status"] == "completed"
     assert result["filename"].startswith("pgdump-")
     # Verify upload went through the storage adapter
     adapter.upload_filename.assert_awaited_once()
     assert adapter.upload_filename.call_args.args[0].startswith("gs://my-backups-bucket/postgres/pgdump-")
+    assert seen["bytes"] == b"PGDMP fake dump"
+    assert not seen["path"].exists()
+
+
+@pytest.mark.asyncio
+async def test_the_dump_is_written_privately_under_a_name_the_code_chooses(monkeypatch, backup_db_url):
+    from app.config import settings
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    adapter, seen = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert seen["mode"] == 0o600 and seen["dir_mode"] == 0o700
+    assert seen["path"].parent.parent == Path(settings.backup_scratch_dir)
+    assert list(Path(settings.backup_scratch_dir).iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_pg_dump_reports_a_reference_not_its_stderr(monkeypatch, backup_db_url, caplog):
+    from app.config import settings
+    from app.services.backup_service import BackupService
+
+    caplog.set_level(logging.DEBUG)
+    _fake_pg_dump(monkeypatch, exit_code=1, stderr=f"pg_dump: error: query failed: ERROR: {SENTINEL} password=hunter2")
+    adapter, _ = _backup_adapter()
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.log_action", new_callable=AsyncMock) as audit,
+    ):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+
+    assert result["status"] == "error"
+    assert result["reference"] in result["message"]
+    for sink in (str(result), caplog.text, str(audit.call_args_list)):
+        assert SENTINEL not in sink and "hunter2" not in sink
+    assert result["reference"] in caplog.text
+    assert audit.call_args.kwargs["action"] == "backup_failed"
+    assert audit.call_args.kwargs["details"]["reference"] == result["reference"]
+    adapter.upload_filename.assert_not_awaited()
+    assert list(Path(settings.backup_scratch_dir).iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_an_upload_failure_is_reported_without_its_text(monkeypatch, backup_db_url, caplog):
+    from app.services.backup_service import BackupService
+
+    caplog.set_level(logging.DEBUG)
+    _fake_pg_dump(monkeypatch)
+    adapter, _ = _backup_adapter()
+    adapter.upload_filename.side_effect = RuntimeError(f"403 for gs://bucket?X-Goog-Signature={SENTINEL}")
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.backup_service.log_action", new_callable=AsyncMock) as audit,
+    ):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error"
+    for sink in (str(result), caplog.text, str(audit.call_args_list)):
+        assert SENTINEL not in sink
+    assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_existing_backup_with_the_same_name_is_never_overwritten(monkeypatch, backup_db_url):
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    adapter, _ = _backup_adapter(exists=True)
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        result = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert result["status"] == "error" and "already exists" in result["message"]
+    adapter.upload_filename.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_second_backup_while_one_runs_is_refused(monkeypatch, backup_db_url, client, admin_token):
+    from app.services.backup_service import BackupService
+
+    gate = asyncio_mod.Event()
+    spawned = _fake_pg_dump(monkeypatch, gate=gate)
+    adapter, _ = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        first = asyncio_mod.create_task(BackupService.run_postgres_backup(_backup_session(), org_id=1))
+        while not spawned:
+            await asyncio_mod.sleep(0.01)
+        second = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+        response = await client.post(
+            "/api/backups/trigger/postgres", headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        gate.set()
+        assert (await first)["status"] == "completed"
+    assert second["status"] == "error" and second["reason"] == "busy"
+    assert response.status_code == 409
+    assert len(spawned) == 1
 
 
 @pytest.mark.asyncio

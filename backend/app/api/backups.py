@@ -100,7 +100,8 @@ async def trigger_postgres_backup(
     """Trigger a manual PostgreSQL backup to GCS."""
     result = await BackupService.run_postgres_backup(session, current_user["org_id"])
     if result["status"] == "error":
-        raise HTTPException(500, detail=result.get("message", "Backup failed"))
+        status_code = 409 if result.get("reason") == "busy" else 500
+        raise HTTPException(status_code, detail=result.get("message", "Backup failed"))
     return result
 
 
@@ -193,7 +194,7 @@ async def start_postgres_restore(
     """Start a database restore from a pg_dump backup. Enters review mode."""
     result = await RestoreService.start(session, current_user["org_id"], body.filename)
     if result["status"] == "error":
-        conflict = "already active" in result["message"] or "still running" in result["message"]
+        conflict = result.get("reason") == "busy" or "already active" in result["message"]
         status_code = 409 if conflict else 500
         raise HTTPException(status_code, detail=result["message"])
     return result

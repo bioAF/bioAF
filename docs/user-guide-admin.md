@@ -68,6 +68,23 @@ Navigate to **Infrastructure > Backup & Recovery**:
 - **Terraform state**: list and download state files
 - **Settings**: adjust backup schedule (hours) and retention (days) for database and config
 
+### When a database backup or restore fails
+
+- The error shows a reference such as `backup-1a2b3c4d` or `restore-1a2b3c4d`. Search the backend log for it
+  (`docker compose logs backend | grep <reference>`): the log lines give the phase (download, create_database,
+  pg_restore, dump, upload), the tool's exit status and a category (`connection`, `authentication`, `disk_full`,
+  `version_mismatch`, `archive_unreadable`, `permission`, `sql_error`, `unclassified`). They never contain the
+  database tool's own output or SQL, which can include research data.
+- One database backup and one restore run at a time. Another request while one runs is refused with a "try again"
+  message; nothing is queued. A retry after a failure starts from the beginning.
+- A backup never replaces an existing backup with the same name. If two land in the same second, the second is
+  refused; try again.
+- The dump file lives in a private directory under `/tmp/bioaf-backups` inside the backend container
+  (`BIOAF_BACKUP_SCRATCH_DIR`) only while the operation runs, and is removed when it ends, succeeded or not.
+- If a restore reports that its database import could not be stopped, no new restore can start. Restart bioAF
+  (`./bioaf restart`), confirm the application is using the `bioaf` database, then drop the leftover review copy
+  with `DROP DATABASE IF EXISTS bioaf_restore;` in `psql`. The leftover dump directory is removed by the next restore.
+
 ## Notifications
 
 ### Slack Integration

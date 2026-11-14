@@ -59,6 +59,11 @@ class ChildResult:
 class Workspace:
     def __init__(self, path: Path):
         self.path = path
+        self.retained = False
+
+    def retain(self) -> None:
+        """Keep the workspace on exit: something may still use it (a child that could not be stopped)."""
+        self.retained = True
 
     def new_file(self, name: str) -> Path:
         """Create an empty file in the workspace, private from creation; refuses an existing or escaping name."""
@@ -96,10 +101,14 @@ async def private_workspace(kind: str, *, root: Path | str | None = None) -> Asy
     base.chmod(0o700)
     await asyncio.to_thread(_sweep, base, kind)
     path = Path(tempfile.mkdtemp(prefix=f"{kind}-", dir=base))
+    workspace = Workspace(path)
     try:
-        yield Workspace(path)
+        yield workspace
     finally:
-        await asyncio.shield(asyncio.to_thread(_remove, path))
+        if workspace.retained:
+            logger.error("A %s workspace was retained for recovery; it is removed by the next %s", kind, kind)
+        else:
+            await asyncio.shield(asyncio.to_thread(_remove, path))
 
 
 # Ordered: the first match names the category. Matching is on lowercased stderr and keeps nothing else.

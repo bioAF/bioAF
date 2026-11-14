@@ -68,6 +68,17 @@ async def test_a_cleanup_failure_does_not_mask_the_operations_error(tmp_path, mo
     assert "PermissionError" in caplog.text
 
 
+async def test_a_retained_workspace_survives_for_recovery(tmp_path, caplog):
+    """A child that could not be stopped may still use its files; they are kept, and said so."""
+    with pytest.raises(br.ChildNotStopped):
+        async with br.private_workspace("restore", root=tmp_path) as ws:
+            ws.new_file("backup.dump")
+            ws.retain()
+            raise br.ChildNotStopped("pid 1")
+    assert (ws.path / "backup.dump").exists()
+    assert "retained" in caplog.text
+
+
 async def test_only_stale_workspaces_of_the_same_kind_are_swept(tmp_path):
     stale_restore = tmp_path / "restore-old"
     stale_restore.mkdir()
