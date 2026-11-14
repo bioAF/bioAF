@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
 from app.services.provenance.csv_renderer import CsvRenderer
-from app.services.provenance.data_gatherer import ProvenanceDataGatherer
+from app.services.provenance.data_gatherer import GatherBudget, ProvenanceDataGatherer
 from app.services.provenance.json_renderer import JsonRenderer
 from app.services.provenance.markdown_renderer import MarkdownRenderer
 from app.services.provenance.pdf_renderer import PdfRenderer
@@ -32,10 +32,18 @@ class ProvenanceReportService:
 
     @staticmethod
     async def gather_report(
-        session: AsyncSession, entity_type: str, entity_id: int, org_id: int, user_email: str
+        session: AsyncSession,
+        entity_type: str,
+        entity_id: int,
+        org_id: int,
+        user_email: str,
+        budget: GatherBudget | None = None,
     ) -> dict:
-        """The canonical JSON report: database reads plus a cheap transform, as plain data."""
-        data = await ProvenanceDataGatherer.gather(session, entity_type, entity_id, org_id)
+        """The canonical JSON report: database reads plus a cheap transform, as plain data.
+
+        With a ``budget`` the gather refuses (``ReportTooLarge``) before reading past it.
+        """
+        data = await ProvenanceDataGatherer.gather(session, entity_type, entity_id, org_id, budget)
         return JsonRenderer.render(entity_type, data, user_email)
 
     @staticmethod

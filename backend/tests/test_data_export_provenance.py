@@ -98,19 +98,33 @@ async def _until(predicate, seconds: float = 5) -> None:
 
 @pytest.mark.parametrize("path", ["/api/experiments/1/export/data", "/api/projects/1/export/data"])
 @pytest.mark.asyncio
-async def test_too_many_records_are_refused_before_any_report_is_gathered(
+async def test_too_many_records_are_refused_before_they_are_read(
     client, session, admin_user, headers, store, monkeypatch, path
 ):
-    monkeypatch.setattr(resources, "PROVENANCE_MAX_RECORDS", 3)
-    gathered = _spy(monkeypatch, "gather_report")
-    await _seed(session, admin_user.organization_id, samples=4)
+    from sqlalchemy import event
 
-    resp = await _post(client, headers, path)
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROWS", 3)
+    rendered = _spy(monkeypatch, "render")
+    await _seed(session, admin_user.organization_id, samples=4)
+    materialized = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        # The sample manifest streams samples ordered by id (bounded on its own); the report reads do not.
+        if statement.lstrip().upper().startswith("SELECT SAMPLES.") and "ORDER BY samples.id" not in statement:
+            materialized.append(statement)
+
+    engine = session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        resp = await _post(client, headers, path)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
 
     assert resp.status_code == 413
     assert "provenance report" in resp.json()["detail"]
     assert "without the provenance report" in resp.json()["detail"]
-    assert gathered == []
+    assert rendered == []
+    assert materialized == []
 
 
 @pytest.mark.asyncio
@@ -258,3 +272,154 @@ async def test_a_render_failure_fails_the_export(client, session, admin_user, he
 
     assert resp.status_code == 409
     assert resp.json()["code"] == "export_content_unavailable"
+
+
+# -- Every gathered collection is bounded before it is read (fifth review) ------------------------
+
+
+def _rss_mib() -> int:
+    import os
+    import subprocess
+
+    return (
+        int(subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())], capture_output=True, text=True).stdout) // 1024
+    )
+
+
+async def _heavy_export(client, headers, path="/api/experiments/1/export/data"):
+    """Export with provenance while sampling RSS and a 10 ms heartbeat; returns (resp, growth MiB, max delay s)."""
+    idle = _rss_mib()
+    peak = {"v": idle}
+    stop = threading.Event()
+
+    def sampler():
+        while not stop.is_set():
+            peak["v"] = max(peak["v"], _rss_mib())
+            time.sleep(0.02)
+
+    threading.Thread(target=sampler, daemon=True).start()
+    delays = []
+
+    async def heartbeat():
+        while True:
+            t = time.perf_counter()
+            await asyncio.sleep(0.01)
+            delays.append(time.perf_counter() - t - 0.01)
+
+    beat = asyncio.create_task(heartbeat())
+    resp = await _post(client, headers, path)
+    await asyncio.sleep(0.05)
+    beat.cancel()
+    stop.set()
+    return resp, peak["v"] - idle, max(delays)
+
+
+@pytest.mark.asyncio
+async def test_a_huge_audit_history_is_refused_without_loading_it(client, session, admin_user, headers, store):
+    await _seed(session, admin_user.organization_id)
+    assert (await _post(client, headers)).status_code == 200  # warm
+    await session.execute(
+        text(
+            "INSERT INTO audit_log (entity_type, entity_id, action, details_json) "
+            "SELECT 'experiment', 1, 'updated', jsonb_build_object('note', repeat('x', 200)) "
+            "FROM generate_series(1, 100000)"
+        )
+    )
+    await session.commit()
+
+    resp, growth, delay = await _heavy_export(client, headers)
+
+    assert resp.status_code == 413
+    assert "provenance report" in resp.json()["detail"]
+    assert growth < 64
+    assert delay < 0.1
+
+
+@pytest.mark.asyncio
+async def test_one_huge_payload_is_refused_by_width_not_count(client, session, admin_user, headers, store):
+    await _seed(session, admin_user.organization_id)
+    await session.execute(
+        text(
+            "INSERT INTO audit_log (entity_type, entity_id, action, details_json) "
+            "VALUES ('experiment', 1, 'updated', jsonb_build_object('blob', repeat('y', 20000000)))"
+        )
+    )
+    await session.commit()
+
+    resp, growth, _ = await _heavy_export(client, headers)
+
+    assert resp.status_code == 413
+    assert growth < 64
+
+
+@pytest.mark.asyncio
+async def test_many_pipeline_processes_are_refused_before_loading(
+    client, session, admin_user, headers, store, monkeypatch
+):
+
+    from sqlalchemy import event
+
+    rendered = _spy(monkeypatch, "render")
+    materialized = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT PIPELINE_PROCESSES."):
+            materialized.append(statement)
+
+    engine = session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    await _seed(session, admin_user.organization_id)
+    run = await session.execute(
+        text(
+            "INSERT INTO pipeline_runs (organization_id, experiment_id, pipeline_name, status) "
+            "VALUES (:o, 1, 'p', 'completed') RETURNING id"
+        ),
+        {"o": admin_user.organization_id},
+    )
+    run_id = run.scalar_one()
+    await session.execute(
+        text(
+            "INSERT INTO pipeline_processes (pipeline_run_id, process_name, status) "
+            "SELECT :r, 'proc'||g, 'completed' FROM generate_series(1, 20000) g"
+        ),
+        {"r": run_id},
+    )
+    await session.commit()
+
+    try:
+        resp = await _post(client, headers)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert resp.status_code == 413
+    assert rendered == []
+    assert materialized == []
+
+
+@pytest.mark.asyncio
+async def test_a_project_report_is_bounded_too(client, session, admin_user, headers, store):
+    await _seed(session, admin_user.organization_id)
+    await session.execute(
+        text(
+            "INSERT INTO audit_log (entity_type, entity_id, action, details_json) "
+            "SELECT 'project', 1, 'updated', jsonb_build_object('note', repeat('x', 200)) "
+            "FROM generate_series(1, 100000)"
+        )
+    )
+    await session.commit()
+
+    resp, growth, delay = await _heavy_export(client, headers, "/api/projects/1/export/data")
+
+    assert resp.status_code == 413
+    assert growth < 64
+    assert delay < 0.1
+
+
+@pytest.mark.asyncio
+async def test_the_standalone_report_api_is_unchanged_without_a_budget(session, admin_user):
+    """Only exports pass a budget; other callers gather exactly as before."""
+    await _seed(session, admin_user.organization_id, samples=3)
+
+    report = await ProvenanceReportService.gather_report(session, "experiment", 1, admin_user.organization_id, "a@b")
+
+    assert len(report["entity"]["samples"]) == 3

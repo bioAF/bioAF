@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import LABEL_STYLE_TABLENAME_PLUS_COL, Text, cast, func, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,7 @@ from app.models.file import File
 from app.models.literature import LiteraturePaper
 from app.models.notebook_session import ComputeSession
 from app.models.notebook_session_file import NotebookSessionFile
+from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
 from app.models.project_sample import ProjectSample
@@ -37,6 +38,63 @@ from app.services.provenance.schema import (
     SampleProvenanceData,
     ValidationStudyProvenanceData,
 )
+
+
+class ReportTooLarge(Exception):
+    """A budgeted gather would read more rows or bytes than its budget allows; nothing more was read."""
+
+    def __init__(self, rows: int, width: int, budget: GatherBudget):
+        self.rows = rows
+        self.width = width
+        self.budget = budget
+        super().__init__(f"report data exceeds {budget.max_rows} rows or {budget.max_bytes} bytes")
+
+
+class GatherBudget:
+    """Bounds what one report gather may read: total rows and total row width across collections.
+
+    Each collection is measured in the database (``count(*)`` and the summed width of each row's
+    JSON form) before it is read, so an oversized report is refused without materializing it. The
+    width is that of the whole selected row, which is what an ORM read loads, so it bounds memory,
+    not just the report's eventual content. Callers without a budget gather exactly as before.
+    """
+
+    def __init__(self, *, max_rows: int, max_bytes: int):
+        self.max_rows = max_rows
+        self.max_bytes = max_bytes
+        self.rows = 0
+        self.width = 0
+
+    def _charge(self, rows: int, width: int) -> None:
+        self.rows += rows
+        self.width += width
+        if self.rows > self.max_rows or self.width > self.max_bytes:
+            raise ReportTooLarge(self.rows, self.width, self)
+
+    async def admit(self, session: AsyncSession, query) -> None:
+        """Measure ``query``'s rows and width without reading them; refuse past the budget."""
+        sub = query.order_by(None).set_label_style(LABEL_STYLE_TABLENAME_PLUS_COL).subquery("budgeted")
+        width = func.octet_length(cast(func.row_to_json(literal_column("budgeted")), Text))
+        rows, total = (
+            await session.execute(select(func.count(), func.coalesce(func.sum(width), 0)).select_from(sub))
+        ).one()
+        self._charge(int(rows), int(total))
+
+    async def admit_text(self, session: AsyncSession, from_where: str) -> None:
+        """The same measurement for a raw ``FROM ... WHERE ...`` clause aliased ``a``."""
+        rows, total = (
+            await session.execute(
+                text(f"SELECT count(*), coalesce(sum(octet_length(row_to_json(a)::text)), 0) {from_where}")  # noqa: S608
+            )
+        ).one()
+        self._charge(int(rows), int(total))
+
+
+async def _read(session: AsyncSession, query, budget: GatherBudget | None) -> list:
+    """``query``'s ORM rows, admitted against ``budget`` first when there is one."""
+    if budget is not None:
+        await budget.admit(session, query)
+    return list((await session.execute(query)).scalars().all())
 
 
 def _dt(val: datetime | date | None) -> str | None:
@@ -73,6 +131,7 @@ async def _audit_entries(
     session: AsyncSession,
     entity_types_ids: list[tuple[str, int]],
     user_map: dict[int, dict[str, Any]],
+    budget: GatherBudget | None = None,
 ) -> list[dict[str, Any]]:
     """Load audit log entries for a list of (entity_type, entity_id) pairs."""
     if not entity_types_ids:
@@ -82,6 +141,8 @@ async def _audit_entries(
     for etype, eid in entity_types_ids:
         conditions.append(f"(entity_type = '{etype}' AND entity_id = {eid})")
     where_clause = " OR ".join(conditions)
+    if budget is not None:
+        await budget.admit_text(session, f"FROM audit_log a WHERE {where_clause}")
     result = await session.execute(
         text(f"SELECT * FROM audit_log WHERE {where_clause} ORDER BY timestamp")  # noqa: S608
     )
@@ -110,8 +171,12 @@ class ProvenanceDataGatherer:
         entity_type: str,
         entity_id: int,
         org_id: int,
+        budget: GatherBudget | None = None,
     ) -> ProvenanceData:
-        """Dispatch to the appropriate gatherer based on entity type."""
+        """Dispatch to the appropriate gatherer based on entity type.
+
+        ``budget`` bounds project and experiment gathers (the ones exports request).
+        """
         gatherers: dict[str, Any] = {
             "project": ProvenanceDataGatherer.gather_project,
             "experiment": ProvenanceDataGatherer.gather_experiment,
@@ -123,10 +188,14 @@ class ProvenanceDataGatherer:
         gatherer = gatherers.get(entity_type)
         if not gatherer:
             raise ValidationError(f"Unknown entity type: {entity_type}")
+        if budget is not None and entity_type in ("project", "experiment"):
+            return await gatherer(session, entity_id, org_id, budget)
         return await gatherer(session, entity_id, org_id)
 
     @staticmethod
-    async def gather_project(session: AsyncSession, project_id: int, org_id: int) -> ProjectProvenanceData:
+    async def gather_project(
+        session: AsyncSession, project_id: int, org_id: int, budget: GatherBudget | None = None
+    ) -> ProjectProvenanceData:
         result = await session.execute(
             select(Project).where(Project.id == project_id, Project.organization_id == org_id)
         )
@@ -138,28 +207,30 @@ class ProvenanceDataGatherer:
         user_ids: set[int | None] = {project.owner_user_id, project.created_by_user_id}
 
         # Experiments
-        exp_result = await session.execute(
-            select(Experiment).where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
+        experiments = await _read(
+            session,
+            select(Experiment).where(Experiment.project_id == project_id, Experiment.organization_id == org_id),
+            budget,
         )
-        experiments = exp_result.scalars().all()
         for exp in experiments:
             user_ids.add(exp.owner_user_id)
 
         # Samples via project_samples
-        ps_result = await session.execute(
+        ps_query = (
             select(ProjectSample, Sample)
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
             .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
         )
-        ps_rows = ps_result.all()
+        if budget is not None:
+            await budget.admit(session, ps_query)
+        ps_rows = (await session.execute(ps_query)).all()
 
         # Also samples from experiments
         exp_ids = [e.id for e in experiments]
         all_samples: list[Sample] = []
         if exp_ids:
-            sample_result = await session.execute(select(Sample).where(Sample.experiment_id.in_(exp_ids)))
-            all_samples = list(sample_result.scalars().all())
+            all_samples = await _read(session, select(Sample).where(Sample.experiment_id.in_(exp_ids)), budget)
 
         # Dedupe samples
         seen_sample_ids: set[int] = set()
@@ -177,46 +248,52 @@ class ProvenanceDataGatherer:
         # references and audit entries are collected: a run of another
         # organization's may still point here from before launch checked the
         # project it was filed under.
-        run_result = await session.execute(
+        project_runs = await _read(
+            session,
             select(PipelineRun)
             .options(selectinload(PipelineRun.references))
-            .where(PipelineRun.project_id == project_id, PipelineRun.organization_id == org_id)
+            .where(PipelineRun.project_id == project_id, PipelineRun.organization_id == org_id),
+            budget,
         )
-        project_runs = list(run_result.scalars().all())
 
         if exp_ids:
-            exp_run_result = await session.execute(
-                select(PipelineRun)
-                .options(selectinload(PipelineRun.references))
-                .where(
-                    PipelineRun.experiment_id.in_(exp_ids),
-                    PipelineRun.project_id.is_(None),
-                    PipelineRun.organization_id == org_id,
+            project_runs.extend(
+                await _read(
+                    session,
+                    select(PipelineRun)
+                    .options(selectinload(PipelineRun.references))
+                    .where(
+                        PipelineRun.experiment_id.in_(exp_ids),
+                        PipelineRun.project_id.is_(None),
+                        PipelineRun.organization_id == org_id,
+                    ),
+                    budget,
                 )
             )
-            project_runs.extend(exp_run_result.scalars().all())
 
         for run in project_runs:
             user_ids.add(run.submitted_by_user_id)
             user_ids.add(run.reviewed_by_user_id)
 
         # Files
-        file_result = (
-            await session.execute(select(File).where(File.organization_id == org_id, File.experiment_id.in_(exp_ids)))
+        files = (
+            await _read(
+                session, select(File).where(File.organization_id == org_id, File.experiment_id.in_(exp_ids)), budget
+            )
             if exp_ids
-            else None
+            else []
         )
-        files = list(file_result.scalars().all()) if file_result else []
         for f in files:
             user_ids.add(f.uploader_user_id)
 
         # Snapshots
-        snap_result = await session.execute(
+        snapshots = await _read(
+            session,
             select(AnalysisSnapshot).where(
                 AnalysisSnapshot.project_id == project_id, AnalysisSnapshot.organization_id == org_id
-            )
+            ),
+            budget,
         )
-        snapshots = snap_result.scalars().all()
 
         # References (from runs)
         references_list: list[dict[str, Any]] = []
@@ -239,12 +316,15 @@ class ProvenanceDataGatherer:
         all_notebook_sessions: list[ComputeSession] = []
         all_qc_dashboards: list[QCDashboard] = []
         if exp_ids:
-            batch_result = await session.execute(select(SampleBatch).where(SampleBatch.experiment_id.in_(exp_ids)))
-            all_batches = list(batch_result.scalars().all())
-            ns_result = await session.execute(select(ComputeSession).where(ComputeSession.experiment_id.in_(exp_ids)))
-            all_notebook_sessions = list(ns_result.scalars().all())
-            qc_result = await session.execute(select(QCDashboard).where(QCDashboard.experiment_id.in_(exp_ids)))
-            all_qc_dashboards = list(qc_result.scalars().all())
+            all_batches = await _read(
+                session, select(SampleBatch).where(SampleBatch.experiment_id.in_(exp_ids)), budget
+            )
+            all_notebook_sessions = await _read(
+                session, select(ComputeSession).where(ComputeSession.experiment_id.in_(exp_ids)), budget
+            )
+            all_qc_dashboards = await _read(
+                session, select(QCDashboard).where(QCDashboard.experiment_id.in_(exp_ids)), budget
+            )
 
         # Resolve users
         user_map = await _user_map(session, user_ids)
@@ -265,7 +345,7 @@ class ProvenanceDataGatherer:
             audit_pairs.append(("notebook_session", ns.id))
         for qc in all_qc_dashboards:
             audit_pairs.append(("qc_dashboard", qc.id))
-        audit_trail = await _audit_entries(session, audit_pairs, user_map)
+        audit_trail = await _audit_entries(session, audit_pairs, user_map, budget)
 
         return ProjectProvenanceData(
             project={
@@ -338,7 +418,9 @@ class ProvenanceDataGatherer:
         )
 
     @staticmethod
-    async def gather_experiment(session: AsyncSession, experiment_id: int, org_id: int) -> ExperimentProvenanceData:
+    async def gather_experiment(
+        session: AsyncSession, experiment_id: int, org_id: int, budget: GatherBudget | None = None
+    ) -> ExperimentProvenanceData:
         result = await session.execute(
             select(Experiment).where(Experiment.id == experiment_id, Experiment.organization_id == org_id)
         )
@@ -349,29 +431,31 @@ class ProvenanceDataGatherer:
         user_ids: set[int | None] = {experiment.owner_user_id}
 
         # Samples
-        sample_result = await session.execute(select(Sample).where(Sample.experiment_id == experiment_id))
-        samples = sample_result.scalars().all()
+        samples = await _read(session, select(Sample).where(Sample.experiment_id == experiment_id), budget)
 
         # Batches
-        batch_result = await session.execute(select(SampleBatch).where(SampleBatch.experiment_id == experiment_id))
-        batches = batch_result.scalars().all()
+        batches = await _read(session, select(SampleBatch).where(SampleBatch.experiment_id == experiment_id), budget)
         for b in batches:
             user_ids.add(b.operator_user_id)
 
         # Pipeline runs with processes
-        run_result = await session.execute(
+        if budget is not None:
+            # The runs' processes are loaded with them: admit them first.
+            runs_here = select(PipelineRun.id).where(PipelineRun.experiment_id == experiment_id)
+            await budget.admit(session, select(PipelineProcess).where(PipelineProcess.pipeline_run_id.in_(runs_here)))
+        runs = await _read(
+            session,
             select(PipelineRun)
             .options(selectinload(PipelineRun.processes), selectinload(PipelineRun.references))
-            .where(PipelineRun.experiment_id == experiment_id)
+            .where(PipelineRun.experiment_id == experiment_id),
+            budget,
         )
-        runs = run_result.scalars().all()
         for r in runs:
             user_ids.add(r.submitted_by_user_id)
             user_ids.add(r.reviewed_by_user_id)
 
         # Files
-        file_result = await session.execute(select(File).where(File.experiment_id == experiment_id))
-        files = file_result.scalars().all()
+        files = await _read(session, select(File).where(File.experiment_id == experiment_id), budget)
         for f in files:
             user_ids.add(f.uploader_user_id)
 
@@ -390,21 +474,22 @@ class ProvenanceDataGatherer:
                     seen_refs.add(ref.id)
 
         # Custom fields
-        cf_result = await session.execute(
-            select(ExperimentCustomField).where(ExperimentCustomField.experiment_id == experiment_id)
+        custom_fields = await _read(
+            session, select(ExperimentCustomField).where(ExperimentCustomField.experiment_id == experiment_id), budget
         )
-        custom_fields = cf_result.scalars().all()
 
         # Resolve users
         user_map = await _user_map(session, user_ids)
 
         # Notebook sessions
-        ns_result = await session.execute(select(ComputeSession).where(ComputeSession.experiment_id == experiment_id))
-        notebook_sessions = ns_result.scalars().all()
+        notebook_sessions = await _read(
+            session, select(ComputeSession).where(ComputeSession.experiment_id == experiment_id), budget
+        )
 
         # QC dashboards
-        qc_result = await session.execute(select(QCDashboard).where(QCDashboard.experiment_id == experiment_id))
-        qc_dashboards = qc_result.scalars().all()
+        qc_dashboards = await _read(
+            session, select(QCDashboard).where(QCDashboard.experiment_id == experiment_id), budget
+        )
 
         # Audit trail -- include all related entity types
         audit_pairs: list[tuple[str, int]] = [("experiment", experiment_id)]
@@ -420,7 +505,7 @@ class ProvenanceDataGatherer:
             audit_pairs.append(("notebook_session", ns.id))
         for qc in qc_dashboards:
             audit_pairs.append(("qc_dashboard", qc.id))
-        audit_trail = await _audit_entries(session, audit_pairs, user_map)
+        audit_trail = await _audit_entries(session, audit_pairs, user_map, budget)
 
         # lit_validation A3 reverse link: if a ValidationStudy reproduces this experiment, cite the
         # source paper it reproduces so the experiment's own report closes the paper <-> run loop.

@@ -26,7 +26,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -37,13 +36,10 @@ from app.exceptions import (
     ExportTimeoutError,
     NotFoundError,
 )
-from app.models.experiment import Experiment
-from app.models.file import File
-from app.models.pipeline_run import PipelineRun
-from app.models.sample import Sample
 from app.services.data_export import naming, resources, selection
 from app.services.data_export.archive import ArchivePlan, ExportJob, check_available
 from app.services.data_export.selection import ExperimentContent, ProjectContent
+from app.services.provenance.data_gatherer import GatherBudget, ReportTooLarge
 from app.services.provenance.report_service import ProvenanceReportService
 
 logger = logging.getLogger("bioaf.export")
@@ -255,24 +251,6 @@ def _report_too_large(entity_type: str, what: str) -> ExportLimitError:
     )
 
 
-async def _report_records(session: AsyncSession, entity_type: str, entity_id: int, org_id: int) -> int:
-    """Samples, files and pipeline runs the report would cover: counted, never loaded."""
-    if entity_type == "experiment":
-        experiments = select(Experiment.id).where(Experiment.id == entity_id, Experiment.organization_id == org_id)
-        runs = PipelineRun.experiment_id.in_(experiments)
-    else:
-        experiments = select(Experiment.id).where(
-            Experiment.project_id == entity_id, Experiment.organization_id == org_id
-        )
-        runs = or_(PipelineRun.project_id == entity_id, PipelineRun.experiment_id.in_(experiments))
-    counts = [
-        select(func.count()).select_from(Sample).where(Sample.experiment_id.in_(experiments)),
-        select(func.count()).select_from(File).where(File.experiment_id.in_(experiments)),
-        select(func.count()).select_from(PipelineRun).where(runs, PipelineRun.organization_id == org_id),
-    ]
-    return sum([(await session.execute(q)).scalar_one() for q in counts])
-
-
 async def _provenance(
     session: AsyncSession,
     job: ExportJob,
@@ -284,16 +262,20 @@ async def _provenance(
 ) -> tuple[str, bytes]:
     """The requested provenance report as an archive member; failing to make it fails the export.
 
-    Bounded before the expensive work (records before gathering, the report's size before
-    rendering) and rendered in the job's owned worker thread, off the event loop.
+    Bounded before the expensive work (every gathered collection before it is read, the report's
+    size before rendering) and rendered in the job's owned worker thread, off the event loop.
     """
-    records = await _report_records(session, entity_type, entity_id, org_id)
-    if records > resources.PROVENANCE_MAX_RECORDS:
-        raise _report_too_large(
-            entity_type, f"{records:,} samples, files and runs; the limit is {resources.PROVENANCE_MAX_RECORDS:,}"
-        )
+    budget = GatherBudget(max_rows=resources.PROVENANCE_MAX_ROWS, max_bytes=resources.PROVENANCE_MAX_ROW_BYTES)
     try:
-        gathered = await ProvenanceReportService.gather_report(session, entity_type, entity_id, org_id, user_email)
+        gathered = await ProvenanceReportService.gather_report(
+            session, entity_type, entity_id, org_id, user_email, budget
+        )
+    except ReportTooLarge:
+        raise _report_too_large(
+            entity_type,
+            f"more than {resources.PROVENANCE_MAX_ROWS:,} records or "
+            f"{resources.PROVENANCE_MAX_ROW_BYTES // resources.MiB} MiB of history and metadata",
+        ) from None
     except Exception as exc:
         if isinstance(exc, DomainError) and not isinstance(exc, NotFoundError):
             raise
