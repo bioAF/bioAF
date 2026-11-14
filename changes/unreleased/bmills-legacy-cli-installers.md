@@ -15,7 +15,8 @@
   the `bioaf-update-agent` systemd unit to this release's version: verified with `systemd-analyze`,
   reloaded, restarted, and restored if the agent does not stay up. A unit you changed is left alone
   and reported; add `# bioaf-managed: operator` to keep managing it. An agent running older code is
-  restarted, but never during an update it is running: it restarts once that update has finished.
+  restarted, but never during an update it is running: the same check-and-restart runs once that
+  update has finished (`sudo journalctl -u bioaf-update-agent-activation` shows the outcome).
   `setup` now configures the agent after any `--version` checkout.
 
 ### Installers
@@ -30,4 +31,5 @@
 - Both installers, run as `curl ... | bash`, download their helper files and never use files from
   the directory you run them in. A helper that fails to download completely stops the install. To
   install a release instead of `main`, pass the same ref with `--ref` (or `BIOAF_INSTALLER_REF`); see
-  "Pinned installer versions" in the deployment guide.
+  "Pinned installer versions" in the deployment guide. Installers from v2026.11.22 and earlier ignore
+  `--ref`. It covers only the installer's helpers: the automatic setup on the VM still uses `main`.

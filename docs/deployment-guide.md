@@ -49,14 +49,24 @@ script cannot tell which URL it came from. To install from a release tag or a
 commit, pass the same ref to the script with `--ref` (or `BIOAF_INSTALLER_REF`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/v2026.11.22/install-gcp.sh \
-  | bash -s -- --ref v2026.11.22
+REF=<release tag or commit>
+curl -fsSL "https://raw.githubusercontent.com/bioAF/bioAF/$REF/install-gcp.sh" \
+  | bash -s -- --ref "$REF"
 ```
+
+Pinning needs an installer that has `--ref`: releases after v2026.11.22. Earlier
+installers (v2026.11.22 and before) do not know the option, and always download
+their helpers from `main`, so pinning them is not possible.
 
 `main` moves; use a commit when you need the exact same files again. A ref that
 does not exist, or helpers that fail to download completely, stop the
 installer; it never falls back to `main`. A script run from a clone uses the
 helpers beside it and never looks in the current directory.
+
+`--ref` governs only the installer's helper files. The automatic setup it
+offers at the end still clones bioAF on the VM and pulls `main` before running
+`./bioaf setup`; to set up another version there, choose the manual option and
+run `./bioaf setup --version <X.Y.Z>` on the VM.
 
 ## One-Command AWS Setup
 
@@ -351,16 +361,21 @@ update. Only `./bioaf update <version>` is ever run.
   `# bioaf-managed: operator` to keep managing it yourself. The checkout
   path may contain only letters, digits and `. _ / + @ -`.
 - **Restart timing.** A stopped agent is started. A running agent whose
-  code differs from the code on disk is restarted, but never in the middle
-  of an update it is running (that would stop the update): a transient
-  `bioaf-update-agent-activation` unit waits until the agent is idle, then
-  restarts it. A failure here is reported and does not stop `./bioaf start`
-  or an update; `./bioaf setup` stops.
+  code differs from the code on disk is restarted. Before changing anything
+  bioAF pauses the agent (SIGSTOP) and continues only if it was between
+  polls, so no update can start before the restart; every start or restart
+  must leave the agent still running a few seconds later, or the previous
+  unit is restored. If the agent is running an update (for example the
+  update that installs this release), nothing changes then: a transient
+  `bioaf-update-agent-activation` unit, running as the checkout's account,
+  repeats the same steps once that update has finished (outcome:
+  `sudo journalctl -u bioaf-update-agent-activation`). A failure is reported
+  and does not stop `./bioaf start` or an update; `./bioaf setup` stops.
 - **From an older release.** The first update from a release before this
   one runs that release's agent and updater, so that update's own status
   and log writes still use the older code. The new release's
-  `install.sh ensure-encryption-key` step installs the new unit and
-  schedules the agent restart, so later updates use the new agent.
+  `install.sh ensure-encryption-key` step schedules the unit and agent
+  update for when that update finishes, so later updates use the new agent.
 
 ### How the database is upgraded
 
