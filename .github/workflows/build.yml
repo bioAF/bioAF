@@ -9,6 +9,8 @@ on:
       - "docker/Dockerfile*"
       - "docker/docker-compose*"
       - "scripts/ci/check_image_contents.py"
+      - "scripts/ci/frontend_image_smoke.sh"
+      - "docker/nginx.conf"
 
 permissions:
   contents: read
@@ -110,3 +112,8 @@ jobs:
               --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
           done
           exit $status
+
+      # The optimizer is disabled (frontend/next.config.js): /_next/image is refused by the server and through the
+      # shipped nginx config, while static images and pages still load.
+      - name: Smoke-test the image directly and through nginx
+        run: scripts/ci/frontend_image_smoke.sh "bioaf/bioaf-frontend:pr-${{ github.event.pull_request.number }}"
