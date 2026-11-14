@@ -1183,6 +1183,24 @@ deploy_begin() {
     deploy_mark_candidate "$1" "$2" || yellow "WARNING: The deployment record (host-state/deployments.json) could not be updated."
 }
 
+deploy_database_bytes() {
+    # The database's size, for the backup's share of the space check; 0 when it cannot be read (the database
+    # upgrade still checks its own backup's space before writing it).
+    $DC exec -T db psql -U bioaf -d bioaf -tAc "SELECT pg_database_size(current_database())" 2>/dev/null \
+        | tr -dc '0-9' || true
+}
+
+deploy_retention_before_staging() {
+    # Remove what no generation needs, then require room for the next one. Removal problems are reported and
+    # skipped; only the space check can stop the operation.
+    deploy_prune_images || true
+    deploy_prune_build_cache || true
+    deploy_rotate_dumps || true
+    local db
+    db="$(deploy_database_bytes)"
+    deploy_require_space "${db:-0}"
+}
+
 deploy_finish() {
     # deploy_finish <tag>: record the images now running as the current generation. The operation already
     # succeeded, so a failure here is reported, not fatal.
@@ -1438,6 +1456,12 @@ cmd_update() {
             update_failed verify_images "Could not verify release image availability (network or registry error)."
         fi
         green "All release images are available."
+
+        # Retention before staging (installer/deployments.sh, owner-approved budgets): old bioAF images, the
+        # build cache, old updater dumps; then room for the new images and the pre-update backup.
+        write_update_status in_progress retention
+        deploy_retention_before_staging \
+            || update_failed disk_space "Not enough free disk space for the v${target_version} images and the pre-update backup. Free space on the host, then run ./bioaf update ${target_version} again."
     fi
 
     # Retrying an installed target: check its configuration before anything else. A backend restarting
@@ -1563,6 +1587,7 @@ cmd_build() {
     local tag service="${1:-}"
     tag="v$(get_current_version)"
     deploy_begin build "$tag" || return $?
+    deploy_retention_before_staging || { red "ERROR: Not enough free disk space to build. Free space on the host, then build again."; return 1; }
     if [ -n "$service" ]; then
         bold "=== Building $service ==="
         BIOAF_IMAGE_TAG="$tag" $DC_BUILD "$service"

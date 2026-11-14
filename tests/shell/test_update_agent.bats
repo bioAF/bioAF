@@ -498,3 +498,20 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
         [ "$(cat "$REPO/updater-calls")" = "update 9.9.9 --yes" ]
     done
 }
+
+@test "the private log rotates past its size limit, keeping two old files" {
+    stub_updater 0
+    rm -f "$REPO/update-requests/update_7.json"
+    mkdir -m 700 -p "$REPO/host-only"
+    for round in 1 2 3; do
+        head -c 200 /dev/zero | tr '\0' 'x' > "$REPO/host-only/agent.log"; chmod 600 "$REPO/host-only/agent.log"
+        echo "round-$round" >> "$REPO/host-only/agent.log"
+        agent_round AGENT_LOG_MAX_BYTES=100
+        [ "$status" -eq 0 ]
+    done
+    grep -q "round-3" "$REPO/host-only/agent.log.1"
+    grep -q "round-2" "$REPO/host-only/agent.log.2"
+    [ ! -e "$REPO/host-only/agent.log.3" ]
+    [ "$(stat -f %Lp "$REPO/host-only/agent.log.1" 2>/dev/null || stat -c %a "$REPO/host-only/agent.log.1")" = 600 ]
+    ! grep -q "round" "$REPO/host-only/agent.log"
+}

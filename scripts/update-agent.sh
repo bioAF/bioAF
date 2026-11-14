@@ -23,6 +23,8 @@ STATUS_DIR="$SCRIPT_DIR/update-status"
 LOG_DIR="$SCRIPT_DIR/host-only"
 LOG_FILE="$LOG_DIR/agent.log"
 POLL_INTERVAL=2
+# The private log is rotated past this size, keeping two old files (owner-approved budget, issue #110).
+AGENT_LOG_MAX_BYTES="${AGENT_LOG_MAX_BYTES:-$((10 * 1024 * 1024))}"
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
 AGENT_LOG_OPEN=false
 
@@ -135,9 +137,25 @@ process_trigger() {
     rm -f -- "$TRIGGER_DIR/$name"
 }
 
+rotate_agent_log() {
+    # Past AGENT_LOG_MAX_BYTES, shift agent.log to agent.log.1 and agent.log.1 to agent.log.2 (the oldest is
+    # dropped), then reopen. Only the agent's own private log is touched: open_agent_log already proved the
+    # directory is this user's alone, so its entries cannot be swapped underneath.
+    [ "$AGENT_LOG_OPEN" = true ] || return 0
+    local size
+    size=$(wc -c < "$LOG_FILE" 2>/dev/null) || return 0
+    [ "$size" -gt "$AGENT_LOG_MAX_BYTES" ] || return 0
+    exec 3>&-
+    AGENT_LOG_OPEN=false
+    [ -f "$LOG_FILE.1" ] && [ ! -L "$LOG_FILE.1" ] && mv -f "$LOG_FILE.1" "$LOG_FILE.2"
+    [ -f "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.1"
+    open_agent_log
+}
+
 process_pending() {
     # One polling round: every trigger present now, in name order.
     local trigger_file
+    rotate_agent_log
     for trigger_file in "$TRIGGER_DIR"/*.json; do
         # Skip an unmatched glob and plain directories; everything else is judged by the parser.
         [ -e "$trigger_file" ] || [ -L "$trigger_file" ] || continue

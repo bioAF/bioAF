@@ -5,6 +5,16 @@ BIOAF_SCRIPT="$BATS_TEST_DIRNAME/../../bioaf"
 
 load network
 
+# No test reaches the host's Docker: retention (installer/deployments.sh) would list, remove and prune real
+# images and build cache. This stand-in answers every docker call with a failure, and the space check gets a
+# floor of zero so it never depends on the host's free disk.
+setup() {
+    printf '#!/bin/sh\nexit 1\n' > "$BATS_TEST_TMPDIR/no-docker"
+    chmod +x "$BATS_TEST_TMPDIR/no-docker"
+    export DEPLOY_DOCKER="$BATS_TEST_TMPDIR/no-docker"
+    export BIOAF_NEW_IMAGES_BYTES=0 BIOAF_DISK_FLOOR_MIN_BYTES=0 BIOAF_DISK_FLOOR_PERCENT=0
+}
+
 # Stand-in update agents (AGENT_PID) are background processes a test may stop; a failed assertion
 # must never leave one stopped, or Bats waits on it forever.
 teardown() {
