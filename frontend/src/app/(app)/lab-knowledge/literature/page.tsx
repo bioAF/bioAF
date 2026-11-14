@@ -6,9 +6,9 @@ import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
@@ -27,9 +27,6 @@ import {
   type Provenance,
   type ReadingStatusValue,
 } from "@/lib/literature";
-import type {
-  ExperimentListResponse,
-} from "@/lib/types";
 
 type StatusFlag = "active" | "dismissed" | "unread" | "reading" | "read";
 
@@ -66,7 +63,6 @@ export default function LiteratureLibraryPage() {
   );
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [projectsDenied, setProjectsDenied] = useState(false);
-  const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Associate modal state (the picker lives in AssociatePaperModal).
@@ -81,15 +77,6 @@ export default function LiteratureLibraryPage() {
       setProjectsDenied(options.status === "denied");
       if (options.status === "failed") toast.error(loadFailureMessage("The project filter"));
     });
-    api
-      .get<ExperimentListResponse>("/api/experiments?page_size=100")
-      .then((data) =>
-        setExperiments(data.experiments.map((e) => ({ id: e.id, name: e.name }))),
-      )
-      .catch((e) => {
-        logError("loading the experiment filter", e);
-        toast.error(loadFailureMessage("The experiment filter"));
-      });
   }, []);
 
   const readingSelection = useMemo<ReadingStatusValue[]>(() => {
@@ -306,25 +293,15 @@ export default function LiteratureLibraryPage() {
           </div>
           <div>
             <label htmlFor="experiment" className="block text-xs text-gray-600 mb-1">Experiment</label>
-            <select id="experiment"
-              value={filterExperimentId}
-              onChange={(e) => setFilterExperimentId(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-2"
-            >
-              <option value="">All experiments</option>
-              {experiments
-                .filter((e) => {
-                  if (!filterProjectId) return true;
-                  return projects.some(
-                    (p) => String(p.id) === filterProjectId,
-                  );
-                })
-                .map((e) => (
-                  <option key={e.id} value={String(e.id)}>
-                    {e.name}
-                  </option>
-                ))}
-            </select>
+            <ExperimentPicker
+              id="experiment"
+              label="Experiment"
+              value={filterExperimentId ? Number(filterExperimentId) : null}
+              onChange={(id) => setFilterExperimentId(id == null ? "" : String(id))}
+              projectId={filterProjectId ? Number(filterProjectId) : null}
+              noneLabel="All experiments"
+              className="border border-gray-300 rounded px-3 py-2 w-full"
+            />
           </div>
           <div>
             <label htmlFor="provenance" className="block text-xs text-gray-600 mb-1">Provenance</label>
