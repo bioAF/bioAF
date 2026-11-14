@@ -19,18 +19,27 @@ delivery 4 matrix):
 - Listings match keys literally, sort by key, honour ``recursive=False`` (nothing past the next
   ``/``) and return nothing for ``max_results <= 0``. ``uploaded_at`` is the destination's mtime.
 - Streams use ``shutil.copyfileobj``'s bounded buffer and are never closed here.
+- Custom object metadata lives outside every container, at ``<root>/.bioaf-object-metadata/<container>/<key>``
+  (directory 0700, records 0600, replaced atomically), so no listing sees it and no URI can address it. It
+  follows its object: a write drops the old record before the bytes change and writes the new one after, so an
+  interruption leaves an object with no metadata rather than with someone else's; copy carries it (or clears the
+  destination's), and delete removes it.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import BinaryIO
 
-from app.adapters.models import StorageObjectNotFound, StoredObject
+from app.adapters.models import StorageObjectNotFound, StoredObject, validate_object_metadata
 from app.exceptions import ValidationError
+
+METADATA_DIR = ".bioaf-object-metadata"
 
 
 class LocalObjectFilesystem:
@@ -49,7 +58,7 @@ class LocalObjectFilesystem:
         return real == base or real.startswith(base + os.sep)
 
     def _container_root(self, container: str, uri: str) -> str:
-        if not container or container in (".", "..") or any(c in container for c in ("/", "\\", "\0")):
+        if not container or container in (".", "..", METADATA_DIR) or any(c in container for c in ("/", "\\", "\0")):
             raise ValidationError(f"Storage URI names an unsafe container: {uri!r}")
         return os.path.join(self._base(), container)
 
@@ -75,6 +84,48 @@ class LocalObjectFilesystem:
         if not self._inside(real):
             raise ValidationError(f"Storage path escapes the object root: {uri!r}")
         return real
+
+    # -- metadata records ---------------------------------------------------------------------
+
+    def _metadata_path(self, uri: str) -> str:
+        """Where ``uri``'s metadata record lives; the key was already confined by ``_lexical``."""
+        container, key = self._parse_uri(uri)
+        self._lexical(uri)
+        return os.path.join(self._base(), METADATA_DIR, container, *[seg for seg in key.split("/") if seg])
+
+    def _clear_metadata(self, uri: str) -> None:
+        try:
+            os.unlink(self._metadata_path(uri))
+        except FileNotFoundError:
+            pass
+
+    def _write_metadata(self, uri: str, metadata: dict[str, str] | None) -> None:
+        if not metadata:
+            return
+        path = self._metadata_path(uri)
+        top = os.path.join(self._base(), METADATA_DIR)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        os.chmod(top, 0o700)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")  # 0600 whatever the umask
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(metadata, f)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def read_metadata(self, uri: str) -> dict[str, str]:
+        self._file(uri)
+        try:
+            with open(self._metadata_path(uri)) as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return {}
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
     def _file(self, uri: str) -> str:
         path = self.path(uri)
@@ -133,20 +184,30 @@ class LocalObjectFilesystem:
         return path
 
     def write_bytes(self, uri: str, data: bytes) -> None:
-        with open(self._writable(uri), "wb") as f:
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        with open(path, "wb") as f:
             f.write(data)
 
-    def write_stream(self, uri: str, file_obj: BinaryIO) -> None:
+    def write_stream(self, uri: str, file_obj: BinaryIO, metadata: dict[str, str] | None = None) -> None:
+        metadata = validate_object_metadata(metadata)
         # Rewind a seekable stream (the upload is the whole object); a pipe is read from where it is.
         try:
             file_obj.seek(0)
         except (AttributeError, OSError, ValueError):
             pass
-        with open(self._writable(uri), "wb") as f:
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        with open(path, "wb") as f:
             shutil.copyfileobj(file_obj, f)
+        self._write_metadata(uri, metadata)
 
-    def upload_filename(self, uri: str, local_path: str) -> None:
-        shutil.copyfile(local_path, self._writable(uri))
+    def upload_filename(self, uri: str, local_path: str, metadata: dict[str, str] | None = None) -> None:
+        metadata = validate_object_metadata(metadata)
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        shutil.copyfile(local_path, path)
+        self._write_metadata(uri, metadata)
 
     def delete(self, uri: str) -> None:
         """Remove the object; idempotent. A symlink is unlinked itself, never its target."""
@@ -157,16 +218,20 @@ class LocalObjectFilesystem:
                 os.unlink(lexical)
             except FileNotFoundError:
                 pass
+        self._clear_metadata(uri)
 
     def copy(self, source_uri: str, dest_uri: str) -> None:
         src = self._file(source_uri)
         dest = self._writable(dest_uri)
         if os.path.exists(dest) and os.path.samefile(src, dest):
             return
+        metadata = self.read_metadata(source_uri)
+        self._clear_metadata(dest_uri)
         try:
             shutil.copyfile(src, dest)
         except FileNotFoundError as e:
             raise StorageObjectNotFound(source_uri) from e
+        self._write_metadata(dest_uri, metadata)
 
     def move(self, source_uri: str, dest_uri: str) -> None:
         """Copy, verify, then delete the source; any failure leaves the source in place."""

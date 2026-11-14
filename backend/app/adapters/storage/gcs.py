@@ -23,6 +23,7 @@ from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
+    validate_object_metadata,
     StorageMetrics,
     SignedDownload,
     StorageObjectNotFound,
@@ -425,19 +426,35 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         await asyncio.to_thread(self._gcs_write_bytes, uri, data, content_type, creds)
 
-    async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
+    async def upload_file(
+        self,
+        uri: str,
+        file_obj: BinaryIO,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
         if self.is_local:
-            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj)
+            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_file, uri, file_obj, content_type, creds)
+        await asyncio.to_thread(self._gcs_upload_file, uri, file_obj, content_type, creds, metadata)
 
-    async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
+    async def upload_filename(
+        self,
+        uri: str,
+        local_path: str,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
         if self.is_local:
-            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path)
+            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_filename, uri, local_path, content_type, creds)
+        await asyncio.to_thread(self._gcs_upload_filename, uri, local_path, content_type, creds, metadata)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -503,8 +520,9 @@ class GcsStorageProvider(StorageProvider):
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         if self.is_local:
-            size = await asyncio.to_thread(self._local_fs().size, uri)
-            return ObjectMetadata(uri=uri, size_bytes=size)
+            fs = self._local_fs()
+            size = await asyncio.to_thread(fs.size, uri)
+            return ObjectMetadata(uri=uri, size_bytes=size, metadata=await asyncio.to_thread(fs.read_metadata, uri))
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_object_metadata, uri, creds)
 
@@ -575,14 +593,16 @@ class GcsStorageProvider(StorageProvider):
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
         blob.upload_from_string(data, content_type=content_type)
 
-    def _gcs_upload_file(self, uri: str, file_obj, content_type, creds) -> None:
+    def _gcs_upload_file(self, uri: str, file_obj, content_type, creds, metadata=None) -> None:
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        blob.metadata = metadata  # custom metadata travels with the upload request itself
         blob.upload_from_file(file_obj, content_type=content_type, rewind=True)
 
-    def _gcs_upload_filename(self, uri: str, local_path: str, content_type, creds) -> None:
+    def _gcs_upload_filename(self, uri: str, local_path: str, content_type, creds, metadata=None) -> None:
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        blob.metadata = metadata
         blob.upload_from_filename(local_path, content_type=content_type)
 
     def _gcs_download_to_file(self, uri: str, file_obj, creds) -> None:
@@ -691,6 +711,7 @@ class GcsStorageProvider(StorageProvider):
             content_type=blob.content_type,
             storage_class=blob.storage_class,
             updated=str(blob.updated) if blob.updated else None,
+            metadata=dict(blob.metadata or {}),
         )
 
     def _gcs_generate_signed_url(self, uri: str, method: str, expiry_seconds: int, content_type, creds) -> str:

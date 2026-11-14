@@ -29,6 +29,7 @@ from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_
 from app.adapters.models import (
     BucketMetrics,
     ObjectMetadata,
+    validate_object_metadata,
     StorageMetrics,
     StorageStore,
     StoredObject,
@@ -221,11 +222,27 @@ class NfsStorageProvider(StorageProvider):
     async def write_bytes(self, uri: str, data: bytes, *, content_type: str = "application/octet-stream") -> None:
         await asyncio.to_thread(self._fs.write_bytes, uri, data)
 
-    async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
-        await asyncio.to_thread(self._fs.write_stream, uri, file_obj)
+    async def upload_file(
+        self,
+        uri: str,
+        file_obj: BinaryIO,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
+        await asyncio.to_thread(self._fs.write_stream, uri, file_obj, metadata)
 
-    async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
-        await asyncio.to_thread(self._fs.upload_filename, uri, local_path)
+    async def upload_filename(
+        self,
+        uri: str,
+        local_path: str,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
+        await asyncio.to_thread(self._fs.upload_filename, uri, local_path, metadata)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         await asyncio.to_thread(self._fs.stream_into, uri, file_obj)
@@ -261,7 +278,7 @@ class NfsStorageProvider(StorageProvider):
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         size = await asyncio.to_thread(self._fs.size, uri)
-        return ObjectMetadata(uri=uri, size_bytes=size)
+        return ObjectMetadata(uri=uri, size_bytes=size, metadata=await asyncio.to_thread(self._fs.read_metadata, uri))
 
     async def get_bucket_info(self, uri: str) -> dict:
         # A filesystem store has no object versioning.
