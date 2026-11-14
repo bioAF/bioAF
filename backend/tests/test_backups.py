@@ -953,3 +953,37 @@ async def test_snapshots_report_their_integrity(monkeypatch, client, admin_token
         )
     states = {s["filename"]: s["integrity"] for s in response.json()["snapshots"]}
     assert states == {names[0]: "unverified", names[1]: "invalid", names[2]: "checksummed"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stuck", ["pg_dump", "pg_restore"])
+async def test_a_backup_child_that_cannot_be_stopped_keeps_its_workspace_and_admission(
+    monkeypatch, backup_db_url, caplog, stuck
+):
+    """Like restore: a child that may still be writing keeps its files, and no new backup starts beside it."""
+    from app.config import settings
+    from app.services import backup_resources
+    from app.services.backup_service import BackupService
+
+    _fake_pg_dump(monkeypatch)
+    real_run_child = backup_resources.run_child
+    spawned = []
+
+    async def run_child(argv, **kwargs):
+        spawned.append(Path(argv[0]).name)
+        if Path(argv[0]).name == stuck:
+            raise backup_resources.ChildNotStopped("pid 1")
+        return await real_run_child(argv, **kwargs)
+
+    monkeypatch.setattr(backup_resources, "run_child", run_child)
+    adapter, _ = _backup_adapter()
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        first = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+        count = len(spawned)
+        second = await BackupService.run_postgres_backup(_backup_session(), org_id=1)
+    assert first["status"] == "error" and first.get("reference"), first
+    assert [p.name.split("-")[0] for p in Path(settings.backup_scratch_dir).iterdir()] == ["backup"]
+    assert second["status"] == "error" and second["reason"] == "busy" and "Restart bioAF" in second["message"]
+    assert len(spawned) == count
+    adapter.upload_filename.assert_not_awaited()
+    assert first["reference"] in caplog.text

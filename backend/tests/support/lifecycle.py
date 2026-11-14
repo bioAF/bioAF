@@ -50,6 +50,7 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.terraform_executor", "_active_processes"),
     ("app.services.literature.fulltext_service", "_parses_running"),
     ("app.services.backup_service", "_restore_state"),
+    ("app.services.backup_service", "_backup_state"),
     ("app.services.networking_applier", "_mock_singleton"),
     ("app.services.pubsub_listener", "_manager"),
     ("app.platform.cloud_provider", "_resolved_backends"),

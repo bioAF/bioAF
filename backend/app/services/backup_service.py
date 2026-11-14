@@ -427,6 +427,13 @@ class BackupService:
         of the same name. A failure returns and logs a reference, the phase, pg_dump's exit status and a safe
         category; never pg_dump's stderr or an exception's text, which can hold SQL, row data or signed URLs.
         """
+        if _backup_state["stuck"]:
+            return {
+                "status": "error",
+                "reason": "busy",
+                "message": "An earlier database backup could not stop its database tool. Restart bioAF before "
+                "starting another backup.",
+            }
         if _backup_state["running"]:
             return {
                 "status": "error",
@@ -436,6 +443,11 @@ class BackupService:
         _backup_state["running"] = True
         try:
             return await _run_postgres_backup(session)
+        except _BackupStuck as stuck:
+            # Keep the exclusion: the child may still be writing. Only a restart (a new process) clears it.
+            _backup_state["stuck"] = True
+            await _record_backup_failure(session, stuck.reference, {"phase": "stop", "category": "child_not_stopped"})
+            return _backup_failure(stuck.reference)
         finally:
             _backup_state["running"] = False
 
@@ -750,7 +762,15 @@ class BackupService:
 # ---------------------------------------------------------------------------
 
 # One backup at a time in this process (the image runs one serving process, app/runtime.py).
-_backup_state: dict = {"running": False}
+_backup_state: dict = {"running": False, "stuck": False}
+
+
+class _BackupStuck(Exception):
+    """A backup's child did not stop; its workspace is kept and no backup may start until a restart."""
+
+    def __init__(self, reference: str):
+        super().__init__(reference)
+        self.reference = reference
 
 
 def _reference(kind: str) -> str:
@@ -877,56 +897,62 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
     phase = "prepare"
     try:
         async with backup_resources.private_workspace("backup") as workspace:
-            dump = workspace.new_file("backup.dump")
-            conn_args, env = _pg_connection()
-            phase = "dump"
-            child = await backup_resources.run_child(
-                [_pg_tool("pg_dump"), *conn_args, "-d", dbname, "-Fc", "-f", str(dump)], env=env
-            )
-            if child.returncode is None:
-                logger.error("Backup %s: pg_dump not found. Install postgresql-client in the container.", reference)
-                await _record_backup_failure(session, reference, {"reason": "pg_dump binary not found"})
-                return {"status": "error", "reference": reference, "message": "pg_dump binary not found"}
-            if child.returncode != 0:
-                logger.error("Backup %s failed: pg_dump exited %d (%s)", reference, child.returncode, child.category)
-                await _record_backup_failure(
-                    session,
-                    reference,
-                    {"phase": phase, "exit_status": child.returncode, "category": child.category},
+            try:
+                dump = workspace.new_file("backup.dump")
+                conn_args, env = _pg_connection()
+                phase = "dump"
+                child = await backup_resources.run_child(
+                    [_pg_tool("pg_dump"), *conn_args, "-d", dbname, "-Fc", "-f", str(dump)], env=env
                 )
-                return _backup_failure(reference)
+                if child.returncode is None:
+                    logger.error("Backup %s: pg_dump not found. Install postgresql-client in the container.", reference)
+                    await _record_backup_failure(session, reference, {"reason": "pg_dump binary not found"})
+                    return {"status": "error", "reference": reference, "message": "pg_dump binary not found"}
+                if child.returncode != 0:
+                    logger.error(
+                        "Backup %s failed: pg_dump exited %d (%s)", reference, child.returncode, child.category
+                    )
+                    await _record_backup_failure(
+                        session,
+                        reference,
+                        {"phase": phase, "exit_status": child.returncode, "category": child.category},
+                    )
+                    return _backup_failure(reference)
 
-            size = dump.stat().st_size
-            phase = "verify"
-            unusable = await _unusable_archive(dump, size)
-            if unusable:
-                logger.error("Backup %s failed: the dump is not a usable archive (%s)", reference, unusable)
-                await _record_backup_failure(session, reference, {"phase": phase, "category": unusable})
-                return _backup_failure(reference)
-            digest = await asyncio.to_thread(backup_integrity.file_sha256, dump)
+                size = dump.stat().st_size
+                phase = "verify"
+                unusable = await _unusable_archive(dump, size)
+                if unusable:
+                    logger.error("Backup %s failed: the dump is not a usable archive (%s)", reference, unusable)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": unusable})
+                    return _backup_failure(reference)
+                digest = await asyncio.to_thread(backup_integrity.file_sha256, dump)
 
-            adapter = get_storage_adapter()
-            uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
-            phase = "cutover"
-            await _legacy_inventory(adapter, bucket_name)  # recorded before the first marked backup exists
-            phase = "upload"
-            if await adapter.exists(uri):
-                logger.error("Backup %s: %s already exists; it was not replaced", reference, filename)
-                await _record_backup_failure(session, reference, {"phase": phase, "category": "name_exists"})
-                return {
-                    "status": "error",
-                    "reference": reference,
-                    "message": f"A backup named {filename} already exists, so it was not replaced. Try again.",
-                }
-            await backup_resources.finish_before_cleanup(
-                adapter.upload_filename(uri, str(dump), metadata=backup_integrity.marker(filename, digest))
-            )
-            phase = "confirm"
-            if not await _marker_confirmed(adapter, uri, filename, digest, size):
-                logger.error("Backup %s failed: the stored backup does not carry its checksum marker", reference)
-                await _discard_upload(adapter, uri, reference)
-                await _record_backup_failure(session, reference, {"phase": phase, "category": "marker_missing"})
-                return _backup_failure(reference)
+                adapter = get_storage_adapter()
+                uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
+                phase = "cutover"
+                await _legacy_inventory(adapter, bucket_name)  # recorded before the first marked backup exists
+                phase = "upload"
+                if await adapter.exists(uri):
+                    logger.error("Backup %s: %s already exists; it was not replaced", reference, filename)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": "name_exists"})
+                    return {
+                        "status": "error",
+                        "reference": reference,
+                        "message": f"A backup named {filename} already exists, so it was not replaced. Try again.",
+                    }
+                await backup_resources.finish_before_cleanup(
+                    adapter.upload_filename(uri, str(dump), metadata=backup_integrity.marker(filename, digest))
+                )
+                phase = "confirm"
+                if not await _marker_confirmed(adapter, uri, filename, digest, size):
+                    logger.error("Backup %s failed: the stored backup does not carry its checksum marker", reference)
+                    await _discard_upload(adapter, uri, reference)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": "marker_missing"})
+                    return _backup_failure(reference)
+            except backup_resources.ChildNotStopped:
+                workspace.retain()  # the child may still be writing its dump
+                raise
 
         # Rotate old backups (use DB-stored retention, not config default). The new backup is already stored,
         # so a rotation failure is logged and does not turn a completed backup into a failed one.
@@ -964,6 +990,14 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
             "size_bytes": size,
             "duration_seconds": round(duration, 1),
         }
+    except backup_resources.ChildNotStopped:
+        logger.error(
+            "Backup %s: %s did not stop, so its workspace was kept and no new backup can start. "
+            "Restart bioAF; the workspace is removed by the next backup.",
+            reference,
+            "pg_dump" if phase == "dump" else "pg_restore --list",
+        )
+        raise _BackupStuck(reference) from None
     except Exception as exc:
         logger.error("Backup %s failed during %s (%s)", reference, phase, type(exc).__name__)
         await _record_backup_failure(session, reference, {"phase": phase, "category": type(exc).__name__})
