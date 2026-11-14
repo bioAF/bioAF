@@ -35,6 +35,9 @@ from app.services.provenance.report_service import ProvenanceReportService
 
 logger = logging.getLogger("bioaf.export")
 
+# The manifest builder lives with the selection now; existing callers import it from here.
+_build_sample_manifest = selection.build_sample_manifest
+
 # ---------------------------------------------------------------------------
 # Size estimation
 # ---------------------------------------------------------------------------

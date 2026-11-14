@@ -206,16 +206,24 @@ class ExportJob:
 
     async def build(self, plan: ArchivePlan, adapter, *, deadline: float = resources.BUILD_DEADLINE) -> int:
         """Build the archive and return its size; any failure releases the job before raising."""
-        coro = self._run(plan, adapter)
         owner = runtime.current_owner()
-        # Not cancellable: abandoning cancels the budget instead, so workers settle before cleanup.
-        if owner is not None:
-            self._task = owner.spawn(coro, role="data-export", cancellable=False)
-        else:
-            self._task = asyncio.create_task(coro, name="bioaf:data-export")
-        stop_watch = _watch_shutdown(owner, self.budget)
         try:
-            size, failure = await asyncio.wait_for(asyncio.shield(self._task), timeout=deadline)
+            stop_watch = _watch_shutdown(owner, self.budget)
+            coro = self._run(plan, adapter)
+            # Not cancellable: abandoning cancels the budget instead, so workers settle before cleanup.
+            if owner is not None:
+                self._task = owner.spawn(coro, role="data-export", cancellable=False)
+            else:
+                self._task = runtime.spawn(coro, role="data-export")
+        except BaseException:
+            self.release()  # nothing started (the owner is shutting down)
+            raise
+        try:
+            # ``wait`` never cancels the task: neither the deadline nor the caller's cancellation.
+            done, _ = await asyncio.wait({self._task}, timeout=deadline)
+            if not done:
+                raise TimeoutError
+            size, failure = self._task.result()
         except TimeoutError:
             await runtime.shielded(self.abandon(), role="data-export-cleanup")
             raise ExportTimeoutError(
@@ -282,5 +290,5 @@ def _watch_shutdown(owner, budget: ScratchBudget) -> Callable[[], None]:
         await owner.stopping.wait()
         budget.cancel()
 
-    watcher = asyncio.create_task(watch(), name="bioaf:data-export-shutdown-watch")
+    watcher = owner.spawn(watch(), role="data-export-shutdown-watch")
     return watcher.cancel
