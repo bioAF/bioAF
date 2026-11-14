@@ -79,3 +79,48 @@ def test_the_cutover_inventory_round_trips_and_rejects_damage():
     for bad in (b"", b"{", json.dumps({"format": 2, "legacy": []}).encode(), json.dumps({"format": 1}).encode()):
         with pytest.raises(bi.IntegrityError):
             bi.parse_cutover(bad)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_callers_record_the_cutover_once():
+    """Two first callers (a listing and a backup) must not each write an inventory: the second would include a
+    newer backup and qualify it for the unverified opt-in (review finding 5)."""
+    import asyncio
+
+    from app.adapters.models import StorageObjectNotFound, StoredObject
+    from app.services import backup_service
+
+    class Store:
+        def __init__(self):
+            self.objects = ["pgdump-20261101-000000.dump"]
+            self.writes: list[bytes] = []
+            self.data: bytes | None = None
+            self.listing = asyncio.Event()
+
+        def build_uri(self, bucket, key):
+            return f"fake://{bucket}/{key}"
+
+        async def read_bytes(self, uri):
+            if self.data is None:
+                raise StorageObjectNotFound(uri)
+            return self.data
+
+        async def list_objects(self, prefix):
+            names = list(self.objects)
+            await self.listing.wait()
+            return [StoredObject(filename=n, storage_uri=f"fake://b/postgres/{n}") for n in names]
+
+        async def write_bytes(self, uri, data, **kwargs):
+            self.writes.append(data)
+            self.data = data
+
+    store = Store()
+    first = asyncio.create_task(backup_service._legacy_inventory(store, "b"))
+    await asyncio.sleep(0)
+    store.objects.append("pgdump-20261114-000000.dump")  # a new backup lands while the first is listing
+    second = asyncio.create_task(backup_service._legacy_inventory(store, "b"))
+    await asyncio.sleep(0)
+    store.listing.set()
+    a, b = await asyncio.gather(first, second)
+    assert len(store.writes) == 1
+    assert a == b == frozenset({"pgdump-20261101-000000.dump"})

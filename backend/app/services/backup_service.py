@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import time
+import weakref
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -852,6 +853,29 @@ async def _legacy_inventory(adapter, bucket_name: str) -> frozenset[str]:
         return backup_integrity.parse_cutover(await adapter.read_bytes(uri))
     except StorageObjectNotFound:
         pass
+    # The inventory is written once. Concurrent first callers (a listing and a backup) are serialized and the
+    # loser reads the winner's record, so no later write can add a newer backup to it. One serving process
+    # (app/runtime.py) makes the in-process lock sufficient.
+    async with _cutover_lock():
+        try:
+            return backup_integrity.parse_cutover(await adapter.read_bytes(uri))
+        except StorageObjectNotFound:
+            pass
+        return await _record_cutover(adapter, bucket_name, uri)
+
+
+_CUTOVER_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+
+
+def _cutover_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _CUTOVER_LOCKS.get(loop)
+    if lock is None:
+        lock = _CUTOVER_LOCKS[loop] = asyncio.Lock()
+    return lock
+
+
+async def _record_cutover(adapter, bucket_name: str, uri: str) -> frozenset[str]:
     objects = await adapter.list_objects(adapter.build_uri(bucket_name, "postgres/"))
     names = [o.storage_uri.rsplit("/", 1)[-1] for o in objects]
     names = [n for n in names if _PG_FILENAME_RE.match(n)]
