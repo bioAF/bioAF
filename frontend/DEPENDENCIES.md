@@ -43,7 +43,10 @@ Remove a floor only when every parent's declared range excludes the vulnerable v
 | `handlebars` `^4.7.10` | GHSA-8r5x-fm3f-whwj, GHSA-p8wg-vrv2-v86f, GHSA-xw65-4hp5-5hc7 and the 4.7.9 set | `ts-jest` (development) |
 | `flatted` `^3.4.2` | GHSA-rf6f-7fwh-wjgh | `eslint` via `flat-cache` (development) |
 | `picomatch@^2.0.0` `^2.3.2`, `picomatch@^4.0.0` `^4.0.4` | GHSA-c2c7-rcm5-vvqj, GHSA-3v7f-55p6-f55p | `jest`, `micromatch`, `fdir` (development) |
-| `glob@^10.0.0` `^10.5.0` | GHSA-5j98-mcp5-4vw2 | `jest` (development) |
+| `glob@^10.0.0` `^10.5.0` | GHSA-5j98-mcp5-4vw2 | none today; kept for any future glob 10 consumer (development) |
+| `@jest/reporters`, `jest-config`, `jest-runtime`: `glob` `^14.0.2` | GHSA-3g3m-2fjr-6pw4, and GHSA-g3hv-75wg-m249 through glob 13's `minimatch ^10.2.2` | Jest 30.5 declares `glob ^13.0.6` (development) |
+| `test-exclude`: `glob` `^14.0.2`, `minimatch` `^11.0.1` | GHSA-3g3m-2fjr-6pw4, GHSA-g3hv-75wg-m249 | `test-exclude` 7 declares `glob ^10.4.1`, `minimatch ^10.2.2` (development) |
+| `@typescript-eslint/typescript-estree`: `minimatch` `^11.0.1` | GHSA-g3hv-75wg-m249 | `typescript-estree` 8.x declares `minimatch ^10.2.2` (development) |
 | `postcss@<8.5.23` `^8.5.23` | GHSA-fxqj-rqcc-2cmp | `next` pins `postcss` 8.4.31 exactly (runtime build) |
 | `dompurify` `^3.4.18` | GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f, GHSA-6688-9rhm-gjv2, GHSA-55q2-fjhq-7xh7 | `jspdf` optional `^3.3.1` (runtime) |
 | `fflate` `^0.8.3` | GHSA-px8p-9vwx-vf98 | `jspdf` `^0.8.1` (runtime) |
@@ -59,3 +62,21 @@ Remove a floor only when every parent's declared range excludes the vulnerable v
 The direct `next` and `eslint-config-next` declarations are held at `^15.5.29` (GHSA-2464-fhr4-w9xw,
 GHSA-p3m5-59mp-jv5r, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p), and the direct
 `postcss` declaration at `^8.5.33`, whose own range requires `source-map-js` `^1.2.2`.
+
+### Parent-scoped overrides
+
+An override nested under a package (`"test-exclude": {"glob": "^14.0.2"}`) applies to that package's whole
+subtree, not only its direct dependency. Before adding one, list every edge it reaches (`npm ls <package>`): on
+Jest 30.3, `"@jest/reporters": {"glob": ...}` also rewrote `test-exclude` 6's glob 7 dependency, which needs glob 7's
+callback API. Version-selector keys across a major (`"glob@^10.0.0": "^14.0.2"`) produced a lock `npm ci` rejects.
+
+A mismatched glob/minimatch pair installs and audits clean and still breaks: glob 10 with minimatch 11 matches
+nothing. `tests/consistency/toolingGlobConsumers.test.ts` calls each overridden consumer's own copy the way the
+consumer does; keep it passing when any of these overrides change.
+
+## Findings with no patched release
+
+`deepmerge` (GHSA-gcqx-w48m-w2h4, prototype poisoning in `mergeObject()`, every release up to 4.3.1, the latest) is
+reached only through `jest-config`, which merges Jest's own configuration objects from this repository's
+`jest.config.js`; no request, upload or other untrusted input reaches it. It needs a dated exception (see
+`.github/security-exceptions.json`) until a fixed release or a Jest release without it exists.

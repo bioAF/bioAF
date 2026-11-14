@@ -36,8 +36,8 @@
     "eslint": "^8.56.0",
     "eslint-config-next": "^15.5.29",
     "identity-obj-proxy": "^3.0.0",
-    "jest": "^30.3.0",
-    "jest-environment-jsdom": "^30.3.0",
+    "jest": "^30.5.2",
+    "jest-environment-jsdom": "^30.5.2",
     "openapi-typescript": "7.13.0",
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.1",
@@ -66,6 +66,22 @@
     "source-map-js": "^1.2.2",
     "browserslist": "^4.28.9",
     "baseline-browser-mapping": "^2.11.0",
-    "postcss-selector-parser@<6.1.5": "^6.1.5"
+    "postcss-selector-parser@<6.1.5": "^6.1.5",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    },
+    "@jest/reporters": {
+      "glob": "^14.0.2"
+    },
+    "jest-config": {
+      "glob": "^14.0.2"
+    },
+    "jest-runtime": {
+      "glob": "^14.0.2"
+    },
+    "test-exclude": {
+      "glob": "^14.0.2",
+      "minimatch": "^11.0.1"
+    }
   }
 }
