@@ -13,3 +13,8 @@
   space and archive readability before touching any database. A restore now succeeds or fails as a whole: an
   import error no longer opens a review of a partly restored copy. Backups made before this release are listed as
   unverified and need an explicit, audited confirmation to restore.
+
+### Fixes
+
+- Settings > Users shows Lock, Deactivate and Reactivate only to roles with the users:deactivate permission, and
+  Delete only with users:delete, and checks again when the action is confirmed (#107).
