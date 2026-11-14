@@ -16,7 +16,7 @@ from starlette.types import Receive, Scope, Send
 
 _FALLBACK_FILENAME = "download"
 # Never in a filename parameter: quoting/parameter syntax and path separators.
-_HEADER_UNSAFE = set('"\\/;,')
+_HEADER_UNSAFE = frozenset('"\\/;,')
 
 
 class ClosingStreamingResponse(StreamingResponse):
@@ -53,3 +53,92 @@ def attachment_disposition(filename: str) -> str:
     clean = _clean(filename)
     ascii_name = "".join(c if 32 < ord(c) < 127 else "_" for c in clean).strip("_") or _FALLBACK_FILENAME
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(clean, safe='')}"
+
+
+class TransferStalled(Exception):
+    """The client accepted no bytes for the stall limit."""
+
+
+class GuardedFileResponse(StreamingResponse):
+    """Streams one prepared file, then runs ``on_close`` however the transfer ends.
+
+    For downloads that hold server resources while they are read (data exports). ``on_close`` runs
+    on every exit (success, a failed header send before the body starts, a later send failure, a
+    disconnect, cancellation, a stall, the deadline), shielded and bounded, so the file and
+    whatever it holds are released without relying on the body generator's ``finally``, which never
+    runs for a generator that never started.
+
+    A body send that does not complete within ``stall_seconds`` (the downstream accepted nothing)
+    closes the stream, as does reaching ``deadline_seconds`` while still progressing. Progress is a
+    completed non-empty body send; an empty message never resets it. After the headers are sent a
+    failure can only close the stream; ``Content-Length`` lets the client see it was cut short.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        *,
+        size: int,
+        filename: str,
+        media_type: str,
+        on_close,
+        stall_seconds: float,
+        deadline_seconds: float,
+        cleanup_seconds: float = 10,
+        chunk_size: int = 256 * 1024,
+    ) -> None:
+        self._path = path
+        self._chunk_size = chunk_size
+        self._on_close = on_close
+        self._stall_seconds = stall_seconds
+        self._deadline_seconds = deadline_seconds
+        self._cleanup_seconds = cleanup_seconds
+        self.outcome: str | None = None
+        super().__init__(
+            self._chunks(),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": attachment_disposition(filename),
+                "Content-Length": str(size),
+                # Stream through nginx instead of spooling the archive to its temporary files.
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    async def _chunks(self):
+        with open(self._path, "rb") as f:
+            while chunk := await anyio.to_thread.run_sync(f.read, self._chunk_size):
+                yield chunk
+
+    def _guard(self, send: Send) -> Send:
+        async def guarded(message) -> None:
+            if message["type"] == "http.response.body" and message.get("body"):
+                try:
+                    with anyio.fail_after(self._stall_seconds):
+                        await send(message)
+                except TimeoutError:
+                    raise TransferStalled() from None
+            else:
+                await send(message)
+
+        return guarded
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        self.outcome = "incomplete"
+        try:
+            with anyio.move_on_after(self._deadline_seconds) as deadline:
+                await super().__call__(scope, receive, self._guard(send))
+                self.outcome = "sent"
+            if deadline.cancelled_caught:
+                self.outcome = "deadline"
+        except TransferStalled:
+            self.outcome = "stalled"
+        except BaseException:
+            self.outcome = "failed"
+            raise
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self.body_iterator.aclose()
+                with anyio.move_on_after(self._cleanup_seconds):
+                    await self._on_close(self.outcome)

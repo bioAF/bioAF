@@ -20,6 +20,7 @@ incomplete S3 provider is unreachable on a GCP install (POLICY never resolves
 import asyncio
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import BinaryIO
 
 from app.config import compute_mode_for
@@ -27,6 +28,7 @@ from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage import s3_signing
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
@@ -35,6 +37,7 @@ from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
+    SignedDownload,
     StorageMetrics,
     StorageObjectNotFound,
     StorageStore,
@@ -495,6 +498,17 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_generate_signed_url, uri, method, expiry_seconds, content_type, creds)
 
+    async def sign_download(self, uri: str, *, max_ttl_seconds: int, min_ttl_seconds: int) -> SignedDownload:
+        await self._get_credentials()  # resolves the region the client factory signs for
+        return await asyncio.to_thread(self._s3_sign_download, uri, max_ttl_seconds, min_ttl_seconds)
+
+    async def check_signed_download(self, *, min_ttl_seconds: int) -> None:
+        await asyncio.to_thread(
+            s3_signing.signing_snapshot,
+            self._signing_credentials(),
+            required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
+        )
+
     async def create_resumable_upload_url(
         self,
         uri: str,
@@ -718,6 +732,7 @@ class S3StorageProvider(StorageProvider):
             size_bytes=obj.get("Size"),
             md5_hash=_etag_to_md5(obj.get("ETag")),
             provider_details=details,
+            uploaded_at=obj.get("LastModified"),
         )
 
     def _s3_list_objects(
@@ -793,6 +808,26 @@ class S3StorageProvider(StorageProvider):
         if content_type is not None:
             params["ContentType"] = content_type
         return self._get_s3_client(creds).generate_presigned_url(client_method, Params=params, ExpiresIn=expiry_seconds)
+
+    def _signing_credentials(self):
+        """The ambient chain's credentials through an export-owned session (no other client's state)."""
+        import boto3
+
+        return boto3.session.Session().get_credentials()
+
+    def _s3_sign_download(self, uri: str, max_ttl_seconds: int, min_ttl_seconds: int) -> SignedDownload:
+        bucket, key = self._parse_uri(uri)
+        snapshot = s3_signing.signing_snapshot(
+            self._signing_credentials(),
+            required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
+        )
+        issued = datetime.now(timezone.utc)
+        lifetime = s3_signing.link_lifetime(snapshot, max_ttl_seconds=max_ttl_seconds, min_ttl_seconds=min_ttl_seconds)
+        # Signed with exactly the measured credentials; nothing re-resolves the ambient chain here.
+        url = self._get_s3_client(snapshot.client_kwargs()).generate_presigned_url(
+            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=lifetime
+        )
+        return SignedDownload(url=url, expires_at=issued + timedelta(seconds=lifetime))
 
     def _s3_create_presigned_put(self, uri: str, content_type: str, creds) -> str:
         bucket, key = self._parse_uri(uri)

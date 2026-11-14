@@ -23,6 +23,7 @@ are left as strings.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -253,6 +254,16 @@ class StoredObject(BaseModel):
     size_bytes: int | None = None
     md5_hash: str | None = None
     provider_details: dict = Field(default_factory=dict)
+    # When the current live object was uploaded or finalized (aware UTC): GCS creation time, S3
+    # last modification, the local store's destination mtime. None when the backend did not say.
+    uploaded_at: datetime | None = None
+
+
+class SignedDownload(BaseModel):
+    """A time-limited GET link and the moment it stops working (never later than the real expiry)."""
+
+    url: str
+    expires_at: datetime
 
 
 class BucketMetrics(BaseModel):

@@ -11061,8 +11061,11 @@ export interface components {
         };
         /** ExportRequest */
         ExportRequest: {
-            /** Delivery Method */
-            delivery_method: string;
+            /**
+             * Delivery Method
+             * @enum {string}
+             */
+            delivery_method: "direct" | "gcs";
             /**
              * Include Fastq
              * @default false
