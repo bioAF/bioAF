@@ -7,7 +7,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# BASH_SOURCE, not $0: the same when run, and still this checkout when sourced (the update-agent waiter).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${BIOAF_COMPOSE_FILE:-$SCRIPT_DIR/docker/docker-compose.yml}"
 ENV_FILE="${BIOAF_ENV_FILE:-$SCRIPT_DIR/docker/.env}"
 
@@ -40,6 +41,9 @@ if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
     # shellcheck source=installer/managed_file.sh
     source "$SCRIPT_DIR/installer/managed_file.sh"
 fi
+# The host I/O program shared with the update agent, read now so an update that checks out another
+# release keeps using the code this process started with.
+HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
 
 wait_for_db() {
     echo "Waiting for database to be ready..."
@@ -231,44 +235,258 @@ ensure_cloud_logging() {
     return "$status"
 }
 
-ensure_update_agent() {
-    # Install the update agent systemd service so the backend can trigger
-    # host-level updates via a trigger file. Idempotent.
+# The update agent's systemd unit bioAF manages. It is rendered from docker/bioaf-update-agent.service
+# with this checkout's path and the invoking account, then reconciled by managed_file_reconcile; units
+# earlier releases wrote without a marker are recognized by rendering their templates
+# (installer/update-agent-legacy/) with the same inputs.
+UPDATE_AGENT_SERVICE="bioaf-update-agent"
+UPDATE_AGENT_UNIT="/etc/systemd/system/bioaf-update-agent.service"
+UPDATE_AGENT_DETAIL_DIR=""   # host-only; defaults to $SCRIPT_DIR/host-only (never a backend mount)
+UPDATE_AGENT_ACTIVE_WAIT=10  # seconds to wait for the agent to be active after a start or restart
+UPDATE_AGENT_SETTLE=3        # then it must still be active this many seconds later (not crash-looping)
 
-    # Skip on non-systemd systems and non-Linux
+update_agent_render() {
+    # update_agent_render <template> <dir> <user> <group>: the unit text, placeholders replaced.
+    local text
+    text="$(cat "$1")" || return 1
+    text="${text//__BIOAF_DIR__/$2}"
+    text="${text//__BIOAF_USER__/$3}"
+    printf '%s\n' "${text//__BIOAF_GROUP__/$4}"
+}
+
+update_agent_inputs_valid() {
+    # The unit carries these values unquoted, so only values that need no systemd quoting or escaping
+    # (no whitespace, quotes, backslashes, % specifiers or $) are accepted.
+    [[ "$1" =~ ^/[A-Za-z0-9._/+@-]+$ ]] && [[ "$2" =~ ^[a-z_][a-z0-9_-]*$ ]] && [[ "$3" =~ ^[a-z_][a-z0-9_-]*$ ]]
+}
+
+update_agent_validate() {
+    # systemd-analyze judges a unit by its file name, so verify a copy under the real name.
+    local dir status=0
+    dir=$(mktemp -d) || return 1
+    cp "$1" "$dir/$UPDATE_AGENT_SERVICE.service" && systemd-analyze verify "$dir/$UPDATE_AGENT_SERVICE.service" || status=$?
+    rm -rf "$dir"
+    return "$status"
+}
+
+update_agent_main_pid() {
+    # The agent's main PID (0: not running). Fails when systemd cannot be asked: an unknown state is
+    # never taken for a stopped agent.
+    local main
+    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || return 1
+    [[ "$main" =~ ^[0-9]+$ ]] || return 1
+    echo "$main"
+}
+
+update_agent_between_polls() {
+    # True when every child of <pid> is the agent's poll `sleep`, and there is one: the agent is
+    # waiting for its next poll. Any other child (an updater, possibly this very process; a trigger
+    # being read) or none at all (between commands) is not provably idle.
+    local child name idle=false
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        name=$(ps -o comm= -p "$child" 2>/dev/null)
+        if [ "${name##*/}" = sleep ]; then idle=true; else return 1; fi
+    done
+    [ "$idle" = true ]
+}
+
+_update_agent_signal() {
+    kill -"$1" "$2" 2>/dev/null || sudo kill -"$1" "$2" 2>/dev/null
+}
+
+UPDATE_AGENT_HELD=""
+update_agent_hold() {
+    # Stop (SIGSTOP) the running agent, then keep it stopped only if it was between polls. A stopped
+    # agent cannot pick up a trigger, so nothing can start between this check and the restart: no
+    # cooperation from the agent is needed, so this holds an older release's agent too. systemd
+    # sends SIGCONT with SIGTERM when it stops a unit. Returns UPDATE_AGENT_BUSY, with the agent
+    # running again, when it is busy; 1 when its state cannot be read. Nothing to hold when it is not
+    # running. The caller's EXIT trap (update_agent_release) must already be set: the target is
+    # recorded before it is stopped, so an interruption at any point resumes it.
+    local main
+    if ! main=$(update_agent_main_pid); then
+        red "Could not read the update agent's state from systemd; nothing was changed."
+        return 1
+    fi
+    [ "$main" = 0 ] && return 0
+    UPDATE_AGENT_HELD="$main"
+    _update_agent_signal STOP "$main" || { update_agent_release; return "$UPDATE_AGENT_BUSY"; }
+    update_agent_between_polls "$main" && return 0
+    update_agent_release
+    return "$UPDATE_AGENT_BUSY"
+}
+
+update_agent_release() {
+    # Resume a held agent (a no-op once a restart has replaced it).
+    [ -n "$UPDATE_AGENT_HELD" ] && { _update_agent_signal CONT "$UPDATE_AGENT_HELD" || true; }
+    UPDATE_AGENT_HELD=""
+}
+
+update_agent_wait_active() {
+    # Active, and still active a moment later: a Type=simple service reports active as soon as it is
+    # started, even when its process exits at once and systemd is about to restart it.
+    local waited=0
+    until sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE"; do
+        [ "$waited" -ge "$UPDATE_AGENT_ACTIVE_WAIT" ] && return 1
+        sleep 1; waited=$((waited + 1))
+    done
+    sleep "$UPDATE_AGENT_SETTLE"
+    sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE"
+}
+
+update_agent_restart() {
+    sudo systemctl restart "$UPDATE_AGENT_SERVICE" && update_agent_wait_active
+}
+
+update_agent_activate() {
+    sudo systemctl daemon-reload && sudo systemctl enable "$UPDATE_AGENT_SERVICE" && update_agent_restart
+}
+
+update_agent_code_current() {
+    # The running agent recorded which code it started with; compare it with the code on disk.
+    [ -n "$HOST_IO_PY" ] && python3 -I -c "$HOST_IO_PY" agent-code-current "$SCRIPT_DIR" 2>/dev/null
+}
+
+update_agent_identity() {
+    # Sets UPDATE_AGENT_USER/GROUP to the account the unit runs as, if the unit can carry them.
+    UPDATE_AGENT_USER=$(whoami) && UPDATE_AGENT_GROUP=$(id -gn) || return 1
+    if ! update_agent_inputs_valid "$SCRIPT_DIR" "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP"; then
+        red "The update agent unit cannot carry this checkout path or account name safely; nothing was changed."
+        red "Use a path made of letters, digits and . _ / + @ - and a standard account name."
+        return 1
+    fi
+}
+
+update_agent_reconcile_now() {
+    # Bring the unit to this checkout's template and the agent to the code on disk. Called with the
+    # agent held (or not running). Every activation is health-checked; a failed one restores the
+    # previous unit (managed_file_reconcile).
+    local work legacy="" old status=0
+    work=$(mktemp -d) || return 1
+    if ! update_agent_render "$SCRIPT_DIR/docker/$UPDATE_AGENT_SERVICE.service" "$SCRIPT_DIR" \
+        "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP" > "$work/unit"; then
+        rm -rf "$work"
+        red "Could not render the update agent unit; nothing was changed."
+        return 1
+    fi
+    for old in "$SCRIPT_DIR"/installer/update-agent-legacy/*.service; do
+        [ -f "$old" ] || continue
+        legacy="$legacy $(update_agent_render "$old" "$SCRIPT_DIR" "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP" | _mf_sha256)"
+    done
+    MF_PRIV=sudo managed_file_reconcile update-agent-unit/v1 "$work/unit" "$UPDATE_AGENT_UNIT" "$legacy" \
+        update_agent_validate update_agent_activate "${UPDATE_AGENT_DETAIL_DIR:-$SCRIPT_DIR/host-only}" || status=$?
+    rm -rf "$work"
+
+    case "$MF_OUTCOME" in
+        installed|migrated)
+            green "Update agent unit ${MF_OUTCOME}."
+            return 0 ;;
+        unchanged|operator_managed)
+            [ "$MF_OUTCOME" = operator_managed ] && yellow "Update agent unit is operator-managed; bioAF did not change it."
+            if ! sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE"; then
+                bold "Starting the update agent..."
+                if ! { sudo systemctl start "$UPDATE_AGENT_SERVICE" && update_agent_wait_active; }; then
+                    red "The update agent could not be started. Check: sudo journalctl -u $UPDATE_AGENT_SERVICE"
+                    return 1
+                fi
+            elif ! update_agent_code_current; then
+                bold "Restarting the update agent to run the code on disk..."
+                if ! update_agent_restart; then
+                    red "The update agent did not stay up after a restart. Check: sudo journalctl -u $UPDATE_AGENT_SERVICE"
+                    return 1
+                fi
+            fi
+            return 0 ;;
+        *)
+            red "Update agent unit not updated (${MF_OUTCOME})."
+            return "$(( status == 0 ? 1 : status ))" ;;
+    esac
+}
+
+# Status of update_agent_reconcile_held when the agent is busy (nothing was changed).
+UPDATE_AGENT_BUSY=75
+UPDATE_AGENT_LOCK_WAIT=300   # seconds to wait for another caller's hold to finish
+
+update_agent_lock() {
+    # Take the activation lock on fd 8 (host-state/agent-activation.lock), waiting up to
+    # UPDATE_AGENT_LOCK_WAIT for another caller (a manual command or the waiter). The lock belongs
+    # to the open file, so it is held until fd 8 is closed: when the calling (sub)shell exits, however
+    # it exits. Python takes it because macOS has no flock(1).
+    local dir="$SCRIPT_DIR/host-state"
+    [ -d "$dir" ] || mkdir -m 700 "$dir" || return 1
+    exec 8>>"$dir/agent-activation.lock" || return 1
+    python3 -I -c '
+import fcntl, sys, time
+deadline = time.monotonic() + float(sys.argv[1])
+while True:
+    try:
+        fcntl.flock(8, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            sys.exit(1)
+        time.sleep(0.2)
+' "$UPDATE_AGENT_LOCK_WAIT"
+}
+
+update_agent_reconcile_held() (
+    # One caller at a time (manual commands and the waiter alike), so no caller can resume the agent
+    # during another's hold. In a subshell whose cleanup is in place before anything is stopped:
+    # the agent is resumed on every way out (return, error, SIGTERM/INT/HUP), and the lock is
+    # released when the subshell's fd 8 closes, after that.
+    UPDATE_AGENT_HELD=""
+    trap update_agent_release EXIT
+    trap 'exit 143' TERM INT HUP
+    if ! update_agent_lock; then
+        yellow "Another bioAF command is updating the update agent."
+        exit "$UPDATE_AGENT_BUSY"
+    fi
+    update_agent_hold || exit $?
+    update_agent_reconcile_now
+)
+
+update_agent_schedule() {
+    # The agent is busy (possibly running the update this process belongs to; restarting it would
+    # stop that update). Leave everything as it is and have a transient unit, outside the agent's
+    # cgroup and running as this account, do the whole reconciliation once the agent is idle:
+    # scripts/update-agent-activate.sh. Its command is one line with no $ or %, because systemd
+    # stores it in a unit file and reads it back on daemon-reload.
+    if sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE-activation" 2>/dev/null; then
+        yellow "The update agent is busy; it is already scheduled to be brought up to date when that update finishes."
+        return 0
+    fi
+    if ! sudo systemd-run --unit="$UPDATE_AGENT_SERVICE-activation" --collect --quiet \
+        --uid="$UPDATE_AGENT_USER" --gid="$UPDATE_AGENT_GROUP" \
+        /bin/bash "$SCRIPT_DIR/scripts/update-agent-activate.sh"; then
+        red "The update agent is busy, and its update could not be scheduled for later."
+        return 1
+    fi
+    yellow "The update agent is running an update; its unit and code will be brought up to date when that update finishes."
+    yellow "Outcome: sudo journalctl -u $UPDATE_AGENT_SERVICE-activation"
+}
+
+ensure_update_agent() {
+    # Reconcile the update agent's systemd unit with this checkout's template, then make sure the
+    # agent is running the code on disk: start it if stopped, restart it if the unit changed or it
+    # runs older code. All of it happens with the agent held between polls, so no trigger can start
+    # meanwhile; when the agent is busy nothing changes now and the same reconciliation runs once it
+    # is idle. Custom units are left alone and fail the step; units marked operator-managed are left
+    # alone but the agent is still kept running. Every failure is returned, so callers may use this
+    # under `if`, `||` or `step`.
     if ! command -v systemctl &>/dev/null; then
         return 0
     fi
+    mkdir -p "$SCRIPT_DIR/update-requests"
+    [ -d "$SCRIPT_DIR/update-status" ] || mkdir -m 755 "$SCRIPT_DIR/update-status"
+    update_agent_identity || return 1
 
-    # Create directories
-    mkdir -p "$SCRIPT_DIR/update-requests" "$SCRIPT_DIR/update-status"
-
-    local service_name="bioaf-update-agent"
-    local service_file="/etc/systemd/system/${service_name}.service"
-    local current_user
-    current_user=$(whoami)
-    local current_group
-    current_group=$(id -gn)
-
-    # Check if already installed with correct paths
-    if [ -f "$service_file" ] && grep -q "$SCRIPT_DIR" "$service_file" 2>/dev/null; then
-        # Ensure it's running
-        if ! systemctl is-active --quiet "$service_name" 2>/dev/null; then
-            sudo systemctl start "$service_name"
-        fi
-        return 0
+    local status=0
+    update_agent_reconcile_held || status=$?
+    if [ "$status" = "$UPDATE_AGENT_BUSY" ]; then
+        update_agent_schedule
+        return
     fi
-
-    bold "Installing update agent service..."
-    sed -e "s|__BIOAF_DIR__|$SCRIPT_DIR|g" \
-        -e "s|__BIOAF_USER__|$current_user|g" \
-        -e "s|__BIOAF_GROUP__|$current_group|g" \
-        "$SCRIPT_DIR/docker/bioaf-update-agent.service" | sudo tee "$service_file" > /dev/null
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$service_name"
-    sudo systemctl start "$service_name"
-    green "Update agent installed and running."
+    return "$status"
 }
 
 build_setup_reexec_cmd() {
@@ -449,10 +667,6 @@ for v in cfg.get('volumes', {}).values():
     # the user end up with a running stack that ships no logs.
     step "Configure Cloud Logging (GCE only, idempotent)" -- ensure_cloud_logging
 
-    # Update agent (idempotent). Required for the in-app self-update
-    # feature to work; without it, backend-triggered updates are a no-op.
-    step "Configure update agent (idempotent)" -- ensure_update_agent
-
     # If a specific version was requested, checkout that tag
     if [ -n "$setup_version" ]; then
         step "Fetch tags from origin" -- git -C "$SCRIPT_DIR" fetch --tags --force
@@ -463,6 +677,12 @@ for v in cfg.get('volumes', {}).values():
         fi
         step "Checkout v${setup_version}" -- git -C "$SCRIPT_DIR" checkout "v${setup_version}"
     fi
+
+    # Update agent (idempotent). Required for the in-app self-update
+    # feature to work; without it, backend-triggered updates are a no-op.
+    # After any checkout, so the unit and agent code installed are the ones
+    # that will run (this script's own functions render the checked-out template).
+    step "Configure update agent (idempotent)" -- ensure_update_agent
 
     # Resolve and pull pre-built images (falls back to building from source).
     # --local-build short-circuits the registry lookup entirely.
@@ -607,6 +827,11 @@ cmd_start() {
     if ! ensure_cloud_logging; then
         red "ERROR: Could not configure Cloud Logging collection; services were not started."
         exit 1
+    fi
+
+    # The update agent is not needed to serve, so a problem with it is reported and start continues.
+    if ! ensure_update_agent; then
+        yellow "WARNING: The update agent could not be configured; in-app updates will not run until this is fixed."
     fi
 
     for svc in db backend frontend nginx; do
@@ -1051,20 +1276,24 @@ get_latest_github_version() {
 }
 
 write_update_status() {
-    # write_update_status <status> <step> [error]; uses _update_from/_update_to.
+    # write_update_status <status> <step> [error]; uses _update_from/_update_to. Published through the
+    # host I/O program shared with the update agent (scripts/update_host_io.py): JSON-encoded, staged
+    # privately and renamed into update-status/ at 0644, never written through a link there.
     local status="$1" step="$2" error="${3:-}" stamp_key="started_at"
-    mkdir -p "$SCRIPT_DIR/update-status"
     [ "$status" = "in_progress" ] || stamp_key="completed_at"
-    local error_json=""
-    [ -n "$error" ] && error_json=", \"error\": \"$(printf '%s' "$error" | sed 's/["\\]/\\&/g')\""
-    printf '{"status": "%s", "from_version": "%s", "to_version": "%s", "step": "%s"%s, "%s": "%s"}\n' \
-        "$status" "$_update_from" "$_update_to" "$step" "$error_json" "$stamp_key" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SCRIPT_DIR/update-status/current.json"
+    local -a fields=(status "$status" from_version "$_update_from" to_version "$_update_to" step "$step")
+    [ -n "$error" ] && fields+=(error "$error")
+    fields+=("$stamp_key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+    if [ -z "$HOST_IO_PY" ]; then
+        red "Could not record the update status: scripts/update_host_io.py was not loaded."
+        return 1
+    fi
+    python3 -I -c "$HOST_IO_PY" write-status "$SCRIPT_DIR" "${fields[@]}"
 }
 
 update_failed() {
     # update_failed <step> <message>: record the failure where the UI and agent read it, then stop.
-    write_update_status failed "$1" "$2"
+    write_update_status failed "$1" "$2" || red "The failure could not be recorded in update-status/current.json."
     red "ERROR: $2"
     exit 1
 }
@@ -1470,6 +1699,8 @@ case "$command" in
     start)        cmd_start ;;
     # Host step the target's install.sh runs during any release's update (plan 22); not in help.
     ensure-cloud-logging) ensure_cloud_logging ;;
+    # Host step setup, start and the target's install.sh run during any release's update (plan 23).
+    ensure-update-agent) ensure_update_agent ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;

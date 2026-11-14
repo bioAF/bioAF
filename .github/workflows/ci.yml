@@ -537,6 +537,36 @@ jobs:
   # This is also the merge gate: the main ruleset requires this one check. It needs every other job in
   # this workflow (held by backend/tests/test_ci_workflow.py) and fails unless each succeeded; the
   # coverage report is still built and posted when one did not.
+  # The update agent's unit reconciliation and activation against real systemd: the runner is a VM
+  # with systemd as PID 1, Docker's unit and passwordless sudo, which tests/shell can only stub.
+  # The script installs and removes its own unit and refuses a host that already has one.
+  update-agent-systemd:
+    name: Update Agent (systemd)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run the update agent against systemd
+        run: |
+          mkdir -p systemd-evidence
+          {
+            systemctl --version | head -1
+            bash --version | head -1
+            python3 --version
+            echo "user: $(whoami):$(id -gn)"
+          } | tee systemd-evidence/environment.txt
+          BIOAF_SYSTEMD_TEST_HOST=disposable tests/integration/update_agent_systemd.sh 2>&1 \
+            | tee systemd-evidence/output.txt
+
+      - name: Upload update agent evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-agent-systemd-evidence
+          path: systemd-evidence/
+          if-no-files-found: warn
+
   coverage-comment:
     name: Coverage Report
     runs-on: ubuntu-latest
@@ -549,6 +579,7 @@ jobs:
       - python-sdk
       - r-sdk
       - shell-tests
+      - update-agent-systemd
       - security-scan
       - docs-lint
     if: always() && github.event_name == 'pull_request'

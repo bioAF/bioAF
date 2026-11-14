@@ -38,6 +38,14 @@
 #     warning and collected for the final summary.
 # ---------------------------------------------------------------------------
 
+# Plain colored lines, shared by both provider installers. ./bioaf and install.sh define the same
+# five themselves (they run without this file), so redefining them here changes nothing for them.
+red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
+dim()    { printf '\033[2m%s\033[0m\n' "$*"; }
+
 # ANSI codes. _IO_ prefix to avoid clashing with caller-defined helpers.
 _IO_RED=$'\033[0;31m'
 _IO_GRN=$'\033[0;32m'

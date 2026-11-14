@@ -41,6 +41,33 @@ cd bioAF
 Open the printed URL in your browser, enter the setup code, and follow the
 wizard to create your admin account and configure the platform.
 
+### Pinned installer versions
+
+The one-liners above run the installer from `main`, and an installer run that
+way downloads its helper files (`installer/*.sh`) from `main` too: a piped
+script cannot tell which URL it came from. To install from a release tag or a
+commit, pass the same ref to the script with `--ref` (or `BIOAF_INSTALLER_REF`):
+
+```bash
+REF=<release tag or commit>
+curl -fsSL "https://raw.githubusercontent.com/bioAF/bioAF/$REF/install-gcp.sh" \
+  | bash -s -- --ref "$REF"
+```
+
+Pinning needs an installer that has `--ref`: releases after v2026.11.22. Earlier
+installers (v2026.11.22 and before) do not know the option, and always download
+their helpers from `main`, so pinning them is not possible.
+
+`main` moves; use a commit when you need the exact same files again. A ref that
+does not exist, or helpers that fail to download completely, stop the
+installer; it never falls back to `main`. A script run from a clone uses the
+helpers beside it and never looks in the current directory.
+
+`--ref` governs only the installer's helper files. The automatic setup it
+offers at the end still clones bioAF on the VM and pulls `main` before running
+`./bioaf setup`; to set up another version there, choose the manual option and
+run `./bioaf setup --version <X.Y.Z>` on the VM.
+
 ## One-Command AWS Setup
 
 To deploy on AWS instead of GCP, use the sibling installer. Run it on your
@@ -67,8 +94,14 @@ VM's attached service account), so no long-lived credentials are stored. The
 script then offers to finish setup on the VM for you, or prints a worksheet so
 you can SSH in and run `./bioaf setup` yourself.
 
-Pass options with the cloned form, e.g. `./install-aws.sh --region us-east-1`
-or `./install-aws.sh --help`. From there, deployment is identical to GCP: open
+Pass options after `bash -s --` in the one-liner, or to the cloned script, e.g.
+`./install-aws.sh --region us-east-1 --ssh-cidr 203.0.113.7/32` (the
+`--option=value` form works too; `--help` lists them). SSH (port 22) is opened
+only to your current public IPv4 address unless you pass `--ssh-cidr`; if that
+address cannot be detected the installer stops before creating anything and
+asks for `--ssh-cidr`. Reusing an existing `bioaf-allow-web` security group
+keeps any SSH rules it already has, and the installer lists broader ones.
+From there, deployment is identical to GCP: open
 the printed URL, enter the setup code, and follow the wizard. Storage (S3) and
 Kubernetes compute (EKS) are provisioned from the Infrastructure page once you
 are in; a few components are still being brought to parity with GCP.
@@ -295,6 +328,54 @@ pinned and running.
 From the UI, admins can click the **Install Update** button on the
 **Settings > Information** page when a new version is available. This
 triggers the same update process through a host-side update agent.
+
+### The update agent
+
+The agent is the `bioaf-update-agent` systemd service. It runs as the
+account that owns the checkout and watches `update-requests/`, which the
+backend container can write. It treats every file there as untrusted: a
+trigger is read once without following links, must be a regular JSON file
+with a `version` like `1.2.3` (optional integer `upgrade_id`, optional
+string `requested_at`), and anything else is removed without running an
+update. Only `./bioaf update <version>` is ever run.
+
+- **Status.** `update-status/current.json` is written by `./bioaf update`
+  and, when the update stopped without recording why, by the agent. Both
+  write a complete JSON record through a private staging directory
+  (`host-state/`, never mounted) and rename it into place at mode 0644; a
+  link planted in `update-status/` is replaced, not followed.
+- **Log.** The agent and the update it runs log to `host-only/agent.log`
+  (directory 0700, file 0600, never mounted). If that log cannot be opened
+  safely (wrong owner, permissions, or a link), they log to the service
+  output instead: `sudo journalctl -u bioaf-update-agent`. The older
+  `update-status/agent.log` is no longer written; you can delete it.
+- **Unit.** `./bioaf setup` (after any `--version` checkout), `./bioaf
+  start` and every update reconcile `/etc/systemd/system/bioaf-update-agent.service`
+  with the release's template, rendered with the checkout path and account.
+  The installed unit starts with `# bioaf-managed: update-agent-unit/v1 sha256=...`.
+  A current unit is left alone; a unit an earlier release wrote for this
+  checkout is replaced after `systemd-analyze verify`, then reloaded,
+  enabled and restarted, and restored if that fails. Any other unit is left
+  unchanged and the step fails, with the candidate saved to
+  `host-only/update-agent-unit-v1.candidate`; add the line
+  `# bioaf-managed: operator` to keep managing it yourself. The checkout
+  path may contain only letters, digits and `. _ / + @ -`.
+- **Restart timing.** A stopped agent is started. A running agent whose
+  code differs from the code on disk is restarted. Before changing anything
+  bioAF pauses the agent (SIGSTOP) and continues only if it was between
+  polls, so no update can start before the restart; every start or restart
+  must leave the agent still running a few seconds later, or the previous
+  unit is restored. If the agent is running an update (for example the
+  update that installs this release), nothing changes then: a transient
+  `bioaf-update-agent-activation` unit, running as the checkout's account,
+  repeats the same steps once that update has finished (outcome:
+  `sudo journalctl -u bioaf-update-agent-activation`). A failure is reported
+  and does not stop `./bioaf start` or an update; `./bioaf setup` stops.
+- **From an older release.** The first update from a release before this
+  one runs that release's agent and updater, so that update's own status
+  and log writes still use the older code. The new release's
+  `install.sh ensure-encryption-key` step schedules the unit and agent
+  update for when that update finishes, so later updates use the new agent.
 
 ### How the database is upgraded
 

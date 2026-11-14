@@ -356,6 +356,19 @@ prepare_host_log_collection() {
     bash "$SCRIPT_DIR/bioaf" ensure-cloud-logging
 }
 
+prepare_update_agent() {
+    # The same hook point delivers this release's update-agent unit and agent code (plan 23), for any
+    # updater: ./bioaf reconciles the unit and restarts the agent, deferring the restart until the
+    # agent is idle when the agent itself is running this update. The services do not depend on the
+    # agent, so a failure is reported and the update continues.
+    [ -f "$SCRIPT_DIR/bioaf" ] || return 0
+    if ! bash "$SCRIPT_DIR/bioaf" ensure-update-agent; then
+        yellow "The update agent could not be brought to this release; the update continues."
+        yellow "Run ./bioaf start on the host to see why and retry."
+    fi
+    return 0
+}
+
 ensure_encryption_key_in_env() {
     if [ ! -f "$ENV_FILE" ]; then
         # Nothing to amend; generate-env hasn't been run. Not an error.
@@ -546,6 +559,7 @@ case "$command" in
         shift
         ensure_encryption_key_in_env "$@"
         prepare_host_log_collection
+        prepare_update_agent
         ;;
     --help|-h)
         usage

@@ -30,7 +30,9 @@
 # Output safety: <dest> and candidate content are never printed. Callback output goes to the
 # terminal only when stdout is one; otherwise it goes to <detail_dir>/<identity>.log (mode 600).
 # <detail_dir> must be host-only: not a directory the backend mounts (update-status, update-requests,
-# backups), because the update agent captures this script's output into update-status/agent.log.
+# backups). Under the update agent this script's output is captured into the agent's private
+# host-only/agent.log, or into the service's stdout/stderr (the journal) when that log is unavailable;
+# neither is web-visible, but raw detail still belongs only in <detail_dir>.
 
 _mf_sha256() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
@@ -89,7 +91,7 @@ managed_file_reconcile() {
         current) MF_OUTCOME=unchanged; rm -f "$rendered"; return 0 ;;
         operator)
             MF_OUTCOME=operator_managed
-            echo "$dest is marked operator-managed; bioAF left it unchanged. It must keep the parser this release expects."
+            echo "$dest is marked operator-managed; bioAF left it unchanged. It must stay compatible with what this release expects."
             rm -f "$rendered"; return 0 ;;
         custom)
             MF_OUTCOME=custom
