@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -88,10 +89,28 @@ class LocalObjectFilesystem:
     # -- metadata records ---------------------------------------------------------------------
 
     def _metadata_path(self, uri: str) -> str:
-        """Where ``uri``'s metadata record lives; the key was already confined by ``_lexical``."""
+        """Where ``uri``'s metadata record lives, confined to the metadata area.
+
+        The segments were checked by ``_lexical``; on disk, the area and every directory below it down to the
+        record must be a real directory (never a link), and an existing record a real file, so no read, write
+        or delete can follow a link out of the store. Missing directories are fine (nothing is recorded yet).
+        """
         container, key = self._parse_uri(uri)
         self._lexical(uri)
-        return os.path.join(self._base(), METADATA_DIR, container, *[seg for seg in key.split("/") if seg])
+        parts = [METADATA_DIR, container, *[seg for seg in key.split("/") if seg]]
+        path = self._base()
+        for depth, part in enumerate(parts):
+            path = os.path.join(path, part)
+            try:
+                info = os.lstat(path)
+            except FileNotFoundError:
+                break
+            last = depth == len(parts) - 1
+            if stat.S_ISLNK(info.st_mode) or (not last and not stat.S_ISDIR(info.st_mode)):
+                raise ValidationError(f"Object metadata for {uri!r} is not inside the store")
+            if last and not stat.S_ISREG(info.st_mode):
+                raise ValidationError(f"Object metadata for {uri!r} is not inside the store")
+        return os.path.join(self._base(), *parts)
 
     def _clear_metadata(self, uri: str) -> None:
         try:
@@ -105,6 +124,7 @@ class LocalObjectFilesystem:
         path = self._metadata_path(uri)
         top = os.path.join(self._base(), METADATA_DIR)
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        path = self._metadata_path(uri)  # nothing was swapped for a link while the directories were made
         os.chmod(top, 0o700)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")  # 0600 whatever the umask
         try:
@@ -121,10 +141,13 @@ class LocalObjectFilesystem:
     def read_metadata(self, uri: str) -> dict[str, str]:
         self._file(uri)
         try:
-            with open(self._metadata_path(uri)) as f:
-                data = json.load(f)
+            fd = os.open(self._metadata_path(uri), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         except FileNotFoundError:
             return {}
+        except OSError as exc:  # a link appeared after the check (ELOOP)
+            raise ValidationError(f"Object metadata for {uri!r} is not inside the store") from exc
+        with os.fdopen(fd) as f:
+            data = json.load(f)
         return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
     def _file(self, uri: str) -> str:
@@ -211,6 +234,7 @@ class LocalObjectFilesystem:
 
     def delete(self, uri: str) -> None:
         """Remove the object; idempotent. A symlink is unlinked itself, never its target."""
+        self._metadata_path(uri)  # refuse before anything is removed if the record is not confined
         lexical = self._lexical(uri)
         self.path(uri)  # containment of what the link points at, too
         if os.path.islink(lexical) or os.path.isfile(lexical):

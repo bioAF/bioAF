@@ -253,3 +253,58 @@ async def test_os_umask_does_not_widen_the_record(local_store, monkeypatch):
         os.umask(old)
     files = [p for p in root.rglob("*") if METADATA_DIR in p.parts and p.is_file()]
     assert files and all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in files)
+
+
+# --- confinement of the metadata area (review finding 1) ---------------------------------------------------
+
+
+def _metadata_root(root) -> "os.PathLike":
+    import pathlib
+
+    found = [p for p in pathlib.Path(root).rglob(METADATA_DIR)]
+    return found[0] if found else None
+
+
+@pytest.mark.parametrize("where", ["container", "key-dir", "area"])
+async def test_a_symlink_in_the_metadata_area_never_reaches_outside_the_root(local_store, tmp_path, where):
+    """Reads, writes and deletes of metadata refuse a link out of the store, and touch nothing outside."""
+    import pathlib
+
+    adapter, root = local_store
+    uri = _uri(adapter, "postgres/a.dump")
+    await adapter.upload_file(uri, io.BytesIO(b"x"), metadata=MARK)
+    meta_root = _metadata_root(root)
+    outside = tmp_path.parent / f"outside-{where}-{tmp_path.name}"
+    (outside / "postgres").mkdir(parents=True)
+    victim = outside / "postgres" / "a.dump"
+    victim.write_text('{"bioaf-sha256": "planted"}')
+    if where == "container":
+        target = meta_root / "bk"
+        import shutil
+
+        shutil.rmtree(target)
+        target.symlink_to(outside)
+    elif where == "key-dir":
+        target = meta_root / "bk" / "postgres"
+        import shutil
+
+        shutil.rmtree(target)
+        target.symlink_to(outside / "postgres")
+    else:
+        import shutil
+
+        shutil.rmtree(meta_root)
+        bk = outside / "bk"
+        bk.mkdir()
+        (bk / "postgres").mkdir()
+        (bk / "postgres" / "a.dump").write_text('{"bioaf-sha256": "planted"}')
+        victim = bk / "postgres" / "a.dump"
+        pathlib.Path(meta_root).symlink_to(outside)
+
+    with pytest.raises(ValidationError):
+        await adapter.get_object_metadata(uri)
+    with pytest.raises(ValidationError):
+        await adapter.delete(uri)
+    with pytest.raises(ValidationError):
+        await adapter.upload_file(uri, io.BytesIO(b"y"), metadata=MARK)
+    assert victim.read_text() == '{"bioaf-sha256": "planted"}'
