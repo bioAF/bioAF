@@ -1,0 +1,41 @@
+# The backend image's build context (docker/Dockerfile.backend copies pyproject.toml, uv.lock, entrypoint.sh,
+# app/, alembic/ and terraform/). .gitignore does not apply to a Docker build: anything here that is not
+# excluded is sent to the builder, and anything under a copied directory lands in the image. Proven by
+# backend/tests/test_image_contents.py and the Build workflow.
+
+# Local environments and caches: the image installs its own from uv.lock.
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+test-artifacts/
+
+# Terraform working state. Module sources and their committed .terraform.lock.hcl stay in.
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.tfvars
+
+# Local environment, credentials and data. No .env file is a build input.
+**/.env
+**/.env.*
+**/*credentials*.json
+**/service-account*.json
+**/*.pem
+**/*.key
+**/*.dump
+**/*.sql.gz
+
+# Editor and OS clutter.
+.git/
+.DS_Store
+**/.DS_Store
+
+# Not image inputs.
+tests/

@@ -8,16 +8,27 @@ on:
       - "frontend/**"
       - "docker/Dockerfile*"
       - "docker/docker-compose*"
+      - "scripts/ci/check_image_contents.py"
 
 permissions:
   contents: read
 
+# Each build first plants synthetic sentinel files at paths its .dockerignore must exclude (.env files,
+# Terraform state, dumps, local caches), then proves none of them reached the build context, a builder stage, or
+# any layer of the image (scripts/ci/check_image_contents.py). The sentinels hold a random token and nothing else.
 jobs:
   build-backend:
     name: Build Backend Image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Plant synthetic sentinels
+        id: sentinel
+        run: |
+          token="bioaf-sentinel-$(openssl rand -hex 12)"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci/check_image_contents.py plant backend --kind backend --token "$token"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -28,9 +39,22 @@ jobs:
           context: ./backend
           file: docker/Dockerfile.backend
           push: false
+          load: true
           tags: bioaf/bioaf-backend:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
+
+      - name: Check the build context and image layers
+        env:
+          TOKEN: ${{ steps.sentinel.outputs.token }}
+          IMAGE: bioaf/bioaf-backend:pr-${{ github.event.pull_request.number }}
+        run: |
+          status=0
+          python3 scripts/ci/check_image_contents.py context backend --dockerfile docker/Dockerfile.backend \
+            --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
+          python3 scripts/ci/check_image_contents.py image "$IMAGE" --root app \
+            --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
+          exit $status
 
   build-frontend:
     name: Build Frontend Image
@@ -38,8 +62,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Plant synthetic sentinels
+        id: sentinel
+        run: |
+          token="bioaf-sentinel-$(openssl rand -hex 12)"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci/check_image_contents.py plant frontend --kind frontend --token "$token"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # The builder stage runs npm ci and COPY . .; a clean final stage alone would not show what it received.
+      - name: Build the builder stage
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: docker/Dockerfile.frontend
+          target: builder
+          push: false
+          load: true
+          build-args: NEXT_PUBLIC_API_URL=
+          tags: bioaf/bioaf-frontend-builder:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha,scope=frontend
 
       - name: Build image (no push)
         uses: docker/build-push-action@v6
@@ -47,7 +91,22 @@ jobs:
           context: ./frontend
           file: docker/Dockerfile.frontend
           push: false
+          load: true
           build-args: NEXT_PUBLIC_API_URL=
           tags: bioaf/bioaf-frontend:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Check the build context, builder stage and image layers
+        env:
+          TOKEN: ${{ steps.sentinel.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          status=0
+          python3 scripts/ci/check_image_contents.py context frontend --dockerfile docker/Dockerfile.frontend \
+            --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
+          for image in "bioaf/bioaf-frontend-builder:pr-$PR" "bioaf/bioaf-frontend:pr-$PR"; do
+            python3 scripts/ci/check_image_contents.py image "$image" --root app \
+              --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
+          done
+          exit $status
