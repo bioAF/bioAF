@@ -198,14 +198,16 @@ class BoundedFile:
 
     Extent is the high-water mark ``max(previous, offset + length)``; only positive growth is
     charged, so rewriting a range (an SDK retry) costs nothing and a write past the end charges the
-    hole too. Growth the budget refuses never reaches the disk. ``discard`` deletes the file and
+    hole too. Growth the budget refuses, or past ``max_extent`` (a source file's share of the source
+    ceiling), never reaches the disk. ``discard`` deletes the file and
     returns its extent. Writes from the SDK's I/O thread and the archive worker are serialized
     per file by its lock; the budget is shared and thread-safe.
     """
 
-    def __init__(self, path: str | os.PathLike, budget: ScratchBudget):
+    def __init__(self, path: str | os.PathLike, budget: ScratchBudget, *, max_extent: int | None = None):
         self.path = Path(path)
         self._budget = budget
+        self._max_extent = max_extent
         self._lock = threading.Lock()
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
         self._file = os.fdopen(fd, "w+b", buffering=0)
@@ -216,6 +218,16 @@ class BoundedFile:
     @property
     def extent(self) -> int:
         return self._extent
+
+    def _grow_to(self, end: int) -> None:
+        """Charge growth to ``end``, refusing an extent past this file's own allowance first."""
+        if self._max_extent is not None and end > self._max_extent:
+            raise ExportLimitError(
+                f"This export is larger than {_gib(MAX_SOURCE_BYTES)}, the most one export can hold "
+                "(its stored files are larger than the catalogue records). Export a smaller scope.",
+                details={"limit_bytes": MAX_SOURCE_BYTES},
+            )
+        self._budget.charge(end - self._extent)
 
     def writable(self) -> bool:
         return True
@@ -238,7 +250,7 @@ class BoundedFile:
         view = memoryview(data)
         with self._lock:
             end = self._file.tell() + len(view)
-            self._budget.charge(end - self._extent)
+            self._grow_to(end)
             self._extent = max(self._extent, end)
             written = 0
             while written < len(view):
@@ -248,7 +260,7 @@ class BoundedFile:
     def truncate(self, size: int | None = None) -> int:
         with self._lock:
             size = self._file.tell() if size is None else size
-            self._budget.charge(size - self._extent)
+            self._grow_to(size)
             result = self._file.truncate(size)
             if size < self._extent:
                 self._budget.refund(self._extent - size)

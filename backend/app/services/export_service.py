@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.exceptions import DomainError, ExportContentUnavailableError, ExportTimeoutError, NotFoundError
 from app.services.data_export import naming, resources, selection
-from app.services.data_export.archive import ArchivePlan, ExportJob
+from app.services.data_export.archive import ArchivePlan, ExportJob, check_available
 from app.services.data_export.selection import ExperimentContent, ProjectContent
 from app.services.provenance.report_service import ProvenanceReportService
 
@@ -50,9 +50,7 @@ async def estimate_experiment_export(
     include_fastq: bool = False,
 ) -> dict | None:
     """Return total_bytes and per-category breakdown for an experiment export."""
-    content = await selection.select_experiment(
-        session, experiment_id, org_id, include_fastq=include_fastq, manifests=False
-    )
+    content = await selection.select_experiment(session, experiment_id, org_id, include_fastq=include_fastq)
     return None if content is None else selection.experiment_estimate(content)
 
 
@@ -66,7 +64,7 @@ async def estimate_project_export(
 
     Files in the project but in none of its experiments count toward the totals without a row.
     """
-    content = await selection.select_project(session, project_id, org_id, include_fastq=include_fastq, manifests=False)
+    content = await selection.select_project(session, project_id, org_id, include_fastq=include_fastq)
     return None if content is None else selection.project_estimate(content)
 
 
@@ -84,13 +82,26 @@ class PreparedExport:
     filename: str
     # Set when a response starts streaming it; from then on the response alone releases it.
     claimed: bool = False
+    # The timer that releases it if no response ever starts; cancelled once that cannot happen.
+    backstop: asyncio.Task | None = None
 
     @property
     def path(self) -> str:
         return str(self.job.archive_path)
 
+    def _stop_backstop(self) -> None:
+        if self.backstop is not None and self.backstop is not asyncio.current_task():
+            self.backstop.cancel()
+        self.backstop = None
+
+    def claim(self) -> None:
+        """A response started streaming this export and now owns its release."""
+        self.claimed = True
+        self._stop_backstop()
+
     def release(self) -> None:
         self.job.release()
+        self._stop_backstop()
 
 
 async def prepare_experiment_export(
@@ -108,15 +119,14 @@ async def prepare_experiment_export(
     )
     if content is None:
         raise NotFoundError(f"Experiment {experiment_id} not found")
-    plan = ArchivePlan()
-    _plan_experiment(plan, content, content.root, user_email, include_fastq, include_provenance)
 
-    async def reports() -> None:
-        if include_provenance:
-            plan.add_generated(*await _provenance(session, "experiment", content.id, org_id, user_email, content.root))
+    async def plan(archive: ArchivePlan) -> None:
+        await _plan_experiment(
+            session, archive, content, content.root, org_id, user_email, include_fastq, include_provenance
+        )
 
     return await _prepare(
-        session, plan, list(content.files), include_fastq, reports, _filename(content.name, "experiment"), started
+        session, list(content.files), include_fastq, plan, _filename(content.name, "experiment"), started
     )
 
 
@@ -135,40 +145,37 @@ async def prepare_project_export(
     )
     if content is None:
         raise NotFoundError(f"Project {project_id} not found")
-    plan = ArchivePlan()
     root = content.root
-    plan.add_generated(f"{root}/README.txt", _build_project_readme(content, user_email))
-    for experiment in content.experiments:
-        _plan_experiment(
-            plan, experiment, f"{root}/experiments/{experiment.root}", user_email, include_fastq, include_provenance
-        )
-    for file in content.files:
-        plan.add_file(root, file)
 
-    async def reports() -> None:
-        if not include_provenance:
-            return
+    async def plan(archive: ArchivePlan) -> None:
+        archive.add_generated(f"{root}/README.txt", _build_project_readme(content, user_email))
         for experiment in content.experiments:
             exp_root = f"{root}/experiments/{experiment.root}"
-            plan.add_generated(*await _provenance(session, "experiment", experiment.id, org_id, user_email, exp_root))
-        plan.add_generated(*await _provenance(session, "project", content.id, org_id, user_email, root))
+            await _plan_experiment(
+                session, archive, experiment, exp_root, org_id, user_email, include_fastq, include_provenance
+            )
+        for file in content.files:
+            archive.add_file(root, file)
+        if include_provenance:
+            archive.add_generated(*await _provenance(session, "project", content.id, org_id, user_email, root))
 
     return await _prepare(
-        session, plan, list(content.all_files), include_fastq, reports, _filename(content.name, "project"), started
+        session, list(content.all_files), include_fastq, plan, _filename(content.name, "project"), started
     )
 
 
-async def _prepare(
-    session: AsyncSession, plan: ArchivePlan, files, include_fastq: bool, reports, filename: str, started: float
-) -> PreparedExport:
+async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, filename: str, started: float):
+    """Refuse what cannot succeed, admit, then plan (manifests, reports) and build under the deadline."""
     from app.adapters.registry import get_storage_adapter
 
     sizes = [f.size_bytes for f in files]
     resources.check_source_limits(sizes, fastq_omitted=not include_fastq)
+    check_available(files)
     job = ExportJob.admit(sizes, scratch_dir=settings.export_scratch_dir)
+    archive = ArchivePlan()
     try:
         async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
-            await reports()
+            await plan(archive)
         # Nothing below needs the database until the audit: end the read transaction rather than
         # hold a pooled connection idle through a build that may take many minutes.
         await session.commit()
@@ -179,22 +186,27 @@ async def _prepare(
         job.release()
         raise
     remaining = started + resources.BUILD_DEADLINE - asyncio.get_running_loop().time()
-    size = await job.build(plan, get_storage_adapter(), deadline=max(remaining, 0))
+    size = await job.build(archive, get_storage_adapter(), deadline=max(remaining, 0))
     return PreparedExport(job=job, size=size, filename=filename)
 
 
-def _plan_experiment(
-    plan: ArchivePlan,
+async def _plan_experiment(
+    session: AsyncSession,
+    archive: ArchivePlan,
     content: ExperimentContent,
     root: str,
+    org_id: int,
     user_email: str,
     include_fastq: bool,
     include_provenance: bool,
 ) -> None:
-    plan.add_generated(f"{root}/README.txt", _build_readme(content, user_email, include_fastq, include_provenance))
-    plan.add_generated(f"{root}/sample_manifest.csv", content.sample_manifest)
+    archive.add_generated(f"{root}/README.txt", _build_readme(content, user_email, include_fastq, include_provenance))
+    manifest = await selection.write_sample_manifest(session, content.id, limit_bytes=archive.generated_remaining)
+    archive.add_generated(f"{root}/sample_manifest.csv", manifest)
     for file in content.files:
-        plan.add_file(root, file)
+        archive.add_file(root, file)
+    if include_provenance:
+        archive.add_generated(*await _provenance(session, "experiment", content.id, org_id, user_email, root))
 
 
 async def _provenance(

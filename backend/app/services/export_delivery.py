@@ -28,32 +28,41 @@ SIGNED_MAX_TTL_SECONDS = 24 * 3600
 EXPORT_PREFIX = "exports"
 
 
+# Time allowed between issuing a link and handing it over (the audit commit and the response).
+HANDOFF_SECONDS = 60
+
+TOO_SHORT = (
+    "A download link could not be issued for long enough right now. Try again later, or download the export directly."
+)
+
+
 @dataclass(frozen=True)
 class IssuedLink:
     uri: str
     url: str
     expires_at: datetime
-    issued_at: datetime
 
-    @property
+    def remaining_seconds(self) -> float:
+        return (self.expires_at - datetime.now(timezone.utc)).total_seconds()
+
     def expires_in_hours(self) -> float:
-        """The lifetime from issuance in hours, rounded down to 0.01 h so it is never overstated."""
-        seconds = min((self.expires_at - self.issued_at).total_seconds(), SIGNED_MAX_TTL_SECONDS)
+        """The link's remaining lifetime now, in hours, rounded down to 0.01 h: never overstated."""
+        seconds = min(self.remaining_seconds(), SIGNED_MAX_TTL_SECONDS)
         return math.floor(max(seconds, 0) / 36) / 100
+
+    def handoff_deadline(self) -> float:
+        """The event-loop time by which the link must be handed over to still meet the minimum."""
+        return asyncio.get_running_loop().time() + self.remaining_seconds() - _min_ttl()
 
 
 def _min_ttl() -> int:
     return settings.export_signed_min_ttl_seconds
 
 
-def ensure_usable(link: IssuedLink) -> None:
-    """Refuse a link that would not stay usable for the minimum lifetime from now."""
-    remaining = (link.expires_at - datetime.now(timezone.utc)).total_seconds()
-    if remaining < _min_ttl():
-        raise StorageUnavailableError(
-            "A download link could not be issued for long enough right now. Try again later, or download the "
-            "export directly."
-        )
+def ensure_usable(link: IssuedLink, *, handoff: float = 0) -> None:
+    """Refuse a link that would not stay usable for the minimum (plus ``handoff``) from now."""
+    if link.remaining_seconds() < _min_ttl() + handoff:
+        raise StorageUnavailableError(TOO_SHORT)
 
 
 async def check_signing_available() -> None:
@@ -69,27 +78,35 @@ def export_key(org_id: int) -> str:
 
 
 async def issue_signed_link(prepared, *, org_id: int) -> IssuedLink:
+    """Upload and sign; the archive stays owned by ``prepared`` until its upload worker settles."""
     from app.adapters.registry import get_storage_adapter
 
     adapter = get_storage_adapter()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
     uri = await adapter.resolve_uri(StorageStore.CONFIG_BACKUPS, export_key(org_id))
     try:
-        async with asyncio.timeout(resources.ISSUE_DEADLINE):
-            await adapter.upload_filename(uri, prepared.path, content_type="application/zip")
-            issued_at = datetime.now(timezone.utc)
+        await prepared.job.upload(adapter, uri, deadline=resources.ISSUE_DEADLINE, undo=lambda: _delete(uri))
+    except (DomainError, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.error("Export upload failed (%s)", type(exc).__name__)
+        raise StorageUnavailableError("The export could not be uploaded for a download link. Try again later.") from exc
+    try:
+        async with asyncio.timeout_at(started + resources.ISSUE_DEADLINE):
             signed = await adapter.sign_download(
                 uri, max_ttl_seconds=SIGNED_MAX_TTL_SECONDS, min_ttl_seconds=_min_ttl()
             )
-        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at, issued_at=issued_at)
-        ensure_usable(link)
+        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at)
+        ensure_usable(link, handoff=HANDOFF_SECONDS)
     except BaseException as exc:
         await runtime.shielded(_delete(uri), role="data-export-withdraw")
         if isinstance(exc, (DomainError, asyncio.CancelledError)):
             raise
         if isinstance(exc, TimeoutError):
-            raise StorageUnavailableError("Uploading the export took too long. Try again later.") from exc
-        logger.error("Export upload or signing failed (%s)", type(exc).__name__)
-        raise StorageUnavailableError("The export could not be uploaded for a download link. Try again later.") from exc
+            raise StorageUnavailableError("Signing the download link took too long. Try again later.") from exc
+        logger.error("Export link signing failed (%s)", type(exc).__name__)
+        raise StorageUnavailableError("A download link could not be signed. Try again later.") from exc
     return link
 
 
@@ -116,4 +133,5 @@ def watch_unclaimed(prepared) -> None:
             logger.warning("A prepared data export was never sent; releasing it")
             prepared.release()
 
-    runtime.spawn(backstop(), role="data-export-backstop")
+    if not prepared.claimed:
+        prepared.backstop = runtime.spawn(backstop(), role="data-export-backstop")

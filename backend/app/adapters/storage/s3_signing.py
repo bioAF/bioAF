@@ -16,8 +16,11 @@ If the remaining validity cannot cover the required lifetime, the shim refreshes
 re-checks; a provider that returns the same short credentials, a failed refresh, an unknown expiry
 on a session token, or missing internals all refuse with ``StorageUnavailableError``. Nothing
 retries or waits for rotation. botocore's IMDS cache-expiration extension can make a nearly expired
-credential report up to ~20 minutes of validity; that is far below the 1 h minimum, so it can only
-cause a refusal, never an over-long link. Credentials never leave the adapter or reach a log.
+credential report up to ``EXTENSION_CEILING_SECONDS`` of validity that the provider never promised.
+That expiry is indistinguishable here from a genuine one, so refreshable credentials must show more
+than the ceiling remaining whatever minimum is configured: below it the shim refuses rather than
+advertise a lifetime it cannot vouch for. (At the default 1 h minimum this changes nothing.)
+Credentials never leave the adapter or reach a log.
 """
 
 from __future__ import annotations
@@ -35,6 +38,9 @@ TESTED_BOTOCORE_VERSION = "1.43.126"
 SAFETY_MARGIN_SECONDS = 60
 # Signing, the audit commit and the response all happen inside this, after the expiry is measured.
 HANDOFF_SECONDS = 60
+# botocore's IMDS fetcher stretches a nearly expired credential to now + refresh window (default
+# 10 min) + jitter (up to 10 min). Remaining validity at or under this is never trusted.
+EXTENSION_CEILING_SECONDS = 20 * 60
 
 _REFUSED = (
     "Download links are not available right now: the server's storage credentials are close to "
@@ -86,6 +92,7 @@ def signing_snapshot(credentials, *, required_seconds: float) -> SigningSnapshot
             raise StorageUnavailableError(_REFUSED)
         return SigningSnapshot(frozen.access_key, frozen.secret_key, None, None)
 
+    required_seconds = max(required_seconds, EXTENSION_CEILING_SECONDS + SAFETY_MARGIN_SECONDS)
     lock = getattr(credentials, "_refresh_lock", None)
     refresh = getattr(credentials, "_protected_refresh", None)
     if lock is None or refresh is None or not hasattr(credentials, "_expiry_time"):

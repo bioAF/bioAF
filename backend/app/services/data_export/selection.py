@@ -65,7 +65,6 @@ class ExperimentContent:
     uuid: uuid.UUID
     name: str
     status: str | None
-    sample_manifest: str
     files: tuple[SelectedFile, ...]
 
     @property
@@ -150,15 +149,35 @@ def build_sample_manifest(samples: list[Sample]) -> str:
     return buf.getvalue()
 
 
-async def _manifest(session: AsyncSession, experiment_id: int, wanted: bool) -> str:
-    if not wanted:
-        return ""
-    samples = (
-        (await session.execute(select(Sample).where(Sample.experiment_id == experiment_id).order_by(Sample.id)))
-        .scalars()
-        .all()
-    )
-    return build_sample_manifest(list(samples))
+async def write_sample_manifest(session: AsyncSession, experiment_id: int, *, limit_bytes: int) -> bytes:
+    """The experiment's sample manifest, read in batches and refused once it passes ``limit_bytes``.
+
+    Byte-identical to ``build_sample_manifest`` over the same samples; never holds more than the
+    limit plus one batch.
+    """
+    from app.exceptions import ExportLimitError
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_MANIFEST_FIELDS, extrasaction="ignore")
+    rows = 0
+    query = select(Sample).where(Sample.experiment_id == experiment_id).order_by(Sample.id)
+    async for sample in await session.stream_scalars(query.execution_options(yield_per=500)):
+        if rows == 0:
+            writer.writeheader()
+        writer.writerow({f: getattr(sample, f, None) for f in _MANIFEST_FIELDS})
+        rows += 1
+        if buf.tell() > limit_bytes:
+            raise ExportLimitError(
+                "This export's sample manifests and reports are too large to include. "
+                "Export one experiment at a time, or without the provenance report.",
+            )
+    data = (buf.getvalue() if rows else build_sample_manifest([])).encode("utf-8")
+    if len(data) > limit_bytes:
+        raise ExportLimitError(
+            "This export's sample manifests and reports are too large to include. "
+            "Export one experiment at a time, or without the provenance report.",
+        )
+    return data
 
 
 async def _experiment_row(session: AsyncSession, experiment_id: int, org_id: int) -> Experiment | None:
@@ -176,12 +195,11 @@ async def select_experiment(
     *,
     include_fastq: bool,
     limit: int | None = None,
-    manifests: bool = True,
 ) -> ExperimentContent | None:
     """The experiment's content, or None when the organization has no such experiment.
 
-    ``limit`` bounds the files read (an export passes one past its count ceiling); an estimate
-    passes ``manifests=False`` because it needs no sample manifest.
+    ``limit`` bounds the files read (an export passes one past its count ceiling). Sample manifests
+    are not read here: an export writes them after admission (``write_sample_manifest``).
     """
     experiment = await _experiment_row(session, experiment_id, org_id)
     if experiment is None:
@@ -192,7 +210,6 @@ async def select_experiment(
         uuid=experiment.uuid,
         name=experiment.name,
         status=experiment.status,
-        sample_manifest=await _manifest(session, experiment.id, manifests),
         files=tuple(files),
     )
 
@@ -204,7 +221,6 @@ async def select_project(
     *,
     include_fastq: bool,
     limit: int | None = None,
-    manifests: bool = True,
 ) -> ProjectContent | None:
     """The project's content with each file assigned once, or None for an unknown project."""
     project = (
@@ -271,7 +287,6 @@ async def select_project(
                 uuid=e.uuid,
                 name=e.name,
                 status=e.status,
-                sample_manifest=await _manifest(session, e.id, manifests),
                 files=tuple(assigned.get(e.id, [])),
             )
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal
 
@@ -14,6 +15,7 @@ from app.api.dependencies import require_permission
 from app.api.streaming_responses import GuardedFileResponse
 from app.config import settings
 from app.database import get_session
+from app.exceptions import StorageUnavailableError
 from app.services import export_service, export_delivery
 from app.services.audit_service import log_action
 from app.services.data_export import resources
@@ -132,22 +134,27 @@ async def _deliver(session, current_user, entity_type, entity_id, body, prepared
         if body.delivery_method == "gcs":
             link = await export_delivery.issue_signed_link(prepared, org_id=int(current_user["org_id"]))
             try:
-                await _audit(
-                    session,
-                    current_user,
-                    entity_type,
-                    entity_id,
-                    body,
-                    stage="link_issued",
-                    archive_bytes=prepared.size,
-                    link_expires_at=link.expires_at.isoformat(),
-                )
-                await session.commit()
-            except BaseException:
+                # The commit must finish while the link can still meet the minimum lifetime.
+                async with asyncio.timeout_at(link.handoff_deadline()):
+                    await _audit(
+                        session,
+                        current_user,
+                        entity_type,
+                        entity_id,
+                        body,
+                        stage="link_issued",
+                        archive_bytes=prepared.size,
+                        link_expires_at=link.expires_at.isoformat(),
+                    )
+                    await session.commit()
+                export_delivery.ensure_usable(link)
+            except BaseException as exc:
                 await export_delivery.withdraw(link)
+                if isinstance(exc, TimeoutError):
+                    raise StorageUnavailableError(export_delivery.TOO_SHORT) from None
                 raise
             prepared.release()
-            return {"signed_url": link.url, "expires_in_hours": link.expires_in_hours}
+            return {"signed_url": link.url, "expires_in_hours": link.expires_in_hours()}
 
         async def finished(outcome: str | None) -> None:
             prepared.release()
@@ -160,7 +167,7 @@ async def _deliver(session, current_user, entity_type, entity_id, body, prepared
             filename=prepared.filename,
             media_type="application/zip",
             on_close=finished,
-            on_start=lambda: setattr(prepared, "claimed", True),
+            on_start=prepared.claim,
             stall_seconds=settings.export_transfer_stall_seconds,
             deadline_seconds=resources.TRANSFER_DEADLINE,
         )

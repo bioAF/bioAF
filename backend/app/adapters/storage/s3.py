@@ -503,11 +503,14 @@ class S3StorageProvider(StorageProvider):
         return await asyncio.to_thread(self._s3_sign_download, uri, max_ttl_seconds, min_ttl_seconds)
 
     async def check_signed_download(self, *, min_ttl_seconds: int) -> None:
-        await asyncio.to_thread(
-            s3_signing.signing_snapshot,
-            self._signing_credentials(),
-            required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
-        )
+        def check() -> None:
+            # Credential discovery may be an IMDS or SSO round trip: it runs in the thread too.
+            s3_signing.signing_snapshot(
+                self._signing_credentials(),
+                required_seconds=min_ttl_seconds + s3_signing.SAFETY_MARGIN_SECONDS + s3_signing.HANDOFF_SECONDS,
+            )
+
+        await asyncio.to_thread(check)
 
     async def create_resumable_upload_url(
         self,

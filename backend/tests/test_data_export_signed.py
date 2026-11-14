@@ -117,12 +117,13 @@ async def test_the_advertised_lifetime_is_the_links_real_lifetime(client, sessio
 
 
 @pytest.mark.asyncio
-async def test_a_full_day_link_reads_as_twenty_four_hours(client, session, admin_user, headers, store):
+async def test_a_full_day_link_is_advertised_by_its_remaining_lifetime(client, session, admin_user, headers, store):
+    """Measured when the response is built, rounded down: never more than what is left."""
     await _seed(session, admin_user.organization_id)
 
     resp = await _signed(client, headers)
 
-    assert resp.json()["expires_in_hours"] == 24
+    assert resp.json()["expires_in_hours"] == 23.99
 
 
 @pytest.mark.asyncio

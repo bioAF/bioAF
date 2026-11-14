@@ -67,6 +67,13 @@ def _unavailable(file: SelectedFile) -> ExportContentUnavailableError:
     )
 
 
+def check_available(files) -> None:
+    """Refuse, before admission, a selection holding a file whose stored bytes are known gone."""
+    for file in files:
+        if file.storage_deleted or not file.storage_uri:
+            raise _unavailable(file)
+
+
 class ArchivePlan:
     """The archive's members, each name claimed once, within the entry and generated-size limits."""
 
@@ -94,6 +101,10 @@ class ArchivePlan:
             )
         self.members.append(GeneratedMember(self._claim(name), data))
 
+    @property
+    def generated_remaining(self) -> int:
+        return max(resources.GENERATED_ALLOWANCE - self.generated_bytes, 0)
+
     def add_file(self, root: str, file: SelectedFile) -> None:
         if file.storage_deleted or not file.storage_uri:
             raise _unavailable(file)
@@ -110,8 +121,33 @@ def _copy_into_archive(archive: zipfile.ZipFile, name: str, source: Path | None,
                 entry.write(chunk)
 
 
+class CancellableReader:
+    """A read-only view of the archive that stops an upload at its next read once the job is abandoned."""
+
+    def __init__(self, raw, budget: ScratchBudget):
+        self._raw = raw
+        self._budget = budget
+
+    def read(self, size: int = -1) -> bytes:
+        if self._budget.cancelled:
+            raise ExportCancelled()
+        return self._raw.read(size)
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._raw.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._raw.tell()
+
+
 class ExportJob:
-    """One admitted export: its slot lease, budget, scratch directory and build task."""
+    """One admitted export: its slot lease, budget, scratch directory and its current worker task."""
 
     def __init__(self, lease: SlotLease, budget: ScratchBudget, workdir: Path):
         self._lease = lease
@@ -151,16 +187,14 @@ class ExportJob:
                 if isinstance(member, GeneratedMember):
                     await asyncio.to_thread(_copy_into_archive, archive, member.name, None, member.content)
                     continue
-                staging = BoundedFile(self.workdir / f"source-{index}", self.budget)
+                staging = BoundedFile(
+                    self.workdir / f"source-{index}",
+                    self.budget,
+                    max_extent=resources.MAX_SOURCE_BYTES - source_bytes,
+                )
                 try:
                     await self._download(adapter, member.file, staging)
                     source_bytes += staging.extent
-                    if source_bytes > resources.MAX_SOURCE_BYTES:
-                        raise ExportLimitError(
-                            "This export is larger than 2 GiB, the most one export can hold "
-                            "(the stored files are larger than the catalogue records).",
-                            details={"limit_bytes": resources.MAX_SOURCE_BYTES},
-                        )
                     staging.close()
                     await asyncio.to_thread(_copy_into_archive, archive, member.name, staging.path, None)
                 finally:
@@ -189,10 +223,13 @@ class ExportJob:
                 f"The stored contents of {file.filename!r} could not be read right now. Try again later."
             ) from exc
 
-    async def _run(self, plan: ArchivePlan, adapter) -> tuple[int | None, Exception | None]:
+    async def _run(self, work, undo) -> tuple[object, Exception | None]:
         # An expected failure is returned, not raised: the task owner logs raised errors as crashes.
+        succeeded = False
         try:
-            return await self._build(plan, adapter), None
+            result = await work()
+            succeeded = True
+            return result, None
         except Exception as exc:
             self.budget.cancel()
             return None, exc
@@ -200,21 +237,29 @@ class ExportJob:
             self.budget.cancel()
             raise
         finally:
+            if self._abandoned and succeeded and undo is not None:
+                await undo()  # nobody will hand this result over: retract what it published
             self._worker_done = True
             if self._abandoned:
                 self.release()
 
-    async def build(self, plan: ArchivePlan, adapter, *, deadline: float = resources.BUILD_DEADLINE) -> int:
-        """Build the archive and return its size; any failure releases the job before raising."""
+    async def _owned(self, work, *, role: str, deadline: float, timeout_message: str, undo=None):
+        """Run ``work`` as the job's one owned worker and wait for it, within ``deadline``.
+
+        Any failure, timeout or cancellation abandons the job: its worker settles (or keeps the
+        scratch and slot until it does, then retracts its result with ``undo``) and the job is
+        released. The caller never releases scratch under a running worker.
+        """
         owner = runtime.current_owner()
         try:
             stop_watch = _watch_shutdown(owner, self.budget)
-            coro = self._run(plan, adapter)
+            coro = self._run(work, undo)
+            self._worker_done = False
             # Not cancellable: abandoning cancels the budget instead, so workers settle before cleanup.
             if owner is not None:
-                self._task = owner.spawn(coro, role="data-export", cancellable=False)
+                self._task = owner.spawn(coro, role=role, cancellable=False)
             else:
-                self._task = runtime.spawn(coro, role="data-export")
+                self._task = runtime.spawn(coro, role=role)
         except BaseException:
             self.release()  # nothing started (the owner is shutting down)
             raise
@@ -223,12 +268,10 @@ class ExportJob:
             done, _ = await asyncio.wait({self._task}, timeout=deadline)
             if not done:
                 raise TimeoutError
-            size, failure = self._task.result()
+            result, failure = self._task.result()
         except TimeoutError:
             await runtime.shielded(self.abandon(), role="data-export-cleanup")
-            raise ExportTimeoutError(
-                "The export took too long to prepare and was stopped. Try a smaller export."
-            ) from None
+            raise ExportTimeoutError(timeout_message) from None
         except BaseException:
             await runtime.shielded(self.abandon(), role="data-export-cleanup")
             raise
@@ -237,7 +280,38 @@ class ExportJob:
         if failure is not None:
             await self.abandon()
             raise failure
-        return size  # type: ignore[return-value]
+        return result
+
+    async def build(self, plan: ArchivePlan, adapter, *, deadline: float = resources.BUILD_DEADLINE) -> int:
+        """Build the archive and return its size; any failure releases the job before raising."""
+        return await self._owned(
+            lambda: self._build(plan, adapter),
+            role="data-export",
+            deadline=deadline,
+            timeout_message="The export took too long to prepare and was stopped. Try a smaller export.",
+        )
+
+    async def upload(self, adapter, uri: str, *, deadline: float, undo) -> None:
+        """Upload the archive to ``uri``; a failed or abandoned upload's object is removed by ``undo``.
+
+        The archive is read through the job's budget, so abandoning stops the SDK at its next read.
+        """
+
+        async def work() -> None:
+            try:
+                with open(self.archive_path, "rb") as raw:
+                    await adapter.upload_file(uri, CancellableReader(raw, self.budget), content_type="application/zip")
+            except BaseException:
+                await undo()
+                raise
+
+        await self._owned(
+            work,
+            role="data-export-upload",
+            deadline=deadline,
+            timeout_message="Uploading the export for a download link took too long. Try again later.",
+            undo=undo,
+        )
 
     # -- ownership --------------------------------------------------------------------------------
 
