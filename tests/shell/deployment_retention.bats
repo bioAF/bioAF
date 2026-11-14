@@ -228,3 +228,11 @@ STUB
     run lib deploy_prune_images
     [ "$(cat "$WORK/removed")" = "sha256:b1" ]
 }
+
+@test "with no record yet, nothing is pruned (the generations are not known)" {
+    retention_docker
+    printf '%s\n' "sha256:b1 old" > "$FAKE_IDS/images"
+    run lib deploy_prune_images
+    [ ! -e "$WORK/removed" ]
+    [[ "$output" == *"left in place"* ]]
+}

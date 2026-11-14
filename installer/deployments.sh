@@ -201,6 +201,10 @@ deploy_prune_images() {
     # Remove bioAF images no container and no recorded generation uses (docker rmi without force: Docker itself
     # refuses one still in use). Removing a tag does not always free bytes: layers shared with kept images stay.
     local kept id removed=0
+    if [ ! -f "$(deploy_state_dir)/deployments.json" ]; then
+        yellow "No deployment generations are recorded yet, so old bioAF images were left in place."
+        return 0
+    fi
     if ! kept="$(_deploy_kept_ids)"; then
         yellow "The deployment record could not be read, so old bioAF images were left in place."
         return 0

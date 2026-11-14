@@ -515,6 +515,42 @@ configuration failure.
    same way with `gunzip -c backups/<file>.sql.gz | ... exec -T db psql -U bioaf -d bioaf`.
    Alembic downgrades are not a substitute: they do not undo data repairs.
 
+### Disk use and deployment generations
+
+`./bioaf update`, `./bioaf build` and `./bioaf setup` run one at a time on a host. A second one started while
+another runs stops at once with "Another bioAF update, build or setup is running" (exit status 75) and changes
+nothing; an in-app update refused that way is retried by the update agent when the first finishes.
+
+Each records, in `host-state/deployments.json` (readable by the host operator only), which backend and frontend
+images run now (**current**, by image ID), which ran before (**previous**), and an operation that has started
+but whose images are not yet running (**candidate**). If an update or build is interrupted, the next one says
+"An earlier ... did not finish" and replaces it. `./bioaf build` changes the deployed version
+(`BIOAF_IMAGE_TAG` in `docker/.env`) only after the build succeeds; the new images become current when
+`./bioaf start` or `restart` runs them.
+
+Before pulling or building, the updater frees space and checks it has enough:
+
+| What | Rule | Override |
+| --- | --- | --- |
+| bioAF images | Removed unless a container (running or stopped) uses them, they are the current, previous or candidate generation, or they carry the version being installed. Other images are never touched. | - |
+| Build cache | Kept to 5 GiB, removing only cache unused for 7 days | `BIOAF_BUILD_CACHE_BYTES`, `BIOAF_BUILD_CACHE_UNUSED` |
+| Updater backups in `backups/` | The 2 newest of each kind made by updates (`bioaf_pre_update_*.sql.gz`, `bioaf_pre_upgrade_*.dump` with its `.json`). Backups from `./bioaf backup` (`bioaf_<timestamp>.sql.gz`) are never removed. | `BIOAF_KEEP_UPDATE_DUMPS` |
+| Free space | 3.5 GiB for new images plus 1.5x the database for the backup must leave max(3 GiB, 10% of the disk) free, or the update stops before changing anything | `BIOAF_NEW_IMAGES_BYTES`, `BIOAF_DISK_FLOOR_MIN_BYTES`, `BIOAF_DISK_FLOOR_PERCENT` |
+| Update agent log | `host-only/agent.log` rotates at 10 MiB, keeping `agent.log.1` and `agent.log.2` | `AGENT_LOG_MAX_BYTES` (agent environment) |
+
+These budgets are provisional starting values. Removing an image's tag does not always free its bytes: layers
+shared with kept images stay. During an update the host holds up to three generations of images (the incoming
+one, current, and previous) until the next update removes the oldest.
+
+Rolling back images is not the same as restoring the database: the previous generation's images may not run
+against a database the new release migrated. To go back, follow the restore steps above with the backup from
+before that update, and set `BIOAF_IMAGE_TAG` to the previous generation's tag shown in
+`host-state/deployments.json`.
+
+If the record is missing or damaged, the updater reports it and removes no images. A damaged record can be
+deleted to start fresh: the next update or start records what is running, and images are pruned again from the
+update after that.
+
 ## Reinstalling
 
 If you need to start fresh (e.g., after changing database credentials):
