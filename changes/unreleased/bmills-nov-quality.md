@@ -26,3 +26,9 @@
   Associate dialog, Plot Archive, glossary scans) now search by name and page through every experiment instead of
   stopping at the first 100 or 500 (#104, #105). Deleted experiments no longer appear in experiment lists unless
   the deleted status is chosen.
+
+### Updates
+
+- `./bioaf update`, `build` and `setup` now run one at a time and record which backend and frontend images run
+  now and which ran before (`host-state/deployments.json`), so an interrupted update is reported by the next run.
+  `./bioaf build` no longer changes the deployed version when the build fails. Nothing is deleted yet (#110).

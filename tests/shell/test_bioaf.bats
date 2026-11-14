@@ -1593,3 +1593,51 @@ run_waiter() {
         cmd_setup --version 9.9.9" </dev/null
     [ "$(grep -E '^(checkout|update_agent)' "$tmp/log")" = "$(printf 'checkout\nupdate_agent')" ]
 }
+
+# ---------------------------------------------------------------------------
+# Deployment generations and the install-wide lock (installer/deployments.sh, issue #110)
+# ---------------------------------------------------------------------------
+
+@test "update refuses while another update, build or setup holds the deployment lock" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    SCRIPT_DIR="$tmp" bash -c "source '$BATS_TEST_DIRNAME/../../installer/deployments.sh'; deploy_lock && sleep 30" &
+    holder=$!
+    for _ in $(seq 1 50); do [ -e "$tmp/host-state/deployment.lock" ] && break; sleep 0.1; done
+    sleep 0.5
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    pkill -P "$holder" 2>/dev/null || true; kill "$holder" 2>/dev/null || true
+    [ "$status" -eq 75 ]
+    [[ "$output" == *"Another bioAF update, build or setup is running"* ]]
+    ! grep -qE '^(pull|up|backup)' "$tmp/log" 2>/dev/null
+    # The running operation's status is not overwritten by the refused one.
+    [ ! -e "$tmp/update-status/current.json" ]
+    grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
+}
+
+@test "a failed update leaves its candidate recorded for the next run to report" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=78 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 1 ]
+    python3 -c "import json; c=json.load(open('$tmp/host-state/deployments.json'))['candidate']; assert c['operation']=='update' and c['tag']=='v2.0.0', c"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_CHECK_STATUS=78 BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+    [[ "$output" == *"An earlier update to v2.0.0"* ]]
+}
+
+@test "build pins its tag only after the build succeeded" {
+    tmp="$(mktemp -d)"
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
+        get_current_version() { echo 2.0.0; }; DC_BUILD=false; cmd_build"
+    [ "$status" -ne 0 ]
+    grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
+        get_current_version() { echo 2.0.0; }; DC_BUILD=true; cmd_build"
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_IMAGE_TAG=v2.0.0$' "$tmp/.env"
+    python3 -c "import json; c=json.load(open('$tmp/host-state/deployments.json'))['candidate']; assert c['operation']=='build' and c['tag']=='v2.0.0', c"
+}

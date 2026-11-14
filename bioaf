@@ -37,6 +37,10 @@ if [ -f "$SCRIPT_DIR/installer/output.sh" ]; then
     source "$SCRIPT_DIR/installer/output.sh"
 fi
 # Reconciliation of host files bioAF manages (the Ops Agent config).
+if [ -f "$SCRIPT_DIR/installer/deployments.sh" ]; then
+    # shellcheck source=installer/deployments.sh
+    source "$SCRIPT_DIR/installer/deployments.sh"
+fi
 if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
     # shellcheck source=installer/managed_file.sh
     source "$SCRIPT_DIR/installer/managed_file.sh"
@@ -684,6 +688,9 @@ for v in cfg.get('volumes', {}).values():
     # that will run (this script's own functions render the checked-out template).
     step "Configure update agent (idempotent)" -- ensure_update_agent
 
+    # One deployment operation at a time, from here until setup exits (installer/deployments.sh).
+    deploy_begin setup "${setup_version:+v$setup_version}" || exit $?
+
     # Resolve and pull pre-built images (falls back to building from source).
     # --local-build short-circuits the registry lookup entirely.
     if [ "$local_build" = true ]; then
@@ -695,6 +702,7 @@ for v in cfg.get('volumes', {}).values():
     # Pin whichever tag we ended up with so future start/restart commands
     # always use this exact version, independent of the worktree.
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
+    deploy_mark_candidate setup "$BIOAF_IMAGE_TAG" || yellow "WARNING: The deployment record (host-state/deployments.json) could not be updated."
     ensure_backups_dir
     step "Start services (docker compose up -d)" -- $DC up -d
 
@@ -706,6 +714,7 @@ for v in cfg.get('volumes', {}).values():
     # when done) and fails setup if it did not complete.
     step "Run database migrations" -- \
         $DC exec -T backend python -m app.schema_upgrade run
+    deploy_finish "$BIOAF_IMAGE_TAG"
 
     # Apply prefill values to platform_config if --prefill was supplied.
     # The file is YAML with flat key/value pairs, e.g.:
@@ -848,6 +857,14 @@ cmd_start() {
             sleep 3
         fi
     done
+
+    # A build's images become the current generation once they run. Skipped while an update, build or setup
+    # holds the deployment lock: that operation records what it runs.
+    local pinned
+    pinned="$(grep '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2-)" || pinned=""
+    if [ -d "$(deploy_state_dir)" ]; then
+        ( deploy_lock >/dev/null 2>&1 && deploy_finish "${pinned:-unpinned}" ) || true
+    fi
 
     echo ""
     green "All services started."
@@ -1148,6 +1165,30 @@ verify_release_images() {
     return 0
 }
 
+deploy_begin() {
+    # deploy_begin <operation> <tag>: take the install-wide deployment lock (held until this shell exits), report
+    # an operation an earlier run left unfinished, and record this one as the candidate (installer/deployments.sh).
+    local status=0 earlier
+    deploy_lock || status=$?
+    if [ "$status" = "$DEPLOY_BUSY" ]; then
+        red "Another bioAF update, build or setup is running. Try again when it finishes."
+        return "$DEPLOY_BUSY"
+    elif [ "$status" != 0 ]; then
+        red "ERROR: Could not take the deployment lock (host-state/deployment.lock)."
+        return "$status"
+    fi
+    if earlier="$(deploy_interrupted)"; then
+        yellow "An earlier $earlier did not finish; this $1 replaces it."
+    fi
+    deploy_mark_candidate "$1" "$2" || yellow "WARNING: The deployment record (host-state/deployments.json) could not be updated."
+}
+
+deploy_finish() {
+    # deploy_finish <tag>: record the images now running as the current generation. The operation already
+    # succeeded, so a failure here is reported, not fatal.
+    deploy_record_running "$1" || yellow "WARNING: The running images could not be recorded in host-state/deployments.json."
+}
+
 pin_image_tag() {
     # Persist BIOAF_IMAGE_TAG=<tag> in docker/.env so docker compose uses this
     # image on every subsequent invocation -- regardless of what the worktree
@@ -1349,6 +1390,11 @@ cmd_update() {
         retry_only=true
     fi
 
+    # One deployment operation at a time. A refusal changes nothing, including the running update's status.
+    local lock_status=0
+    deploy_begin update "v${target_version}" || lock_status=$?
+    [ "$lock_status" = 0 ] || exit "$lock_status"
+
     bold "=== bioAF Update ==="
     echo ""
     echo "  Current version:  $current_version"
@@ -1498,6 +1544,7 @@ cmd_update() {
     local new_version
     new_version=$(get_running_version)
     _update_to="$new_version"
+    deploy_finish "v${target_version}"
     write_update_status completed done
 
     echo ""
@@ -1511,17 +1558,21 @@ cmd_build() {
     # image at the worktree's version and pins it as the deployed tag, so the
     # next `start`/`restart` runs that build instead of whatever was there
     # before.
-    pin_image_tag "v$(get_current_version)"
-    local service="${1:-}"
+    # The tag is pinned only after the build succeeded: a failed build leaves the deployed pin alone. The new
+    # images become the current generation when they run (start, restart).
+    local tag service="${1:-}"
+    tag="v$(get_current_version)"
+    deploy_begin build "$tag" || return $?
     if [ -n "$service" ]; then
         bold "=== Building $service ==="
-        $DC_BUILD "$service"
+        BIOAF_IMAGE_TAG="$tag" $DC_BUILD "$service"
         green "$service built."
     else
         bold "=== Building All Services ==="
-        $DC_BUILD
+        BIOAF_IMAGE_TAG="$tag" $DC_BUILD
         green "All services built."
     fi
+    pin_image_tag "$tag"
 }
 
 cmd_shell() {
