@@ -50,8 +50,11 @@ Remove a floor only when every parent's declared range excludes the vulnerable v
 | `sharp` `^0.35.5` | GHSA-wq5f-xc86-pv6w, GHSA-rgj7-g3m4-5g8c | `next` optional `^0.34.3 \|\| ^0.35.5` (runtime) |
 | `source-map-js` `^1.2.2` | GHSA-68fv-2mgg-jv7q | `postcss` `^1.2.0` on older 8.5 releases, which the `postcss` floor still admits (runtime build) |
 | `ws` `^8.21.0` | GHSA-96hv-2xvq-fx4p, GHSA-58qx-3vcg-4xpx | `jsdom` (development) |
-| `brace-expansion@^1.1.7` `^1.1.16`, `@^2.0.2` `^2.1.2`, `@^5.0.2` `^5.0.7` | earlier brace-expansion advisories | `minimatch` 3.x, 5.x/9.x, 10.x (development) |
-| `js-yaml@^3.13.1` `^3.15.0`, `js-yaml@^4.1.0` `^4.3.0` | earlier js-yaml advisories | `@istanbuljs/load-nyc-config`, `@eslint/eslintrc` (development) |
+| `brace-expansion@^1.1.7` `^1.1.21`, `@^2.0.2` `^2.1.7`, `@^5.0.2` `^5.0.12` | GHSA-q2hr-2g5m-vwhr | `minimatch` 3.x, 5.x/9.x, 10.x (development) |
+| `js-yaml@^3.13.1` `^3.15.2`, `js-yaml@^4.1.0` `^4.3.2` | GHSA-2883-xcg3-v3hh | `@istanbuljs/load-nyc-config`, `@eslint/eslintrc`, `@redocly/openapi-core` (development) |
+| `browserslist` `^4.28.9` | GHSA-73wf-gq98-2v4g | `autoprefixer`, `@babel/helper-compilation-targets` (development build) |
+| `baseline-browser-mapping` `^2.11.0` | GHSA-w5vr-8v7q-w6rv | `browserslist` `^2.10.44` (development build) |
+| `postcss-selector-parser@<6.1.5` `^6.1.5` | GHSA-rj75-hqrm-r3gf, GHSA-w9m9-85wc-3x92 | `@tailwindcss/typography` pins `6.0.10` exactly; `tailwindcss` and `postcss-nested` `^6.1.1` (development build) |
 
 The direct `next` and `eslint-config-next` declarations are held at `^15.5.29` (GHSA-2464-fhr4-w9xw,
 GHSA-p3m5-59mp-jv5r, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p), and the direct
