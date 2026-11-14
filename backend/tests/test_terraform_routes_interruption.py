@@ -14,7 +14,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.terraform_streaming import ClosingStreamingResponse, INTERRUPTED_MESSAGE, client_event
+from app.api.streaming_responses import ClosingStreamingResponse
+from app.api.terraform_streaming import INTERRUPTED_MESSAGE, client_event
 from app.services.terraform_executor import TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
 
