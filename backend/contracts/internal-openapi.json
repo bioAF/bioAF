@@ -30809,6 +30809,8 @@
             "required": false,
             "schema": {
               "default": 25,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Page Size",
               "type": "integer"
             }
@@ -30875,6 +30877,22 @@
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
             }
           }
         ],

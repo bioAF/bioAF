@@ -22,6 +22,11 @@ from app.services.vocabulary_validator import VocabularyValidator
 from app.runtime import spawn_event
 
 
+def _escape_like(text: str) -> str:
+    """``text`` matched literally inside an ILIKE pattern (its % and _ are not wildcards)."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class ExperimentService:
     @staticmethod
     async def create_experiment(
@@ -333,13 +338,23 @@ class ExperimentService:
         status: str | None = None,
         owner_user_id: int | None = None,
         search: str | None = None,
+        name: str | None = None,
     ) -> tuple[list[Experiment], int]:
+        """One page, newest first with id as the tie-breaker (offset pages never skip or repeat a row).
+
+        Deleted experiments are left out unless ``status`` asks for them; ``name`` matches names only, while
+        ``search`` also matches the hypothesis and description.
+        """
         base_query = select(Experiment).where(Experiment.organization_id == org_id)
 
         if project_id is not None:
             base_query = base_query.where(Experiment.project_id == project_id)
         if status is not None:
             base_query = base_query.where(Experiment.status == status)
+        else:
+            base_query = base_query.where(Experiment.status != "deleted")
+        if name:
+            base_query = base_query.where(Experiment.name.ilike(f"%{_escape_like(name)}%", escape="\\"))
         if owner_user_id is not None:
             base_query = base_query.where(Experiment.owner_user_id == owner_user_id)
         if search:
@@ -361,7 +376,7 @@ class ExperimentService:
                 selectinload(Experiment.sample_batches),
                 selectinload(Experiment.template),
             )
-            .order_by(Experiment.created_at.desc())
+            .order_by(Experiment.created_at.desc(), Experiment.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

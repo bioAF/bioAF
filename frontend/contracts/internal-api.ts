@@ -19932,6 +19932,7 @@ export interface operations {
                 status?: string | null;
                 owner_user_id?: number | null;
                 search?: string | null;
+                name?: string | null;
             };
             header?: never;
             path?: never;
