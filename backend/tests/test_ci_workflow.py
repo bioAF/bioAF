@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from datetime import date, timedelta
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
@@ -104,6 +105,94 @@ def test_the_gate_enforces_every_dependency_result_in_an_always_step(workflow):
     assert step["if"] == "always()"
     assert "toJSON(needs)" in json.dumps(step.get("env", {}))
     assert not step.get("continue-on-error")
+
+
+# ── dependency review ──
+
+REVIEW_JOB = "dependency-review"
+
+
+def _review_step(workflow, uses_prefix: str) -> dict:
+    steps = workflow["jobs"][REVIEW_JOB]["steps"]
+    return next(s for s in steps if s.get("uses", "").startswith(uses_prefix))
+
+
+def test_dependency_review_fails_introduced_high_risk_in_every_scope(workflow):
+    step = _review_step(workflow, "actions/dependency-review-action@")
+    ref = step["uses"].split("@", 1)[1]
+    assert re.fullmatch(r"[0-9a-f]{40}", ref), "pin the action to a reviewed commit"
+    inputs = step["with"]
+    assert inputs["fail-on-severity"] == "high"
+    assert {s.strip() for s in inputs["fail-on-scopes"].split(",")} == {"runtime", "development", "unknown"}
+    assert inputs["vulnerability-check"] is True
+    assert not step.get("continue-on-error") and "warn-only" not in inputs
+    assert inputs["allow-ghsas"] == "${{ steps.policy.outputs.ghsas }}"
+
+
+def test_dependency_review_reads_the_policy_from_the_base_branch(workflow):
+    checkout = _review_step(workflow, "actions/checkout@")
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    run = next(s for s in workflow["jobs"][REVIEW_JOB]["steps"] if s.get("id") == "policy")["run"]
+    assert "base/scripts/ci/dependency_report.py" in run and "base/.github/security-exceptions.json" in run
+
+
+def _run_policy_step(workflow, tmp_path: Path, files: dict[str, str]) -> tuple[int, str]:
+    run = next(s for s in workflow["jobs"][REVIEW_JOB]["steps"] if s.get("id") == "policy")["run"]
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text)
+    output = tmp_path / "github_output"
+    output.write_text("")
+    done = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", run],
+        cwd=tmp_path,
+        env={"GITHUB_OUTPUT": str(output), "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"},
+        capture_output=True,
+        text=True,
+    )
+    return done.returncode, output.read_text()
+
+
+def _policy(**entry) -> str:
+    base = {
+        "ghsa": "GHSA-2222-3333-4444",
+        "package": "p",
+        "paths": ["p"],
+        "versions": "<1",
+        "severity": "high",
+        "scope": "runtime",
+        "rationale": "r",
+        "mitigation": "m",
+        "owner": "o",
+        "approved_by": "a",
+        "approval_reference": "ref",
+        "approval_date": "2000-01-01",
+        "expires": "2000-01-31",
+        "allow_pr_introduction": True,
+    }
+    base.update(entry)
+    return json.dumps({"exceptions": [base]})
+
+
+def test_the_policy_step_allows_nothing_when_the_base_branch_has_no_policy(workflow, tmp_path):
+    assert _run_policy_step(workflow, tmp_path, {}) == (0, "ghsas=\n")
+
+
+def test_the_policy_step_forwards_only_active_approved_entries(workflow, tmp_path):
+    script = (REPO / "scripts" / "ci" / "dependency_report.py").read_text()
+    today = date.today()
+    active = _policy(approval_date=today.isoformat(), expires=(today + timedelta(days=5)).isoformat())
+    files = {"base/scripts/ci/dependency_report.py": script, "base/.github/security-exceptions.json": active}
+    assert _run_policy_step(workflow, tmp_path, files) == (0, "ghsas=GHSA-2222-3333-4444\n")
+    expired = {**files, "base/.github/security-exceptions.json": _policy()}
+    assert _run_policy_step(workflow, tmp_path, expired) == (0, "ghsas=\n")
+
+
+def test_an_invalid_base_policy_fails_the_dependency_review(workflow, tmp_path):
+    script = (REPO / "scripts" / "ci" / "dependency_report.py").read_text()
+    files = {"base/scripts/ci/dependency_report.py": script, "base/.github/security-exceptions.json": "{broken"}
+    code, output = _run_policy_step(workflow, tmp_path, files)
+    assert code != 0 and "ghsas=" not in output
 
 
 def test_ci_validates_terraform_with_the_version_the_backend_image_ships(workflow):
