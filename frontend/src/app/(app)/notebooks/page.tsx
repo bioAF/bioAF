@@ -304,6 +304,7 @@ export default function NotebooksPage() {
           session_type: sessionType,
           resource_profile: selectedProfile,
           experiment_id: scopeType === "experiment" ? selectedExperiment : undefined,
+          project_id: scopeType === "project" ? (selectedProject ?? undefined) : undefined,
           image_uri: imageUri,
           input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
           environment_version_id: selectedVersionId,

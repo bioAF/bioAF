@@ -26,6 +26,7 @@ from app.services.session_bucket import _bucket_filter
 from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
 from app.exceptions import ConflictError, NotFoundError, ValidationError
+from app.services.launch_scope import owned_environment_version, resolve_launch_scope
 from app.runtime import spawn_event
 from app import runtime
 
@@ -58,16 +59,10 @@ class WorkNodeService:
             raise ValidationError(f"Invalid machine type: {machine_type}. Valid types: {', '.join(valid_names)}")
 
         # Validate environment version is ready and is a work_node environment
-        from app.models.environment_version import EnvironmentVersion
-
-        ev_result = await session.execute(
-            select(EnvironmentVersion)
-            .options(selectinload(EnvironmentVersion.environment))
-            .where(EnvironmentVersion.id == environment_version_id)
-        )
-        env_version = ev_result.scalar_one_or_none()
-        if not env_version:
-            raise ValidationError("Environment version not found")
+        try:
+            env_version = await owned_environment_version(session, org_id, environment_version_id)
+        except NotFoundError:
+            raise ValidationError("Environment version not found") from None
         if env_version.status != "ready":
             raise ValidationError(
                 f"Environment version must be in ready status (current: {env_version.status}). "
@@ -77,6 +72,8 @@ class WorkNodeService:
             raise ValidationError(
                 "Only work node environments can be used for work nodes. This environment is configured for notebooks."
             )
+        scope = await resolve_launch_scope(session, org_id, project_id=project_id, experiment_id=experiment_id)
+        project_id, experiment_id = scope.project_id, scope.experiment_id
 
         # Require session credentials for SSH
         from app.services.session_credential_service import SessionCredentialService

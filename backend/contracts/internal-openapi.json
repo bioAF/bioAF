@@ -11514,6 +11514,17 @@
             "title": "Input File Ids",
             "type": "array"
           },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
           "resource_profile": {
             "default": "small",
             "enum": [

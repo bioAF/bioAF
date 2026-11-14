@@ -12277,6 +12277,8 @@ export interface components {
              * @default []
              */
             input_file_ids: number[];
+            /** Project Id */
+            project_id?: number | null;
             /**
              * Resource Profile
              * @default small

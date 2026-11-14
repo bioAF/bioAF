@@ -18,3 +18,7 @@
 
 - Settings > Users shows Lock, Deactivate and Reactivate only to roles with the users:deactivate permission, and
   Delete only with users:delete, and checks again when the action is confirmed (#107).
+- A notebook launched in a project now records that project, and one launched for an experiment records the
+  experiment's project, so its outputs and Recreate keep it (#103). Notebook and work-node launches refuse a
+  project, experiment or template version from another organization, or an experiment outside the chosen
+  project, before anything is created.

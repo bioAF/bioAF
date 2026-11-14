@@ -812,7 +812,9 @@ async def _unusable_archive(dump, size: int) -> str | None:
     if size == 0:
         return "empty_dump"
     listing = await backup_resources.run_child(
-        ["pg_restore", "--list", str(dump)], env=dict(os.environ), timeout=settings.restore_toc_timeout_seconds
+        [_pg_tool("pg_restore"), "--list", str(dump)],
+        env=dict(os.environ),
+        timeout=settings.restore_toc_timeout_seconds,
     )
     return None if listing.returncode == 0 and not listing.timed_out else "archive_unreadable"
 
@@ -879,7 +881,7 @@ async def _run_postgres_backup(session: AsyncSession) -> dict:
             conn_args, env = _pg_connection()
             phase = "dump"
             child = await backup_resources.run_child(
-                ["pg_dump", *conn_args, "-d", dbname, "-Fc", "-f", str(dump)], env=env
+                [_pg_tool("pg_dump"), *conn_args, "-d", dbname, "-Fc", "-f", str(dump)], env=env
             )
             if child.returncode is None:
                 logger.error("Backup %s: pg_dump not found. Install postgresql-client in the container.", reference)

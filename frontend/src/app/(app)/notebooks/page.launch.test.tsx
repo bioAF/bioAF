@@ -273,3 +273,43 @@ test("a launch failure that arrives after the dialog closed does not show in the
   expect(within(dialog).queryByText("Quota exceeded")).not.toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Launch Jupyter" })).toBeEnabled();
 });
+
+// Issue #103: the project a session is launched in reaches the backend, on a launch and on a Recreate.
+function withProject() {
+  const base = mockGet.getMockImplementation()!;
+  mockGet.mockImplementation((url: string, ...rest: unknown[]) =>
+    url.includes("/api/projects")
+      ? Promise.resolve({ projects: [{ id: 5, name: "Proj 5" }], total: 1 })
+      : base(url, ...rest),
+  );
+}
+
+test("a project-scoped launch sends its project", async () => {
+  mockPost.mockResolvedValue({});
+  serve();
+  withProject();
+  render(<NotebooksPage />);
+  const dialog = await openDialog();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Project" }));
+  const project = within(dialog).getByRole("combobox", { name: "Project" });
+  await waitFor(() => expect(within(project).getByRole("option", { name: "Proj 5" })).toBeInTheDocument());
+  fireEvent.change(project, { target: { value: "5" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Launch Jupyter" }));
+  const confirm = await screen.findByRole("dialog", { name: "Launch without inputs?" });
+  fireEvent.click(within(confirm).getByRole("button", { name: /Launch anyway/i }));
+  await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  expect(lastPost()).toMatchObject({ project_id: 5 });
+  expect(lastPost().experiment_id).toBeUndefined();
+});
+
+test("recreating a project-scoped session sends its project again", async () => {
+  mockPost.mockResolvedValue({});
+  serve({ sessions: [{ ...finishedSession, experiment: null, project: { id: 5, name: "Proj 5" } }] });
+  withProject();
+  render(<NotebooksPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Recreate" }));
+  const confirm = await screen.findByRole("dialog", { name: "Launch without inputs?" });
+  fireEvent.click(within(confirm).getByRole("button", { name: /Launch anyway/i }));
+  await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  expect(lastPost()).toMatchObject({ project_id: 5 });
+});
