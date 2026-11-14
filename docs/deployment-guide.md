@@ -533,8 +533,8 @@ Before pulling or building, the updater frees space and checks it has enough:
 | What | Rule | Override |
 | --- | --- | --- |
 | bioAF images | Removed unless a container (running or stopped) uses them, they are the current, previous or candidate generation, or they carry the version being installed. Other images are never touched. | - |
-| Build cache | Kept to 5 GiB, removing only cache unused for 7 days | `BIOAF_BUILD_CACHE_BYTES`, `BIOAF_BUILD_CACHE_UNUSED` |
-| Updater backups in `backups/` | The 2 newest of each kind made by updates (`bioaf_pre_update_*.sql.gz`, `bioaf_pre_upgrade_*.dump` with its `.json`). Backups from `./bioaf backup` (`bioaf_<timestamp>.sql.gz`) are never removed. | `BIOAF_KEEP_UPDATE_DUMPS` |
+| Build cache | Never removed: it belongs to the host's shared Docker builder. Over 5 GiB, the updater says so and gives the command to free it | `BIOAF_BUILD_CACHE_BYTES` |
+| Updater backups in `backups/` | The backups each update made (its recovery set) are kept for the current and previous generations. Of the rest, the 2 newest of each kind (`bioaf_pre_update_*.sql.gz`, `bioaf_pre_upgrade_*.dump` with its `.json`) are kept. Nothing is removed without a readable record. Backups from `./bioaf backup` (`bioaf_<timestamp>.sql.gz`) are never removed. | `BIOAF_KEEP_UPDATE_DUMPS` |
 | Free space | 3.5 GiB for new images plus 1.5x the database for the backup must leave max(3 GiB, 10% of the disk) free, or the update stops before changing anything | `BIOAF_NEW_IMAGES_BYTES`, `BIOAF_DISK_FLOOR_MIN_BYTES`, `BIOAF_DISK_FLOOR_PERCENT` |
 | Update agent log | `host-only/agent.log` rotates at 10 MiB, keeping `agent.log.1` and `agent.log.2` | `AGENT_LOG_MAX_BYTES` (agent environment) |
 
@@ -543,9 +543,9 @@ shared with kept images stay. During an update the host holds up to three genera
 one, current, and previous) until the next update removes the oldest.
 
 Rolling back images is not the same as restoring the database: the previous generation's images may not run
-against a database the new release migrated. To go back, follow the restore steps above with the backup from
-before that update, and set `BIOAF_IMAGE_TAG` to the previous generation's tag shown in
-`host-state/deployments.json`.
+against a database the new release migrated. To go back, follow the restore steps above with the backup listed
+as the current generation's `recovery` in `host-state/deployments.json` (made before that update), and set
+`BIOAF_IMAGE_TAG` to the previous generation's tag shown there.
 
 If the record is missing or damaged, the updater reports it and removes no images. A damaged record can be
 deleted to start fresh: the next update or start records what is running, and images are pruned again from the

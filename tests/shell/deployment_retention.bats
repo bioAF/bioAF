@@ -122,7 +122,7 @@ lib() { bash -c "source '$LIB'; $*"; }
     sleep 0.5
     run lib deploy_lock
     [ "$status" -eq 75 ]
-    pkill -P "$HOLDER" 2>/dev/null || true; kill "$HOLDER"; wait "$HOLDER" 2>/dev/null || true
+    pkill -P "$HOLDER" 2>/dev/null || true; kill "$HOLDER" 2>/dev/null || true; wait "$HOLDER" 2>/dev/null || true
     HOLDER=""
     run lib deploy_lock
     [ "$status" -eq 0 ]
@@ -150,9 +150,12 @@ case "$1" in
     rmi) echo "$2" >> "$WORK/removed" ;;
     builder)
         shift
-        [ "$1" = prune ] || exit 1
-        if [ "${2:-}" = --help ]; then echo "      --max-used-space bytes   Maximum amount"; exit 0; fi
-        echo "$*" >> "$WORK/pruned" ;;
+        case "$1" in
+            prune) echo "$*" >> "$WORK/pruned" ;;
+            du) echo "Total: $(cat "$FAKE_IDS/cache-bytes" 2>/dev/null || echo 0)" ;;
+        esac ;;
+    system)
+        [ "$2" = df ] && echo "$(cat "$FAKE_IDS/cache-bytes" 2>/dev/null || echo 0)" ;;
 esac
 exit 0
 STUB
@@ -183,12 +186,16 @@ STUB
     [[ "$output" == *"left in place"* ]]
 }
 
-@test "the build cache is pruned to its budget, only cache unused for a week" {
+@test "a build cache over its budget is reported, never pruned (review finding 6)" {
     retention_docker
-    run lib deploy_prune_build_cache
+    echo 7516192768 > "$FAKE_IDS/cache-bytes"   # 7 GiB, over the 5 GiB budget
+    run lib deploy_report_build_cache
     [ "$status" -eq 0 ]
-    grep -q -- "--max-used-space 5368709120" "$WORK/pruned"
-    grep -q -- "--filter until=168h" "$WORK/pruned"
+    [ ! -e "$WORK/pruned" ]
+    [[ "$output" == *"7.0 GiB"* ]] && [[ "$output" == *"docker builder prune"* ]]
+    echo 1073741824 > "$FAKE_IDS/cache-bytes"
+    run lib deploy_report_build_cache
+    [ -z "$output" ] && [ ! -e "$WORK/pruned" ]
 }
 
 @test "an update needs room for the new images and a backup above the floor" {
@@ -201,8 +208,10 @@ STUB
     [[ "$output" == *"free"* ]]
 }
 
-@test "only the two newest updater dump sets are kept, never a manual backup" {
+@test "only the two newest eligible updater dump sets are kept, never a manual backup" {
     b="$WORK/backups"; mkdir -p "$b"
+    mkdir -m 700 "$WORK/host-state"
+    running b1 f1; lib deploy_record_running v1.0.0   # a record exists, with no recovery sets yet
     n=0
     for stamp in 20261101 20261102 20261103; do
         n=$((n + 1))
@@ -235,4 +244,55 @@ STUB
     run lib deploy_prune_images
     [ ! -e "$WORK/removed" ]
     [[ "$output" == *"left in place"* ]]
+}
+
+# --- recovery sets (review finding 3) ---------------------------------------------------------------------------
+
+@test "an update's backups are recorded as its generation's recovery set" {
+    b="$WORK/backups"; mkdir -p "$b"
+    mkdir -m 700 "$WORK/host-state"
+    running b1 f1; lib deploy_record_running v1.0.0
+    touch -t 202610010000 "$b/bioaf_pre_update_0_to_1_old.sql.gz"
+    lib deploy_mark_candidate update v2.0.0
+    touch "$b/bioaf_pre_update_1_to_2_now.sql.gz" "$b/bioaf_pre_upgrade_r1_to_r2_now.dump" "$b/bioaf_pre_upgrade_r1_to_r2_now.json"
+    running b2 f2; lib deploy_record_running v2.0.0
+    [ "$(state "sorted(d['current']['recovery'])")" = "['bioaf_pre_update_1_to_2_now.sql.gz', 'bioaf_pre_upgrade_r1_to_r2_now.dump', 'bioaf_pre_upgrade_r1_to_r2_now.json']" ]
+}
+
+@test "the backups needed to roll back survive newer failed attempts" {
+    b="$WORK/backups"; mkdir -p "$b"
+    mkdir -m 700 "$WORK/host-state"
+    running b1 f1; lib deploy_record_running v1.0.0
+    lib deploy_mark_candidate update v2.0.0
+    touch "$b/bioaf_pre_update_1_to_2_needed.sql.gz" "$b/bioaf_pre_upgrade_r1_to_r2_needed.dump" "$b/bioaf_pre_upgrade_r1_to_r2_needed.json"
+    running b2 f2; lib deploy_record_running v2.0.0
+    touch -t 202601010000 "$b/bioaf_pre_update_1_to_2_needed.sql.gz" "$b/bioaf_pre_upgrade_r1_to_r2_needed.dump"
+    for attempt in a1 a2 a3; do   # later attempts toward v3 that failed: newer than the needed set
+        touch "$b/bioaf_pre_update_2_to_3_${attempt}.sql.gz" "$b/bioaf_pre_upgrade_r2_to_r3_${attempt}.dump" "$b/bioaf_pre_upgrade_r2_to_r3_${attempt}.json"
+        sleep 1
+    done
+    run lib deploy_rotate_dumps
+    [ "$status" -eq 0 ]
+    [ -e "$b/bioaf_pre_update_1_to_2_needed.sql.gz" ]
+    [ -e "$b/bioaf_pre_upgrade_r1_to_r2_needed.dump" ] && [ -e "$b/bioaf_pre_upgrade_r1_to_r2_needed.json" ]
+    [ ! -e "$b/bioaf_pre_update_2_to_3_a1.sql.gz" ] && [ -e "$b/bioaf_pre_update_2_to_3_a3.sql.gz" ]
+}
+
+@test "without a readable record no updater backup is removed" {
+    b="$WORK/backups"; mkdir -p "$b"
+    for i in 1 2 3; do touch -t "2026110${i}0000" "$b/bioaf_pre_update_1_to_2_${i}.sql.gz"; done
+    run lib deploy_rotate_dumps
+    [ "$(ls "$b" | wc -l | tr -d ' ')" = 3 ]
+    [[ "$output" == *"left in place"* ]]
+}
+
+@test "a retried update keeps its first start, so the first attempt's backup stays in its recovery set" {
+    mkdir -m 700 "$WORK/host-state"
+    lib deploy_mark_candidate update v2.0.0
+    first="$(state "d['candidate']['started_at']")"
+    sleep 1
+    lib deploy_mark_candidate update v2.0.0
+    [ "$(state "d['candidate']['started_at']")" = "$first" ]
+    lib deploy_mark_candidate update v3.0.0
+    [ "$(state "d['candidate']['started_at']")" != "$first" ]
 }

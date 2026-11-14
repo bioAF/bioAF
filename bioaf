@@ -1194,7 +1194,7 @@ deploy_retention_before_staging() {
     # Remove what no generation needs, then require room for the next one. Removal problems are reported and
     # skipped; only the space check can stop the operation.
     deploy_prune_images || true
-    deploy_prune_build_cache || true
+    deploy_report_build_cache || true
     deploy_rotate_dumps || true
     local db
     db="$(deploy_database_bytes)"

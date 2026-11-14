@@ -8,6 +8,8 @@
 #   previous   the generation before it (the rollback images)
 #   candidate  an operation that started and has not yet run its images (update, build or setup, and its tag);
 #              still present at the next operation means that one was interrupted or failed
+#   recovery   on a generation an update installed: the updater backups made since that update started (the
+#              database as the generation before had it). Retention never removes current's or previous's set.
 #
 # A tag is not identity: a same-tag rebuild or a one-service build is a new generation. The record is written
 # atomically (a reader never sees half a file) and privately (0700 directory, 0600 file). A damaged record is
@@ -69,10 +71,25 @@ deploy_running_ids() {
 _deploy_update() {
     # Apply one change to the record with Python (json, atomic replace). $1 is the change; the rest are its args.
     _deploy_ensure_dir || return 1
-    python3 -I - "$(deploy_state_dir)/deployments.json" "$@" <<'PY'
+    python3 -I - "$(deploy_state_dir)/deployments.json" "$SCRIPT_DIR/backups" "$@" <<'PY'
 import datetime, json, os, sys, tempfile
+from pathlib import Path
 
-path, change, *args = sys.argv[1:]
+path, backups, change, *args = sys.argv[1:]
+UPDATER_BACKUPS = ("bioaf_pre_update_*.sql.gz", "bioaf_pre_upgrade_*.dump", "bioaf_pre_upgrade_*.json")
+
+
+def made_since(started_at):
+    """Updater backups written since ``started_at`` (ISO seconds): what this update's database state is."""
+    since = datetime.datetime.fromisoformat(started_at).timestamp()
+    found = set()
+    for pattern in UPDATER_BACKUPS:
+        for p in Path(backups).glob(pattern):
+            if p.is_file() and not p.is_symlink() and p.stat().st_mtime >= since:
+                found.add(p.name)
+    return sorted(found)
+
+
 now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 try:
     with open(path) as f:
@@ -88,6 +105,9 @@ if record.get("format") != 1:
 
 if change == "candidate":
     operation, tag = args
+    earlier = record.get("candidate") or {}
+    if earlier.get("operation") == operation and earlier.get("tag") == tag:
+        sys.exit(0)  # a retry of the same operation keeps its first start (its backups stay attributable)
     record["candidate"] = {"operation": operation, "tag": tag, "started_at": now}
 elif change == "running":
     tag, backend, frontend = args
@@ -96,8 +116,12 @@ elif change == "running":
         if record.get("candidate") is None:
             sys.exit(0)  # nothing changed: the file is not rewritten
     else:
+        candidate = record.get("candidate") or {}
+        recovery = made_since(candidate["started_at"]) if candidate.get("operation") == "update" else []
         record["previous"] = current
-        record["current"] = {"tag": tag, "backend": backend, "frontend": frontend, "recorded_at": now}
+        record["current"] = {
+            "tag": tag, "backend": backend, "frontend": frontend, "recorded_at": now, "recovery": recovery,
+        }
     record["candidate"] = None
 else:
     sys.exit(f"unknown change {change}")
@@ -155,7 +179,6 @@ PY
 DEPLOY_IMAGE_LABEL="org.opencontainers.image.source=https://github.com/bioAF/bioAF"
 DEPLOY_IMAGE_REPO_PREFIX="ghcr.io/bioaf/bioaf-"   # docker/docker-compose.yml image names
 DEPLOY_BUILD_CACHE_BYTES="${BIOAF_BUILD_CACHE_BYTES:-$((5 * 1024 * 1024 * 1024))}"
-DEPLOY_BUILD_CACHE_UNUSED="${BIOAF_BUILD_CACHE_UNUSED:-168h}"
 DEPLOY_NEW_IMAGES_BYTES="${BIOAF_NEW_IMAGES_BYTES:-$((7 * 512 * 1024 * 1024))}"   # 3.5 GiB
 DEPLOY_FLOOR_MIN_BYTES="${BIOAF_DISK_FLOOR_MIN_BYTES:-$((3 * 1024 * 1024 * 1024))}"
 DEPLOY_FLOOR_PERCENT="${BIOAF_DISK_FLOOR_PERCENT:-10}"
@@ -221,12 +244,28 @@ deploy_prune_images() {
     echo "Removed $removed old bioAF image(s)."
 }
 
-deploy_prune_build_cache() {
-    # Keep the build cache within its budget, removing only cache unused for DEPLOY_BUILD_CACHE_UNUSED.
-    local flag=--keep-storage
-    _deploy_docker builder prune --help 2>/dev/null | grep -q -- '--max-used-space' && flag=--max-used-space
-    _deploy_docker builder prune -f "$flag" "$DEPLOY_BUILD_CACHE_BYTES" --filter "until=$DEPLOY_BUILD_CACHE_UNUSED" >/dev/null \
-        || yellow "The Docker build cache could not be pruned; it was left as it is."
+deploy_report_build_cache() {
+    # Report a build cache over DEPLOY_BUILD_CACHE_BYTES; never prune it. The cache belongs to the host's shared
+    # default builder, and Docker cannot prune one project's cache there, so removing it is the operator's call
+    # (owner decision on review finding 6). Prints nothing when within budget or when it cannot be measured.
+    local size
+    size="$(_deploy_docker system df --format '{{if eq .Type "Build Cache"}}{{.Size}}{{end}}' 2>/dev/null)" || return 0
+    python3 -I - "$size" "$DEPLOY_BUILD_CACHE_BYTES" <<'PY'
+import re, sys
+
+text, budget = sys.argv[1].strip(), int(sys.argv[2])
+units = {"": 1, "B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12}
+m = re.fullmatch(r"([0-9.]+)\s*([kKMGT]?B)?", text)
+if not m:
+    sys.exit(0)
+used = float(m.group(1)) * units[m.group(2) or ""]
+if used > budget:
+    print(
+        f"The Docker build cache uses {used / 2**30:.1f} GiB, over bioAF's {budget / 2**30:.0f} GiB budget. It is "
+        "shared with everything else built on this host, so bioAF does not remove it. To free it: "
+        f"docker builder prune --filter until=168h"
+    )
+PY
 }
 
 _deploy_disk_usage() {
@@ -254,23 +293,33 @@ deploy_require_space() {
 
 deploy_rotate_dumps() {
     # Keep the DEPLOY_KEEP_DUMP_SETS newest dumps of each kind the updater makes (bioaf_pre_update_*.sql.gz from
-    # ./bioaf update, bioaf_pre_upgrade_*.dump with its .json manifest from the database upgrade). Manual
-    # backups, other names and links are never touched.
-    local dir="$SCRIPT_DIR/backups" pattern
+    # ./bioaf update, bioaf_pre_upgrade_*.dump with its .json manifest from the database upgrade), after first
+    # protecting the recovery sets of the current and previous generations (the backups a rollback needs).
+    # Without a readable record nothing is removed. Manual backups, other names and links are never touched.
+    local dir="$SCRIPT_DIR/backups"
     [ -d "$dir" ] || return 0
-    for pattern in 'bioaf_pre_update_*.sql.gz' 'bioaf_pre_upgrade_*.dump'; do
-        python3 -I - "$dir" "$pattern" "$DEPLOY_KEEP_DUMP_SETS" <<'PY'
-import os, sys
+    python3 -I - "$dir" "$(deploy_state_dir)/deployments.json" "$DEPLOY_KEEP_DUMP_SETS" <<'PY'
+import json, sys
 from pathlib import Path
 
-directory, pattern, keep = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
-dumps = [p for p in directory.glob(pattern) if p.is_file() and not p.is_symlink()]
-dumps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-for old in dumps[keep:]:
-    for member in (old, old.with_suffix(".json") if old.suffix == ".dump" else None):
-        if member is not None and member.is_file() and not member.is_symlink():
-            member.unlink()
-            print(f"Removed an old updater backup: {member.name}")
+directory, record_path, keep = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+try:
+    record = json.load(open(record_path))
+    protected = set()
+    for generation in ("current", "previous"):
+        protected.update((record.get(generation) or {}).get("recovery") or [])
+except (OSError, ValueError, AttributeError):
+    print("The deployment record could not be read, so old updater backups were left in place.", file=sys.stderr)
+    sys.exit(0)
+for pattern in ("bioaf_pre_update_*.sql.gz", "bioaf_pre_upgrade_*.dump"):
+    dumps = [
+        p for p in directory.glob(pattern) if p.is_file() and not p.is_symlink() and p.name not in protected
+    ]
+    dumps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in dumps[keep:]:
+        for member in (old, old.with_suffix(".json") if old.suffix == ".dump" else None):
+            if member is not None and member.is_file() and not member.is_symlink() and member.name not in protected:
+                member.unlink()
+                print(f"Removed an old updater backup: {member.name}")
 PY
-    done
 }
