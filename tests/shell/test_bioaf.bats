@@ -1083,6 +1083,7 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 #                           RELOAD for daemon-reload); FAKE_RESTART_FAILS_ONCE=1 fails only the first
 #   FAKE_VERIFY_STATUS      exit of systemd-analyze verify;  FAKE_RUN_STATUS  exit of systemd-run
 #   FAKE_DIES_AFTER_START=1  the agent is active on the first check after a start, then not
+#   FAKE_RESTART_HOOK=<file>  restart first runs <file> with bash (to interleave events)
 #   FAKE_RESTART_MARK=<file>  restart also logs whether <file> existed at that moment
 #   FAKE_WAITER_ACTIVE_STATUS  exit of `systemctl is-active` for the waiter unit (default 3: none)
 agent_env() {
@@ -1112,6 +1113,7 @@ case "$1" in
     enable) exit "${FAKE_ENABLE_STATUS:-0}" ;;
     start) [ "${FAKE_START_STATUS:-0}" = 0 ] && : > "$FAKE_LOG.started"; exit "${FAKE_START_STATUS:-0}" ;;
     restart)
+        if [ -n "${FAKE_RESTART_HOOK:-}" ]; then bash "$FAKE_RESTART_HOOK"; fi
         if [ -n "${FAKE_RESTART_MARK:-}" ]; then
             if [ -e "$FAKE_RESTART_MARK" ]; then echo restart-after-updater; else echo restart-during-updater; fi >> "$FAKE_LOG"
         fi
@@ -1330,34 +1332,114 @@ busy_agent() {
     sleep 0.3
 }
 
-@test "an agent with an update in flight is not restarted now; a waiter outside it is scheduled" {
+# polling_agent <tmp>: a stand-in agent that polls every second and starts an updater (perl, 5 s) as
+# soon as <tmp>/trigger appears, the way the real agent picks up a trigger. Sets AGENT_PID. (macOS
+# pgrep does not list an exited, unreaped child, so a short poll sleep could vanish while held.)
+polling_agent() {
+    bash -c "while :; do if [ -e '$1/trigger' ]; then rm -f '$1/trigger'; perl -e 'sleep 5'; fi; sleep 1; done" </dev/null >/dev/null 2>&1 &
+    AGENT_PID=$!
+    sleep 0.3
+}
+
+# A restart hook that delivers a trigger at the worst moment (after any idle check, before the
+# restart) and records whether the agent got to start an updater before being restarted.
+race_hook() {
+    cat > "$tmp/race-hook" <<HOOK
+: > '$tmp/trigger'
+sleep 1.5
+if pgrep -P $AGENT_PID -x perl >/dev/null; then echo updater-started-before-restart; else echo no-updater-before-restart; fi >> '$tmp/log'
+case "\$(ps -o stat= -p $AGENT_PID)" in *T*) echo restart-while-held ;; *) echo restart-while-running ;; esac >> '$tmp/log'
+HOOK
+}
+
+not_stopped() { case "$(ps -o stat= -p "$1")" in *T*) return 1 ;; esac; }
+
+waiter_env() {
+    # The checkout's own ./bioaf, with the unit path and wait times pointed at the test.
+    sed -e "s|^UPDATE_AGENT_UNIT=.*|UPDATE_AGENT_UNIT='$tmp/etc/bioaf-update-agent.service'|" \
+        -e "s|^UPDATE_AGENT_ACTIVE_WAIT=.*|UPDATE_AGENT_ACTIVE_WAIT=0|" -e "s|^UPDATE_AGENT_SETTLE=.*|UPDATE_AGENT_SETTLE=0|" \
+        "$BIOAF_SCRIPT" > "$tmp/repo/bioaf"
+    cp "$REPO_ROOT/scripts/update-agent-activate.sh" "$tmp/repo/scripts/"
+    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
+}
+
+# run_waiter [env...]: the transient unit's command, as systemd runs it, against the stubs.
+run_waiter() {
+    rm -f "$tmp/log.started" "$tmp/log.checked"
+    run env FAKE_LOG="$tmp/log" PATH="$tmp/bin:$PATH" "$@" \
+        perl -e 'alarm 40; exec @ARGV' /bin/bash "$tmp/repo/scripts/update-agent-activate.sh" </dev/null
+}
+
+@test "an agent with an update in flight is left alone: nothing changes now and a waiter is scheduled" {
     tmp="$(mktemp -d)"; agent_env "$tmp"
     busy_agent "$tmp" 30
     legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
     ensure_agent FAKE_MAINPID="$AGENT_PID"
-    kill "$AGENT_PID" 2>/dev/null || true
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    ! grep -qE '^(systemd-analyze|systemctl (daemon-reload|restart|start))' "$tmp/log"
+    grep -q "^systemd-run --unit=bioaf-update-agent-activation .*--uid=$(whoami) --gid=$(id -gn) .*/scripts/update-agent-activate.sh\$" "$tmp/log"
+    [[ "$output" == *"when that update finishes"* ]]
+}
+
+@test "a trigger arriving after the idle check cannot start an update before the restart" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    ensure_agent FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    grep -qx no-updater-before-restart "$tmp/log"
+    grep -qx restart-while-held "$tmp/log"
+    ! grep -q updater-started-before-restart "$tmp/log"
+}
+
+@test "the agent is never left stopped, whether reconciliation succeeds or fails" {
+    local fail
+    for fail in "" FAKE_VERIFY_STATUS=1 FAKE_RESTART_STATUS=1; do
+        tmp="$(mktemp -d)"; agent_env "$tmp"
+        polling_agent "$tmp"
+        legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+        ensure_agent FAKE_MAINPID="$AGENT_PID" $fail
+        not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
+    done
+}
+
+@test "the waiter reconciles once the update has ended, holding the agent through the restart" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    busy_agent "$tmp" 3
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_MARK="$tmp/updater-done"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
     [ "$status" -eq 0 ]
     head -1 "$tmp/etc/bioaf-update-agent.service" | grep -q '^# bioaf-managed: update-agent-unit/v1'
-    grep -q '^systemctl daemon-reload' "$tmp/log"
-    ! grep -q '^systemctl restart' "$tmp/log"
-    grep -q "^systemd-run --unit=bioaf-update-agent-activation .*/scripts/update-agent-activate.sh $AGENT_PID\$" "$tmp/log"
+    grep -q '^systemd-analyze verify' "$tmp/log"
+    grep -qx restart-after-updater "$tmp/log"
+    ! grep -q restart-during-updater "$tmp/log"
 }
 
-@test "the waiter restarts the agent only after its in-flight updater has ended" {
-    tmp="$(mktemp -d)"; agent_env "$tmp"
-    busy_agent "$tmp" 3
-    run env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_MARK="$tmp/updater-done" perl -e 'alarm 30; exec @ARGV' bash -c "source '$tmp/agent.sh'; update_agent_restart_when_idle $AGENT_PID 20"
+@test "the waiter's restart is health-checked and a unit that does not stay up is rolled back" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    busy_agent "$tmp" 1
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    cp "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_DIES_AFTER_START=1
     kill "$AGENT_PID" 2>/dev/null || true
-    [ "$status" -eq 0 ]
-    grep -q '^restart-after-updater$' "$tmp/log"
-    ! grep -q 'restart-during-updater' "$tmp/log"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"activation_failed"* ]] || [[ "$output" == *"rollback_failed"* ]]
+    cmp -s "$tmp/etc/bioaf-update-agent.service" "$tmp/before"
 }
 
-@test "the waiter leaves an agent that something else already restarted alone" {
-    tmp="$(mktemp -d)"; agent_env "$tmp"
-    run env FAKE_LOG="$tmp/log" FAKE_MAINPID=424242 bash -c "source '$tmp/agent.sh'; update_agent_restart_when_idle 1 5" </dev/null
+@test "the waiter's restart cannot race a trigger either" {
+    tmp="$(mktemp -d)"; agent_env "$tmp"; waiter_env
+    polling_agent "$tmp"; race_hook
+    legacy_unit "$tmp" v0.11.5 > "$tmp/etc/bioaf-update-agent.service"
+    run_waiter FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_HOOK="$tmp/race-hook"
+    not_stopped "$AGENT_PID"; kill "$AGENT_PID" 2>/dev/null || true
     [ "$status" -eq 0 ]
-    ! grep -q '^systemctl restart' "$tmp/log"
+    grep -qx no-updater-before-restart "$tmp/log"
 }
 
 @test "the scheduled waiter is a fixed script that systemd can store: one line per argument, no \$ or %" {
@@ -1369,25 +1451,10 @@ busy_agent() {
     kill "$AGENT_PID" 2>/dev/null || true
     [ "$status" -eq 0 ]
     # systemd stores a transient unit's command in a unit file and re-reads it on daemon-reload: a
-    # newline in an argument breaks it, and $ or % would be expanded. So: options, the interpreter,
-    # the script, and the agent PID last; no argument spans lines.
-    [ "$(tail -1 "$tmp/run-args")" = "$AGENT_PID" ]
+    # newline in an argument breaks it, and $ or % would be expanded.
+    [ "$(tail -1 "$tmp/run-args")" = "$tmp/repo/scripts/update-agent-activate.sh" ]
     [ "$(sed -n '$=' "$tmp/run-args")" -eq "$(grep -c . "$tmp/run-args")" ]
     ! grep -q '[$%]' "$tmp/run-args"
-    grep -qx "$tmp/repo/scripts/update-agent-activate.sh" "$tmp/run-args"
-}
-
-@test "the waiter script restarts the agent once it is idle" {
-    tmp="$(mktemp -d)"; agent_env "$tmp"
-    cp "$BIOAF_SCRIPT" "$tmp/repo/bioaf"
-    cp "$REPO_ROOT/scripts/update-agent-activate.sh" "$tmp/repo/scripts/"
-    mkdir -p "$tmp/repo/installer"; cp "$REPO_ROOT/installer/managed_file.sh" "$REPO_ROOT/installer/output.sh" "$tmp/repo/installer/"
-    busy_agent "$tmp" 2
-    run env FAKE_LOG="$tmp/log" FAKE_MAINPID="$AGENT_PID" FAKE_RESTART_MARK="$tmp/updater-done" PATH="$tmp/bin:$PATH" \
-        perl -e 'alarm 30; exec @ARGV' /bin/bash "$tmp/repo/scripts/update-agent-activate.sh" "$AGENT_PID"
-    kill "$AGENT_PID" 2>/dev/null || true
-    [ "$status" -eq 0 ]
-    grep -q '^restart-after-updater$' "$tmp/log"
 }
 
 @test "an agent that exits right after it starts is a failed activation, and the previous unit is restored" {

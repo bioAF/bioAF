@@ -7,7 +7,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# BASH_SOURCE, not $0: the same when run, and still this checkout when sourced (the update-agent waiter).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${BIOAF_COMPOSE_FILE:-$SCRIPT_DIR/docker/docker-compose.yml}"
 ENV_FILE="${BIOAF_ENV_FILE:-$SCRIPT_DIR/docker/.env}"
 
@@ -268,34 +269,50 @@ update_agent_validate() {
     return "$status"
 }
 
-update_agent_busy() {
-    # True while the running agent has any child other than its poll `sleep`: an updater in flight
-    # (possibly this very process) or a trigger being read. A child-less instant is not provably
-    # idle either. False when the agent is not running at all.
-    local main child name idle=false
-    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || return 0
-    if [ -z "$main" ] || [ "$main" = 0 ]; then return 1; fi
-    for child in $(pgrep -P "$main" 2>/dev/null); do
-        name=$(ps -o comm= -p "$child" 2>/dev/null)
-        if [ "${name##*/}" = sleep ]; then idle=true; else return 0; fi
-    done
-    [ "$idle" = false ]
+update_agent_main_pid() {
+    local main
+    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || main=0
+    echo "${main:-0}"
 }
 
-update_agent_restart_when_idle() {
-    # update_agent_restart_when_idle <agent pid> [limit seconds]: run by the transient waiter, outside
-    # the agent's cgroup. Restarts the agent once that process is idle; does nothing if the agent was
-    # already restarted (its PID changed) or the limit passes.
-    local started="$1" limit="${2:-86400}" waited=0
-    while [ "$waited" -lt "$limit" ]; do
-        [ "$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null)" = "$started" ] || return 0
-        if ! update_agent_busy; then
-            systemctl restart "$UPDATE_AGENT_SERVICE"
-            return
-        fi
-        sleep 2; waited=$((waited + 2))
+update_agent_between_polls() {
+    # True when every child of <pid> is the agent's poll `sleep`, and there is one: the agent is
+    # waiting for its next poll. Any other child (an updater, possibly this very process; a trigger
+    # being read) or none at all (between commands) is not provably idle.
+    local child name idle=false
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        name=$(ps -o comm= -p "$child" 2>/dev/null)
+        if [ "${name##*/}" = sleep ]; then idle=true; else return 1; fi
     done
+    [ "$idle" = true ]
+}
+
+_update_agent_signal() {
+    kill -"$1" "$2" 2>/dev/null || sudo kill -"$1" "$2" 2>/dev/null
+}
+
+UPDATE_AGENT_HELD=""
+update_agent_hold() {
+    # Stop (SIGSTOP) the running agent, then keep it stopped only if it was between polls. A stopped
+    # agent cannot pick up a trigger, so nothing can start between this check and the restart: no
+    # cooperation from the agent is needed, so this holds an older release's agent too. systemd
+    # sends SIGCONT with SIGTERM when it stops a unit. Fails, with the agent running again, when it
+    # is busy. Nothing to hold when the agent is not running.
+    local main
+    UPDATE_AGENT_HELD=""
+    main=$(update_agent_main_pid)
+    [ "$main" = 0 ] && return 0
+    _update_agent_signal STOP "$main" || return 1
+    UPDATE_AGENT_HELD="$main"
+    update_agent_between_polls "$main" && return 0
+    update_agent_release
     return 1
+}
+
+update_agent_release() {
+    # Resume a held agent (a no-op once a restart has replaced it).
+    [ -n "$UPDATE_AGENT_HELD" ] && { _update_agent_signal CONT "$UPDATE_AGENT_HELD" || true; }
+    UPDATE_AGENT_HELD=""
 }
 
 update_agent_wait_active() {
@@ -311,23 +328,7 @@ update_agent_wait_active() {
 }
 
 update_agent_restart() {
-    # Restart the agent so it runs the unit and code on disk. Restarting it from inside its own
-    # update would kill that update (the updater is in the agent's cgroup), so while it is busy a
-    # transient unit (scripts/update-agent-activate.sh, the agent PID its only argument) waits for it
-    # to be idle and restarts it then.
-    local main
-    if ! update_agent_busy; then
-        sudo systemctl restart "$UPDATE_AGENT_SERVICE" && update_agent_wait_active
-        return
-    fi
-    if sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE-activation" 2>/dev/null; then
-        echo "The update agent will restart when its current update finishes (already scheduled)."
-        return 0
-    fi
-    main=$(systemctl show -p MainPID --value "$UPDATE_AGENT_SERVICE" 2>/dev/null) || return 1
-    sudo systemd-run --unit="$UPDATE_AGENT_SERVICE-activation" --collect --quiet \
-        /bin/bash "$SCRIPT_DIR/scripts/update-agent-activate.sh" "$main" || return 1
-    echo "The update agent will restart when its current update finishes."
+    sudo systemctl restart "$UPDATE_AGENT_SERVICE" && update_agent_wait_active
 }
 
 update_agent_activate() {
@@ -339,35 +340,31 @@ update_agent_code_current() {
     [ -n "$HOST_IO_PY" ] && python3 -I -c "$HOST_IO_PY" agent-code-current "$SCRIPT_DIR" 2>/dev/null
 }
 
-ensure_update_agent() {
-    # Reconcile the update agent's systemd unit with this checkout's template, then make sure the
-    # agent is running the code on disk: start it if stopped, restart it (now or when its update
-    # finishes) if the unit changed or it runs older code. Custom units are left alone and fail the
-    # step; units marked operator-managed are left alone but the agent is still kept running.
-    # Every failure is returned, so callers may use this under `if`, `||` or `step`.
-    if ! command -v systemctl &>/dev/null; then
-        return 0
-    fi
-    mkdir -p "$SCRIPT_DIR/update-requests" "$SCRIPT_DIR/update-status"
-
-    local user group
-    user=$(whoami) && group=$(id -gn) || return 1
-    if ! update_agent_inputs_valid "$SCRIPT_DIR" "$user" "$group"; then
+update_agent_identity() {
+    # Sets UPDATE_AGENT_USER/GROUP to the account the unit runs as, if the unit can carry them.
+    UPDATE_AGENT_USER=$(whoami) && UPDATE_AGENT_GROUP=$(id -gn) || return 1
+    if ! update_agent_inputs_valid "$SCRIPT_DIR" "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP"; then
         red "The update agent unit cannot carry this checkout path or account name safely; nothing was changed."
         red "Use a path made of letters, digits and . _ / + @ - and a standard account name."
         return 1
     fi
+}
 
+update_agent_reconcile_now() {
+    # Bring the unit to this checkout's template and the agent to the code on disk. Called with the
+    # agent held (or not running). Every activation is health-checked; a failed one restores the
+    # previous unit (managed_file_reconcile).
     local work legacy="" old status=0
     work=$(mktemp -d) || return 1
-    if ! update_agent_render "$SCRIPT_DIR/docker/$UPDATE_AGENT_SERVICE.service" "$SCRIPT_DIR" "$user" "$group" > "$work/unit"; then
+    if ! update_agent_render "$SCRIPT_DIR/docker/$UPDATE_AGENT_SERVICE.service" "$SCRIPT_DIR" \
+        "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP" > "$work/unit"; then
         rm -rf "$work"
         red "Could not render the update agent unit; nothing was changed."
         return 1
     fi
     for old in "$SCRIPT_DIR"/installer/update-agent-legacy/*.service; do
         [ -f "$old" ] || continue
-        legacy="$legacy $(update_agent_render "$old" "$SCRIPT_DIR" "$user" "$group" | _mf_sha256)"
+        legacy="$legacy $(update_agent_render "$old" "$SCRIPT_DIR" "$UPDATE_AGENT_USER" "$UPDATE_AGENT_GROUP" | _mf_sha256)"
     done
     MF_PRIV=sudo managed_file_reconcile update-agent-unit/v1 "$work/unit" "$UPDATE_AGENT_UNIT" "$legacy" \
         update_agent_validate update_agent_activate "${UPDATE_AGENT_DETAIL_DIR:-$SCRIPT_DIR/host-only}" || status=$?
@@ -388,7 +385,7 @@ ensure_update_agent() {
             elif ! update_agent_code_current; then
                 bold "Restarting the update agent to run the code on disk..."
                 if ! update_agent_restart; then
-                    red "The update agent could not be restarted. Check: sudo journalctl -u $UPDATE_AGENT_SERVICE"
+                    red "The update agent did not stay up after a restart. Check: sudo journalctl -u $UPDATE_AGENT_SERVICE"
                     return 1
                 fi
             fi
@@ -397,6 +394,60 @@ ensure_update_agent() {
             red "Update agent unit not updated (${MF_OUTCOME})."
             return "$(( status == 0 ? 1 : status ))" ;;
     esac
+}
+
+# Status of update_agent_reconcile_held when the agent is busy (nothing was changed).
+UPDATE_AGENT_BUSY=75
+
+update_agent_reconcile_held() (
+    # In a subshell, so the agent is resumed on every way out, including an error exit.
+    update_agent_hold || exit "$UPDATE_AGENT_BUSY"
+    trap update_agent_release EXIT
+    update_agent_reconcile_now
+)
+
+update_agent_schedule() {
+    # The agent is busy (possibly running the update this process belongs to; restarting it would
+    # stop that update). Leave everything as it is and have a transient unit, outside the agent's
+    # cgroup and running as this account, do the whole reconciliation once the agent is idle:
+    # scripts/update-agent-activate.sh. Its command is one line with no $ or %, because systemd
+    # stores it in a unit file and reads it back on daemon-reload.
+    if sudo systemctl is-active --quiet "$UPDATE_AGENT_SERVICE-activation" 2>/dev/null; then
+        yellow "The update agent is busy; it is already scheduled to be brought up to date when that update finishes."
+        return 0
+    fi
+    if ! sudo systemd-run --unit="$UPDATE_AGENT_SERVICE-activation" --collect --quiet \
+        --uid="$UPDATE_AGENT_USER" --gid="$UPDATE_AGENT_GROUP" \
+        /bin/bash "$SCRIPT_DIR/scripts/update-agent-activate.sh"; then
+        red "The update agent is busy, and its update could not be scheduled for later."
+        return 1
+    fi
+    yellow "The update agent is running an update; its unit and code will be brought up to date when that update finishes."
+    yellow "Outcome: sudo journalctl -u $UPDATE_AGENT_SERVICE-activation"
+}
+
+ensure_update_agent() {
+    # Reconcile the update agent's systemd unit with this checkout's template, then make sure the
+    # agent is running the code on disk: start it if stopped, restart it if the unit changed or it
+    # runs older code. All of it happens with the agent held between polls, so no trigger can start
+    # meanwhile; when the agent is busy nothing changes now and the same reconciliation runs once it
+    # is idle. Custom units are left alone and fail the step; units marked operator-managed are left
+    # alone but the agent is still kept running. Every failure is returned, so callers may use this
+    # under `if`, `||` or `step`.
+    if ! command -v systemctl &>/dev/null; then
+        return 0
+    fi
+    mkdir -p "$SCRIPT_DIR/update-requests"
+    [ -d "$SCRIPT_DIR/update-status" ] || mkdir -m 755 "$SCRIPT_DIR/update-status"
+    update_agent_identity || return 1
+
+    local status=0
+    update_agent_reconcile_held || status=$?
+    if [ "$status" = "$UPDATE_AGENT_BUSY" ]; then
+        update_agent_schedule
+        return
+    fi
+    return "$status"
 }
 
 build_setup_reexec_cmd() {
