@@ -145,6 +145,9 @@ class CancellableReader:
     def tell(self) -> int:
         return self._raw.tell()
 
+    def close(self) -> None:
+        """SDKs close what they were given; the job owns the underlying file and closes it."""
+
 
 class ExportJob:
     """One admitted export: its slot lease, budget, scratch directory and its current worker task."""

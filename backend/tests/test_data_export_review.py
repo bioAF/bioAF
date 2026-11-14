@@ -370,3 +370,50 @@ async def test_a_delivered_export_leaves_no_backstop_timer(client, session, admi
     await asyncio.sleep(0)
 
     assert _backstops() == []
+
+
+# -- The cancellable archive reader through the locked S3 upload path ----------------------------
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.asyncio
+async def test_the_archive_reader_uploads_through_s3transfer_and_stops_when_cancelled(
+    mode_adapter_factory, monkeypatch, tmp_path, cancel
+):
+    import boto3
+
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.services.data_export.archive import CancellableReader
+    from app.services.data_export.resources import ExportCancelled, ScratchBudget
+    from app.settings_contract import ComputeMode
+
+    adapter = mode_adapter_factory(S3StorageProvider, mode=ComputeMode.KUBERNETES)
+
+    async def none(*a, **k):
+        return None
+
+    monkeypatch.setattr(adapter, "_get_credentials", none)
+    client = boto3.client("s3", region_name="us-east-1", aws_access_key_id="x", aws_secret_access_key="y")
+    received = {}
+
+    def put_object(**kwargs):
+        received["body"] = kwargs["Body"].read()
+        return {"ETag": '"e"'}
+
+    client.put_object = put_object
+    monkeypatch.setattr(adapter, "_get_s3_client", lambda creds=None: client)
+    archive = tmp_path / "export.zip"
+    payload = os.urandom(300_000)
+    archive.write_bytes(payload)
+    budget = ScratchBudget(10, probe=lambda: resources.DiskSpace(free=10**12, total=10**12))
+    if cancel:
+        budget.cancel()
+
+    with open(archive, "rb") as raw:
+        if cancel:
+            with pytest.raises(ExportCancelled):
+                await adapter.upload_file("s3://b/exports/1/x.zip", CancellableReader(raw, budget))
+        else:
+            await adapter.upload_file("s3://b/exports/1/x.zip", CancellableReader(raw, budget))
+
+    assert received.get("body") == (None if cancel else payload)
