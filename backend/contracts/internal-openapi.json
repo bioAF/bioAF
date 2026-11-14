@@ -7668,6 +7668,10 @@
       "ExportRequest": {
         "properties": {
           "delivery_method": {
+            "enum": [
+              "direct",
+              "gcs"
+            ],
             "title": "Delivery Method",
             "type": "string"
           },

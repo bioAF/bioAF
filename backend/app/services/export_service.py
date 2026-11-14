@@ -1,32 +1,51 @@
-"""Data export service for experiments and projects.
+"""Data exports for experiments and projects.
 
-Builds structured ZIP archives containing results, raw files, provenance
-reports, GEO exports, and sample manifests. Supports direct streaming and
-GCS signed-URL delivery for large exports.
+An export is one ZIP holding the selected catalogue files' actual bytes, a README, sample manifests
+and, when requested, provenance reports, under the layout in ``data_export/naming.py``. It is
+delivered directly (streamed from private scratch) or through a time-limited signed link.
+
+The order of work is the contract (plan 24):
+
+1. Scope and select (``data_export/selection.py``): the entity must belong to the organization;
+   membership, deduplication and FASTQ rules are the same as the estimate's.
+2. Refuse what cannot succeed before any content work: over-limit selections (413), selected files
+   whose stored bytes are known to be gone (409).
+3. Admit (``data_export/resources.py``): take the one global slot (429 when busy) and reserve
+   scratch above the free-space floor (503).
+4. Generate reports, then build the archive (``data_export/archive.py``). A requested provenance
+   report that cannot be generated fails the export; nothing is silently omitted.
+5. Hand the prepared archive to the caller, who owns it until delivery ends.
 """
 
 from __future__ import annotations
 
-import csv
-import io
+import asyncio
+import contextlib
+import json
 import logging
-import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import NotFoundError
-from app.models.experiment import Experiment
-from app.models.file import File
-from app.models.project import Project
-from app.models.sample import Sample
+from app.config import settings
+from app.exceptions import (
+    DomainError,
+    ExportContentUnavailableError,
+    ExportLimitError,
+    ExportTimeoutError,
+    NotFoundError,
+)
+from app.services.data_export import naming, resources, selection
+from app.services.data_export.archive import ArchivePlan, ExportJob, check_available
+from app.services.data_export.selection import ExperimentContent, ProjectContent
+from app.services.provenance.data_gatherer import GatherBudget, ReportTooLarge
 from app.services.provenance.report_service import ProvenanceReportService
 
 logger = logging.getLogger("bioaf.export")
 
-_FASTQ_TYPES = {"fastq", "fastq.gz", "fq", "fq.gz"}
-
+# The manifest builder lives with the selection now; existing callers import it from here.
+_build_sample_manifest = selection.build_sample_manifest
 
 # ---------------------------------------------------------------------------
 # Size estimation
@@ -38,29 +57,10 @@ async def estimate_experiment_export(
     experiment_id: int,
     org_id: int,
     include_fastq: bool = False,
-) -> dict:
+) -> dict | None:
     """Return total_bytes and per-category breakdown for an experiment export."""
-    experiment = await _get_experiment(session, experiment_id, org_id)
-    if experiment is None:
-        return None  # type: ignore[return-value]
-
-    rows = (
-        await session.execute(
-            select(File.file_type, File.size_bytes).where(
-                File.experiment_id == experiment_id,
-                File.organization_id == org_id,
-            )
-        )
-    ).fetchall()
-
-    breakdown: dict[str, int] = {}
-    for file_type, size in rows:
-        ftype = (file_type or "other").lower()
-        if ftype in _FASTQ_TYPES and not include_fastq:
-            continue
-        breakdown[ftype] = breakdown.get(ftype, 0) + (size or 0)
-
-    return {"total_bytes": sum(breakdown.values()), "breakdown": breakdown}
+    content = await selection.select_experiment(session, experiment_id, org_id, include_fastq=include_fastq)
+    return None if content is None else selection.experiment_estimate(content)
 
 
 async def estimate_project_export(
@@ -69,307 +69,284 @@ async def estimate_project_export(
     org_id: int,
     include_fastq: bool = False,
 ) -> dict | None:
-    """Return total_bytes, per-category breakdown, and per-experiment breakdown."""
-    project = await _get_project(session, project_id, org_id)
-    if project is None:
-        return None
+    """Return total_bytes, per-category breakdown, and per-experiment breakdown.
 
-    experiments = (
-        await session.execute(
-            select(Experiment.id, Experiment.name).where(
-                Experiment.project_id == project_id,
-                Experiment.organization_id == org_id,
-            )
-        )
-    ).fetchall()
-
-    per_experiment: list[dict] = []
-    grand_total = 0
-    grand_breakdown: dict[str, int] = {}
-
-    for exp_id, exp_name in experiments:
-        est = await estimate_experiment_export(session, exp_id, org_id, include_fastq)
-        per_experiment.append({"experiment_id": exp_id, "name": exp_name, **est})
-        grand_total += est["total_bytes"]
-        for k, v in est["breakdown"].items():
-            grand_breakdown[k] = grand_breakdown.get(k, 0) + v
-
-    return {
-        "total_bytes": grand_total,
-        "breakdown": grand_breakdown,
-        "experiments": per_experiment,
-    }
+    Files in the project but in none of its experiments count toward the totals without a row.
+    """
+    content = await selection.select_project(session, project_id, org_id, include_fastq=include_fastq)
+    return None if content is None else selection.project_estimate(content)
 
 
 # ---------------------------------------------------------------------------
-# Export builders
+# Prepared archives
 # ---------------------------------------------------------------------------
 
 
-async def export_experiment(
+@dataclass
+class PreparedExport:
+    """A finished archive in private scratch. Its owner must ``release`` it exactly once (idempotent)."""
+
+    job: ExportJob
+    size: int
+    filename: str
+    # Set when a response starts streaming it; from then on the response alone releases it.
+    claimed: bool = False
+    # The timer that releases it if no response ever starts; cancelled once that cannot happen.
+    backstop: asyncio.Task | None = None
+
+    @property
+    def path(self) -> str:
+        return str(self.job.archive_path)
+
+    def _stop_backstop(self) -> None:
+        if self.backstop is not None and self.backstop is not asyncio.current_task():
+            self.backstop.cancel()
+        self.backstop = None
+
+    def claim(self) -> None:
+        """A response started streaming this export and now owns its release."""
+        self.claimed = True
+        self._stop_backstop()
+
+    def release(self) -> None:
+        self.job.release()
+        self._stop_backstop()
+
+
+async def prepare_experiment_export(
     session: AsyncSession,
     experiment_id: int,
     org_id: int,
+    *,
     include_fastq: bool,
     include_provenance: bool,
     user_email: str,
-    folder_prefix: str | None = None,
-) -> bytes:
-    """Build and return ZIP bytes for a single experiment export.
-
-    folder_prefix: when set, all paths are nested under this prefix (used for
-    project exports that embed experiments as sub-folders).
-    """
-    experiment = await _get_experiment(session, experiment_id, org_id)
-    if experiment is None:
+) -> PreparedExport:
+    started = asyncio.get_running_loop().time()
+    resources.SLOT.refuse_if_busy()
+    async with _preparation_deadline(started):
+        content = await selection.select_experiment(
+            session, experiment_id, org_id, include_fastq=include_fastq, limit=resources.MAX_FILES + 1
+        )
+    if content is None:
         raise NotFoundError(f"Experiment {experiment_id} not found")
 
-    safe_name = _safe_name(experiment.name)
-    prefix = f"{folder_prefix}/{safe_name}/" if folder_prefix else f"{safe_name}/"
-
-    files = (
-        (
-            await session.execute(
-                select(File).where(
-                    File.experiment_id == experiment_id,
-                    File.organization_id == org_id,
-                )
-            )
+    async def plan(archive: ArchivePlan, job: ExportJob) -> None:
+        await _plan_experiment(
+            session, archive, job, content, content.root, org_id, user_email, include_fastq, include_provenance
         )
-        .scalars()
-        .all()
+
+    return await _prepare(
+        session, list(content.files), include_fastq, plan, _filename(content.name, "experiment"), started
     )
 
-    samples = (await session.execute(select(Sample).where(Sample.experiment_id == experiment_id))).scalars().all()
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # README
-        readme = _build_readme(experiment, user_email, include_fastq, include_provenance)
-        zf.writestr(f"{prefix}README.txt", readme)
-
-        # Sample manifest CSV
-        manifest_csv = _build_sample_manifest(samples)
-        zf.writestr(f"{prefix}sample_manifest.csv", manifest_csv)
-
-        # Data files (stubs -- GCS fetch would happen here in production)
-        for f in files:
-            ftype = (f.file_type or "other").lower()
-            if ftype in _FASTQ_TYPES and not include_fastq:
-                continue
-            folder = _file_folder(ftype)
-            zf.writestr(f"{prefix}{folder}/{f.filename}", b"")  # placeholder -- real impl streams from GCS
-
-        # Provenance report
-        if include_provenance:
-            try:
-                report = await ProvenanceReportService.generate(
-                    session=session,
-                    entity_type="experiment",
-                    entity_id=experiment_id,
-                    org_id=org_id,
-                    user_email=user_email,
-                    format="all",
-                )
-                content = report.content
-                if isinstance(content, str):
-                    content = content.encode("utf-8")
-                zf.writestr(f"{prefix}provenance/{report.filename}", content)
-            except Exception as exc:
-                logger.warning("Provenance report failed for experiment %d: %s", experiment_id, exc)
-
-    return buf.getvalue()
-
-
-async def export_project(
+async def prepare_project_export(
     session: AsyncSession,
     project_id: int,
     org_id: int,
+    *,
     include_fastq: bool,
     include_provenance: bool,
     user_email: str,
-) -> tuple[bytes, str]:
-    """Build and return (zip_bytes, filename) for a project export."""
-    project = await _get_project(session, project_id, org_id)
-    if project is None:
-        raise NotFoundError(f"Project {project_id} not found")
-
-    safe_name = _safe_name(project.name)
-    folder_prefix = safe_name
-
-    experiments = (
-        (
-            await session.execute(
-                select(Experiment.id).where(
-                    Experiment.project_id == project_id,
-                    Experiment.organization_id == org_id,
-                )
-            )
+) -> PreparedExport:
+    started = asyncio.get_running_loop().time()
+    resources.SLOT.refuse_if_busy()
+    async with _preparation_deadline(started):
+        content = await selection.select_project(
+            session,
+            project_id,
+            org_id,
+            include_fastq=include_fastq,
+            limit=resources.MAX_FILES + 1,
+            max_experiments=resources.MAX_PROJECT_EXPERIMENTS,
         )
-        .scalars()
-        .all()
+    if content is None:
+        raise NotFoundError(f"Project {project_id} not found")
+    root = content.root
+
+    async def plan(archive: ArchivePlan, job: ExportJob) -> None:
+        archive.add_generated(f"{root}/README.txt", _build_project_readme(content, user_email))
+        for experiment in content.experiments:
+            exp_root = f"{root}/experiments/{experiment.root}"
+            await _plan_experiment(
+                session, archive, job, experiment, exp_root, org_id, user_email, include_fastq, include_provenance
+            )
+        for file in content.files:
+            archive.add_file(root, file)
+        if include_provenance:
+            archive.add_generated(*await _provenance(session, job, "project", content.id, org_id, user_email, root))
+
+    return await _prepare(
+        session, list(content.all_files), include_fastq, plan, _filename(content.name, "project"), started
     )
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Project-level README
-        readme = _build_project_readme(project, user_email)
-        zf.writestr(f"{folder_prefix}/README.txt", readme)
 
-        for exp_id in experiments:
-            exp_bytes = await export_experiment(
-                session, exp_id, org_id, include_fastq, include_provenance, user_email, folder_prefix
-            )
-            # Merge experiment zip contents into project zip
-            with zipfile.ZipFile(io.BytesIO(exp_bytes)) as exp_zf:
-                for item in exp_zf.infolist():
-                    zf.writestr(item, exp_zf.read(item.filename))
-
-        # Project-level provenance
-        if include_provenance:
-            try:
-                report = await ProvenanceReportService.generate(
-                    session=session,
-                    entity_type="project",
-                    entity_id=project_id,
-                    org_id=org_id,
-                    user_email=user_email,
-                    format="all",
-                )
-                content = report.content
-                if isinstance(content, str):
-                    content = content.encode("utf-8")
-                zf.writestr(f"{folder_prefix}/provenance/{report.filename}", content)
-            except Exception as exc:
-                logger.warning("Provenance report failed for project %d: %s", project_id, exc)
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"{safe_name}_export_{ts}.zip"
-    return buf.getvalue(), filename
+@contextlib.asynccontextmanager
+async def _preparation_deadline(started: float):
+    """The one absolute preparation budget: selection, planning and the build all spend it."""
+    try:
+        async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
+            yield
+    except TimeoutError:
+        raise ExportTimeoutError("The export took too long to prepare and was stopped. Try a smaller export.") from None
 
 
-async def _upload_zip_to_gcs(
-    zip_bytes: bytes,
-    org_id: int,
-    name: str,
-    session: AsyncSession,
-) -> str:
-    """Upload zip_bytes to the config_backups store and return a 24h signed URL."""
-    from app.adapters.models import StorageStore
+async def _prepare(session: AsyncSession, files, include_fastq: bool, plan, filename: str, started: float):
+    """Refuse what cannot succeed, admit, then plan (manifests, reports) and build under the deadline."""
     from app.adapters.registry import get_storage_adapter
 
-    adapter = get_storage_adapter()
+    sizes = [f.size_bytes for f in files]
+    resources.check_source_limits(sizes, fastq_omitted=not include_fastq)
+    check_available(files)
+    job = ExportJob.admit(sizes, scratch_dir=settings.export_scratch_dir)
+    archive = ArchivePlan()
+    try:
+        async with asyncio.timeout_at(started + resources.BUILD_DEADLINE):
+            await plan(archive, job)
+            # Nothing below needs the database until the audit: end the read transaction rather
+            # than hold a pooled connection idle through a build that may take many minutes.
+            await session.commit()
+    except TimeoutError:
+        job.release()
+        raise ExportTimeoutError("The export took too long to prepare and was stopped. Try a smaller export.") from None
+    except BaseException:
+        job.release()
+        raise
+    remaining = started + resources.BUILD_DEADLINE - asyncio.get_running_loop().time()
+    size = await job.build(archive, get_storage_adapter(), deadline=max(remaining, 0))
+    return PreparedExport(job=job, size=size, filename=filename)
+
+
+async def _plan_experiment(
+    session: AsyncSession,
+    archive: ArchivePlan,
+    job: ExportJob,
+    content: ExperimentContent,
+    root: str,
+    org_id: int,
+    user_email: str,
+    include_fastq: bool,
+    include_provenance: bool,
+) -> None:
+    archive.add_generated(f"{root}/README.txt", _build_readme(content, user_email, include_fastq, include_provenance))
+    manifest = await selection.write_sample_manifest(session, content.id, limit_bytes=archive.generated_remaining)
+    archive.add_generated(f"{root}/sample_manifest.csv", manifest)
+    for file in content.files:
+        archive.add_file(root, file)
+    if include_provenance:
+        archive.add_generated(*await _provenance(session, job, "experiment", content.id, org_id, user_email, root))
+
+
+_PROVENANCE_FAILED = (
+    "The provenance report could not be generated, so the export was stopped. "
+    "Try again, or export without the provenance report."
+)
+
+
+def _report_too_large(entity_type: str, what: str) -> ExportLimitError:
+    return ExportLimitError(
+        f"The provenance report for this {entity_type} is too large to generate with an export ({what}). "
+        "Export without the provenance report, or export a smaller scope.",
+    )
+
+
+async def _provenance(
+    session: AsyncSession,
+    job: ExportJob,
+    entity_type: str,
+    entity_id: int,
+    org_id: int,
+    user_email: str,
+    root: str,
+) -> tuple[str, bytes]:
+    """The requested provenance report as an archive member; failing to make it fails the export.
+
+    Bounded before the expensive work (every gathered collection before it is read, the report's
+    size before rendering) and rendered in the job's owned worker thread, off the event loop.
+    """
+    budget = GatherBudget(max_rows=resources.PROVENANCE_MAX_ROWS, max_bytes=resources.PROVENANCE_MAX_ROW_BYTES)
+    try:
+        gathered = await ProvenanceReportService.gather_report(
+            session, entity_type, entity_id, org_id, user_email, budget
+        )
+    except ReportTooLarge:
+        raise _report_too_large(
+            entity_type,
+            f"more than {resources.PROVENANCE_MAX_ROWS:,} records or "
+            f"{resources.PROVENANCE_MAX_ROW_BYTES // resources.MiB} MiB of history and metadata",
+        ) from None
+    except Exception as exc:
+        if isinstance(exc, DomainError) and not isinstance(exc, NotFoundError):
+            raise
+        logger.warning("Export provenance gathering failed for %s %d (%s)", entity_type, entity_id, type(exc).__name__)
+        raise ExportContentUnavailableError(_PROVENANCE_FAILED) from exc
+    size = len(json.dumps(gathered, default=str).encode("utf-8"))
+    if size > resources.PROVENANCE_MAX_REPORT_BYTES:
+        raise _report_too_large(
+            entity_type,
+            f"{size // 1024:,} KiB of report data; the limit is {resources.PROVENANCE_MAX_REPORT_BYTES // 1024:,} KiB",
+        )
+
+    def render():
+        try:
+            return ProvenanceReportService.render(entity_type, entity_id, gathered, "all")
+        except Exception as exc:
+            logger.warning(
+                "Export provenance rendering failed for %s %d (%s)", entity_type, entity_id, type(exc).__name__
+            )
+            raise ExportContentUnavailableError(_PROVENANCE_FAILED) from exc
+
+    report = await job.render(render, deadline=resources.BUILD_DEADLINE)
+    content = report.content.encode("utf-8") if isinstance(report.content, str) else report.content
+    name = naming.safe_component(report.filename, fallback=f"provenance_{entity_type}")
+    return naming.join(*root.split("/"), "provenance", name), content
+
+
+def _filename(name: str, kind: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    key = f"exports/{org_id}/{ts}_{_safe_name(name)}.zip"
-    uri = await adapter.resolve_uri(StorageStore.CONFIG_BACKUPS, key)
-    await adapter.write_bytes(uri, zip_bytes, content_type="application/zip")
-    return await adapter.generate_signed_url(uri, method="GET", expiry_seconds=86400)
+    return f"{naming.safe_component(name, fallback=kind, max_bytes=96)}_export_{ts}.zip"
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Generated content
 # ---------------------------------------------------------------------------
 
 
-async def _get_experiment(session: AsyncSession, experiment_id: int, org_id: int) -> Experiment | None:
-    result = await session.execute(
-        select(Experiment).where(
-            Experiment.id == experiment_id,
-            Experiment.organization_id == org_id,
-        )
-    )
-    return result.scalar_one_or_none()
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-async def _get_project(session: AsyncSession, project_id: int, org_id: int) -> Project | None:
-    result = await session.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.organization_id == org_id,
-        )
-    )
-    return result.scalar_one_or_none()
-
-
-def _safe_name(name: str) -> str:
-    """Return a filesystem-safe version of a name."""
-    return "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip("_")
-
-
-def _file_folder(file_type: str) -> str:
-    if file_type in _FASTQ_TYPES:
-        return "raw"
-    if file_type in {"bam", "bai", "cram", "vcf", "vcf.gz"}:
-        return "results"
-    if file_type in {"csv", "tsv", "txt", "xlsx"}:
-        return "results"
-    return "results"
-
-
-def _build_readme(experiment: Experiment, user_email: str, include_fastq: bool, include_provenance: bool) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %Human:%M:%S UTC").replace("%Human", "%H")
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+def _build_readme(experiment: ExperimentContent, user_email: str, include_fastq: bool, include_provenance: bool) -> str:
     lines = [
         f"Export: {experiment.name}",
+        f"Experiment UUID: {experiment.uuid}",
         f"Generated by: {user_email}",
-        f"Generated at: {now}",
+        f"Generated at: {_now()}",
         f"Status: {experiment.status}",
         "",
         "Contents:",
         "  README.txt          -- this file",
         "  sample_manifest.csv -- all samples and metadata",
-        "  results/            -- analysis output files",
+        "  results/            -- analysis output files, one folder per catalogue file UUID",
     ]
     if include_fastq:
-        lines.append("  raw/                -- raw FASTQ files")
+        lines.append("  raw/                -- raw FASTQ files, one folder per catalogue file UUID")
     if include_provenance:
         lines.append("  provenance/         -- provenance report (JSON, Markdown, PDF, CSV)")
     return "\n".join(lines) + "\n"
 
 
-def _build_project_readme(project: Project, user_email: str) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+def _build_project_readme(project: ProjectContent, user_email: str) -> str:
     return (
         f"Export: {project.name}\n"
+        f"Project UUID: {project.uuid}\n"
         f"Generated by: {user_email}\n"
-        f"Generated at: {now}\n"
+        f"Generated at: {_now()}\n"
         "\n"
-        "This archive contains one sub-folder per experiment.\n"
+        "experiments/ holds one folder per experiment, named by its UUID and name.\n"
         "Each experiment folder contains its own README.txt, sample manifest, and data files.\n"
+        "A file linked to several experiments appears once, under the experiment it is attached to\n"
+        "(or the first by UUID). Files that belong to the project but to none of its experiments\n"
+        "are in results/ and raw/ at this level.\n"
     )
-
-
-def _build_sample_manifest(samples: list[Sample]) -> str:
-    if not samples:
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["external_id", "organism", "tissue_type", "qc_status", "status"])
-        return buf.getvalue()
-
-    fields = [
-        "external_id",
-        # The label migration 080 replaced, for samples it relabelled; empty otherwise.
-        "relabeled_from",
-        "organism",
-        "tissue_type",
-        "donor_source",
-        "treatment_condition",
-        "molecule_type",
-        "qc_status",
-        "status",
-        "collection_timestamp",
-        "library_prep_method",
-        "library_layout",
-        "chemistry_version",
-        "viability_pct",
-        "cell_count",
-        "prep_notes",
-        "qc_notes",
-    ]
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
-    writer.writeheader()
-    for s in samples:
-        row = {f: getattr(s, f, None) for f in fields}
-        writer.writerow(row)
-    return buf.getvalue()

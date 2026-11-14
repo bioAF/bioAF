@@ -17,7 +17,7 @@ delivery 4 matrix):
   does nothing, listings skip it.
 - Deleting a symlink removes the link, never its target.
 - Listings match keys literally, sort by key, honour ``recursive=False`` (nothing past the next
-  ``/``) and return nothing for ``max_results <= 0``.
+  ``/``) and return nothing for ``max_results <= 0``. ``uploaded_at`` is the destination's mtime.
 - Streams use ``shutil.copyfileobj``'s bounded buffer and are never closed here.
 """
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import BinaryIO
 
 from app.adapters.models import StorageObjectNotFound, StoredObject
@@ -211,12 +212,17 @@ class LocalObjectFilesystem:
         results: list[StoredObject] = []
         for key, real in found:
             try:
-                size = os.path.getsize(real)
+                stat = os.stat(real)
             except FileNotFoundError:
                 continue  # removed while listing
             results.append(
                 StoredObject(
-                    filename=key.rsplit("/", 1)[-1], storage_uri=self._build_uri(container, key), size_bytes=size
+                    filename=key.rsplit("/", 1)[-1],
+                    storage_uri=self._build_uri(container, key),
+                    size_bytes=stat.st_size,
+                    # Writes create or truncate the destination (copies never carry the source's
+                    # times), so the mtime is when the current object was written.
+                    uploaded_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
                 )
             )
         return results

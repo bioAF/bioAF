@@ -148,3 +148,37 @@ class StorageUnavailableError(DomainError):
 
     status_code = 502
     code = "storage_unavailable"
+
+
+class ExportLimitError(DomainError):
+    """A data export is larger than the supported limits; a smaller scope may fit."""
+
+    status_code = 413
+    code = "export_limit_exceeded"
+
+
+class ExportBusyError(DomainError):
+    """Another data export is running; exports run one at a time."""
+
+    status_code = 429
+    code = "export_busy"
+
+
+class ExportCapacityError(DomainError):
+    """The server lacks the scratch space to build this export safely right now."""
+
+    status_code = 503
+    code = "export_capacity_unavailable"
+
+
+class ExportContentUnavailableError(StateError):
+    """A selected file's stored bytes are gone or unreadable, so the export cannot be complete."""
+
+    code = "export_content_unavailable"
+
+
+class ExportTimeoutError(DomainError):
+    """A data export did not finish preparing within its time limit."""
+
+    status_code = 504
+    code = "export_timed_out"

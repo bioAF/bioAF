@@ -172,6 +172,23 @@ resource "google_storage_bucket" "config_backups" {
   versioning { enabled = true }
   force_destroy = false
 
+  # Signed data exports live under exports/. The backend's hourly cleanup deletes live export
+  # objects 48 h after upload; with versioning on, that only makes them noncurrent. This rule
+  # removes those noncurrent versions a day later, so only export bytes are reclaimed. It never
+  # touches a live object or anything outside exports/. GCS soft delete (the bucket's soft-delete
+  # retention, 7 days by default) still holds deleted bytes after this rule runs, and lifecycle
+  # actions run asynchronously (typically within a day), so physical erasure is not immediate.
+  lifecycle_rule {
+    condition {
+      matches_prefix             = ["exports/"]
+      with_state                 = "ARCHIVED"
+      days_since_noncurrent_time = 1
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   labels = {
     managed_by = "bioaf"
     purpose    = "config-backups"

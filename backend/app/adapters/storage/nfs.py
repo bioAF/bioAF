@@ -280,6 +280,14 @@ class NfsStorageProvider(StorageProvider):
             "The NFS storage backend cannot mint signed URLs; use the proxied upload path.",
         )
 
+    async def sign_download(self, uri: str, *, max_ttl_seconds: int, min_ttl_seconds: int):
+        raise CapabilityNotSupported(
+            "signed_url_upload", "The NFS storage backend cannot mint signed links; use direct download."
+        )
+
+    async def check_signed_download(self, *, min_ttl_seconds: int) -> None:
+        await self.sign_download("", max_ttl_seconds=min_ttl_seconds, min_ttl_seconds=min_ttl_seconds)
+
     async def create_resumable_upload_url(
         self,
         uri: str,
