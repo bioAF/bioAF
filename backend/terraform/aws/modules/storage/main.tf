@@ -126,6 +126,28 @@ resource "aws_s3_bucket_lifecycle_configuration" "literature" {
   }
 }
 
+# Signed data exports live under exports/ in config-backups. The backend's hourly cleanup deletes
+# live export objects 48 h after upload; with versioning on, a delete leaves a noncurrent version
+# and a delete marker. This removes export versions a day after they become noncurrent and the
+# markers left with no versions, and nothing else: no live object, nothing outside exports/.
+# S3 applies lifecycle rules asynchronously (usually within a day of eligibility).
+resource "aws_s3_bucket_lifecycle_configuration" "config_backups" {
+  bucket = aws_s3_bucket.store["config_backups"].id
+  rule {
+    id     = "exports-noncurrent-expiry"
+    status = "Enabled"
+    filter {
+      prefix = "exports/"
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+}
+
 # CORS so browsers can upload directly via presigned URLs. ingest = PUT;
 # references = PUT + POST (resumable/multipart init), mirroring the GCS CORS.
 # S3 handles OPTIONS preflight from these rules, so OPTIONS is not listed.
