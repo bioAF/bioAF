@@ -1,0 +1,48 @@
+name: Dependency Audit
+
+# The full npm audit of the committed frontend lock, development dependencies included, every day and on demand.
+# It reports every current finding against .github/security-exceptions.json: an unapproved finding, an expired
+# exception or an untrustworthy result (registry error, unreadable report) fails the run, and GitHub notifies the
+# maintainer of a failed scheduled run. It is not a pull request check, so an existing finding never blocks an
+# unrelated merge; the PR-side check is the Dependency Review job in ci.yml.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  npm-audit:
+    name: npm audit (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # The Node and npm the frontend is built with (docker/Dockerfile.frontend, ci.yml).
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      # The audit reads the lock only; no package is installed and no package script runs.
+      - name: Audit the committed lock
+        working-directory: frontend
+        run: |
+          node --version && npm --version
+          status=0
+          npm audit --json --package-lock-only > "$RUNNER_TEMP/npm-audit.json" || status=$?
+          echo "$status" > "$RUNNER_TEMP/npm-audit.status"
+
+      - name: Classify against the dated exceptions
+        run: |
+          python3 scripts/ci/dependency_report.py audit \
+            --exceptions .github/security-exceptions.json \
+            --report "$RUNNER_TEMP/npm-audit.json" \
+            --exit-status "$(cat "$RUNNER_TEMP/npm-audit.status")" \
+            --summary "$GITHUB_STEP_SUMMARY"

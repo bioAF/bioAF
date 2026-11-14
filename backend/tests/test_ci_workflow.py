@@ -304,3 +304,13 @@ def test_the_shell_job_gates_its_bats_output(workflow):
     assert len(gating) == 1
     assert "bats-output.tap" in gating[0]["run"]
     assert not gating[0].get("continue-on-error")
+
+
+def test_the_scheduled_audit_is_never_a_pull_request_check():
+    """Existing findings fail the daily run and notify; they must not freeze unrelated pull requests."""
+    audit = yaml.safe_load((REPO / ".github" / "workflows" / "dependency-audit.yml").read_text())
+    triggers = audit[True]  # PyYAML reads the bare key `on` as a boolean
+    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    run = "\n".join(s.get("run", "") for s in audit["jobs"]["npm-audit"]["steps"])
+    assert "scripts/ci/dependency_report.py audit" in run and "--package-lock-only" in run
+    assert "|| true" not in run

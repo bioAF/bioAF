@@ -15,3 +15,19 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: boto3
         update-types: ["version-update:semver-major"]
+
+  # Frontend npm dependencies: package.json declares them, package-lock.json pins them (frontend/DEPENDENCIES.md).
+  # Minor and patch updates arrive weekly in two groups; a major version arrives as its own pull request. Security
+  # floors in package.json overrides move only with a reviewed change that updates DEPENDENCIES.md.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-runtime:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+      frontend-development:
+        dependency-type: development
+        update-types: ["minor", "patch"]
