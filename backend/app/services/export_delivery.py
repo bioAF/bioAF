@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,12 +33,13 @@ class IssuedLink:
     uri: str
     url: str
     expires_at: datetime
+    issued_at: datetime
 
     @property
     def expires_in_hours(self) -> float:
-        """The usable lifetime at issuance, in hours (the response field the frontend reads)."""
-        seconds = (self.expires_at - datetime.now(timezone.utc)).total_seconds()
-        return round(max(seconds, 0) / 3600, 2)
+        """The lifetime from issuance in hours, rounded down to 0.01 h so it is never overstated."""
+        seconds = min((self.expires_at - self.issued_at).total_seconds(), SIGNED_MAX_TTL_SECONDS)
+        return math.floor(max(seconds, 0) / 36) / 100
 
 
 def _min_ttl() -> int:
@@ -74,10 +76,11 @@ async def issue_signed_link(prepared, *, org_id: int) -> IssuedLink:
     try:
         async with asyncio.timeout(resources.ISSUE_DEADLINE):
             await adapter.upload_filename(uri, prepared.path, content_type="application/zip")
+            issued_at = datetime.now(timezone.utc)
             signed = await adapter.sign_download(
                 uri, max_ttl_seconds=SIGNED_MAX_TTL_SECONDS, min_ttl_seconds=_min_ttl()
             )
-        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at)
+        link = IssuedLink(uri=uri, url=signed.url, expires_at=signed.expires_at, issued_at=issued_at)
         ensure_usable(link)
     except BaseException as exc:
         await runtime.shielded(_delete(uri), role="data-export-withdraw")

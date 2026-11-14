@@ -117,6 +117,15 @@ async def test_the_advertised_lifetime_is_the_links_real_lifetime(client, sessio
 
 
 @pytest.mark.asyncio
+async def test_a_full_day_link_reads_as_twenty_four_hours(client, session, admin_user, headers, store):
+    await _seed(session, admin_user.organization_id)
+
+    resp = await _signed(client, headers)
+
+    assert resp.json()["expires_in_hours"] == 24
+
+
+@pytest.mark.asyncio
 async def test_a_link_shorter_than_the_minimum_is_refused_and_its_object_removed(
     client, session, admin_user, headers, store
 ):
