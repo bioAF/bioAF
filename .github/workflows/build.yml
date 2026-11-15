@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+# Backend containers started here get the installation metrics override explicitly (ADR-075).
+env:
+  BIOAF_INSTALL_METRICS_DISABLED: "1"
+
 # Each build first plants synthetic sentinel files at paths its .dockerignore must exclude (.env files,
 # Terraform state, dumps, local caches), then proves none of them reached the build context, a builder stage, or
 # any layer of the image (scripts/ci/check_image_contents.py). The sentinels hold a random token and nothing else.
@@ -57,6 +61,17 @@ jobs:
           python3 scripts/ci/check_image_contents.py image "$IMAGE" --root app \
             --token "$TOKEN" --summary "$GITHUB_STEP_SUMMARY" || status=1
           exit $status
+
+      # The release's public installation metrics destination ships in the image and imports without
+      # network I/O (ADR-075). Host environment does not enter a container, so the operator override is
+      # passed explicitly, and the container has no network at all.
+      - name: Installation metrics destination is in the image
+        env:
+          IMAGE: bioaf/bioaf-backend:pr-${{ github.event.pull_request.number }}
+        run: |
+          docker run --rm --network none --entrypoint python \
+            -e BIOAF_INSTALL_METRICS_DISABLED=1 -e BIOAF_COMPUTE_MODE=local \
+            "$IMAGE" -c "import app.install_metrics_release as r; assert r.POSTHOG_HOST.startswith('https://')"
 
   build-frontend:
     name: Build Frontend Image

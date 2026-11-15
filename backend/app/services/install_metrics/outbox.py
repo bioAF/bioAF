@@ -53,8 +53,10 @@ async def reserve(
         await session.execute(
             text(
                 "INSERT INTO install_metric_events "
-                "(source_key, event_uuid, event_name, payload, report_date, status, attempts, next_attempt_at) "
-                "VALUES (:source_key, :event_uuid, :name, CAST(:payload AS JSONB), :day, 'pending', 0, :moment) "
+                "(source_key, event_uuid, event_name, payload, report_date, status, attempts, next_attempt_at, "
+                "created_at) "
+                "VALUES (:source_key, :event_uuid, :name, CAST(:payload AS JSONB), :day, 'pending', 0, :moment, "
+                ":moment) "
                 "ON CONFLICT (source_key) DO NOTHING RETURNING id"
             ),
             {

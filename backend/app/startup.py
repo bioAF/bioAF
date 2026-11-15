@@ -419,6 +419,16 @@ async def glossary_orphans(ctx: StartupContext) -> None:
             logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
 
 
+async def install_metrics(ctx: StartupContext) -> None:
+    """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
+    from app.database import async_session_factory
+    from app.services.install_metrics.state import InstallMetricsService
+
+    async with async_session_factory() as session:
+        await InstallMetricsService.reconcile(session)
+        await session.commit()
+
+
 async def interrupted_local_jobs(ctx: StartupContext) -> None:
     """Fail local jobs (searches, URL imports, PDF extractions) a restart interrupted."""
     from app.database import async_session_factory
@@ -484,6 +494,7 @@ NORMAL_STEPS = [
         "optional",
         "Could not mark jobs interrupted by the restart as failed: %s",
     ),
+    Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
 ]
 
 

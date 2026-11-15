@@ -425,6 +425,24 @@ def _no_accession_manifest_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_install_metrics_network(monkeypatch):
+    """No test reaches PostHog (ADR-075).
+
+    The sender's default transport refuses every request, so a test that enables reporting with
+    production-shaped configuration still cannot send. Sender tests inject their own MockTransport;
+    nothing falls through to a real network.
+    """
+    import httpx
+
+    from app.services.install_metrics import sender
+
+    def _refuse(request):
+        raise RuntimeError("tests do not send installation metrics")
+
+    monkeypatch.setattr(sender, "transport_factory", lambda: httpx.MockTransport(_refuse))
+
+
+@pytest.fixture(autouse=True)
 def _private_backup_scratch(monkeypatch, tmp_path_factory):
     """Each test's backup and restore workspaces live under its own root.
 

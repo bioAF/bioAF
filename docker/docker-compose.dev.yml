@@ -22,6 +22,8 @@ services:
       - BIOAF_COMPUTE_MODE=local
       # Single-line JSON on stdout, as in production; nothing is shipped to a cloud sink.
       - BIOAF_LOG_DELIVERY=stdout
+      # Development never reports installation metrics (ADR-075).
+      - BIOAF_INSTALL_METRICS_DISABLED=1
     # The same shutdown budget as docker-compose.yml (this file is used on its own). Under --reload
     # the reloader supervises the worker, so the 60 s hard stop is the container's, not uvicorn's.
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-access-log --timeout-graceful-shutdown 10

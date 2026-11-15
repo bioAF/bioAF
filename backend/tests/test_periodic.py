@@ -189,6 +189,7 @@ TIMINGS = {
     "validation-fetch-reaper": (86400, 86400),
     "version-check": (86400, 86400),
     "sdr-trigger": (86400, 86400),
+    "install-metrics-sender": (60, 300),
     "review-reminder": (21600, 21600),
     "cost-billing-sync": (60, 86400),
     "nf-core-registry-refresh": (60, 86400),
@@ -214,6 +215,7 @@ MESSAGES = {
     "version-check": "Version check error: %s",
     "review-reminder": "Review reminder error: %s",
     "sdr-trigger": "SDR trigger loop error: %s",
+    "install-metrics-sender": "Installation metrics sender error: %s",
     "auto-run-launch": "Auto-run launch loop error: %s",
     "validation-driver": "Validation driver loop error: %s",
     "session-monitor": "Session monitor error: %s",
@@ -230,7 +232,7 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    assert len(jobs.PERIODIC_JOBS) == 27
+    assert len(jobs.PERIODIC_JOBS) == 28
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):
