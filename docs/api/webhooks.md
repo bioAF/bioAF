@@ -1,38 +1,36 @@
 # Webhooks
 
-bioAF posts JSON events to subscriber URLs when entities change. Each
-delivery is signed; failed deliveries are retried with exponential
-backoff and eventually dead-lettered.
+Subscriptions are managed under **Settings > Users & Accounts > Webhooks**. The backend maps selected
+internal events to public webhook names and persists deliveries for active matching subscriptions.
 
-Webhook Subscriptions are managed in Settings > Users & Accounts >
-Webhooks. There is no public endpoint to create or modify subscriptions.
+## Event Types
 
-## Event catalog
-
-| Event | Fires when |
+| Event | Meaning |
 | --- | --- |
-| `experiment.created` | A new experiment is created (any source). |
-| `experiment.updated` | An experiment's mutable metadata changes. |
-| `experiment.status_changed` | An experiment moves between status states. |
-| `sample.created` | A new sample is registered. |
-| `sample.updated` | A sample's mutable metadata changes. |
-| `sample.qc_changed` | A sample's QC status changes. |
-| `file.registered` | bioAF records a new file row. |
-| `file.ready` | A file is fully ingested and downstream tasks can use it. |
+| `experiment.created` | An Experiment is created |
+| `experiment.updated` | Experiment metadata changes |
+| `experiment.status_changed` | An Experiment moves to a new status |
+| `sample.created` | A Sample is created |
+| `sample.updated` | Sample metadata changes |
+| `sample.qc_changed` | A Sample's QC status changes |
+| `file.registered` | A file is registered in bioAF |
+| `file.ready` | A registered file becomes ready for use |
 
-There are no project lifecycle events in v1.
+Select the event types your receiver needs when creating or editing a subscription. Deliveries are
+sent to active subscriptions that match the event type. Project lifecycle events are outside this
+event vocabulary.
 
-## Delivery format
+## Delivery Format and Identity
 
 ```http
 POST <subscriber-url>
 Content-Type: application/json
 X-bioAF-Event: experiment.created
-X-bioAF-Delivery: evt_3f1d7a92...
+X-bioAF-Delivery: 123
 X-bioAF-Signature: t=1747244400,v1=ab12cd34...
 ```
 
-Request body:
+A representative body is:
 
 ```json
 {
@@ -40,63 +38,32 @@ Request body:
   "event": "experiment.created",
   "occurred_at": "2026-05-14T15:00:00Z",
   "organization_id": 1,
-  "data": {
-    "experiment_id": 7,
-    "external_id": "LIMS-EXP-042",
-    "project_id": 42
-  }
+  "data": {"experiment_id": 7, "external_id": "LIMS-EXP-042", "project_id": 42}
 }
 ```
 
-The `data` payload is event-specific and intentionally minimal. To get
-the full row, call the appropriate read endpoint (`/experiments/{id}`,
-`/samples/{id}`, `/files/{id}`).
+`X-bioAF-Delivery` is the integer database delivery-row ID. Automatic retries retain that row ID, but an
+admin Replay clones a new row and changes the header. The body `id` identifies the event and is preserved
+on Replay. Deduplicate on the body `id`, scoped to your receiving consumer/subscription, if retries and
+manual replays must not repeat side effects. Use the header for delivery-attempt diagnostics.
 
-## Verifying the signature
+## Verify the Signature
 
-`X-bioAF-Signature` has the form `t=<unix-seconds>,v1=<hex-sha256>` where
-the signed message is `<unix-seconds>.<raw-body-bytes>` and the key is
-the subscription's secret (shown once at create time, regenerable via
-the rotate-secret action).
+The signed bytes are `<unix-seconds>.<raw-body-bytes>`, using the subscription secret as the HMAC-SHA256
+key. Parse the timestamp and signature from `X-bioAF-Signature`, compute the expected digest and compare
+with a constant-time comparison such as `hmac.compare_digest`.
 
-Pseudocode:
+Enforce a timestamp-age window and deduplicate event IDs. A valid signature authenticates bytes; it does
+not by itself reject a replay. The body must be used as received, before JSON reserialization.
 
-```python
-import hmac, hashlib, time
+## Retries and Replay
 
-t, v1 = parse_signature(request.headers["X-bioAF-Signature"])
-message = f"{t}.".encode() + request.body
-expected = hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-assert hmac.compare_digest(expected, v1)
-# Optional: reject if abs(time.time() - int(t)) > 300
-```
+The durable worker sends one HTTP request per recorded attempt. Any HTTP 2xx is success; non-2xx or network
+failure schedules another attempt. The request timeout is 10 seconds, and the normal five-attempt cap uses
+retry delays of 60, 300, 1800 and 7200 seconds after the initial attempt. A fifth failure becomes
+`dead_letter`.
 
-`hmac.compare_digest` (or your language's equivalent) avoids timing
-attacks. Anchoring the timestamp inside the signed message blocks replay.
-
-## Delivery semantics
-
-- At-least-once. Subscribers must dedupe on `X-bioAF-Delivery` (also
-  available as `id` in the body).
-- Success: any HTTP 2xx from the subscriber within the timeout.
-- Retry: any 4xx/5xx (including network errors) is retried.
-- Backoff schedule (seconds since the previous attempt): **60, 300, 1800,
-  7200, 43200**.
-- Max attempts: **5**. After the fifth failure the delivery is moved to
-  `dead_letter` status and stops retrying.
-- Replay: an admin can re-queue any delivery (including `dead_letter`)
-  from the Webhooks > delivery row.
-
-## Operational responses
-
-- `2xx`: the subscriber received the event. Body is ignored.
-- `4xx`/`5xx`: retry per schedule above. Subscribers should respond fast
-  (target under 5s) to avoid timeouts.
-- The subscription is **not** auto-disabled on repeated failures in v1.
-  Operators can disable a subscription from the UI.
-
-## Inspecting deliveries
-
-Settings > Users & Accounts > Webhooks shows the Webhook Deliveries table for
-each subscription with status, attempt count, last response status, and
-a Replay button per row.
+Subscribers can see duplicate events after ambiguous responses. Return promptly, make processing
+idempotent and use the stable body event ID. Admin Replay creates a new pending delivery of the original
+event. A missing/inactive subscription prevents delivery; repeated failures do not automatically disable
+an otherwise active subscription.

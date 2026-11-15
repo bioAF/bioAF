@@ -1,98 +1,60 @@
 # Compute Stack Setup
 
-bioAF supports two compute backends through the BioAF Adapter Layer (BAL): Kubernetes (GKE Autopilot) and SLURM (via Google HPC Toolkit). This guide helps you choose the right backend for your team and walks through the setup process for each option.
+Kubernetes is the implemented compute backend. Pipelines and Notebook Sessions run in the cluster;
+SSH Work Nodes run on separate virtual machines. SLURM compute and notebook adapters are stubs and cannot
+run workloads, even though the legacy configuration value is accepted.
 
-## Kubernetes vs SLURM: When to Use Each
+## Cloud and Backend Choices
 
-Kubernetes (GKE Autopilot) is the recommended default for most teams. SLURM is available for teams with existing SLURM expertise or specific HPC requirements.
+| Resource | GCP reference deployment | AWS implementation |
+| --- | --- | --- |
+| Kubernetes cluster | GKE with separate managed node pools | EKS with Cluster Autoscaler |
+| Notebook Sessions | Jupyter or RStudio pods | Kubernetes notebook implementation with AWS identity/storage paths |
+| Work Nodes | GCE virtual machines | EC2 virtual machines |
+| Object storage | GCS | S3 |
+| Environment images | Cloud Build and Artifact Registry | CodeBuild and ECR |
 
-**Choose Kubernetes if:**
+AWS parity is incomplete, especially for cellxgene and several platform-service adapters. Validate the
+specific workflow before relying on it. NFS is an implemented storage backend, not a working SLURM stack.
+The GCP Terraform module creates node pools; it is not an Autopilot-only deployment.
 
-- You are starting fresh without existing infrastructure preferences.
-- Cost efficiency matters -- GKE Autopilot charges only for running pods, with no idle controller or login node costs.
-- You want managed autoscaling, self-healing, and native GCP integration out of the box.
-- Your pipelines are containerized (Nextflow, Snakemake with container profiles).
-- You plan to use bioAF's automated pipeline triggering, which integrates natively with Kubernetes job scheduling.
+## Provision Infrastructure
 
-**Choose SLURM if:**
+1. Complete first-run setup and configure cloud access in **Settings > Integrations**.
+2. Open **Infrastructure > Components** and use its deployment controls to provision the compute stack.
+3. Follow the progress display through to a confirmed outcome. A closed connection or progress message is
+   not sufficient evidence that Terraform succeeded.
+4. Enable the notebook, pipeline and visualization components you need. Components may wait for their
+   infrastructure or image-build prerequisites.
+5. Check component health, then launch a small test workload appropriate to the selected backend.
 
-- Your team has deep SLURM expertise and existing job scripts written for SLURM.
-- You need POSIX filesystem semantics for pipeline working directories (NFS Filestore).
-- Your pipelines depend on environment modules or SLURM-specific features (job arrays, accounting).
-- You are migrating from an on-premises SLURM cluster and want minimal workflow disruption.
+Use the deployment page's recovery controls if provisioning is interrupted. A deploy that reaches the
+cloud but loses its response can leave resources to reconcile. Recovery actions require
+`infrastructure:deploy`. See the [Admin Guide](../user-guide-admin.md#deployment-recovery).
 
-## Cost Comparison
+## Configure Workloads
 
-| Component | Kubernetes (GKE Autopilot) | SLURM (HPC Toolkit) |
-|-----------|---------------------------|----------------------|
-| Idle cost | ~$0/month (no persistent nodes) | ~$50-80/month (controller + login node) |
-| Storage | GCS at ~$0.02/GB/month | Filestore minimum 1TB at ~$200/month (HDD) |
-| Compute | Pay-per-pod-second | Pay-per-VM-hour (preemptible available) |
-| Autoscaling | Native, sub-minute | VM-based, 2-5 minute spin-up |
-| Management | Fully managed by Google | Self-managed VMs via Terraform |
+- Select a ready environment version and a resource profile for Notebook Sessions.
+- Configure pipeline parameters and resources from **Pipelines > Pipeline Catalog** or **Custom Pipelines**.
+- Configure Work Node defaults under **Settings > Workbench Settings** and launch from **Workbench > Work Nodes**.
+- Review quota and capacity feedback before increasing resource requests. Cloud pricing and fixed costs depend
+  on the actual cluster, node pools, disks, networking and region; use the cloud estimate and Cost Center.
 
-For a typical small biotech team processing 5-10 experiments per month, Kubernetes with GCS costs roughly $50-150/month in compute. The equivalent SLURM setup starts at $250-350/month before any pipeline runs due to the Filestore minimum and always-on nodes.
+Each launch is subject to permissions, Organization ownership and provider capabilities. Project scope on
+an interactive session is recorded and preserved by Recreate; it does not grant access to extra files.
 
-## Setting Up Kubernetes (Recommended)
+## Local Simulation
 
-### Step 1: Enable the Compute Component
+`BIOAF_COMPUTE_MODE=local` simulates the mode-aware compute, notebook, storage and Work Node adapters.
+`kubernetes` (or `k8s`) selects real execution. `cloud_provider` and the configured compute stack select the
+actual providers independently of this mode.
 
-Navigate to **Settings > Infrastructure > Optional Components** in the bioAF UI. Toggle on "Kubernetes Compute." bioAF automatically provisions:
+Local mode is not a complete offline sandbox: cellxgene has no simulation and other external integrations
+can still make requests. Do not treat simulated success as evidence of a real cloud launch.
+See [Configuration](../configuration.md) and [Development](../development.md).
 
-- A GKE Autopilot cluster in your selected region.
-- A dedicated node pool namespace for pipeline workloads.
-- IAM bindings for the bioAF service account to submit jobs.
-- Network policies restricting pod-to-pod communication.
+## Connecting to Workloads
 
-Provisioning takes 5-10 minutes. You can track progress in the deployment modal.
-
-### Step 3: Verify Connectivity
-
-Once provisioning completes, navigate to **Compute > Status**. You should see a green health check for the Kubernetes backend. Run a test pipeline (bioAF includes a built-in "hello-world" pipeline) to confirm end-to-end functionality.
-
-### Step 4: Configure Resource Defaults
-
-Under **Compute > Settings**, set default resource requests for pipeline jobs:
-
-- **CPU request:** 2 cores (sufficient for most alignment steps)
-- **Memory request:** 8Gi (Cell Ranger recommends 8GB minimum)
-- **CPU limit:** 8 cores (allows bursting for multi-threaded steps)
-- **Memory limit:** 32Gi (prevents OOM kills during peak usage)
-
-These defaults apply to all pipeline runs unless overridden at launch time.
-
-## Setting Up SLURM
-
-### Step 1: Enable the Compute Component
-
-Navigate to **Settings > Infrastructure > Optional Components**. Toggle on "SLURM Compute." bioAF automatically provisions:
-
-- A SLURM controller VM (e2-standard-2).
-- A login node VM (e2-standard-2).
-- A Filestore NFS instance (1TB minimum).
-- Compute node templates with autoscaling configuration.
-
-Provisioning takes 10-15 minutes due to the Filestore and SLURM controller setup. Note the Filestore cost -- this is a fixed monthly expense regardless of usage.
-
-### Step 3: Configure Partitions
-
-After provisioning, navigate to **Compute > SLURM > Partitions**. bioAF creates a default partition with autoscaling compute nodes. You may want to add partitions for different workload types:
-
-- **short** -- max 4 hours, preemptible VMs, for QC and small alignment jobs.
-- **long** -- max 72 hours, standard VMs, for full Cell Ranger runs.
-- **highmem** -- high-memory VMs (n1-highmem-16), for integration analyses.
-
-### Step 4: Verify with a Test Job
-
-Submit a test pipeline from the bioAF UI. Monitor the SLURM queue in **Compute > SLURM > Queue** to verify that nodes spin up, the job runs, and nodes scale back down after the idle timeout.
-
-## Switching Between Backends
-
-bioAF supports running both backends simultaneously. You can assign pipelines to specific backends in the pipeline configuration. To switch the default backend, navigate to **Compute > Settings > Default Backend** and select your preferred option. Existing pipeline runs continue on their original backend; only new runs use the updated default.
-
-## Tips
-
-- Start with Kubernetes unless you have a specific reason to use SLURM. You can always add SLURM later.
-- Set budget alerts in **Settings > Cost Management** before running large batch jobs. bioAF's budget pre-flight check will warn you before launching jobs that exceed your configured threshold.
-- For Cell Ranger alignment, request at least 8 cores and 32GB memory. Under-provisioning leads to silent slowdowns rather than clear error messages.
-- Use preemptible/spot VMs for fault-tolerant pipelines (Nextflow handles retries natively). This can reduce compute costs by 60-80%.
+Work Nodes display SSH details on their page. Pipeline and Notebook Session connection-command endpoints
+provide Kubernetes exec commands and setup instructions. See [SSH and Exec Access](ssh-access.md) for
+connection methods, credentials and permissions.

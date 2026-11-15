@@ -1,61 +1,48 @@
 # Life After bioAF
 
-bioAF is designed with data portability as a core principle (see [ADR-012](../decisions/ADR-012-data-portability.md)). If you stop using the platform, all your data remains accessible through standard tools.
+Research data and infrastructure records remain in standard formats. Preserve and verify what you need
+before deleting the application host or storage. General file exports, GEO metadata packages, database
+dumps and platform-config backups serve different purposes.
 
-## Preserved Assets
+## Preserve the Records
 
-### Database (PostgreSQL)
+| Asset | Where to obtain it | What to retain |
+| --- | --- | --- |
+| Research/application records | PostgreSQL and database backups | A verified database dump, source version and recovery instructions |
+| Registered files and outputs | Configured GCS, S3 or NFS storage | Actual file contents, paths and recorded checksums |
+| Notebooks and scripts | Synced session/output storage | `.ipynb`, `.Rmd`, scripts and registered output files |
+| Environments and pipelines | Version definitions, source repositories and image registries | Code refs, Dockerfile/conda definitions, parameters and needed images |
+| Infrastructure | Terraform state and cloud account | State, configuration and ownership/access information |
+| Encrypted settings | Host configuration plus encrypted database fields | Required encryption keys, stored securely alongside recovery material |
 
-Your experiment metadata, sample records, pipeline configurations, and audit logs are in PostgreSQL:
+New UI database snapshots carry creation-time checksums. Legacy snapshots can require explicit unverified
+restore confirmation; test recovery before relying on one. Host `./bioaf backup` dumps and updater recovery
+sets are distinct from UI snapshots. See [Backup & Recovery](user-guide-admin.md#backup--recovery).
 
-- Connect with any PostgreSQL client: `psql`, DBeaver, pgAdmin
-- Export with `pg_dump` for migration to another database
-- pg_dump backups are stored in GCS per your configured retention policy
+## Copy Files
 
-### Files (GCS)
+Use [Data Exports](guides/data-exports.md) for bounded experiment/project packages with actual file bytes.
+Their 2 GiB and count/report limits make them unsuitable for moving an entire large installation at once.
+GEO exports contain submission metadata and checksums, not the data files themselves.
 
-All uploaded data files, pipeline outputs, and notebook files are stored in GCS buckets:
+For larger migrations, inventory the configured buckets/prefixes or NFS paths, then copy directly with
+storage tools appropriate to the backend, such as `gcloud storage`, the AWS CLI or filesystem tools.
+Use the actual recorded locations; bucket names and prefixes vary by installation. Verify checksums and
+file counts after the copy. Include unregistered files and Work Node scratch that matter to you explicitly;
+bioAF cannot export records it never registered or storage it never synced.
 
-- Access via `gsutil`, the GCP Console, or any S3-compatible client
-- Bucket names follow the pattern: `bioaf-{purpose}-{org}-{suffix}` (e.g., `bioaf-raw-myorg-abc123`)
+## Retire the Installation
 
-### Notebooks
+1. Save and verify a database backup and its required keys/configuration.
+2. Copy files, references, literature documents, synced notebooks and any required image/code artifacts.
+3. Save Terraform state and a resource inventory so remaining resources can be managed independently.
+4. On **Infrastructure > Components**, use **Teardown** to remove the managed compute stack. Storage buckets
+   are retained by this action. **Destroy Storage** separately removes managed buckets and storage-module
+   messaging resources, including GCP Pub/Sub topics/subscriptions; it can also remove AWS image-build
+   infrastructure when deployed. Use it only after verifying external copies and saving required configuration.
+5. Stop the application on its host with `./bioaf stop`. Delete the VM through the cloud provider after
+   preserving host-only dumps/configuration and checking what remains billable.
 
-JupyterHub and RStudio notebooks are stored in GCS:
-
-- Download from the results or working bucket
-- Notebooks are standard `.ipynb` and `.Rmd` files
-- Conda/pip environments are defined in standard `environment.yml` / `requirements.txt` files
-
-### Pipeline Definitions
-
-Nextflow and Snakemake pipeline definitions are standard workflow files:
-
-- Nextflow: `*.nf` files with `nextflow.config`
-- Snakemake: `Snakefile` with config YAML
-- Run them directly on any compatible compute environment
-
-### Terraform State
-
-Infrastructure state is stored in a GCS backend bucket:
-
-- Import into your own Terraform workspace
-- Or use `terraform state list` to see all managed resources
-
-### Platform Configuration
-
-Nightly config backups in GCS contain:
-
-- Component configuration
-- User and organization settings
-- Notification rules and preferences
-- Exportable as JSON
-
-## Recommended Migration Steps
-
-1. **Export database**: use the Backup & Recovery page to trigger a pg_dump, then download from GCS
-2. **Copy files**: `gsutil -m cp -r gs://bioaf-raw-myorg-*/ ./local-backup/`
-3. **Download notebooks**: download from the GCS working or results bucket
-4. **Save pipeline configs**: copy from GCS results bucket
-5. **Run teardown**: on **Infrastructure > Components**, use **Teardown** to remove the bioAF-managed compute stack. Your storage buckets are kept. **Destroy Storage** (offered once compute is down) empties and deletes the bioAF-managed buckets, so only use it after step 2 and only if you want that data gone.
-6. **Stop the server**: on the bioAF host, `./bioaf stop` (see [Teardown](deployment-guide.md#teardown) in the deployment guide). Delete the VM itself through your cloud provider; bioAF has no command for that.
+See [Teardown](deployment-guide.md#teardown). Stopping containers alone does not remove cloud workloads,
+volumes, registries or storage. Provider versioning and soft-delete policies can also retain bytes after
+delete operations.

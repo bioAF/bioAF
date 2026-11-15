@@ -1,128 +1,62 @@
 # CRO Naming Profiles
 
-When CROs (Contract Research Organizations) deliver data files, they follow structured naming conventions that encode project, experiment, sample, date, and version information into each filename. bioAF's Naming Profiles let you define parsing rules that automatically extract this metadata during auto-ingest, linking incoming files to the correct experiments and samples without manual intervention.
+A Naming Profile reads structured fields from a filename. It never renames or standardizes the file.
+Profiles can use the custom-field vocabulary of an Experiment Template.
 
-## How Naming Profiles Work
+Auto-ingest is temporarily disabled during the Naming Profile redesign. Saving or testing a profile does
+not enable bucket monitoring or automatic experiment/sample creation.
 
-A Naming Profile is a set of rules that describe the structure of filenames from a specific CRO. Each profile defines:
+## Create and Test a Profile
 
-- **Delimiter:** The character separating fields (typically underscore `_` or hyphen `-`).
-- **Segments:** Which Segment in the delimited filename maps to which metadata field (project, experiment, sample, date, data type, researcher, version).
-- **Date format:** How the CRO encodes dates (e.g., `YYYY-MM-DD`, `YYMMDD`, `DD-Mon-YYYY`).
-- **Version pattern:** How version numbers are encoded (e.g., `v001`, `V1`, `rev2`).
-- **File type mappings:** Which filename patterns or extensions correspond to which bioAF data types (FASTQ, BAM, count matrix, QC report).
+1. Open **Data & Files > Naming Profiles** and create a profile.
+2. Give it a name and description; select an Experiment Template if its fields should be offered.
+3. Choose `_` or `-` as the delimiter and whether to strip file extensions.
+4. Add segments with a field name and type: `string`, `number` or `date`.
+5. Give each non-date segment a unique 1-4 letter identifier. Date segments have no identifier.
+6. Use the test panel with representative filenames, inspect parsed values, unrecognized tokens and warnings,
+   then save the profile.
 
-When a file arrives in the auto-ingest bucket, bioAF tries each active Naming Profile against the filename. The first profile that successfully parses all required fields is used to catalog the file.
+The navigation entry requires infrastructure configuration access. The profile API also checks the
+appropriate experiment create/edit grants. Ask your administrator for the required access if unavailable.
 
-## Creating a Naming Profile
+## Segment Rules
 
-### Step 1: Navigate to Naming Profiles
+| Type | Filename form | Example |
+| --- | --- | --- |
+| Number | Identifier followed by digits | `SMP0042` |
+| String | Identifier, inner separator, value | `req-bmills` with delimiter `_` |
+| Date | One selected date format, without an identifier | `20261114` |
 
-Go to **Data & Files > Naming Profiles** and click "Create Profile."
+The inner separator is the opposite of the delimiter: `_` uses `-` inside a string segment, and `-` uses `_`.
+Identifiers match without regard to case. Segment order is for display; tokens identify themselves, so
+reordering recognized segments does not change their field meanings.
 
-### Step 2: Define Basic Information
+Supported dates are `YYYYMMDD`, `YYYY-MM-DD` and `YYMMDD`. A profile can have at most one date segment.
+Non-date values are returned as strings, preserving leading zeros. Dates are returned in ISO form.
 
-- **Profile name:** A descriptive name like "GeneCorp Standard" or "SequenceLab 2026."
-- **CRO name:** The CRO this profile applies to. This is used for display and filtering.
-- **Priority:** Profiles are tried in priority order (lower number = higher priority). Set this to control which profile takes precedence when multiple could match.
+For example, a profile with number identifier `SMP` mapped to `sample_number`, string identifier `req`
+mapped to `researcher`, and a `YYYYMMDD` date mapped to `received_date` parses:
 
-### Step 3: Configure the Delimiter and Fields
+```text
+SMP0042_req-bmills_20261114.fastq.gz
+```
 
-Enter a sample filename from the CRO. bioAF splits it by the selected delimiter and displays the resulting fields in a visual editor.
+as:
 
-Example filename: `2026-03-10_ProjectX_RNASeq_DiffExpr_SmithE_v001.txt`
+```json
+{
+  "sample_number": "0042",
+  "researcher": "bmills",
+  "received_date": "2026-11-14"
+}
+```
 
-With underscore delimiter, this produces six fields:
+## Review Before Using Parsed Values
 
-| Position | Value | Mapping |
-|----------|-------|---------|
-| 1 | `2026-03-10` | Date |
-| 2 | `ProjectX` | Project Code |
-| 3 | `RNASeq` | Data Type |
-| 4 | `DiffExpr` | Experiment Code |
-| 5 | `SmithE` | Researcher |
-| 6 | `v001` | Version |
+Check warnings and unrecognized tokens rather than assuming every filename matches completely. Parsed
+values are returned by the test/parser API; the current parser path does not save them into experiment
+custom fields. Template-derived field vocabulary does not imply automatic persistence or association.
 
-Use the dropdown for each Segment to assign it to a bioAF metadata field. Fields marked as "Ignore" are parsed but not used for cataloging.
-
-### Step 4: Configure Code Mappings
-
-CRO-specific codes rarely match bioAF's internal names exactly. Code mappings translate between the two.
-
-**Data type mappings** link CRO codes to bioAF data types:
-
-| CRO Code | bioAF Data Type |
-|----------|-----------------|
-| `RNASeq` | `fastq` |
-| `DiffExpr` | `count_matrix` |
-| `QCReport` | `qc_report` |
-| `Alignment` | `bam` |
-
-**Project code mappings** link CRO project identifiers to bioAF experiments:
-
-| CRO Code | bioAF Experiment |
-|----------|------------------|
-| `ProjectX` | `EXP-2026-001` |
-| `ProjY` | `EXP-2026-002` |
-
-Navigate to the "Code Mappings" tab in the profile editor to define these. You can add mappings individually or bulk-import from a CSV file.
-
-### Step 5: Set the Date Format
-
-Select the date format used by the CRO from the dropdown, or enter a custom format string using Python's strftime syntax (e.g., `%Y-%m-%d` for `2026-03-10`, `%d%b%Y` for `10Mar2026`).
-
-### Step 6: Set the Version Pattern
-
-Enter a regex pattern that matches version strings in filenames. Common patterns:
-
-- `v\d{3}` matches `v001`, `v002`
-- `V\d+` matches `V1`, `V12`
-- `rev\d+` matches `rev1`, `rev2`
-
-bioAF uses the version to determine which file supersedes a previous delivery. Higher versions replace lower versions for the same experiment/sample/data-type combination.
-
-### Step 7: Save and Activate
-
-Click "Save Profile." The profile is created in inactive state. Review the configuration, then toggle the "Active" switch to enable it.
-
-## Testing a Naming Profile
-
-Before activating a profile for production use, test it against sample filenames.
-
-### Step 1: Open the Test Panel
-
-From the profile editor, click "Test Profile" in the toolbar.
-
-### Step 2: Enter Test Filenames
-
-Paste a list of filenames (one per line) from a recent CRO delivery. bioAF parses each filename against the profile and displays the extracted metadata in a results table.
-
-### Step 3: Review Results
-
-For each filename, verify:
-
-- All fields are correctly extracted (date, project, experiment, sample, data type, version).
-- Code mappings resolve to the correct bioAF entities.
-- No fields show "Unresolved" -- this means a code mapping is missing.
-- The date parses correctly (watch for timezone and format issues).
-
-### Step 4: Fix and Re-test
-
-If any fields are incorrect, adjust the profile configuration and re-run the test. Common issues:
-
-- **Wrong delimiter:** Some CROs use hyphens within date fields and underscores between fields. Use the "Compound delimiter" option to handle this.
-- **Missing code mappings:** Add new mappings for any CRO codes that show as "Unresolved."
-- **Variable field count:** Some CROs include optional fields. Use the "Optional field" checkbox for positions that may be absent.
-
-## Managing Multiple Profiles
-
-When working with multiple CROs simultaneously, each CRO gets its own profile. Profiles are tried in priority order during auto-ingest. If the first profile fails to parse a filename (missing required fields or unresolved codes), bioAF tries the next profile.
-
-To reorder priorities, go to **Data & Files > Naming Profiles** and drag profiles into the desired order, or edit the priority number directly.
-
-## Tips
-
-- Always test a profile against at least 20-30 real filenames before activating it. Edge cases in CRO naming are common.
-- When a CRO changes their naming convention (even slightly), create a new profile version rather than editing the existing one. This preserves the parsing history for files already ingested under the old convention.
-- Use the "Fallback action" setting to control what happens when no profile matches a file: quarantine (default), notify admin, or ignore. Quarantined files appear in **Data Management > Quarantine** for manual review.
-- Export your Naming Profiles as JSON backups via the API (`GET /api/v1/naming-profiles/export`). This is useful when setting up a second bioAF instance or sharing profiles between teams.
+The old CRO code-mapping tables, version replacement rules, profile-priority auto-selection and quarantine
+workflow are not the current profile contract. See [ADR-058](../../decisions/ADR-058-naming-profile-parse-only.md)
+and [Automated Pipelines](automated-pipelines.md) for the ingest limitation.

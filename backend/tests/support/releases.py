@@ -29,9 +29,9 @@ RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 # Published migration files edited after release (follow-up review, 2026-11-07). A different tree hash
 # alone does not establish a different schema; these are the reasons the trees differ.
 EQUIVALENT_EDITS = {
-    "2ff2018a": "comment/docstring edits only",
-    "912bb4bd": "comment/docstring edits; 076 helper import paths moved (same behavior)",
-    "604f9aa8": "038 scopes a catalog query to current_schema(); same result in a dedicated database",
+    "feca475a": "comment/docstring edits only",
+    "c834fac0": "comment/docstring edits; 076 helper import paths moved (same behavior)",
+    "4251e496": "038 scopes a catalog query to current_schema(); same result in a dedicated database",
 }
 
 

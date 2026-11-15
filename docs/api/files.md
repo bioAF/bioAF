@@ -58,7 +58,7 @@ to a different org).
 
 ## Discovering new files
 
-To learn about new files as they arrive, subscribe to webhooks. The
-`file.registered` and `file.ready` events deliver `file_id` and minimal
-context; clients then call `GET /files/{id}` for full metadata. See
-[webhooks.md](webhooks.md).
+Poll `GET /files` and deduplicate by file ID. Start from the first page to discover newly created rows;
+a cursor moves toward older records, not toward records added after the previous poll.
+For change notifications, subscribe to `file.registered` and `file.ready`, then retrieve the relevant
+metadata through this API. See [Webhooks](webhooks.md) for event types and receiver setup.

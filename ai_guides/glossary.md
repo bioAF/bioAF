@@ -59,9 +59,11 @@ Literature inputs are enabled (see [ADR-057](../decisions/ADR-057-literature-as-
 
 ### Analysis Snapshot
 
-_Pending definition._ A model named `AnalysisSnapshot` exists in code; the term has not
-been confirmed by the domain owner. Do not use this term in new work until it is defined
-here.
+A saved record of selected analysis-object metadata, a label and notes, associated
+with an [Experiment](#experiment) or [Project](#project). It can link a Notebook
+Session and optional figure/checkpoint files. The SDK's snapshot function creates
+this record; it does not capture the entire analysis process or guarantee a full
+object backup. See [Analysis Snapshots](../docs/guides/analysis-snapshots.md).
 
 ### API Key
 
@@ -91,17 +93,20 @@ reworked. See [ADR-058](../decisions/ADR-058-naming-profile-parse-only.md)._
 ### BioAF Adapter Layer (BAL)
 
 A set of interface contracts that decouple application logic from infrastructure
-providers. Three provider categories: Compute Provider, Storage Provider, Notebook
-Provider. The deployed stack today is Kubernetes (GKE) plus GCS; SLURM plus NFS is
-stubbed.
+providers. Runtime categories cover compute, storage, notebooks, Work Nodes and
+cellxgene; additional provider seams cover identity, image builds/registries and
+platform services. Results use normalized models and declared capabilities. GCP
+is the reference deployment, AWS implementations have partial coverage, and NFS
+storage is implemented. SLURM compute and notebook providers remain stubs. See
+[Current Architecture](../docs/architecture.md).
 
 ### Compute Session
 
 The canonical parent term for any on-demand interactive compute environment. Stored
 in one table, distinguished by type. Two canonical subtypes:
 [Notebook Session](#notebook-session) (Jupyter or RStudio, browser-based) and
-[Work Node](#work-node) (SSH-accessed Linux pod). `NotebookSession` as a parent alias is
-deprecated.
+[Work Node](#work-node) (an SSH-accessed Linux virtual machine). `NotebookSession`
+as a parent alias is deprecated.
 
 ### CRO (Contract Research Organization)
 
@@ -112,11 +117,12 @@ and [Auto-ingest](#auto-ingest) are built to handle.
 
 ### Custom Pipeline
 
-A user-authored pipeline that is executed in a Linux node configured using Conda, with
-image configurations stored in [Environments](#environment). The user may store
-pipeline code in GitHub in a repo that is passed to their image, or they may pass in a
-code blob directly. Each custom pipeline is owned by an [Organization](#organization)
-with its own version history (see [Custom Pipeline Version](#custom-pipeline-version)).
+A user-authored workflow executed as a Kubernetes Job using a ready, pinned
+[Environment Version](#environment-version). The environment image supplies its
+tools; conda is one possible way to define that image, not a separate execution
+backend. Code can come from a registered GitHub repository, a code blob or an inline
+entrypoint. Each workflow belongs to an [Organization](#organization) and has
+integer-numbered [Custom Pipeline Versions](#custom-pipeline-version).
 
 ### Custom Pipeline Version
 
@@ -141,9 +147,11 @@ Version.
 
 ### Experiment
 
-A research study that owns [Samples](#sample) and progresses through a fixed status
-lifecycle: `registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` ->
-`processing` -> `pipeline_complete` -> `reviewed` -> `analysis` -> `complete`. The
+A research study that owns [Samples](#sample). A forward status path is
+`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` ->
+`processing` -> `pipeline_complete` -> `analysis` -> `complete`.
+An Experiment can also pass through `reviewed` between `pipeline_complete` and
+`analysis`, or return from `analysis` to `processing`. The
 primary entity all other layers reference; mandatory (unlike [Project](#project)). Has
 a code, belongs to an [Organization](#organization), optionally to a Project.
 
@@ -166,23 +174,32 @@ listing fields with name + type (`string`, `number`, `date`) + required
 flag. An [Experiment](#experiment) created from a template inherits its
 default [Naming Profile](#naming-profile) and can override it per-row.
 
+### Lab Document
+
+An Organization-scoped record for operational or institutional knowledge, with
+a title, description, current stored file, version history, tags, notes and an
+archive flag. File replacements create version records. See
+[ADR-059](../decisions/ADR-059-lab-knowledge-institutional-memory.md),
+[ADR-060](../decisions/ADR-060-lab-document-tag-organization.md) and
+[ADR-061](../decisions/ADR-061-lab-document-versioning.md).
+
 ### LLM Provider
 
-A configured back end for [Agent Review](#agent-review) inference. Four are
-supported: OpenAI, Anthropic Claude, Google Gemini (hosted), and Gemma 4 (self-
-hosted, runs inside the bioAF GCP project). Exactly one per [Organization](#organization)
-is active at a time; switching is a settings toggle, keys for all four can
-persist simultaneously.
+A configured inference provider. Hosted integrations include OpenAI, Anthropic
+and Google. One provider per [Organization](#organization) is active at a time;
+select a model that supports the chosen workflow. See
+[Literature and AI Workflows](../docs/guides/literature-and-ai.md).
 
 ### Lit Review Run
 
-A single execution of an LLM-driven paper recommendation job scoped to an
-[Experiment](#experiment). Uses the org's active [LLM Provider](#llm-provider) to
-generate expansion queries and rank candidate papers, producing a queue of
-[Literature Recommendations](#literature-recommendation). On demand in v1;
-scheduled cadences are deferred to v2. Not an [Agent Review](#agent-review):
-different output shape (queue of recommendations vs severity-coded advisory
-note), different lifecycle, different table. See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+An LLM-driven paper-recommendation execution scoped to an
+[Experiment](#experiment). It collects candidates, ranks them and automatically
+adds up to the configured maximum at or above the score threshold to the
+[Literature Library](#literature-library), with accepted recommendation records.
+It is separate from an [Agent Review](#agent-review) advisory note. A valid empty
+result, partial source failure, failed run and cancellation have distinct outcomes.
+See [Literature and AI Workflows](../docs/guides/literature-and-ai.md) and
+[ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
 
 ### Literature Dismissal
 
@@ -193,38 +210,41 @@ and any [Agent Review](#agent-review) Literature payload. Created by `admin` or
 
 ### Literature Library
 
-The org-scoped collection of [Papers](#paper) and their associations, comments,
-reading status, and dismissals. Distinct from the [Reference Dataset](#reference-dataset)
-registry; distinct from the file/document subsystem (papers live in a
-dedicated per-org GCS bucket `bioaf-literature-{org}` and a dedicated set of
-tables). See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
+The Organization-scoped collection of [Papers](#paper), associations, comments,
+reading state and dismissals, with dedicated records and document storage. The
+reference deployment uses GCS for its paper documents; this does not imply complete
+AWS parity for the workflow. It is distinct from the
+[Reference Dataset](#reference-dataset) registry and [Lab Documents](#lab-document).
+See [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
 
 ### Literature Recommendation
 
-A single LLM-scored paper produced by a [Lit Review Run](#lit-review-run),
-with a continuous relevance score (0.0 to 1.0) and one-sentence reasoning.
-Lifecycle: `pending -> accepted` (paper joins the [Literature Library](#literature-library)
-associated with the scope) or `pending -> dismissed` (paper is dismissed
-org-wide via [Literature Dismissal](#literature-dismissal)). See
+A Paper's LLM score and reasoning associated with a [Lit Review Run](#lit-review-run)
+and Experiment. The model permits pending/accepted/dismissed states, but the current
+review-run generator writes accepted records directly for the candidates it keeps.
+There is no universal mandatory pending-accept queue. A later dismissal is a
+separate action. See
 [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
 
 ### Literature Source
 
 An external bibliographic data source the [Literature Library](#literature-library)
-can query. Four in v1: PubMed (NCBI), bioRxiv, Europe PMC, Semantic Scholar.
-Per-org configuration of enablement and API key. API keys are stored
-encrypted at rest via the `EncryptedString` pattern from
-[ADR-047](../decisions/ADR-047-data-at-rest-encryption.md). See
+can query: PubMed (NCBI), bioRxiv, Europe PMC, Semantic Scholar and OpenAlex.
+Configuration controls credentials, rate overrides and optional-source enablement;
+OpenAlex is always on. API keys are stored encrypted at rest through the pattern
+in [ADR-047](../decisions/ADR-047-data-at-rest-encryption.md). See
+[Literature and AI Workflows](../docs/guides/literature-and-ai.md) and
 [ADR-056](../decisions/ADR-056-literature-library-domain-model.md).
 
 ### `.md` Review Artifact
 
 The standardized Markdown rollup of a single [Pipeline Run](#pipeline-run) (run
-record, parameters, output JSON, QC report text, sample metadata, errors) built
-on demand for [Agent Review](#agent-review) consumption and persisted in GCS
-under that pipeline run's artifact directory. The only user data that ever
-leaves the org under any LLM code path. Raw rows, FASTQ, file blobs, and
-pipeline logs are never included.
+record, parameters, output JSON, QC report text, Sample metadata and errors) built
+on demand for [Agent Review](#agent-review) consumption and persisted in the run's
+artifact storage. Raw FASTQ data and file blobs are not included in this artifact.
+Other LLM workflows, including the assistant and Literature review, use their own
+request context and tool results; this artifact is not a universal boundary on
+what every LLM request can transmit.
 
 ### Naming Profile
 
@@ -245,9 +265,9 @@ are recognized by their digit pattern (one of `YYYYMMDD`, `YYYY-MM-DD`,
 `YYMMDD`) and carry no identifier.
 
 Parsed values are returned as strings (leading zeros preserved), except
-dates which are returned as ISO date strings. If a parsed field has a
-matching custom field on the target experiment, the value is persisted
-to `experiment_custom_fields`; otherwise it is human-readable only.
+dates which are returned as ISO date strings. The parser/test API returns those
+values; it does not persist them to experiment custom fields. Template-derived
+vocabulary does not imply automatic persistence.
 
 See [ADR-058](../decisions/ADR-058-naming-profile-parse-only.md) for
 the decision record.
@@ -300,10 +320,12 @@ lineage. Owns [Pipeline Process](#pipeline-process) records.
 
 ### Pipeline Trigger
 
-A configured rule that launches a [Pipeline Run](#pipeline-run) in one of three modes:
-manual (UI), event-driven (file ingest), or scheduled (cron). All modes pass through
-the same budget-aware pre-flight check; if over budget, the run is queued as "pending
-budget review."
+A configured rule intended to launch a [Pipeline Run](#pipeline-run) in response to
+an event or schedule. Historical trigger models and ADRs are distinct from the
+implemented per-experiment auto-run configuration. The general trigger editor,
+cron queue and budget-approval workflow are not currently exposed. Ingest-driven
+auto-runs are limited by the temporary ingest gate; see
+[Automated Pipelines](../docs/guides/automated-pipelines.md).
 
 ### Project
 
@@ -335,7 +357,8 @@ group is a decomposition of one sample.
 ### Reference Dataset
 
 A curated, versioned biological reference (genome, annotation, index, atlas, markers)
-stored in GCS, scoped public or internal to an [Organization](#organization). Has
+stored in GCS on the reference ingestion path, scoped public or internal to an
+[Organization](#organization). Has
 lifecycle status (active / deprecated / pending_approval / uploading / failed) and
 supersession lineage. Associated to [Pipeline Runs](#pipeline-run). May also be
 associated to [Notebook Sessions](#notebook-session) or [Work Nodes](#work-node) (the
@@ -445,8 +468,11 @@ from a Delivery.
 
 ### Work Node
 
-A [Compute Session](#compute-session) subtype: an SSH-accessed Linux pod for
-interactive work. Backed by an ephemeral Kubernetes Pod with GCS FUSE data mounts.
+A [Compute Session](#compute-session) subtype: an SSH-accessed Linux virtual machine
+for interactive work, outside the Kubernetes cluster. The reference backend uses
+GCE; an EC2 implementation also exists. Each launch selects an environment version
+and supported input/output storage. See
+[ADR-043](../decisions/ADR-043-work-nodes-gce-migration.md).
 
 ## Deprecated term map
 

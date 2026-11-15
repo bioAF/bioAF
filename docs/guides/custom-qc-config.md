@@ -14,7 +14,7 @@ For a walkthrough of authoring custom pipelines themselves, see [Custom Pipeline
 When a custom pipeline run completes, bioAF:
 
 1. Looks up the pipeline version's `qc_template` and `qc_config_json`.
-2. If `qc_template = custom`, reads `/outputs/qc_metrics.json` from the run's GCS prefix.
+2. If `qc_template = custom`, reads `/outputs/qc_metrics.json` from the run's configured results-storage prefix.
 3. Renders the QC Dashboard generically: sections from the config, values from the metrics file, formats and threshold colors from the config.
 
 The render config travels with the pipeline version. Editing it produces a new version, so old runs always render the way they were generated even if you later evolve the layout. Inside `bioAF` the QC Dashboard row also snapshots the resolved config at generation time, so this guarantee survives even if the pipeline is later deleted.
@@ -203,7 +203,7 @@ If you want to preview the layout without re-running a pipeline:
 
 ## Common Pitfalls
 
-- **Metric value is `null` or missing** -- the card doesn't render, and a section made up entirely of missing metrics is hidden. Check the run's GCS prefix to confirm `qc_metrics.json` actually got written and contains the keys you expect.
+- **Metric value is `null` or missing** -- the card doesn't render, and a section made up entirely of missing metrics is hidden. Check the run's configured results-storage prefix to confirm `qc_metrics.json` actually got written and contains the keys you expect.
 - **JSON parse error in the editor** -- the panel shows a red "JSON: ..." note inline. Trailing commas and unquoted keys are the usual culprits; the editor enforces strict JSON.
 - **Threshold rule never matches** -- the comparison must be a single operator + numeric literal. Whitespace is fine; ranges (`"5..10"`) and string comparisons aren't supported.
 - **`quality_rating` shows `Concerning`** -- the custom template's default rating when no `quality_rating` is emitted is `pending_review`; `concerning` only happens when the pipeline explicitly writes that rating. Most often this means an old run before you wired up the metrics file.

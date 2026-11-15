@@ -5,9 +5,12 @@
 - **Docker** and **Docker Compose** (v2 plugin)
 - **Git**
 - **openssl** (for secret generation during install)
+- **Python 3** (host management helpers)
 
-That is it. bioAF runs entirely in Docker containers. No language runtimes,
-package managers, or cloud CLIs are required on the host machine.
+The application services run in Docker. Host management also uses Python 3; managed Linux installs use
+systemd for the update agent and, on GCE, the Ops Agent. Cloud provisioning scripts run on your local
+machine and can install the cloud CLI. See [Configuration](configuration.md) for settings sources and
+[Current Architecture](architecture.md) for workload boundaries.
 
 ## One-Command GCP Setup
 
@@ -18,28 +21,23 @@ on your local machine (macOS or Linux):
 curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | bash
 ```
 
-The script walks you through:
+The script installs/checks local cloud tooling, authenticates, selects the project and enables the
+services declared in `install-gcp.sh` (not just Compute, Storage and IAM). It creates scoped service
+accounts and impersonation bindings without downloading JSON keys, configures networking, provisions
+the VM and writes a local prefill file at `~/.bioaf/prefill.yaml`.
 
-1. Installing the gcloud CLI (if not present). On a Mac it installs it with
-   Homebrew, installing Homebrew first if needed; that asks for your Mac password.
-2. Authenticating with Google Cloud
-3. Selecting your GCP project
-4. Enabling required APIs (Compute, Storage, IAM)
-5. Creating a firewall rule for ports 80 and 443
-6. Creating an e2-medium VM with Ubuntu 22.04 and Docker pre-installed
-7. Optionally creating a service account with a JSON key
-
-Once the VM is ready, SSH in and deploy:
+Use its automatic handoff, or follow the printed manual worksheet to copy the prefill to
+`~/.bioaf-prefill.yaml` on the VM and connect there. On that VM, after the prefill has been copied:
 
 ```bash
-gcloud compute ssh bioaf --zone=<your-zone> --project=<your-project>
 git clone https://github.com/bioAF/bioAF.git
 cd bioAF
-./bioaf setup
+./bioaf setup --prefill "$HOME/.bioaf-prefill.yaml"
 ```
 
-Open the printed URL in your browser, enter the setup code, and follow the
-wizard to create your admin account and configure the platform.
+Use the VM name, zone, project and account details printed by your installer rather than assuming the
+defaults. The prefill supplies the VM-default credential and bootstrap/Sheets-reader account settings
+for the web wizard. Open the printed URL and use the setup code to complete administrator setup.
 
 ### Pinned installer versions
 
@@ -49,11 +47,12 @@ script cannot tell which URL it came from. To install from a release tag or a
 commit, pass the same ref to the script with `--ref` (or `BIOAF_INSTALLER_REF`):
 
 ```bash
-REF=<release tag or commit>
+REF="vYYYY.M.N"  # Replace with an actual release tag or commit
 curl -fsSL "https://raw.githubusercontent.com/bioAF/bioAF/$REF/install-gcp.sh" \
   | bash -s -- --ref "$REF"
 ```
 
+Release tags use `vYYYY.M.N` with an unpadded month, for example `v2026.9.1`.
 Pinning needs an installer that has `--ref`: releases after v2026.11.22. Earlier
 installers (v2026.11.22 and before) do not know the option, and always download
 their helpers from `main`, so pinning them is not possible.
@@ -66,7 +65,7 @@ helpers beside it and never looks in the current directory.
 `--ref` governs only the installer's helper files. The automatic setup it
 offers at the end still clones bioAF on the VM and pulls `main` before running
 `./bioaf setup`; to set up another version there, choose the manual option and
-run `./bioaf setup --version <X.Y.Z>` on the VM.
+run `./bioaf setup --version YYYY.M.N` with the intended numeric release on the VM.
 
 ## One-Command AWS Setup
 
@@ -101,16 +100,18 @@ only to your current public IPv4 address unless you pass `--ssh-cidr`; if that
 address cannot be detected the installer stops before creating anything and
 asks for `--ssh-cidr`. Reusing an existing `bioaf-allow-web` security group
 keeps any SSH rules it already has, and the installer lists broader ones.
-From there, deployment is identical to GCP: open
-the printed URL, enter the setup code, and follow the wizard. Storage (S3) and
-Kubernetes compute (EKS) are provisioned from the Infrastructure page once you
-are in; a few components are still being brought to parity with GCP.
+Open the printed URL, enter the setup code and follow the wizard. AWS has S3, EKS, EC2 and image-build
+implementations, but several platform-service factories and cellxgene parity remain incomplete. A
+successful EC2 host install does not prove each workload path works. Review
+[Cloud support](architecture.md#cloud-support) before relying on a specific AWS workflow.
 
 ## Quick Deploy (Existing Server)
 
-If you already have a Linux server with Docker installed:
+If you already have a Linux server, install Docker, the Compose v2 plugin, Git, openssl and Python 3
+before using the host management script. Verify Python 3 explicitly:
 
 ```bash
+python3 --version
 git clone https://github.com/bioAF/bioAF.git
 cd bioAF
 ./bioaf setup
@@ -160,9 +161,10 @@ it automatically when needed.
            :5432
 ```
 
-All four services run as Docker containers orchestrated by Docker Compose.
-nginx handles TLS termination and request routing. HTTP on port 80 is
-redirected to HTTPS on port 443.
+All four services run as Docker containers orchestrated by Docker Compose. nginx handles TLS termination
+and routing, including `/api/v1/integrations` to the same FastAPI backend. HTTP redirects to HTTPS except
+for health checks and the ACME challenge path. The backend owns its workers and Terraform subprocesses;
+Kubernetes and Work Node VMs are separate cloud resources. See the [architecture diagram](architecture.md).
 
 ## Service Management
 
@@ -179,9 +181,9 @@ redirected to HTTPS on port 443.
 
 ```bash
 ./bioaf migrate             # Upgrade the database (verified backup first); retry after a failure
-./bioaf migrate-down <rev>  # Downgrade to a specific revision (also backs up first)
+./bioaf migrate-down REVISION  # Replace REVISION; also backs up first
 ./bioaf backup              # Dump database to backups/ directory (gzipped, verified)
-./bioaf seed <script.py>       # Run a seed script inside the backend container
+./bioaf seed path/to/script.py  # Run a seed script inside the backend container
 ./bioaf dbshell             # Open a psql session
 ./bioaf reset-db            # Drop and recreate database (destructive, with confirmation)
 ```
@@ -204,7 +206,8 @@ The backend writes each log record as one JSON object on one line of stdout: `ti
 present, `exception` (the whole traceback, chained causes included), `stack`, and `fields`
 (structured data). Newlines, control characters and Unicode line separators are escaped inside the
 line, so a traceback or a hostile request path can never start a forged record. Production logs
-`INFO` and above; `BIOAF_DEBUG=true` adds `DEBUG`. There is no text format and no switching on
+`INFO` and above. Passing `BIOAF_DEBUG=true` to the application enables `DEBUG`, but production Compose
+hardcodes it to `false`; a value in `docker/.env` alone does not change that mapping. There is no text format and no switching on
 environment or terminal.
 
 ### Choosing the delivery path
@@ -315,7 +318,7 @@ From the CLI:
 
 ```bash
 ./bioaf update              # Update to the latest release
-./bioaf update 0.7.0        # Update to a specific version
+./bioaf update YYYY.M.N     # Replace with the intended release; month is unpadded
 ```
 
 This backs up the database, fetches the target version tag from GitHub,
@@ -326,7 +329,7 @@ configuration check passes, so a rejected check leaves the current release
 pinned and running.
 
 From the UI, admins can click the **Install Update** button on the
-**Settings > Information** page when a new version is available. This
+**Settings > Platform Info** page when a new version is available. This
 triggers the same update process through a host-side update agent.
 
 ### The update agent
@@ -499,16 +502,23 @@ configuration failure.
    `BIOAF_ENCRYPTION_KEYS` decrypts the stored secrets; the manifest lists
    fingerprints of the keys that were in use), and the release the dump came
    from. Check out that release's tag, set `BIOAF_IMAGE_TAG` in `docker/.env`
-   to it, and restore into a fresh database:
+   to it, and restore into a fresh database. Verify the dump against its manifest before stopping services.
+   The example uses the default `bioaf` database/user names; adapt these if your installation changed them.
+   Replace `TIMESTAMP` with the chosen dump's timestamp and check the file exists before proceeding:
 
    ```bash
-   ./bioaf stop
-   docker compose -f docker/docker-compose.yml --env-file docker/.env up -d db
-   docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
-       sh -c 'dropdb -U bioaf bioaf && createdb -U bioaf bioaf'
-   docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
-       pg_restore -U bioaf -d bioaf --no-owner < backups/bioaf_pre_upgrade_<...>.dump
-   ./bioaf start
+   DUMP="backups/bioaf_pre_upgrade_TIMESTAMP.dump"
+   if test -s "$DUMP"; then
+       ./bioaf stop &&
+       docker compose -f docker/docker-compose.yml --env-file docker/.env up -d db &&
+       docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
+           sh -c 'dropdb -U bioaf bioaf && createdb -U bioaf bioaf' &&
+       docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T db \
+           pg_restore -U bioaf -d bioaf --exit-on-error --single-transaction --no-owner --no-acl < "$DUMP" &&
+       ./bioaf start
+   else
+       printf '%s\n' "Dump missing or empty; no services or databases were changed."
+   fi
    ```
 
    A gzipped SQL backup from `./bioaf backup` or an older update restores the
@@ -558,19 +568,24 @@ update after that.
 
 ## Reinstalling
 
-If you need to start fresh (e.g., after changing database credentials):
+This is a destructive reset for an intentional fresh installation. It removes the PostgreSQL volume,
+host configuration (including encryption keys) and the default TLS certificate/key files. Before running
+it, create and verify a database backup and save the matching `docker/.env`, encryption keyring, certificates
+and any other recovery configuration outside the checkout. Retained cloud files and encrypted backup
+records can still require the original keys after a new setup generates a different keyring.
+
+After preserving that recovery material, the following resets an installation using the default paths:
 
 ```bash
 ./bioaf stop
-docker compose -f docker/docker-compose.yml down -v   # Remove containers and volumes
+docker compose -f docker/docker-compose.yml --env-file docker/.env down -v   # Destroys the database volume
 rm docker/.env docker/certs/tls.crt docker/certs/tls.key
 ./bioaf setup
 ```
 
-Removing `docker/.env` and the certs causes `setup` to re-run the full
-installer. The `down -v` removes the PostgreSQL data volume, which is
-necessary because PostgreSQL bakes the initial password into the volume
-on first startup.
+Removing the configuration and certificates makes `setup` generate fresh ones. This procedure does not
+restore prior data or preserve the old encryption keys automatically. Ordinary image updates use the
+[Updating](#updating) workflow and retain the database/configuration.
 
 ## Manual GCP VM Deployment
 
@@ -624,23 +639,40 @@ Settings > Integrations after logging in.
 
 ### Component Activation
 
-From the Components page, enable infrastructure components your team needs:
-SLURM HPC, Filestore NFS, JupyterHub, RStudio, Nextflow, Snakemake,
-cellxgene. Each component is provisioned via Terraform when enabled.
+From **Infrastructure > Components**, enable the available notebook, pipeline and visualization components
+your team needs. Prerequisites can include provisioned compute/storage and a ready image; a toggle does
+not always start an independent Terraform apply. SLURM compute is a stub, not an activatable HPC stack.
+See [Compute Stack Setup](guides/compute-stack-setup.md) for the supported paths.
 
 ### Backup Configuration
+
+Review [Backup & Recovery](user-guide-admin.md#backup--recovery), including creation-time checksums,
+legacy-backup confirmation, strict import and the one-hour Accept/Reject review. Preparation checks both
+scratch space and, in production Compose, the read-only database-volume capacity view. The UI workflow is
+separate from host/updater dumps.
 
 Backups are configured with sensible defaults. Review and adjust retention
 policies in Infrastructure > Backup & Recovery.
 
 ## Teardown
 
-Stop all services and remove Docker resources:
+### Remove Managed Cloud Compute
+
+Use **Infrastructure > Components > Teardown** for the managed compute stack. This action keeps storage
+buckets. **Destroy Storage** is a separate destructive operation offered after compute removal. It empties
+and deletes managed buckets and removes storage-module messaging resources, including GCP Pub/Sub topics
+and subscriptions. On AWS it can also remove managed image-build infrastructure when deployed. Preserve
+and verify files and required configuration first. See [Life After bioAF](life-after-bioaf.md).
+
+### Stop the Application Host
+
+From the host checkout:
 
 ```bash
 ./bioaf stop
-docker compose -f docker/docker-compose.yml down -v
 ```
 
-All data in the PostgreSQL volume will be destroyed. Create a backup first
-with `./bioaf backup` if needed.
+Stopping services keeps PostgreSQL's Docker volume and does not remove other cloud resources. Deleting
+the application VM or running a volume-removal command such as `docker compose down -v` can destroy the
+host database. That is not the same as cloud-compute teardown and is not required just to stop bioAF.
+Save verified database backups, keys and host configuration before permanently removing the host or volumes.
