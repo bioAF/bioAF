@@ -523,7 +523,10 @@ nothing; an in-app update refused that way is retried by the update agent when t
 
 Each records, in `host-state/deployments.json` (readable by the host operator only), which backend and frontend
 images run now (**current**, by image ID), which ran before (**previous**), and an operation that has started
-but whose images are not yet running (**candidate**). If an update or build is interrupted, the next one says
+but whose images are not yet running (**candidate**). The current and previous generations' images also carry
+their own local tag, shown as `local_tag` (`gen-<backend>-<frontend>`), so a rebuild under the same version
+cannot remove the images a rollback needs; `images_present` is `false` if a generation's images are no longer
+on the host (for example, removed by hand), and that generation cannot be rolled back to. If an update or build is interrupted, the next one says
 "An earlier ... did not finish" and replaces it. `./bioaf build` changes the deployed version
 (`BIOAF_IMAGE_TAG` in `docker/.env`) only after the build succeeds; the new images become current when
 `./bioaf start` or `restart` runs them.
@@ -544,8 +547,10 @@ one, current, and previous) until the next update removes the oldest.
 
 Rolling back images is not the same as restoring the database: the previous generation's images may not run
 against a database the new release migrated. To go back, follow the restore steps above with the backup listed
-as the current generation's `recovery` in `host-state/deployments.json` (made before that update), and set
-`BIOAF_IMAGE_TAG` to the previous generation's tag shown there.
+as the current generation's `recovery` in `host-state/deployments.json` (made before that update), set
+`BIOAF_IMAGE_TAG` in `docker/.env` to the previous generation's `local_tag` shown there, and run
+`./bioaf restart`. The two generations then swap: the one you returned to is current, and the one you left is
+previous, so you can return to it the same way.
 
 If the record is missing or damaged, the updater reports it and removes no images. A damaged record can be
 deleted to start fresh: the next update or start records what is running, and images are pruned again from the

@@ -1193,6 +1193,7 @@ deploy_database_bytes() {
 deploy_retention_before_staging() {
     # Remove what no generation needs, then require room for the next one. Removal problems are reported and
     # skipped; only the space check can stop the operation.
+    deploy_sync_generation_tags || true   # first: the running images keep a tag when the build moves the version tag
     deploy_prune_images || true
     deploy_report_build_cache || true
     deploy_rotate_dumps || true
@@ -1204,7 +1205,7 @@ deploy_retention_before_staging() {
 deploy_finish() {
     # deploy_finish <tag>: record the images now running as the current generation. The operation already
     # succeeded, so a failure here is reported, not fatal.
-    deploy_record_running "$1" || yellow "WARNING: The running images could not be recorded in host-state/deployments.json."
+    deploy_record_generation "$1" || yellow "WARNING: The running images could not be recorded in host-state/deployments.json."
 }
 
 pin_image_tag() {

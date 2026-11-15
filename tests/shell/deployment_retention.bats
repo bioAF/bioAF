@@ -326,3 +326,128 @@ STUB
     running b3 f3; lib deploy_record_running v3.0.0
     [[ "$(state "d['current']['recovery']")" == *"bioaf_pre_update_1_to_2_first.sql.gz"* ]]
 }
+
+# --- generation tags: rollback images survive a same-tag rebuild (owner review, 2026-11-15) ---------------------
+#
+# Docker's containerd image store deletes an image as soon as its last tag moves, even while a container runs it,
+# so an image ID in the record does not keep the rollback images. Each recorded generation's images carry their
+# own local tag (gen-<backend12>-<frontend12>), which also names them for a rollback.
+
+# A docker stand-in with tags: $FAKE_IDS/images holds "<id> <ref>" lines ("<id> -" for an untagged image); an
+# image exists while it has a line. tag moves a ref, rmi <ref> removes one (and the image with its last ref).
+tag_docker() {
+    cat > "$WORK/fake-docker" <<'STUB'
+#!/usr/bin/env bash
+img="$FAKE_IDS/images"
+case "$1" in
+    inspect)
+        last="${*: -1}"
+        case "$last" in cid-*)
+            svc="${last#cid-}"; [ -s "$FAKE_IDS/$svc" ] || exit 1; cat "$FAKE_IDS/$svc"; exit 0 ;;
+        esac
+        grep -q "^$last " "$img" || exit 1; echo "$last" ;;
+    image)
+        [ "$2" = inspect ] || exit 1
+        grep -q "^${*: -1} " "$img" ;;
+    tag)
+        grep -q "^$2 " "$img" || exit 1
+        grep -v " $3\$" "$img" > "$img.new"; echo "$2 $3" >> "$img.new"; mv "$img.new" "$img" ;;
+    rmi)
+        echo "$2" >> "$WORK/removed"
+        grep -v " $2\$" "$img" > "$img.new"; mv "$img.new" "$img" ;;
+    images)
+        [[ "$*" == *"label=org.opencontainers.image.source=https://github.com/bioAF/bioAF"* ]] || exit 1
+        if [[ "$*" == *"{{.Repository}}:{{.Tag}}"* ]]; then cut -d' ' -f2 "$img" | grep -v '^-$'
+        else cut -d' ' -f1 "$img" | sort -u; fi ;;
+    ps) sed 's/^/img:/' "$FAKE_IDS/in-use" 2>/dev/null ;;
+esac
+exit 0
+STUB
+    chmod +x "$WORK/fake-docker"
+    : > "$FAKE_IDS/images"
+    mkdir -m 700 "$WORK/host-state"
+}
+
+images() { printf '%s\n' "$@" >> "$FAKE_IDS/images"; }
+has_ref() { grep -q "^sha256:$1 ghcr.io/bioaf/bioaf-$2\$" "$FAKE_IDS/images"; }
+gone() { ! grep -q "^sha256:$1 " "$FAKE_IDS/images"; }
+# What ./bioaf build does to the version tag: it moves to the new image.
+rebuild() { lib "_deploy_docker tag sha256:$1 ghcr.io/bioaf/bioaf-$2"; }
+
+@test "each generation's images carry its own tag, so a same-tag rebuild keeps the rollback images" {
+    tag_docker
+    images "sha256:b1 ghcr.io/bioaf/bioaf-backend:v1" "sha256:f1 ghcr.io/bioaf/bioaf-frontend:v1" "sha256:b2 -"
+    running b1 f1; lib deploy_record_generation v1
+    [ "$(state "d['current']['local_tag']")" = "gen-b1-f1" ]
+    has_ref b1 backend:gen-b1-f1 && has_ref f1 frontend:gen-b1-f1
+    rebuild b2 backend:v1                     # the version tag leaves b1; on containerd that alone deleted it
+    running b2 f1; lib deploy_record_generation v1
+    has_ref b1 backend:gen-b1-f1 && has_ref f1 frontend:gen-b1-f1
+    has_ref b2 backend:gen-b2-f1 && has_ref f1 frontend:gen-b2-f1
+    [ "$(state "d['previous']['local_tag']")" = "gen-b1-f1" ]
+    [ "$(state "d['previous']['images_present']")" = "True" ]
+}
+
+@test "the tags are in place before a build moves the version tag (records made before tags existed)" {
+    tag_docker
+    images "sha256:b1 ghcr.io/bioaf/bioaf-backend:v1" "sha256:f1 ghcr.io/bioaf/bioaf-frontend:v1"
+    running b1 f1; lib deploy_record_running v1   # an older install: generations recorded, nothing tagged
+    run lib deploy_sync_generation_tags
+    [ "$status" -eq 0 ]
+    has_ref b1 backend:gen-b1-f1 && has_ref f1 frontend:gen-b1-f1
+    [ "$(state "d['current']['local_tag']")" = "gen-b1-f1" ]
+}
+
+@test "staging syncs the generation tags before it prunes, and finishing records them" {
+    BIOAF="$BATS_TEST_DIRNAME/../../bioaf"
+    body="$(sed -n '/^deploy_retention_before_staging()/,/^}/p' "$BIOAF")"
+    sync_line="$(grep -n 'deploy_sync_generation_tags' <<< "$body" | head -1 | cut -d: -f1)"
+    prune_line="$(grep -n 'deploy_prune_images' <<< "$body" | head -1 | cut -d: -f1)"
+    [ -n "$sync_line" ] && [ -n "$prune_line" ] && [ "$sync_line" -lt "$prune_line" ]
+    sed -n '/^deploy_finish()/,/^}/p' "$BIOAF" | grep -q 'deploy_record_generation'
+}
+
+@test "a generation that leaves the record loses its tag, and only bioAF generation tags are touched" {
+    tag_docker
+    images "sha256:b1 -" "sha256:f1 -" "sha256:b2 -" "sha256:b3 -" "sha256:b1 ghcr.io/bioaf/bioaf-backend:keep-me"
+    running b1 f1; lib deploy_record_generation v1
+    running b2 f1; lib deploy_record_generation v1
+    running b3 f1; lib deploy_record_generation v1
+    ! has_ref b1 backend:gen-b1-f1 && ! has_ref f1 frontend:gen-b1-f1
+    has_ref b1 backend:keep-me
+    has_ref b2 backend:gen-b2-f1 && has_ref b3 backend:gen-b3-f1 && has_ref f1 frontend:gen-b3-f1
+}
+
+@test "a generation whose images are gone is marked absent, never claimed as a rollback" {
+    tag_docker
+    images "sha256:b2 -" "sha256:f2 -"
+    running b1 f1; lib deploy_record_running v1    # b1/f1 were already deleted (a same-tag rebuild before tags)
+    running b2 f2; lib deploy_record_running v1
+    run lib deploy_sync_generation_tags
+    [ "$status" -eq 0 ]
+    [ "$(state "d['previous']['images_present']")" = "False" ]
+    [ "$(state "d['current']['images_present']")" = "True" ]
+    [[ "$output" == *"previous"* ]] && [[ "$output" == *"no longer on this host"* ]]
+    [ "$(state "d['previous']['backend']")" = "sha256:b1" ]   # its recovery set stays attributable
+}
+
+@test "rolling back to the previous generation's tag swaps current and previous" {
+    tag_docker
+    images "sha256:b1 -" "sha256:f1 -" "sha256:b2 -"
+    running b1 f1; lib deploy_record_generation v1
+    running b2 f1; lib deploy_record_generation v1
+    touch "$WORK/backups-marker"
+    running b1 f1; lib deploy_record_generation gen-b1-f1    # BIOAF_IMAGE_TAG=gen-b1-f1, then restart
+    [ "$(state "d['current']['backend']")" = "sha256:b1" ]
+    [ "$(state "d['current']['local_tag']")" = "gen-b1-f1" ]
+    [ "$(state "d['previous']['backend']")" = "sha256:b2" ]
+    has_ref b1 backend:gen-b1-f1 && has_ref b2 backend:gen-b2-f1
+}
+
+@test "the pinned tag is never removed, even when no generation names it" {
+    tag_docker
+    mkdir -p "$WORK/docker"; echo "BIOAF_IMAGE_TAG=gen-b0-f0" > "$WORK/docker/.env"
+    images "sha256:b0 ghcr.io/bioaf/bioaf-backend:gen-b0-f0" "sha256:b1 -" "sha256:f1 -"
+    running b1 f1; lib deploy_record_generation v1
+    has_ref b0 backend:gen-b0-f0
+}

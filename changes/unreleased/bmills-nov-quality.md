@@ -31,4 +31,8 @@
 
 - `./bioaf update`, `build` and `setup` now run one at a time and record which backend and frontend images run
   now and which ran before (`host-state/deployments.json`), so an interrupted update is reported by the next run.
-  `./bioaf build` no longer changes the deployed version when the build fails. Nothing is deleted yet (#110).
+  `./bioaf build` no longer changes the deployed version when the build fails (#110).
+- Before pulling or building, the updater removes bioAF images no generation uses and the oldest updater
+  backups beyond the two newest of each kind, reports a build cache over 5 GiB, and stops if the disk would fall
+  below its floor (#110). The images that ran before keep their own tag (`local_tag` in the record), so a
+  rebuild of the same version cannot remove them, and setting `BIOAF_IMAGE_TAG` to that tag rolls back.

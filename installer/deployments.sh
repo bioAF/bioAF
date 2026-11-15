@@ -6,6 +6,11 @@
 #
 #   current    the backend and frontend images running now, by immutable image ID, with the tag they ran under
 #   previous   the generation before it (the rollback images)
+#   local_tag  on current and previous: gen-<backend12>-<frontend12>, a tag both of the generation's images carry
+#              (deploy_sync_generation_tags). An image ID does not keep an image: Docker's containerd store deletes
+#              one as soon as its last tag moves, even while it runs. The tag keeps it, and names it for a rollback
+#              (BIOAF_IMAGE_TAG=<local_tag>). images_present says whether both images were on the host when last
+#              checked; a generation without them is kept in the record (its recovery set) but is no rollback.
 #   candidate  an operation that started and has not yet run its images (update, build or setup, and its tag);
 #              still present at the next operation means that one was interrupted or failed
 #   recovery   on a generation an update installed: the updater backups made since the first unfinished operation
@@ -15,8 +20,8 @@
 #
 # A tag is not identity: a same-tag rebuild or a one-service build is a new generation. The record is written
 # atomically (a reader never sees half a file) and privately (0700 directory, 0600 file). A damaged record is
-# reported and left as it is, never replaced as if empty. Nothing here deletes images: the retention budgets
-# that would are a separate, owner-approved stage.
+# reported and left as it is, never replaced as if empty. Images are removed only by retention (stage C below):
+# deploy_prune_images, and deploy_sync_generation_tags removing a generation tag the record no longer names.
 #
 # Needs: SCRIPT_DIR, DC (docker compose), python3. DEPLOY_DOCKER overrides the docker CLI (tests).
 
@@ -105,6 +110,12 @@ if record.get("format") != 1:
     print(f"The deployment record {path} has an unknown format; it was left unchanged.", file=sys.stderr)
     sys.exit(2)
 
+def local_tag(generation):
+    """The generation's own tag: gen-<backend12>-<frontend12> (image IDs without their sha256: prefix)."""
+    short = lambda image_id: image_id.split(":")[-1][:12]
+    return f"gen-{short(generation['backend'])}-{short(generation['frontend'])}"
+
+
 if change == "candidate":
     operation, tag = args
     earlier = record.get("candidate") or {}
@@ -119,6 +130,12 @@ elif change == "running":
     if current and current.get("backend") == backend and current.get("frontend") == frontend:
         if record.get("candidate") is None:
             sys.exit(0)  # nothing changed: the file is not rewritten
+    elif (previous := record.get("previous")) and (previous.get("backend"), previous.get("frontend")) == (
+        backend,
+        frontend,
+    ):
+        # A rollback: the previous generation runs again. The two swap, each keeping its tag and recovery set.
+        record["current"], record["previous"] = previous, current
     else:
         candidate = record.get("candidate") or {}
         since = candidate.get("protect_since") or candidate.get("started_at")
@@ -127,7 +144,19 @@ elif change == "running":
         record["current"] = {
             "tag": tag, "backend": backend, "frontend": frontend, "recorded_at": now, "recovery": recovery,
         }
+        record["current"]["local_tag"] = local_tag(record["current"])
     record["candidate"] = None
+elif change == "presence":
+    # args: <generation>=<1|0> for each generation checked; also names a generation recorded before local tags.
+    before = json.dumps(record, sort_keys=True)
+    for item in args:
+        generation, _, present = item.partition("=")
+        entry = record.get(generation)
+        if entry:
+            entry.setdefault("local_tag", local_tag(entry))
+            entry["images_present"] = present == "1"
+    if json.dumps(record, sort_keys=True) == before:
+        sys.exit(0)
 else:
     sys.exit(f"unknown change {change}")
 
@@ -156,6 +185,12 @@ deploy_record_running() {
     ids="$(deploy_running_ids)" || return 1
     # shellcheck disable=SC2086  # two words: the backend and frontend image IDs
     _deploy_update running "$tag" $ids
+}
+
+deploy_record_generation() {
+    # deploy_record_generation <tag>: record the running images as the current generation, then tag the generations.
+    deploy_record_running "$1" || return 1
+    deploy_sync_generation_tags
 }
 
 deploy_interrupted() {
@@ -223,6 +258,55 @@ PY
             _deploy_docker inspect --type image --format '{{.Id}}' "${DEPLOY_IMAGE_REPO_PREFIX}${svc}:${tag}" 2>/dev/null || true
         done
     fi
+}
+
+deploy_sync_generation_tags() {
+    # Give the current and previous generations' images their local tag (see the header), record whether each
+    # generation's images are on the host, and remove the local tags of generations that left the record (Docker
+    # then frees or prunes those images). Never removes the pinned BIOAF_IMAGE_TAG or any other tag.
+    local path generations gen tag backend frontend svc id present ref pinned wanted="" presence=()
+    path="$(deploy_state_dir)/deployments.json"
+    [ -f "$path" ] || return 0
+    if ! generations="$(python3 -I - "$path" <<'PY'
+import json, sys
+try:
+    record = json.load(open(sys.argv[1]))
+except ValueError:
+    sys.exit(1)
+for generation in ("current", "previous"):
+    g = record.get(generation) or {}
+    if g.get("backend") and g.get("frontend"):
+        short = lambda image_id: image_id.split(":")[-1][:12]
+        print(generation, f"gen-{short(g['backend'])}-{short(g['frontend'])}", g["backend"], g["frontend"])
+PY
+)"; then
+        yellow "The deployment record could not be read, so the generations' image tags were left as they are."
+        return 0
+    fi
+    while read -r gen tag backend frontend; do
+        [ -n "$gen" ] || continue
+        wanted+="$tag"$'\n'
+        present=1
+        for svc in $DEPLOY_SERVICES; do
+            if [ "$svc" = backend ]; then id="$backend"; else id="$frontend"; fi
+            _deploy_docker image inspect "$id" >/dev/null 2>&1 \
+                && _deploy_docker tag "$id" "${DEPLOY_IMAGE_REPO_PREFIX}${svc}:${tag}" >/dev/null 2>&1 \
+                || present=0
+        done
+        presence+=("$gen=$present")
+        [ "$present" = 1 ] \
+            || yellow "The $gen generation's images ($tag) are no longer on this host, so bioAF cannot roll back to them."
+    done <<< "$generations"
+    [ "${#presence[@]}" -eq 0 ] || _deploy_update presence "${presence[@]}" || return 1
+    pinned="$(grep '^BIOAF_IMAGE_TAG=' "${ENV_FILE:-$SCRIPT_DIR/docker/.env}" 2>/dev/null | tail -n 1 | cut -d= -f2-)" || pinned=""
+    for ref in $(_deploy_docker images --filter "label=$DEPLOY_IMAGE_LABEL" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); do
+        case "$ref" in "${DEPLOY_IMAGE_REPO_PREFIX}"*:gen-*) ;; *) continue ;; esac
+        tag="${ref##*:}"
+        if ! grep -qxF "$tag" <<< "$wanted" && [ "$tag" != "$pinned" ]; then
+            _deploy_docker rmi "$ref" >/dev/null 2>&1 \
+                || yellow "An old generation's image tag ($ref) could not be removed; it was left in place."
+        fi
+    done
 }
 
 deploy_prune_images() {
