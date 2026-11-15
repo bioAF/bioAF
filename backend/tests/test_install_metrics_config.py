@@ -166,12 +166,32 @@ def test_production_compose_passes_the_runtime_overrides_but_never_disables_repo
     compose = yaml.safe_load((REPO / "docker" / "docker-compose.yml").read_text())
     env = compose["services"]["backend"]["environment"]
 
-    # Only the host env file decides; the default is empty (reporting follows the admin's choice).
-    assert env["BIOAF_INSTALL_METRICS_DISABLED"] == "${BIOAF_INSTALL_METRICS_DISABLED:-}"
+    # Only the host env file decides; the default is false (reporting follows the admin's choice).
+    assert env["BIOAF_INSTALL_METRICS_DISABLED"] == "${BIOAF_INSTALL_METRICS_DISABLED:-false}"
     assert env["BIOAF_POSTHOG_PROJECT_TOKEN"] == "${BIOAF_POSTHOG_PROJECT_TOKEN:-}"
     assert env["BIOAF_POSTHOG_HOST"] == "${BIOAF_POSTHOG_HOST:-}"
     dockerfile = (REPO / "docker" / "Dockerfile.backend").read_text()
     assert "INSTALL_METRICS_DISABLED" not in dockerfile
+
+
+def test_the_production_compose_defaults_parse_as_valid_settings(monkeypatch):
+    """With nothing in the host env file, each value Compose substitutes must pass the settings parser."""
+    import re
+
+    import yaml
+
+    compose = yaml.safe_load((REPO / "docker" / "docker-compose.yml").read_text())
+    env = compose["services"]["backend"]["environment"]
+    for name in ("BIOAF_INSTALL_METRICS_DISABLED", "BIOAF_POSTHOG_PROJECT_TOKEN", "BIOAF_POSTHOG_HOST"):
+        match = re.fullmatch(r"\$\{" + name + r":-(.*)\}", env[name])
+        assert match, env[name]
+        monkeypatch.setenv(name, match.group(1))
+
+    parsed = Settings()  # type: ignore[call-arg]
+
+    assert parsed.install_metrics_disabled is False
+    monkeypatch.setattr("app.config.settings", parsed)
+    assert sender.resolve_destination() == sender.Destination(release.POSTHOG_PROJECT_TOKEN, release.POSTHOG_HOST)
 
 
 def test_subprocess_launchers_pass_the_override_to_their_children():
