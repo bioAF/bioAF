@@ -522,5 +522,20 @@ async def complete_setup(
         details={"setup_complete": True},
     )
     await session.commit()
+    await _record_setup_completion(session)
 
     return {"message": "Setup complete"}
+
+
+async def _record_setup_completion(session: AsyncSession) -> None:
+    """Mark setup complete for installation metrics, reserving the baseline if the admin opted in.
+
+    Runs after setup is committed and never changes its outcome (ADR-075)."""
+    from app.services.install_metrics.state import InstallMetricsService
+
+    try:
+        await InstallMetricsService.setup_completed(session)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.error("install_metrics setup_completion=failed code=record_failed")
