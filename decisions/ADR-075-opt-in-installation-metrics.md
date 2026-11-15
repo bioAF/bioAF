@@ -21,7 +21,10 @@ declined choices create no [Installation ID](../ai_guides/glossary.md#installati
 report and no network traffic, including the first report. The choice is installation-wide and is
 asked once: on the setup wizard's Organization Name step for a new installation, or on the first
 authenticated app entry by such an admin for an installation whose choice is still pending. Either
-committed choice resolves the prompt for good; later changes happen in Settings > System Settings.
+committed choice resolves the prompt for good; later changes happen in Settings > System Settings
+(`GET /api/system-settings`, `PUT /api/system-settings/install-metrics`). The mutation accepts only the
+choice, the notice version (`NOTICE_VERSION`, currently `2026-11-15`) and the revision it was read at; a
+stale revision or another notice version is a 409, and the backend owns IDs, dates and payloads.
 
 **One policy owner and local consent evidence.** `InstallMetricsService` owns the versioned state in
 `platform_config.install_metrics_state`: the nullable Installation ID (a random UUID created on first
@@ -29,7 +32,9 @@ opt-in, never rotated), new/existing classification (made by migration before bo
 Organization), preference, notice version, exact decision time, the effective enabled-since time,
 the operator-override state, setup completion and baseline markers, and a revision for optimistic
 concurrency. Writes lock the row; a stale revision is refused. Consent evidence stays local and is
-never sent.
+never sent; the audit log records which admin chose. Migration 133 creates the outbox and classifies the
+database; setup completion (`POST /api/bootstrap/complete`, the end of both wizard paths) is recorded after
+setup commits, and a metrics failure never changes the setup outcome.
 
 **Three lifecycle events, from a closed allowlist.** `bioaf_installation_completed` (new setup
 completed while reporting is enabled), `bioaf_installation_observed` (first reporting enablement
@@ -42,12 +47,15 @@ Payloads are built only from typed fields; unknown keys and invalid values are r
 echoing them.
 
 **A local outbox and an owned, bounded sender.** Events are reserved in `install_metric_events`
-under a unique source key (one baseline per installation; one per host upgrade operation), with the
-immutable payload and reporting date. A periodic job owned by the application's `TaskOwner` sends at
-most 5 reports per pass with a 3-second timeout, backs off up to 24 hours, expires reports after 7
+under a unique source key (`baseline`, once per installation; `upgrade:<installation id>:<operation id>`),
+with the immutable payload and reporting date; a settled row keeps only its key, event UUID and status. The
+periodic job `install-metrics-sender` (first after one minute, then every five) is owned by the
+application's `TaskOwner`, pauses during a restore review, and sends at most 5 reports per pass with a
+3-second timeout, backs off up to 24 hours, expires reports after 7
 days, holds at most 100 pending upgrade reports, and never holds a database transaction across a
-network call. It rechecks consent and the operator override before each send. Withdrawal or
-`BIOAF_INSTALL_METRICS_DISABLED=1` cancels everything pending; re-enabling never replays it.
+network call. It rechecks consent, the enabled interval and the operator override before each send.
+Withdrawal or `BIOAF_INSTALL_METRICS_DISABLED=1` cancels everything pending (a startup step applies an
+override changed across a restart); re-enabling never replays it.
 
 **Direct HTTPS to PostHog, configuration in the image.** The public project token and US ingestion
 host are committed in `backend/app/install_metrics_release.py`, so installers handle no token. The

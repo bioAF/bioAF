@@ -10,6 +10,8 @@ See [architecture and support status](architecture.md) before choosing a deploym
 - [Deployment Guide](deployment-guide.md): install, update, recover and remove an installation.
 - [Configuration](configuration.md): settings sources, compute mode, logging and operational limits.
 - [Life After bioAF](life-after-bioaf.md): preserve data and infrastructure records before teardown.
+- [Installation Metrics](installation-metrics.md): the optional, opt-in reports an installation can share,
+  and how to change or withdraw that choice.
 
 ## Role Guides
 
