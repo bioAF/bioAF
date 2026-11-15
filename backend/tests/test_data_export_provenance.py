@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import gc
 import io
 import threading
 import time
@@ -286,8 +288,39 @@ def _rss_mib() -> int:
     )
 
 
+@contextlib.asynccontextmanager
+async def _loop_heartbeat():
+    """Measure how long the event loop is held: a 10 ms heartbeat's lateness, less the time the loop spent in
+    Python's garbage collector meanwhile. A collection belongs to the test worker (whose heap grows over a full
+    run; pauses of seconds were measured), not to the code under test. Yields the list of delays (seconds)."""
+    in_gc = {"total": 0.0, "since": 0.0}
+
+    def on_gc(phase, _info):
+        if phase == "start":
+            in_gc["since"] = time.perf_counter()
+        else:
+            in_gc["total"] += time.perf_counter() - in_gc["since"]
+
+    delays: list[float] = []
+
+    async def heartbeat():
+        while True:
+            t, collected = time.perf_counter(), in_gc["total"]
+            await asyncio.sleep(0.01)
+            delays.append(time.perf_counter() - t - 0.01 - (in_gc["total"] - collected))
+
+    gc.callbacks.append(on_gc)
+    beat = asyncio.create_task(heartbeat())
+    try:
+        yield delays
+        await asyncio.sleep(0.05)
+    finally:
+        beat.cancel()
+        gc.callbacks.remove(on_gc)
+
+
 async def _heavy_export(client, headers, path="/api/experiments/1/export/data"):
-    """Export with provenance while sampling RSS and a 10 ms heartbeat; returns (resp, growth MiB, max delay s)."""
+    """Export with provenance while sampling RSS and the loop heartbeat; returns (resp, growth MiB, max delay s)."""
     idle = _rss_mib()
     peak = {"v": idle}
     stop = threading.Event()
@@ -298,20 +331,35 @@ async def _heavy_export(client, headers, path="/api/experiments/1/export/data"):
             time.sleep(0.02)
 
     threading.Thread(target=sampler, daemon=True).start()
-    delays = []
-
-    async def heartbeat():
-        while True:
-            t = time.perf_counter()
-            await asyncio.sleep(0.01)
-            delays.append(time.perf_counter() - t - 0.01)
-
-    beat = asyncio.create_task(heartbeat())
-    resp = await _post(client, headers, path)
-    await asyncio.sleep(0.05)
-    beat.cancel()
+    async with _loop_heartbeat() as delays:
+        resp = await _post(client, headers, path)
     stop.set()
     return resp, peak["v"] - idle, max(delays)
+
+
+@pytest.mark.asyncio
+async def test_the_heartbeat_catches_code_that_holds_the_loop():
+    async with _loop_heartbeat() as delays:
+        await asyncio.sleep(0.03)
+        time.sleep(0.15)  # blocking work on the loop
+        await asyncio.sleep(0.03)
+    assert max(delays) >= 0.1
+
+
+@pytest.mark.asyncio
+async def test_the_heartbeat_does_not_count_the_test_workers_garbage_collection():
+    """A 150 ms collection on the loop, signalled the way the collector signals one (gc.callbacks start/stop):
+    a real one that long needs a heap of millions of objects, which a long-lived worker has and a unit test should
+    not build."""
+    async with _loop_heartbeat() as delays:
+        await asyncio.sleep(0.03)
+        for callback in list(gc.callbacks):
+            callback("start", {"generation": 2})
+        time.sleep(0.15)
+        for callback in list(gc.callbacks):
+            callback("stop", {"generation": 2, "collected": 0, "uncollectable": 0})
+        await asyncio.sleep(0.03)
+    assert max(delays) < 0.1
 
 
 @pytest.mark.asyncio
