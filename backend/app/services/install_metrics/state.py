@@ -118,14 +118,14 @@ def current_version() -> str:
     return settings.app_version
 
 
-async def _setup_complete(session: AsyncSession) -> bool:
+async def setup_complete(session: AsyncSession) -> bool:
     row = (await session.execute(text("SELECT 1 FROM organizations WHERE setup_complete LIMIT 1"))).first()
     return row is not None
 
 
 async def _initial(session: AsyncSession) -> InstallMetricsState:
     """State for a database the migration never classified (created from the models)."""
-    complete = await _setup_complete(session)
+    complete = await setup_complete(session)
     return InstallMetricsState(classification="existing" if complete else "new", setup_completed=complete)
 
 
@@ -253,7 +253,7 @@ async def _transition(
         await outbox.cancel_pending(session, now)
         return replace(state, enabled_since=None)
     state = replace(state, enabled_since=now)
-    if state.setup_completed or await _setup_complete(session):
+    if state.setup_completed or await setup_complete(session):
         state = await _reserve_baseline(
             session, replace(state, setup_completed=True), now, allowlist.INSTALLATION_OBSERVED
         )

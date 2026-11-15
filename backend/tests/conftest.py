@@ -8,6 +8,11 @@ import os
 for _name in [name for name in os.environ if name.upper() == "BIOAF_COMPUTE_MODE"]:
     del os.environ[_name]
 os.environ["BIOAF_COMPUTE_MODE"] = "local"
+# No test reports installation metrics: the operator override is on over whatever the shell exports
+# (ADR-075). Sender tests switch it off on a local settings instance and inject their own transport.
+for _name in [name for name in os.environ if name.upper() == "BIOAF_INSTALL_METRICS_DISABLED"]:
+    del os.environ[_name]
+os.environ["BIOAF_INSTALL_METRICS_DISABLED"] = "1"
 # Two keys exercise the MultiFernet rotation path; only the first is the writer.
 os.environ.setdefault(
     "BIOAF_ENCRYPTION_KEYS",

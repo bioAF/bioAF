@@ -9229,6 +9229,109 @@
         "title": "IngestSimulateRequest",
         "type": "object"
       },
+      "InstallMetricsChoiceRequest": {
+        "additionalProperties": false,
+        "description": "Only the choice, the notice version it was made against, and the revision it was read at.",
+        "properties": {
+          "choice": {
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "title": "Choice",
+            "type": "string"
+          },
+          "notice_version": {
+            "title": "Notice Version",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "choice",
+          "notice_version",
+          "revision"
+        ],
+        "title": "InstallMetricsChoiceRequest",
+        "type": "object"
+      },
+      "InstallMetricsSettings": {
+        "description": "The installation metrics choice as an admin sees it (ADR-075).",
+        "properties": {
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "effective": {
+            "title": "Effective",
+            "type": "boolean"
+          },
+          "installation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installation Id"
+          },
+          "notice_version": {
+            "title": "Notice Version",
+            "type": "string"
+          },
+          "operator_override": {
+            "title": "Operator Override",
+            "type": "boolean"
+          },
+          "preference": {
+            "enum": [
+              "pending",
+              "enabled",
+              "disabled"
+            ],
+            "title": "Preference",
+            "type": "string"
+          },
+          "prompt_required": {
+            "title": "Prompt Required",
+            "type": "boolean"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "setup_completed": {
+            "title": "Setup Completed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "preference",
+          "prompt_required",
+          "effective",
+          "operator_override",
+          "setup_completed",
+          "installation_id",
+          "notice_version",
+          "decided_at",
+          "revision"
+        ],
+        "title": "InstallMetricsSettings",
+        "type": "object"
+      },
       "LabDocumentCreate": {
         "properties": {
           "description": {
@@ -23604,6 +23707,18 @@
           "prompt_fragment"
         ],
         "title": "SubItemPayload",
+        "type": "object"
+      },
+      "SystemSettingsResponse": {
+        "properties": {
+          "install_metrics": {
+            "$ref": "#/components/schemas/InstallMetricsSettings"
+          }
+        },
+        "required": [
+          "install_metrics"
+        ],
+        "title": "SystemSettingsResponse",
         "type": "object"
       },
       "TemplateCloneRequest": {
@@ -44135,6 +44250,68 @@
         "summary": "Get Storage Stats",
         "tags": [
           "storage"
+        ]
+      }
+    },
+    "/api/system-settings": {
+      "get": {
+        "operationId": "get_system_settings_api_system_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Settings",
+        "tags": [
+          "system-settings"
+        ]
+      }
+    },
+    "/api/system-settings/install-metrics": {
+      "put": {
+        "operationId": "put_install_metrics_api_system_settings_install_metrics_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallMetricsChoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Install Metrics",
+        "tags": [
+          "system-settings"
         ]
       }
     },
