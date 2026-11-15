@@ -6,6 +6,13 @@ import { api } from "@/lib/api";
 import { useResource } from "@/hooks/useResource";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { logError } from "@/lib/errorReporting";
+import {
+  INSTALL_METRICS_NOTICE_VERSION,
+  fetchSystemSettings,
+  isChoiceConflict,
+  saveInstallMetricsChoice,
+  type InstallMetricsChoice,
+} from "@/lib/installMetrics";
 import { startSession } from "@/lib/session";
 import type { PickerComponent } from "@/components/components/ComponentPicker";
 import { apiUrl } from "@/lib/apiUrl";
@@ -96,8 +103,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
 
-  // Step 2: Org name
+  // Step 2: Org name, and the installation metrics choice (ADR-075). Nothing is preselected; the
+  // choice is saved before the name and, once saved, never asked again.
   const [orgName, setOrgName] = useState("");
+  const [metricsChoice, setMetricsChoice] = useState<InstallMetricsChoice | null>(null);
+  const [metricsCommitted, setMetricsCommitted] = useState<InstallMetricsChoice | null>(null);
 
   // Step 3: cloud credentials. Mirror what the installer persisted, read once authenticated.
   const gcp = useGcpCredentials(step >= 3 && !isAws ? `setup:gcp-settings:${step}` : null);
@@ -207,8 +217,40 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
+  /** Save the metrics choice for a fresh installation; true once a choice is committed. */
+  const commitMetricsChoice = async (): Promise<boolean> => {
+    if (metricsCommitted) return true;
+    if (!metricsChoice) return false;
+    try {
+      const saved = await saveInstallMetricsChoice(
+        { notice_version: INSTALL_METRICS_NOTICE_VERSION, revision: 0 },
+        metricsChoice,
+      );
+      setMetricsCommitted((saved?.install_metrics?.preference as InstallMetricsChoice | undefined) ?? metricsChoice);
+      return true;
+    } catch (e) {
+      if (isChoiceConflict(e)) {
+        // Already chosen for this installation (another admin, or an earlier visit): that choice stands.
+        try {
+          const settings = await fetchSystemSettings();
+          const preference = settings?.install_metrics?.preference;
+          if (preference === "enabled" || preference === "disabled") {
+            setMetricsCommitted(preference);
+            return true;
+          }
+        } catch (readError) {
+          logError("reading the installation metrics setting", readError);
+        }
+      }
+      logError("saving the installation metrics choice", e);
+      setError("Your installation metrics choice was not saved. Try again.");
+      return false;
+    }
+  };
+
   const handleConfigureOrg = async () => {
     setError("");
+    if (!(await commitMetricsChoice())) return;
     const current = { orgName };
     if (isUnchangedSinceCommit(2, current)) {
       setStep(3);
@@ -493,7 +535,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         />
       )}
 
-      {step === 2 && <OrganizationStep orgName={orgName} setOrgName={setOrgName} onSave={submit(handleConfigureOrg)} />}
+      {step === 2 && (
+        <OrganizationStep
+          orgName={orgName}
+          setOrgName={setOrgName}
+          metricsChoice={metricsChoice}
+          setMetricsChoice={setMetricsChoice}
+          metricsCommitted={metricsCommitted}
+          onSave={submit(handleConfigureOrg)}
+        />
+      )}
 
       {step === 3 && !isAws && <GcpCredentialsStep gcp={gcp} onSave={submit(saveCredentials)} onSkip={() => setStep(4)} />}
 

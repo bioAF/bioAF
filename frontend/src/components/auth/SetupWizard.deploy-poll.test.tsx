@@ -66,6 +66,7 @@ async function toDeployingStep() {
   await user.click(screen.getByRole("button", { name: /create admin/i }));
   await screen.findByRole("heading", { name: "Organization Name" });
   await user.type(screen.getByLabelText(/organization name/i), "Acme Bio");
+  await user.click(screen.getByRole("radio", { name: "Do not share" }));
   await user.click(screen.getByRole("button", { name: /save organization/i }));
   await screen.findByRole("heading", { name: "GCP Credentials" });
   await user.click(screen.getByRole("button", { name: /do this later/i }));

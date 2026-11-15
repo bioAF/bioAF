@@ -50,8 +50,11 @@ async function advanceToStep(user: ReturnType<typeof userEvent.setup>, targetSte
 
   // Step 2 -> 3: org name
   if (targetStep >= 3) {
+    // The installation metrics choice is saved first, then the organization name.
+    mockFetch.mockImplementationOnce(() => mockFetchResponse(200, {}));
     mockFetch.mockImplementationOnce(() => mockFetchResponse(200, { message: "ok" }));
     await user.type(screen.getByLabelText(/organization name/i), "Test Org");
+    await user.click(screen.getByRole("radio", { name: "Do not share" }));
     await user.click(screen.getByRole("button", { name: /save organization/i }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "GCP Credentials" })).toBeInTheDocument());
   }

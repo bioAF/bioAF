@@ -1,6 +1,8 @@
 "use client";
 
 import { Button } from "@/components/ui/Button";
+import { InstallMetricsDisclosure } from "@/components/installMetrics/InstallMetricsDisclosure";
+import { CHOICE_LABEL, type InstallMetricsChoice } from "@/lib/installMetrics";
 
 /** Setup's account steps. Views only: the wizard owns the values and the requests. */
 
@@ -95,10 +97,17 @@ export function AdminAccountStep({
 export function OrganizationStep({
   orgName,
   setOrgName,
+  metricsChoice,
+  setMetricsChoice,
+  metricsCommitted,
   onSave,
 }: {
   orgName: string;
   setOrgName: (value: string) => void;
+  metricsChoice: InstallMetricsChoice | null;
+  setMetricsChoice: (choice: InstallMetricsChoice) => void;
+  /** The choice already saved for this installation; it is not asked again. */
+  metricsCommitted: InstallMetricsChoice | null;
   onSave: () => void;
 }) {
   return (
@@ -109,7 +118,18 @@ export function OrganizationStep({
           placeholder="e.g., Acme Biotech"
           className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
       </div>
-      <Button className="w-full" onClick={onSave}>
+      <section aria-labelledby="setup-install-metrics" className="space-y-2">
+        <h3 id="setup-install-metrics" className="text-sm font-medium text-gray-700">Installation metrics</h3>
+        {metricsCommitted ? (
+          <p className="text-sm text-gray-600">
+            Installation metrics: {CHOICE_LABEL[metricsCommitted]}. You can change this in Settings &gt; System
+            Settings.
+          </p>
+        ) : (
+          <InstallMetricsDisclosure value={metricsChoice} onChange={setMetricsChoice} alreadyCompleted={false} />
+        )}
+      </section>
+      <Button className="w-full" onClick={onSave} disabled={!metricsCommitted && !metricsChoice}>
         Save Organization Name
       </Button>
     </div>

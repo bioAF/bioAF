@@ -77,6 +77,7 @@ async function toGcpStep() {
   fireEvent.click(screen.getByRole("button", { name: "Create Admin Account" }));
   await screen.findByRole("heading", { name: "Organization Name" });
   fireEvent.change(screen.getByLabelText("Organization Name"), { target: { value: "Acme" } });
+  fireEvent.click(screen.getByRole("radio", { name: "Do not share" }));
   fireEvent.click(screen.getByRole("button", { name: "Save Organization Name" }));
   await screen.findByRole("heading", { name: "GCP Credentials" });
 }
@@ -148,7 +149,8 @@ test("Save & Validate sends the GCP settings once however fast it is pressed", a
     save.click();
   });
   await screen.findByRole("heading", { name: "SMTP Settings" });
-  expect(mockPut).toHaveBeenCalledTimes(1);
+  // The Organization step's installation metrics save is a PUT too; count only the GCP settings.
+  expect(mockPut.mock.calls.filter(([url]) => String(url).includes("/settings/gcp"))).toHaveLength(1);
 });
 
 test("no password, SMTP secret or setup token is written to browser storage", async () => {
