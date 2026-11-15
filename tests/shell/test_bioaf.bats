@@ -429,6 +429,8 @@ case "$args" in
         fi
         exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+    *"app.cli.reset_install_metrics_identity"*)
+        echo "reset_install_metrics_identity args=[$args]" >> "$log"; exit 0 ;;
     *"app.cli.record_upgrade_metric"*)
         echo "record_upgrade_metric args=[$args]" >> "$log"; exit "${FAKE_RECORD_STATUS:-0}" ;;
 esac
@@ -1830,4 +1832,13 @@ PY
     [ "$status" -eq 0 ]
     [ -z "$(operation "$tmp" id 2>/dev/null)" ]
     ! grep -q record_upgrade_metric "$tmp/log" 2>/dev/null
+}
+
+@test "reset-install-metrics-identity passes its arguments to the backend command" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; cmd_reset_install_metrics_identity --confirm"
+    [ "$status" -eq 0 ]
+    grep -q '^reset_install_metrics_identity args=.*exec -T backend python -m app.cli.reset_install_metrics_identity --confirm' "$tmp/log"
+    run bash "$BIOAF_SCRIPT" help
+    [[ "$output" == *"reset-install-metrics-identity"* ]]
 }

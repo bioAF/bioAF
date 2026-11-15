@@ -1725,6 +1725,11 @@ cmd_register_outputs() {
     $DC exec -T backend python -m app.cli.register_outputs "$@"
 }
 
+cmd_reset_install_metrics_identity() {
+    bold "=== Reset the installation metrics identity (for a deliberate copy of an installation) ==="
+    $DC exec -T backend python -m app.cli.reset_install_metrics_identity "$@"
+}
+
 cmd_rotate_encryption_keys() {
     bold "=== Re-encrypt sensitive columns under the current primary key ==="
     $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
@@ -1770,6 +1775,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  reset-install-metrics-identity --confirm"
+    echo "                      Give a deliberate copy of an installation its own"
+    echo "                      installation metrics identity (clears queued reports)."
     echo "  help                Show this help message"
     echo ""
     bold "Examples:"
@@ -1825,6 +1833,7 @@ case "$command" in
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
+    reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
         red "Unknown command: $command"

@@ -241,6 +241,24 @@ class InstallMetricsService:
         logger.info("install_metrics override=%s", "on" if override else "off")
         return state
 
+    @staticmethod
+    async def reset_identity(session: AsyncSession) -> InstallMetricsState:
+        """Clear the Installation ID, the choice and every reserved report (a deliberate clone reset).
+
+        Classification and setup completion stay; the next admin is asked again and a new opt-in gets a new ID.
+        """
+        current = await _locked(session)
+        await session.execute(text("DELETE FROM install_metric_events"))
+        state = InstallMetricsState(
+            classification=current.classification,
+            setup_completed=current.setup_completed,
+            override_active=current.override_active,
+            revision=current.revision + 1,
+        )
+        await _write(session, state)
+        logger.info("install_metrics identity=reset revision=%d", state.revision)
+        return state
+
 
 async def _transition(
     session: AsyncSession, state: InstallMetricsState, was_effective: bool, now: datetime
