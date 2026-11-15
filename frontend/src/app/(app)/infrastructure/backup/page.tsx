@@ -259,6 +259,8 @@ export default function InfraBackupPage() {
             unverified ? { filename, allow_unverified: true } : { filename }
           );
           setActionMessage(data.message);
+          // The review status is polled only while a review is active, so read it now to open the review.
+          void restorePoll.refresh();
           await loadData();
         } catch (e) {
           setActionMessage(e instanceof Error ? e.message : "Restore failed");
