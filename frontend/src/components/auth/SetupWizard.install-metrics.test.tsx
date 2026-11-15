@@ -141,21 +141,45 @@ test("a failed save shows a retryable error, does not advance, and saves nothing
   expect(mockPut).toHaveBeenCalledTimes(2);
 });
 
-test("a choice another admin already committed is respected and setup continues", async () => {
+test("a choice another admin committed meanwhile is shown before setup continues", async () => {
   mockPut.mockRejectedValueOnce(Object.assign(new Error("revision_conflict"), { status: 409 }));
-  const reads = [pending(0), saved("disabled")];
+  const reads = [pending(0), pending(0), saved("enabled")];
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
-    if (url === "/api/system-settings") return Promise.resolve(reads.shift() ?? saved("disabled"));
+    if (url === "/api/system-settings") return Promise.resolve(reads.shift() ?? saved("enabled"));
     return Promise.resolve({});
   });
   await toOrganizationStep();
 
-  fireEvent.click(screen.getByRole("radio", { name: "Share installation metrics" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Do not share" }));
+  fireEvent.click(save());
+
+  // The other decision wins; this admin sees it before anything advances.
+  await screen.findByText(/Another administrator already chose: Share installation metrics/);
+  expect(screen.getByRole("heading", { name: "Organization Name" })).toBeInTheDocument();
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(mockPost).not.toHaveBeenCalledWith("/api/bootstrap/configure-org", expect.anything());
+
+  fireEvent.click(save());
+  await screen.findByRole("heading", { name: "GCP Credentials" });
+  expect(mockPut).toHaveBeenCalledTimes(1);
+});
+
+test("a decision already stored when the step opens is shown instead of the choice", async () => {
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
+    if (url === "/api/system-settings") return Promise.resolve(saved("enabled"));
+    return Promise.resolve({});
+  });
+  await toOrganizationStep();
+
+  await screen.findByText(/Another administrator already chose: Share installation metrics/);
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(save()).toBeEnabled();
   fireEvent.click(save());
 
   await screen.findByRole("heading", { name: "GCP Credentials" });
-  expect(mockPut).toHaveBeenCalledTimes(1);
+  expect(mockPut).not.toHaveBeenCalled();
 });
 
 test("returning to the step shows the saved choice and never asks again", async () => {
@@ -195,7 +219,7 @@ test("the choice is saved at the revision the server reports, not an assumed one
 });
 
 test("a conflict that leaves the choice pending retries once at the refreshed revision", async () => {
-  const reads = [pending(0), pending(4)];
+  const reads = [pending(0), pending(0), pending(4)];
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
     if (url === "/api/system-settings") return Promise.resolve(reads.shift() ?? pending(4));

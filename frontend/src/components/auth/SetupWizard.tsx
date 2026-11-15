@@ -1,7 +1,7 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useResource } from "@/hooks/useResource";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
@@ -109,6 +109,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [orgName, setOrgName] = useState("");
   const [metricsChoice, setMetricsChoice] = useState<InstallMetricsChoice | null>(null);
   const [metricsCommitted, setMetricsCommitted] = useState<InstallMetricsChoice | null>(null);
+  // True when the saved choice is another administrator's, not the one made on this step.
+  const [metricsChosenElsewhere, setMetricsChosenElsewhere] = useState(false);
 
   // Step 3: cloud credentials. Mirror what the installer persisted, read once authenticated.
   const gcp = useGcpCredentials(step >= 3 && !isAws ? `setup:gcp-settings:${step}` : null);
@@ -228,10 +230,32 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
+  /** Adopt a choice another administrator already saved; it stands for this installation. */
+  const adoptStoredChoice = (preference: InstallMetricsChoice) => {
+    setMetricsCommitted(preference);
+    setMetricsChosenElsewhere(true);
+  };
+
+  // Show a decision already stored for this installation as soon as the step opens.
+  useEffect(() => {
+    if (step !== 2 || metricsCommitted) return;
+    let active = true;
+    void readMetrics().then((current) => {
+      if (active && (current?.preference === "enabled" || current?.preference === "disabled")) {
+        adoptStoredChoice(current.preference);
+      }
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   /**
    * Save the metrics choice at the revision the server reports (an identity reset leaves it pending at a
-   * later revision); true once a choice is committed. A choice already committed for this installation
-   * (another admin, or an earlier visit) stands; a conflict that leaves it pending retries once.
+   * later revision); true once a choice is committed. A different choice another administrator committed
+   * meanwhile stands and is shown first (false, so the step does not advance unseen); a conflict that
+   * leaves the choice pending retries once.
    */
   const commitMetricsChoice = async (): Promise<boolean> => {
     if (metricsCommitted) return true;
@@ -239,8 +263,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     let current = await readMetrics();
     for (let attempt = 0; ; attempt++) {
       if (current?.preference === "enabled" || current?.preference === "disabled") {
-        setMetricsCommitted(current.preference);
-        return true;
+        adoptStoredChoice(current.preference);
+        return current.preference === metricsChoice;
       }
       try {
         const saved = await saveInstallMetricsChoice(
@@ -555,6 +579,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           metricsChoice={metricsChoice}
           setMetricsChoice={setMetricsChoice}
           metricsCommitted={metricsCommitted}
+          metricsChosenElsewhere={metricsChosenElsewhere}
           onSave={submit(handleConfigureOrg)}
         />
       )}

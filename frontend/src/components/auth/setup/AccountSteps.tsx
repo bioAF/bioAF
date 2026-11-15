@@ -100,6 +100,7 @@ export function OrganizationStep({
   metricsChoice,
   setMetricsChoice,
   metricsCommitted,
+  metricsChosenElsewhere = false,
   onSave,
 }: {
   orgName: string;
@@ -108,6 +109,8 @@ export function OrganizationStep({
   setMetricsChoice: (choice: InstallMetricsChoice) => void;
   /** The choice already saved for this installation; it is not asked again. */
   metricsCommitted: InstallMetricsChoice | null;
+  /** The saved choice is another administrator's; say so instead of presenting it as this one's. */
+  metricsChosenElsewhere?: boolean;
   onSave: () => void;
 }) {
   return (
@@ -120,7 +123,12 @@ export function OrganizationStep({
       </div>
       <section aria-labelledby="setup-install-metrics" className="space-y-2">
         <h3 id="setup-install-metrics" className="text-sm font-medium text-gray-700">Installation metrics</h3>
-        {metricsCommitted ? (
+        {metricsCommitted && metricsChosenElsewhere ? (
+          <p role="status" className="text-sm text-gray-600">
+            Another administrator already chose: {CHOICE_LABEL[metricsCommitted]}. Reporting follows that choice.
+            You can change it in Settings &gt; System Settings.
+          </p>
+        ) : metricsCommitted ? (
           <p className="text-sm text-gray-600">
             Installation metrics: {CHOICE_LABEL[metricsCommitted]}. You can change this in Settings &gt; System
             Settings.
