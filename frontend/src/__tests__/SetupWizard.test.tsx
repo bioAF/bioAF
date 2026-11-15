@@ -50,7 +50,8 @@ async function advanceToStep(user: ReturnType<typeof userEvent.setup>, targetSte
 
   // Step 2 -> 3: org name
   if (targetStep >= 3) {
-    // The installation metrics choice is saved first, then the organization name.
+    // The installation metrics setting is read and the choice saved first, then the organization name.
+    mockFetch.mockImplementationOnce(() => mockFetchResponse(200, {}));
     mockFetch.mockImplementationOnce(() => mockFetchResponse(200, {}));
     mockFetch.mockImplementationOnce(() => mockFetchResponse(200, { message: "ok" }));
     await user.type(screen.getByLabelText(/organization name/i), "Test Org");

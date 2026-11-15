@@ -12,6 +12,7 @@ import {
   isChoiceConflict,
   saveInstallMetricsChoice,
   type InstallMetricsChoice,
+  type InstallMetricsSettings,
 } from "@/lib/installMetrics";
 import { startSession } from "@/lib/session";
 import type { PickerComponent } from "@/components/components/ComponentPicker";
@@ -217,35 +218,47 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
-  /** Save the metrics choice for a fresh installation; true once a choice is committed. */
+  /** The installation's current metrics setting; null when it cannot be read. */
+  const readMetrics = async (): Promise<InstallMetricsSettings | null> => {
+    try {
+      return (await fetchSystemSettings())?.install_metrics ?? null;
+    } catch (readError) {
+      logError("reading the installation metrics setting", readError);
+      return null;
+    }
+  };
+
+  /**
+   * Save the metrics choice at the revision the server reports (an identity reset leaves it pending at a
+   * later revision); true once a choice is committed. A choice already committed for this installation
+   * (another admin, or an earlier visit) stands; a conflict that leaves it pending retries once.
+   */
   const commitMetricsChoice = async (): Promise<boolean> => {
     if (metricsCommitted) return true;
     if (!metricsChoice) return false;
-    try {
-      const saved = await saveInstallMetricsChoice(
-        { notice_version: INSTALL_METRICS_NOTICE_VERSION, revision: 0 },
-        metricsChoice,
-      );
-      setMetricsCommitted((saved?.install_metrics?.preference as InstallMetricsChoice | undefined) ?? metricsChoice);
-      return true;
-    } catch (e) {
-      if (isChoiceConflict(e)) {
-        // Already chosen for this installation (another admin, or an earlier visit): that choice stands.
-        try {
-          const settings = await fetchSystemSettings();
-          const preference = settings?.install_metrics?.preference;
-          if (preference === "enabled" || preference === "disabled") {
-            setMetricsCommitted(preference);
-            return true;
-          }
-        } catch (readError) {
-          logError("reading the installation metrics setting", readError);
-        }
+    let current = await readMetrics();
+    for (let attempt = 0; ; attempt++) {
+      if (current?.preference === "enabled" || current?.preference === "disabled") {
+        setMetricsCommitted(current.preference);
+        return true;
       }
-      logError("saving the installation metrics choice", e);
-      setError("Your installation metrics choice was not saved. Try again.");
-      return false;
+      try {
+        const saved = await saveInstallMetricsChoice(
+          { notice_version: INSTALL_METRICS_NOTICE_VERSION, revision: current?.revision ?? 0 },
+          metricsChoice,
+        );
+        setMetricsCommitted((saved?.install_metrics?.preference as InstallMetricsChoice | undefined) ?? metricsChoice);
+        return true;
+      } catch (e) {
+        if (!isChoiceConflict(e) || attempt > 0) {
+          logError("saving the installation metrics choice", e);
+          break;
+        }
+        current = await readMetrics();
+      }
     }
+    setError("Your installation metrics choice was not saved. Try again.");
+    return false;
   };
 
   const handleConfigureOrg = async () => {

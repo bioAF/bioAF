@@ -44,6 +44,10 @@ function saved(preference: "enabled" | "disabled", revision = 1) {
   };
 }
 
+function pending(revision: number) {
+  return { install_metrics: { ...saved("disabled", revision).install_metrics, preference: "pending", decided_at: null } };
+}
+
 beforeEach(() => {
   order.length = 0;
   mockFetch.mockReset();
@@ -139,9 +143,10 @@ test("a failed save shows a retryable error, does not advance, and saves nothing
 
 test("a choice another admin already committed is respected and setup continues", async () => {
   mockPut.mockRejectedValueOnce(Object.assign(new Error("revision_conflict"), { status: 409 }));
+  const reads = [pending(0), saved("disabled")];
   mockGet.mockImplementation((url: string) => {
     if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
-    if (url === "/api/system-settings") return Promise.resolve(saved("disabled"));
+    if (url === "/api/system-settings") return Promise.resolve(reads.shift() ?? saved("disabled"));
     return Promise.resolve({});
   });
   await toOrganizationStep();
@@ -167,4 +172,46 @@ test("returning to the step shows the saved choice and never asks again", async 
   fireEvent.click(save());
   await screen.findByRole("heading", { name: "GCP Credentials" });
   await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+});
+
+test("the choice is saved at the revision the server reports, not an assumed one", async () => {
+  // A deliberate identity reset returns the choice to pending at a later revision.
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
+    if (url === "/api/system-settings") return Promise.resolve(pending(3));
+    return Promise.resolve({});
+  });
+  await toOrganizationStep();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Do not share" }));
+  fireEvent.click(save());
+
+  await screen.findByRole("heading", { name: "GCP Credentials" });
+  expect(mockPut).toHaveBeenCalledWith("/api/system-settings/install-metrics", {
+    choice: "disabled",
+    notice_version: INSTALL_METRICS_NOTICE_VERSION,
+    revision: 3,
+  });
+});
+
+test("a conflict that leaves the choice pending retries once at the refreshed revision", async () => {
+  const reads = [pending(0), pending(4)];
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/bootstrap/status")) return Promise.resolve({ cloud_provider: "gcp" });
+    if (url === "/api/system-settings") return Promise.resolve(reads.shift() ?? pending(4));
+    return Promise.resolve({});
+  });
+  mockPut.mockRejectedValueOnce(Object.assign(new Error("revision_conflict"), { status: 409 }));
+  await toOrganizationStep();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Share installation metrics" }));
+  fireEvent.click(save());
+
+  await screen.findByRole("heading", { name: "GCP Credentials" });
+  expect(mockPut).toHaveBeenCalledTimes(2);
+  expect(mockPut).toHaveBeenLastCalledWith("/api/system-settings/install-metrics", {
+    choice: "enabled",
+    notice_version: INSTALL_METRICS_NOTICE_VERSION,
+    revision: 4,
+  });
 });
