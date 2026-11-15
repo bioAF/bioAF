@@ -21,3 +21,11 @@ def test_the_public_notice_names_the_responsible_party_and_a_deletion_contact():
     assert "privacy@bioaf.co" in notice
     assert "**Responsible party:** bioAF" in notice
     assert "publishes a verified privacy contact here" not in notice
+
+
+def test_the_public_notice_states_the_configured_retention():
+    notice = (Path(__file__).resolve().parents[2] / "docs" / "installation-metrics.md").read_text()
+
+    assert "kept for 12 months" in notice
+    assert "kept until a deletion request" in notice
+    assert "24 months" not in notice

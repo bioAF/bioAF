@@ -84,9 +84,12 @@ this connection metadata. PostHog's own operational logs are governed by its
 
 ## Retention
 
-The target retention for installation metrics and their profiles is 24 months, so that annual cohorts can
-be compared. The retention actually configured, and how stored reports, profiles and any exports are
-cleaned up, is confirmed by the bioAF team before reporting is activated and recorded here.
+- **Reports** (events) are kept for 12 months, then deleted by PostHog's retention. PostHog may take some
+  time after that to remove expired events.
+- **The installation profile** (the installation ID with its `first_reported_date` and `registration_kind`) is
+  kept until a deletion request, so that installations can be counted across releases. It holds nothing
+  beyond those values.
+- The bioAF team keeps no exports or copies of reports outside PostHog.
 
 ## Turning reporting off and deleting reports
 
