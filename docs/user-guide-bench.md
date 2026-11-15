@@ -1,62 +1,52 @@
 # Bench Scientist User Guide
 
-This guide covers the bioAF workflow for bench scientists who register experiments, manage samples, and review results.
+Use bioAF to register experiments, manage Samples, associate files and review results. Your built-in or
+custom role determines which actions are available; enabled components also affect navigation.
 
-## Getting Started
+## Register an Experiment
 
-After receiving your invitation email, click the link to set your password and log in. Your account will have the **bench** role.
+1. Open **Experiments > Experiment List** and choose **New Experiment**.
+2. Enter a name and description, select an Experiment Template when applicable, and optionally select a Project.
+3. Review the template's required metadata and create the experiment.
 
-## Registering an Experiment
+The normal lifecycle is `registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` ->
+`pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`. The scientist's review/handoff is advisory,
+not a data-access or pipeline-launch gate; an affirmative review can record the `reviewed` status.
+Only authorized actions and services move status; a file appearing does not imply an analysis is complete.
 
-1. Navigate to **Projects > Experiment List** in the sidebar
-2. Click **New Experiment**
-3. Fill in experiment details:
-   - Name (e.g., "PBMC scRNA-seq Batch 3")
-   - Description
-   - Select an experiment template (pre-configured by your admin)
-   - Project assignment (optional)
-4. Click **Create**
+## Manage Samples and Batches
 
-Your experiment starts in the **registered** status and progresses through: library_prep, sequencing, fastq_uploaded, processing, analysis, complete.
+From the experiment, add Samples individually or use the CSV/template import workflow. Complete the required
+organism, tissue, library and custom metadata for the study. Preview imported rows and correct reported
+errors before confirming; inspect row-level failures after confirmation rather than assuming every row saved.
 
-## Managing Samples
+Sample Batches organize sample preparation. Sequencing Batches track sequencing and delivered files. Keep
+both associations accurate so downstream sample sheets can use the intended inputs.
 
-From your experiment detail page:
+## Upload and Associate Files
 
-1. Click **Add Samples** or use batch upload
-2. For each sample, fill in MINSEQE-compliant metadata:
-   - Sample name, organism, tissue type
-   - Library strategy (e.g., scRNA-seq, ATAC-seq)
-   - Custom fields defined by your experiment template
-3. Samples can be organized into **Sample Batches** for processing
+Open **Data & Files > Data Upload**, choose files and select the relevant experiment or other association
+where offered. Check the result in **Data & Files > Files**. Use **Associate** to correct or add supported
+associations; files are not automatically assigned to the intended experiment just because you uploaded them.
 
-## Uploading Data
+Experiment filters and association pickers search by experiment name and page through eligible records.
+Use their page controls for older experiments. Deleted experiments are excluded from ordinary lists.
+Naming Profiles can parse filename metadata, but auto-ingest is currently disabled. See
+[Naming Profiles](guides/naming-profiles.md).
 
-1. Navigate to **Data & Files > Upload** in the sidebar
-2. Select your FASTQ or other data files
-3. Files are automatically associated with your experiment
-4. Upload progress is shown in real-time
+## Review Results
 
-## Viewing Results
+Open the experiment's results or **Results > QC Dashboards**, **cellxgene Explorer**, or **Plot Archive**
+when those components and permissions are available. Review pipeline status and QC before using outputs.
+Agent Review notes are advisory; the scientist's review decision is a separate recorded action.
 
-When your experiment progresses to the analysis or complete stage:
+Download individual registered files, or use [Data Exports](guides/data-exports.md) for an experiment package.
+[GEO Export](guides/geo-export.md) creates submission metadata and checksum records; upload data files to
+GEO separately.
 
-1. Navigate to **Results** in the sidebar
-2. View QC Dashboards with quality metrics
-3. Access cellxgene for interactive single-cell data exploration
-4. Download result files and plots
+## Notifications and Lab Knowledge
 
-## Notifications
-
-You'll receive notifications for:
-
-- Pipeline completion on your experiments
-- QC results ready
-- Experiment status changes
-
-Click the bell icon in the header to see recent notifications. Configure your notification preferences in **Profile > Notifications**.
-
-## Quick Tips
-
-- The **Dashboard** shows your experiments at a glance
-- Contact your admin if you need access to additional components
+The header bell shows in-app notifications. Configure preferences from your profile's notification settings.
+Email and Slack require administrator configuration. **Lab Knowledge** contains Literature Library, Lab
+Documents, Lab Glossary and Scientific Decision Records; available actions follow their grants.
+See [Literature and AI Workflows](guides/literature-and-ai.md) before using hosted AI features.

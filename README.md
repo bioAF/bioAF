@@ -1,99 +1,92 @@
 <p align="center">
-  <img src="assets/mascot.png" alt="bioAF" width="200" />
+  <img src="assets/bioAF-logo.svg" alt="bioAF logo" width="200" />
 </p>
 
 <h1 align="center">bioAF</h1>
 <p align="center"><strong>Computational Biology Automation Framework</strong></p>
 
-A turnkey computational biology platform for small biotech companies (5-50 researchers), deployed on Google Cloud Platform. bioAF provides a web-based control plane for managing HPC clusters, notebook environments, pipeline engines, and data visualization tools -- all provisioned through UI-driven Terraform.
+bioAF is a web platform for small biotech teams to organize experiments, run computational biology pipelines,
+and keep research data connected to the work that produced it. It manages cloud infrastructure through
+UI-driven Terraform, with Google Cloud as the reference deployment and partial AWS implementations.
 
 ## Features
 
-- **Experiment Tracking** - MINSEQE-compliant metadata, sample management, Sample and Sequencing Batches, project organization
-- **Compute Orchestration** - Kubernetes (GKE) compute via the BioAF Adapter Layer, JupyterHub/RStudio notebooks, versioned compute environments, auto-scaling, Cloud Build image pipeline
-- **Pipeline Engine** - Nextflow integration, Custom Pipelines, Pipeline Catalog, run monitoring, parameter management
-- **Data Management** - File upload/download, dataset browser, GCS storage integration, GEO export, SuperSeries cross-experiment packaging
-- **Results & Visualization** - QC Dashboards, cellxgene single-cell viewer, plot archive, search
-- **SSH Access** - One-click kubectl exec into running pipeline jobs and Notebook Sessions; standalone GCE work-node VMs ([ADR-043](decisions/ADR-043-work-nodes-gce-migration.md)) for interactive shell work outside the cluster
-- **Knowledge & Records** - Literature Library (paper ingest, search, Agent Review), Lab Knowledge (lab documents + glossary), Scientific Decision Records (SDRs), and configurable CRO Naming Profiles
-- **Notifications** - Event-driven alerts via in-app, email (SMTP), and Slack (OAuth integration)
-- **Cost Center** - GCP billing integration, budget alerts, component cost breakdown, projections
-- **Backup & Recovery** - 4-tier GCS backups (pg_dump, GCS versioning, platform config, terraform state), restore with review period
-- **Session Credentials** - Per-user RStudio credentials with PAM authentication, auto-generated usernames
-- **Role-Based Access** - Permission-based RBAC with four built-in roles, custom role creation, and per-resource/action grants
-- **Upgrade System** - GitHub-based version checking, managed upgrade flow with rollback
-- **Audit Log** - Immutable audit trail with filtering, pagination, and human-readable descriptions
-- **GitOps** - Version-controlled platform configuration with diff and rollback
-- **Integration API** - Public, key-authenticated REST surface for LIMS and other external systems, with webhooks for event delivery
-- **advisory Agent Review** - Per-org hosted LLM integration (OpenAI, Anthropic Claude, Google Gemini) that produces severity-coded advisory notes on completed pipeline runs and across-experiment comparisons. Output is advisory only, never enters provenance; every invocation is audited with provider, model, key prefix, and transmitted GCS artifact paths
+- **Research records:** experiments, samples, Sample Batches, Sequencing Batches, templates and cross-experiment Projects.
+- **Pipelines:** an nf-core Pipeline Catalog, versioned Custom Pipelines, launch validation, run monitoring, QC and review handoff.
+- **Interactive analysis:** Jupyter and RStudio Notebook Sessions, standalone SSH Work Nodes, and versioned compute environments.
+- **Data and provenance:** file upload and browsing, input/output lineage, analysis snapshots, bounded data exports and GEO metadata packages.
+- **Lab Knowledge:** Literature Library, Lab Documents, Lab Glossary and Scientific Decision Records (SDRs).
+- **AI assistance:** a conversational assistant, advisory Agent Review, AI Literature Review and beta paper-validation workflows.
+- **Administration:** custom roles and permissions, an immutable Audit Log, email/Slack notifications, cost reporting, backups and managed updates.
+- **Integrations:** a public service-account/API-key REST API and signed outbound webhooks.
+
+Feature availability depends on permissions, enabled components, provider capabilities and beta settings.
+Naming Profiles parse filenames only; auto-ingest is temporarily disabled during its redesign.
 
 ## Architecture
 
 <p align="center">
-  <img src="assets/bioAF_Architecture.svg" alt="bioAF System Architecture" width="100%" />
+  <img src="assets/bioAF_Architecture.svg" alt="bioAF architecture: nginx, web app, FastAPI, PostgreSQL, adapters and cloud workloads" width="100%" />
 </p>
 
-### How it works
+nginx routes browser and integration requests to the Next.js web app and a single FastAPI backend.
+The backend owns background workers, the event bus and Terraform execution. PostgreSQL stores research
+records, application configuration and the Audit Log. The BioAF Adapter Layer (BAL) provides typed
+contracts for compute, storage, notebooks, Work Nodes, cellxgene and platform services.
 
-A computational biologist registers an experiment, links FASTQ files (uploaded or auto-ingested from a sequencer drop), selects a pipeline from the catalog (nf-core/scrnaseq, rnaseq, or custom), and launches a run. The **BioAF Adapter Layer** handles everything below that: staging inputs from GCS, submitting Kubernetes Jobs to GKE Autopilot, monitoring execution via Nextflow trace parsing, collecting outputs back to GCS, and transitioning the experiment through its status lifecycle (`registered` -> `library_prep` -> `sequencing` -> `fastq_uploaded` -> `processing` -> `pipeline_complete` -> [`reviewed` ->] `analysis` -> `complete`). Pipeline completion triggers event-driven notifications (in-app, email, Slack), and results are browsable through the plot archive, cellxgene viewer, and GEO export tools. Jupyter and RStudio sessions run as Kubernetes Pods with GCS-backed home directories, while SSH Work Nodes run as standalone GCE VMs ([ADR-043](decisions/ADR-043-work-nodes-gce-migration.md)) for interactive shell work outside the cluster. RStudio sessions use per-user PAM authentication ([ADR-030](decisions/ADR-030-session-credentials-pam-auth.md)), and notebook container images are managed as versioned environments ([ADR-033](decisions/ADR-033-versioned-compute-environments.md)), built automatically via Cloud Build ([ADR-031](decisions/ADR-031-notebook-image-build-pipeline.md)).
+Pipelines and Notebook Sessions run on Kubernetes; SSH Work Nodes run on separate virtual machines.
+Environment builds publish versioned images for workloads to use. Uploaded files and analysis outputs live
+in the configured storage backend. Credentials use a combination of host configuration, encrypted database
+fields and supported secret-provider integrations; see [deployment configuration](docs/configuration.md).
 
-The adapter layer ([ADR-020](decisions/ADR-020-bioaf-adapter-layer.md), recontracted in [ADR-065](decisions/ADR-065-bal-normalized-contract.md)) abstracts five runtime provider categories (compute, storage, notebook, work-node, cellxgene) plus five platform-service categories (secrets, messaging, observability, IAM, billing) behind clean interfaces. Every method returns a typed, backend-neutral normalized model, and each backend declares a `ProviderCapabilities` set that gates optional UI and is enforced server-side. The category (the "what") is separated from the backend (the "how"): a committed import guardrail (`backend/tests/test_bal_layering.py`) fails the build if any module outside `adapters/` imports a cloud or Kubernetes SDK, or if an adapter imports back up into the service layer. GKE + GCS + the surrounding GCP platform services are the complete reference implementation ([ADR-021](decisions/ADR-021-kubernetes-compute-backend.md), [ADR-022](decisions/ADR-022-gcs-storage-backend.md)), and a real NFS storage backend also exists. **AWS is now supported alongside GCP, with some components still being completed.** A single authoritative `cloud_provider` install setting (`gcp` or `aws`) selects the cloud identity and drives backend selection; on AWS, S3 storage and EKS Kubernetes compute are implemented (cluster authentication via IRSA, node autoscaling via the Cluster Autoscaler), container image builds run on ECR + CodeBuild, and notebook sessions work end to end (including saving outputs back to storage); SSH work nodes build and launch on EC2, with end-to-end validation and the cellxgene viewer still being finalized. GCP installs are unaffected: the `cloud_provider` default is `gcp` and every seam resolves to its existing GCP backend. The remaining backend slots (SLURM, on-premise) are seams without shipped implementations.
+### Cloud and backend status
 
-Infrastructure is provisioned through UI-driven Terraform ([ADR-007](decisions/ADR-007-ui-driven-terraform.md)) -- researchers never touch HCL. All secrets live in Secret Manager ([ADR-008](decisions/ADR-008-secret-manager.md)), all actions are recorded in an immutable audit log ([ADR-009](decisions/ADR-009-immutable-audit-log.md)), and data portability is guaranteed ([ADR-012](decisions/ADR-012-data-portability.md)).
+| Area | GCP reference path | AWS implementation |
+| --- | --- | --- |
+| Kubernetes workloads | GKE with managed node pools | EKS, cluster authentication, pod identity and Cluster Autoscaler |
+| Object storage | GCS | S3 |
+| SSH Work Nodes | GCE virtual machines | EC2 virtual machines |
+| Container builds and registry | Cloud Build and Artifact Registry | CodeBuild and ECR |
+| Other platform services | GCP secrets, IAM, billing, messaging and logging adapters | Full parity is incomplete; several factories remain GCP-only |
 
-See all architecture decision records in [decisions/README.md](decisions/README.md).
+Each installation has one `cloud_provider` (`gcp` or `aws`). Implementations in the table do not imply
+that every end-to-end AWS workflow has been validated. cellxgene and several platform-service paths still
+need AWS parity. NFS storage is implemented; SLURM compute and notebook adapters remain stubs.
+`BIOAF_COMPUTE_MODE=local` simulates mode-aware adapters for development, but is not a complete offline mode.
+
+See [architecture and implementation boundaries](docs/architecture.md),
+[compute setup](docs/guides/compute-stack-setup.md), and the [Architecture Decision Records](decisions/README.md).
 
 ## Quick Start
 
-### Prerequisites
+### Deploy on GCP
 
-- Docker and Docker Compose
-- Git
-- openssl (for secret generation)
-
-### Deploy on GCP (one command)
-
-Run this on your local machine to provision a GCP VM and get started:
+Run the installer in a terminal on your local machine:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | bash
 ```
 
-The script sets up gcloud, creates a VM with Docker, and walks you through
-the process. Run it in the Terminal app. On a Mac with nothing installed, it
-installs Homebrew first, which asks for your Mac password. Once the VM is ready, SSH in and run:
+The installer checks local prerequisites, helps configure cloud access and provisions the application VM.
+Follow its automatic setup prompt or the instructions it prints. On a fresh Mac, installing Homebrew can
+require your Mac password.
 
-```bash
-git clone https://github.com/bioAF/bioAF.git
-cd bioAF
-./bioaf setup
-```
-
-### Deploy on AWS (one command)
-
-To run bioAF on AWS instead, use the sibling installer. Run it on your local
-machine (it needs the AWS CLI, which it can install for you):
+### Deploy on AWS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-aws.sh | bash
 ```
 
-The script verifies your AWS credentials, creates an SSH key pair, a security
-group, and the `bioaf-app` IAM role + instance profile, then launches an
-Ubuntu 22.04 EC2 VM (the VM authenticates via its instance profile, so no
-long-lived keys are stored) stamped `cloud_provider: aws`. It then offers to
-finish setup on the VM for you, or prints a worksheet so you can SSH in and run
-`./bioaf setup` yourself. For options (region, SSH source CIDR), add them after
-`bash -s --`, e.g. `... | bash -s -- --help`. To install a release instead of
-`main`, see "Pinned installer versions" in the deployment guide.
+The AWS installer provisions an EC2 application host and its instance profile. AWS workload and platform
+support is partial as described above. For installer options, run the script with `--help`.
 
-> AWS support is being completed: storage (S3) and Kubernetes compute (EKS) are
-> ready, while a few components are still being brought to parity. See the
-> architecture note above for current status.
+For either cloud, the [Deployment Guide](docs/deployment-guide.md) explains prerequisites, cloud permissions,
+SSH restrictions and [pinned installer versions](docs/deployment-guide.md#pinned-installer-versions).
+An installer's `--ref` pins its helpers; the VM's automatic setup still uses `main`.
 
 ### Deploy on an existing server
 
-If you already have a Linux server with Docker installed:
+On a Linux server with Docker, Docker Compose, Git, openssl and Python 3:
 
 ```bash
 git clone https://github.com/bioAF/bioAF.git
@@ -101,168 +94,106 @@ cd bioAF
 ./bioaf setup
 ```
 
-The `setup` command handles everything: checks prerequisites, generates
-secrets and TLS certs, pulls pre-built images, runs migrations, and prints
-a one-time setup code. Open the URL it shows in your browser and enter the
-code to create your admin account and configure the platform.
+Setup generates configuration and TLS certificates, pulls images and upgrades the database. Open the URL
+it prints and use the one-time setup code to create the first administrator account.
 
-### Management Commands
+### Manage an installation
 
-| Command | Description |
-| ------- | ----------- |
-| `./bioaf setup` | First-run setup (pulls images, generates secrets, prints setup code) |
-| `./bioaf start` | Start all services in dependency order |
-| `./bioaf stop` | Stop all services |
-| `./bioaf restart` | Restart all services |
-| `./bioaf status` | Show service status |
-| `./bioaf logs [service]` | Tail logs (all or one service) |
-| `./bioaf build [service]` | Build container images locally (development only) |
-| `./bioaf migrate` | Run database migrations |
-| `./bioaf migrate-down <rev>` | Downgrade database to a specific revision |
-| `./bioaf seed <script.py>` | Run a seed/data script in the backend container |
-| `./bioaf backup` | Create a database backup |
-| `./bioaf update [version]` | Update to latest (or specific) version |
-| `./bioaf reset-db` | Destroy and recreate the database (with confirmation) |
-| `./bioaf shell [service]` | Open a shell in a container (default: backend) |
-| `./bioaf dbshell` | Open a psql session to the database |
-| `./bioaf register-outputs` | Register pipeline output files from GCS |
-| `./bioaf help` | Show all commands |
+Run these commands from the repository directory on the application host:
 
-See the full [Deployment Guide](docs/deployment-guide.md) for detailed instructions.
+| Command | Purpose |
+| --- | --- |
+| `./bioaf start`, `stop`, `restart`, `status` | Manage application services |
+| `./bioaf logs [service]` | Read container logs |
+| `./bioaf backup` | Create a host-side database backup |
+| `./bioaf update [version]` | Install the latest or a specified release |
+| `./bioaf migrate` | Run the guarded database-upgrade path |
+| `./bioaf build [service]` | Build local images; activate them with `start` or `restart` |
+| `./bioaf shell [service]`, `dbshell` | Open a container shell or psql |
+| `./bioaf help` | Show a command summary |
 
-## Documentation
-
-- [Quickstart](docs/README.md) - Documentation hub
-- [Deployment Guide](docs/deployment-guide.md) - Full deployment walkthrough
-- [Bench Scientist Guide](docs/user-guide-bench.md) - Experiments, samples, results
-- [Computational Biologist Guide](docs/user-guide-compbio.md) - Pipelines, notebooks, environments
-- [Admin Guide](docs/user-guide-admin.md) - User management, costs, backups, notifications
-- [Life After bioAF](docs/life-after-bioaf.md) - Data portability after teardown
-- [ADR Index](decisions/README.md) - Architecture Decision Records
-- [SSH Access Guide](docs/guides/ssh-access.md) - Connecting to running workloads
-- [GEO Export Guide](docs/guides/geo-export.md) - Exporting to NCBI GEO
-- [Reference Data Guide](docs/guides/reference-data.md) - Managing reference genomes and annotations
-- [Compute Stack Setup](docs/guides/compute-stack-setup.md) - Kubernetes configuration
-
-### Integration API
-
-Public, key-authenticated REST surface for LIMS systems and other external
-callers. The OpenAPI document at `/api/v1/integrations/openapi.json` is the
-source of truth (Swagger UI at `/api/v1/integrations/docs`); the docs below
-cover the contracts, conventions, and event delivery story.
-
-- [Integration API overview](docs/api/README.md) - What this API is and is not
-- [Authentication and Authorization](docs/api/auth.md) - Service accounts, API keys, scopes
-- [Conventions](docs/api/conventions.md) - Error envelope, idempotency, pagination, external IDs
-- Per-resource contracts: [Projects](docs/api/projects.md), [Experiments](docs/api/experiments.md), [Samples](docs/api/samples.md), [Files](docs/api/files.md)
-- [Webhooks](docs/api/webhooks.md) - Event catalog, HMAC signatures, retries
+The host management script is separate from the in-session `bioaf` command. See
+[SSH and exec access](docs/guides/ssh-access.md) and
+[disk use and deployment generations](docs/deployment-guide.md#disk-use-and-deployment-generations).
 
 ## Development Setup
 
-### Using Docker Compose (recommended)
+The project uses Python 3.12, PostgreSQL 16 and Node 20. Backend dependencies are declared in
+`backend/pyproject.toml` and pinned in `backend/uv.lock`; frontend dependencies are pinned in
+`frontend/package-lock.json`.
+
+### Docker Compose
 
 ```bash
-# Start backend, frontend, and PostgreSQL
-docker compose -f docker/docker-compose.dev.yml up
-
-# Backend:  http://localhost:8000
-# Frontend: http://localhost:3000
-# Postgres: localhost:5432
+docker compose -f docker/docker-compose.dev.yml up --build
 ```
 
-### Manual Setup
+The development stack exposes the backend at `http://localhost:8000`, frontend at
+`http://localhost:3000` and PostgreSQL at `localhost:5432`. Its database service is named `postgres`.
+It sets `BIOAF_COMPUTE_MODE=local` explicitly.
 
-```bash
-# Backend (needs uv: https://docs.astral.sh/uv/; dependencies are declared in
-# backend/pyproject.toml and pinned in backend/uv.lock, see backend/DEPENDENCIES.md)
-cd backend
-uv sync --locked          # runtime + development groups into backend/.venv
-source .venv/bin/activate
-# Required, no default: local simulates compute and storage; kubernetes contacts real backends.
-# Settings read the environment, then a .env in the directory you launch from (here backend/),
-# so the repository-root .env.example alone does not apply. Alembic and CLI commands need it too.
-export BIOAF_COMPUTE_MODE=local
-# Same flags as the packaged image: Uvicorn's access log would print full request lines.
-uvicorn app.main:app --reload --no-access-log
+### Manual development and tests
 
-# Frontend
-cd frontend
-npm install
-npm run dev
+Use the [Development Guide](docs/development.md) for complete setup and test commands, including a separate
+test database. Install with `uv sync --locked` and `npm ci`; commit lock changes with dependency changes.
+Manual launchers and Alembic need `BIOAF_COMPUTE_MODE` and valid `BIOAF_ENCRYPTION_KEYS`.
+The root `.env.example` does not supply an encryption key; complete the key setup in the Development Guide
+before importing the application. Backend CLI requirements depend on the command; the offline schema
+exporter supplies its own synthetic settings.
 
-# Database (requires PostgreSQL 16)
-cd backend
-BIOAF_COMPUTE_MODE=local alembic upgrade head
-```
+CI checks backend/frontend behavior, generated contracts, types, coverage, SDKs, shell scripts,
+Terraform modules, dependencies and documentation. See [Contributing](CONTRIBUTING.md),
+[backend dependencies](backend/DEPENDENCIES.md), [frontend dependencies](frontend/DEPENDENCIES.md),
+and [API contract generation](backend/contracts/README.md).
 
-### Running Tests
+## Documentation
 
-```bash
-# Backend tests (requires PostgreSQL)
-docker compose -f docker/docker-compose.dev.yml up -d db
-cd backend && python -m pytest tests/ -v
+Start at the [documentation hub](docs/README.md).
 
-# Frontend tests
-cd frontend && npm test
-```
+- [Bench Scientist Guide](docs/user-guide-bench.md): experiments, samples, uploads and results.
+- [Computational Biologist Guide](docs/user-guide-compbio.md): pipelines, notebooks, Work Nodes and provenance.
+- [Admin Guide](docs/user-guide-admin.md): access, components, costs, backups and updates.
+- [Data Exports](docs/guides/data-exports.md): archive contents, limits and download links.
+- [Literature and AI Workflows](docs/guides/literature-and-ai.md): source settings, review outcomes and approvals.
+- [GEO Export](docs/guides/geo-export.md): submission metadata and SuperSeries packages.
+- [Life After bioAF](docs/life-after-bioaf.md): retain and move data before teardown.
 
-### Logging
+### Integration API
 
-The backend writes one JSON object per line to stdout, in development as in production
-(`time`, `severity`, `logger`, `message`, and `exception`, `stack` or `fields` when present).
-Pipe it through `jq` to read it locally, for example `... | jq -r '"\(.severity) \(.logger): \(.message)"'`.
+External integrations use `/api/v1/integrations`. Its live
+[OpenAPI location](docs/api/README.md) is `/api/v1/integrations/openapi.json`, with Swagger UI at
+`/api/v1/integrations/docs`.
 
-- Get a module's logger with `get_app_logger(__name__)` from `app.logging_config` (it maps
-  `app.x` to `bioaf.x`), or use an explicit `bioaf.*` name. A test rejects any other logger name
-  in `backend/app`. Do not add handlers in modules.
-- Structured data goes in a mapping message (`logger.info({"event": ...})`) or
-  `extra={"json_fields": {...}}`; it appears under `fields`. Other `extra` values are not emitted.
-- Known secrets (the live SMTP password, JWT key, Slack client and signing secret slots, each
-  encryption key, the database URL password; values of four characters or more) are replaced with
-  `***` in every application sink. Everything else, including organization credentials stored in
-  the database, must be kept out of log calls at the source: log fixed text plus the exception
-  class, never raw provider errors, bodies, URLs with credentials, or headers.
+- [Authentication and authorization](docs/api/auth.md)
+- [Conventions](docs/api/conventions.md): errors, idempotency, cursor pagination and external IDs
+- [Projects](docs/api/projects.md), [Experiments](docs/api/experiments.md), [Samples](docs/api/samples.md), [Files](docs/api/files.md)
+- [Webhooks](docs/api/webhooks.md): event types, signatures and retries
 
-Delivery, collection and their limits are in the deployment guide's
-[Logging](docs/deployment-guide.md#logging) section.
-
-## Component Catalog
-
-bioAF manages these infrastructure components through its UI:
-
-| Component | Category | Compute Stack | Dependencies |
-| --------- | -------- | ------------- | ----------- |
-| GKE Cluster | Compute | Kubernetes | None |
-| GCS Buckets | Storage | Kubernetes | GKE |
-| JupyterHub | Notebooks | Kubernetes | Compute, Storage |
-| RStudio Server | Notebooks | Kubernetes | Compute, Storage |
-| Nextflow | Pipelines | Kubernetes | Compute |
-| cellxgene | Visualization | Any | None |
-| QC Dashboard | Visualization | Any | None |
+The internal API has a separate [offline schema and generated frontend types](backend/contracts/README.md).
+Its interactive docs and schema are disabled in production.
 
 ## Project Structure
 
 ```text
 bioAF/
-  backend/           FastAPI application, migrations, and the GCP/AWS Terraform modules (backend/terraform/)
-  frontend/          Next.js 14 application
-  docker/            Dockerfiles, compose, and nginx config
-  decisions/         Architecture Decision Records
-  ai_guides/         Working model for humans and AI agents (process, domain language, TDD)
-  docs/              User-facing documentation
+  backend/           FastAPI app, migrations, contracts, tests and GCP/AWS Terraform modules
+  frontend/          Next.js app, generated transport types and tests
+  docker/            Container builds, Compose, nginx and host-agent units
+  decisions/         Historical Architecture Decision Records
+  ai_guides/         Shared development process and domain language
+  docs/              User, operator and developer documentation
   sdk/               Python and R analysis SDKs
-  templates/         Example pipeline/workflow templates
-  installer/         Installer helper scripts and roles manifest
-  changes/           Unreleased change notes
-  assets/            Architecture diagram and static images
-  scripts/           Utility scripts (seed data, update agent)
-  tests/shell/       BATS tests for install.sh and bioaf scripts
-  bioaf              Management script (entry point)
-  install.sh         First-time installer (prereq checks + env generation)
-  install-gcp.sh     One-command GCP provisioning script
-  install-aws.sh     One-command AWS provisioning script
+  templates/         Example workflows
+  installer/         Installer helpers and cloud-role manifest
+  scripts/           Environment assets, CI helpers and update agent
+  tests/             Host shell and integration checks
+  assets/            Project logo and architecture diagram, in SVG and PNG
+  bioaf              Host management script
+  install*.sh        First-time setup and cloud provisioning
 ```
 
 ## Contributing
 
-See the ADRs in [decisions/](decisions/) for architectural context before making changes. All infrastructure changes must go through the UI-driven Terraform workflow (ADR-007). The audit log is immutable by design (ADR-009).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [ai_guides/README.md](ai_guides/README.md) before making changes.
+Architecture decisions live in [decisions/](decisions/); current implementation boundaries live in
+[docs/architecture.md](docs/architecture.md).

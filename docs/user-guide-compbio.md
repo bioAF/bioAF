@@ -1,87 +1,78 @@
 # Computational Biologist User Guide
 
-This guide covers the bioAF workflow for computational biologists who run pipelines, manage notebooks, and analyze data.
+This guide covers pipelines, interactive compute, outputs and research provenance. Built-in `comp_bio`
+permissions are a starting point; custom roles, component readiness and provider capabilities govern the
+actual controls you see.
 
-## Getting Started
+## Launch and Monitor Pipelines
 
-Log in with your credentials. Your account has the **comp_bio** role, giving you access to pipelines, notebooks, and environments.
+1. Open **Pipelines > Pipeline Catalog**, or **Custom Pipelines** for a user-authored workflow.
+2. Select an installed/enabled pipeline and version. Review its required inputs and parameter schema.
+3. Choose the experiment, Samples and files appropriate to the run; review resources and parameters.
+4. Submit, then follow the record under **Pipelines > Pipeline Runs**.
 
-## Pipeline Catalog
+Catalog contents depend on what your Organization installed. Sample-sheet construction validates linked
+inputs; missing or ambiguous files must be corrected before launch. The launch preflight can report
+problems before a run is created.
 
-Navigate to **Pipeline Catalog** to browse available pipelines:
+If submission raises after the run exists, bioAF records a failed run with `submission_failed`. This means
+it could not confirm cluster acceptance, not proof that no cloud job exists. Ask an administrator to inspect
+the run/job before relaunching to avoid duplicate work. See [Compute Stack Setup](guides/compute-stack-setup.md).
 
-- **nf-core/scrnaseq** - Single-cell RNA-seq processing
-- **nf-core/rnaseq** - Bulk RNA-seq alignment and quantification
-- **nf-core/atacseq** - ATAC-seq analysis
-- Custom pipelines added by your admin
+Review run logs, registered outputs and QC, then record a scientist's review/handoff decision as appropriate.
+This review is advisory: it does not gate data access or later pipeline launches. An affirmative review can
+move an experiment from `pipeline_complete` to `reviewed`. Agent Review is a separate AI advisory note.
 
-Each pipeline shows its description, required inputs, and default parameters.
+## Templates and Environment Versions
 
-## Running Pipelines
+**Pipelines > Pipeline Templates** and **Workbench > Workbench Templates** manage the relevant Environment
+families. Create a template/environment, add a version from a Dockerfile or conda definition, then build it.
+A launch selects a successful `ready` version. Container builds use Cloud Build/Artifact Registry on the GCP
+reference path and have CodeBuild/ECR implementations on AWS; full AWS parity remains incomplete.
 
-1. Select a pipeline from the catalog
-2. Click **Launch**
-3. Configure parameters:
-   - Select the experiment and samples
-   - Set compute resources (CPUs, memory)
-   - Override default parameters as needed
-4. Click **Submit**
-
-Monitor runs from **Pipeline Runs**:
-
-- View real-time progress and logs
-- See per-stage completion status
-- Access output files when complete
+Versioned definitions keep earlier images available for reproducibility. See
+[Custom Pipelines](guides/custom-pipelines.md) for its version-cascade and runtime contracts.
 
 ## Notebook Sessions
 
-Navigate to **Workbench > Notebooks** to manage notebook sessions:
+Open **Workbench > Notebook Sessions** and launch Jupyter or RStudio with a ready template version,
+resource profile and any applicable Project/Experiment scope.
 
-1. Click **Launch Notebook**
-2. Select environment type: JupyterHub or RStudio
-3. Choose compute resources
-4. Select a versioned environment and image version
+- A project-only launch records the project.
+- An experiment-only launch records that experiment and its project, when it has one.
+- If both are selected, the experiment must belong to that project. Standalone experiments remain supported.
+- Foreign Organization IDs and environment versions are refused before a workload is created.
 
-Sessions auto-stop after idle timeout (configurable). You'll receive a notification when a session is about to stop.
+The session list and **Recreate** retain recorded scope. Recreate pre-fills a new launch; review its version,
+resources and inputs before confirming. Project scope does not by itself mount extra files.
 
-## Environments
+Use the session's storage-sync and output-registration actions to preserve work and its provenance. Session
+credentials support RStudio login. Idle-timeout behavior follows Workbench settings and session status;
+check the page rather than assuming a browser tab keeps a session alive.
 
-Navigate to **Workbench > Environments** to manage versioned compute environments:
+## SSH Work Nodes
 
-- **Create** a named environment with a description and visibility (team or organization)
-- **Add versions** by uploading a Dockerfile or conda environment.yml definition
-- **Build** a version to produce a container image via Cloud Build
-- **Select** a built environment version when launching notebook sessions
+Open **Workbench > Work Nodes** for a standalone GCE VM (with an EC2 implementation on AWS). Choose a ready
+Work Node environment version, resources and scope. Work Nodes are separate from notebook/pipeline pods.
+Use the displayed connection details and preserve outputs before stopping the node.
+See [SSH and Exec Access](guides/ssh-access.md) for access prerequisites and the audit boundary.
 
-Each environment can have multiple versions, letting you iterate on dependencies while keeping previous versions available. Only versions with a "ready" status (successful build) can be used for notebook launches.
+## Files, Projects and Provenance
 
-## Data Management
+Use **Data & Files > Files** to browse and associate registered files. Large experiment selectors search by
+name and support paging. Use [Reference Data](guides/reference-data.md) to manage reference inputs, and
+[Cross-Experiment Projects](guides/cross-experiment-projects.md) to understand membership and scope.
 
-Navigate to **Data & Files** for file management:
+Record significant analysis states with the [Python/R SDK](guides/analysis-snapshots.md). The snapshot records
+selected object metadata, notes and optional artifacts; it is not a complete capture of every notebook action.
+Inspect provenance from the experiment/project and registered outputs.
 
-- Browse uploaded files and pipeline outputs
-- Download individual files or datasets
-- Organize files by experiment and project
+Use [Data Exports](guides/data-exports.md) for file archives and [GEO Export](guides/geo-export.md) for submission
+metadata. These exports have different contents and delivery contracts.
 
-## Results and Visualization
+## Literature and AI
 
-From **Results**:
-
-- View QC Dashboards with quality metrics per pipeline run
-- Launch cellxgene for interactive single-cell exploration
-- Browse publication-quality plots
-- Search across all results with the global search
-
-## Notebook Templates
-
-Access pre-configured analysis templates from **Templates**:
-
-- Standard analysis workflows
-- Customizable parameters
-- Auto-populated with your experiment data
-
-## Tips
-
-- Use the **Dashboard** to see active pipeline runs and notebook sessions
-- Check **Activity Feed** for team-wide events
-- Set notification preferences for pipeline completions and failures
+Use **Lab Knowledge > Literature Library** for papers and AI Literature Review. The floating assistant can
+help inspect records and propose actions. Consequential actions require approval, and provider failures
+should be retried explicitly after review. [Paper Validation](guides/paper-validation.md) is a beta workflow
+with assay/evidence limitations. See [Literature and AI Workflows](guides/literature-and-ai.md).

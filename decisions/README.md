@@ -1,5 +1,9 @@
 # Architecture Decision Records
 
+This index preserves each decision's recorded status. Accepted or proposed historical text is not a
+guarantee that every described workflow is implemented today. Read [Current Architecture](../docs/architecture.md)
+and the [documentation hub](../docs/README.md) for current behavior and support limits.
+
 | ADR | Title | Status | Date |
 | ----- | ------- | -------- | ------ |
 | [ADR-001](ADR-001-gcp-only.md) | GCP as Sole Supported Cloud Provider | Accepted | 2026-03-05 |
@@ -8,7 +12,7 @@
 | [ADR-004](ADR-004-tiered-backup-strategy.md) | Tiered Backup Strategy with Mandatory Database Backups | Accepted | 2026-03-05 |
 | [ADR-005](ADR-005-github-based-upgrades.md) | GitHub-Based Versioning and Upgrade System | Accepted | 2026-03-05 |
 | [ADR-006](ADR-006-experiment-tracking-as-foundation.md) | Experiment Tracking as Architectural Foundation | Accepted | 2026-03-05 |
-| [ADR-007](ADR-007-ui-driven-terraform.md) | UI-Driven Terraform Execution for Infrastructure Management | Accepted | 2026-03-05 |
+| [ADR-007](ADR-007-ui-driven-terraform.md) | UI-Driven Terraform Execution for Infrastructure Management | Accepted; implementation superseded by [ADR-066](ADR-066-terraform-single-execution-owner.md) | 2026-03-05 |
 | [ADR-008](ADR-008-secret-manager.md) | Google Secret Manager for All Secrets | Accepted | 2026-03-05 |
 | [ADR-009](ADR-009-immutable-audit-log.md) | Immutable Audit Log via Database-Level Enforcement | Accepted | 2026-03-05 |
 | [ADR-010](ADR-010-notification-system.md) | Built-in Notification System with Email and Slack Connectors | Accepted | 2026-03-05 |
@@ -53,6 +57,12 @@
 | [ADR-049](ADR-049-service-accounts-and-api-keys.md) | Service Accounts and API Key Authentication | Accepted | 2026-05-13 |
 | [ADR-050](ADR-050-external-ids-and-idempotent-writes.md) | External IDs and Idempotent Writes | Accepted | 2026-05-13 |
 | [ADR-051](ADR-051-outbound-webhook-delivery.md) | Outbound Webhook Delivery | Accepted | 2026-05-13 |
+| [ADR-052](ADR-052-llm-integration-trust-boundary.md) | LLM Integration Trust Boundary and Advisory Output Model | Accepted | 2026-05-15 |
+| [ADR-053](ADR-053-llm-provider-abstraction.md) | LLM Provider Abstraction and Single-Active Configuration | Accepted | 2026-05-15 |
+| [ADR-054](ADR-054-gemma-per-request-inference.md) | Self-hosted Gemma 4 as a Per-Request GCE Inference Pipeline | Accepted | 2026-05-15 |
+| [ADR-055](ADR-055-agent-review-advisory-entity.md) | Agent Review as an Advisory Entity | Accepted | 2026-05-15 |
+| [ADR-056](ADR-056-literature-library-domain-model.md) | Literature Library Domain Model | Accepted | 2026-05-18 |
+| [ADR-057](ADR-057-literature-as-input-to-agent-review.md) | Literature as Input to Agent Review | Accepted | 2026-05-18 |
 | [ADR-058](ADR-058-naming-profile-parse-only.md) | Naming Profiles are Parse-Only with Template-Driven Vocabulary | Accepted | 2026-06-02 |
 | [ADR-059](ADR-059-lab-knowledge-institutional-memory.md) | Lab Knowledge as Institutional Memory Layer | Proposed | 2026-06-05 |
 | [ADR-060](ADR-060-lab-document-tag-organization.md) | Tag-Based Document Organization for Lab Knowledge | Proposed | 2026-06-05 |
@@ -61,8 +71,22 @@
 | [ADR-063](ADR-063-sdr-status-machine.md) | Scientific Decision Records (SDR) Status Machine | Proposed | 2026-06-05 |
 | [ADR-064](ADR-064-sdr-reassessment-triggers.md) | Date-Based SDR Re-Assessment Triggers | Proposed | 2026-06-05 |
 | [ADR-065](ADR-065-bal-normalized-contract.md) | BAL Normalized Contract, Capabilities, and the Category/Backend Rule | Accepted | 2026-06-08 |
+| [ADR-066](ADR-066-terraform-single-execution-owner.md) | TerraformExecutor is the single Terraform execution owner | Accepted | 2026-06-09 |
+| [ADR-067](ADR-067-conversational-assistant.md) | Conversational Assistant (action-taking agent over a tool layer) | Proposed | 2026-06-24 |
 | [ADR-068](ADR-068-literature-validation-reproduction-triage.md) | Literature Validation as a Reproduction-Triage Screen | Accepted | 2026-07-15 |
 | [ADR-069](ADR-069-level3-finding-concordance.md) | Level-3 Finding Concordance for Literature Validation | Proposed | 2026-07-22 |
+
+## Historical Status and Current Behavior
+
+Recorded status is not a feature-availability flag. ADR-059 through ADR-064, ADR-067 and ADR-069 still
+say Proposed in their source records even where related code exists; this index does not silently approve
+those proposals. Current guides describe the inspected code and its limits.
+
+ADR-001's GCP-only decision and ADR-008's all-Secret-Manager decision remain historical Accepted records.
+They do not describe today's partial AWS implementations or host/encrypted-database secret storage.
+ADR-007's UI-driven principle remains, while its execution implementation is superseded by ADR-066.
+Read [Current Architecture](../docs/architecture.md) and [Configuration](../docs/configuration.md) for the
+current system. Changes to decision status require an explicit decision, not inference from feature code.
 
 ## How to Use This Directory
 

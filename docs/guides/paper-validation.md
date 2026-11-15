@@ -1,5 +1,9 @@
 # Paper Validation
 
+This is a beta feature. **Lab Knowledge > Validation Studies** is shown only when the `lit_validation`
+beta flag and required permissions are enabled. Check the plan and evidence for the specific study;
+the assay demonstration table below records prior validation, not a new verification on every release.
+
 Paper Validation reproduces a published paper's analysis on your own infrastructure and tells you
 how far the result agrees. You give it a DOI, it reads the methods, picks an nf-core pipeline,
 fetches the deposited data, runs it, and compares what it got against what the paper reported.
@@ -62,24 +66,11 @@ Level 4 verdict, and the plan says so before you approve.
 
 **Bulk RNA-seq and ATAC-seq are the only assays fully proven at every level.**
 
-## Known limitations
+## Review the Plan and Evidence
 
-**Some assays currently pick the wrong pipeline and a few others decline to run altogether.**
-These will prompt the user before running.
-Check the pipeline named on the plan before approving, and decline if it is wrong.
-
-| Assay | Should use | Does today |
-|---|---|---|
-| Dual RNA-seq | `nf-core/dualrnaseq` | picks `nf-core/rnaseq` |
-| Nanopore direct RNA | `nf-core/nanoseq` | picks `nf-core/rnaseq` |
-| Single-cell ATAC-seq | a barcode-aware pipeline | picks `nf-core/atacseq`, which is bulk-only |
-| Spatial transcriptomics (Visium) | `nf-core/spatialvi` | picks `nf-core/spatialaxe`, which is for Xenium |
-| circRNA | `nf-core/circrna` | declines |
-| Metatranscriptome | `nf-core/metatdenovo` | declines |
-| Iso-Seq | `nf-core/isoseq` | declines |
-
-`nf-core/circrna` and `nf-core/spatialvi` decline or divert because neither has a released version
-to install. bioAF will not run a pipeline it cannot pin to a release.
+Before approving a study, review the selected assay, deposited accession, pipeline version, reference
+and parameters. The pipeline should match the data you intend to validate. bioAF pins the pipeline to
+a released version before running it.
 
 **A pipeline chosen from a family is marked as such.** Where a paper's methods describe the assay
 only in words its whole subfield shares ("RNA sequencing"), the plan says the pipeline was weighed
@@ -87,15 +78,12 @@ against the alternatives and names the nearest one. That is a prompt to check, n
 the accession when you start the study settles it outright, because the deposit records what the
 data actually is.
 
-**A paper covering several assays is read as a whole.** bioAF uses the deposited accession's own
-declared library type to decide which pipeline to run, so a paper doing both RRBS and RNA-seq runs
-the right one for the dataset. The quantitative claims it compares against are not filtered the same
-way, so a claim about one assay can be compared against another assay's data. Read the comparison
-table before accepting a verdict.
+**For a paper covering several assays, select the dataset for the assay you want to validate.**
+Review the comparison table against the claims for that dataset before accepting a verdict.
 
-**Only the current genome build of each organism is recognised**: human, mouse, rat, zebrafish,
-*C. elegans*, *Drosophila* and *Arabidopsis*. An older build, such as Zv9 or Rnor_6.0, is not mapped
-to its modern equivalent, and the run uses a default reference instead.
+**Reference inference is limited to the builds and aliases implemented for the selected workflow.**
+Inspect the actual reference and parameters in the plan/run, especially for an older assembly or a
+Paper that omits its reference. Defaults and aliases are not evidence that two genome builds are equivalent.
 
 **Level 4 needs a deposited result table.** Most ChIP-seq papers publish differential binding as
 figures rather than tables, so they stop at Level 3 regardless of how well the run went.

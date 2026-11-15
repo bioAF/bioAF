@@ -5,8 +5,8 @@
 External systems authenticate as a **service account**, which is just a
 `User` row in bioAF with `is_service_account=true`. Service accounts:
 
-- Cannot log in to the browser UI (login is rejected with
-  `service_account_login_blocked`).
+- Cannot log in to the browser UI: login returns HTTP 401 with `Invalid email or password`.
+  `service_account_login_blocked` is the audit reason, not the response detail.
 - Hold exactly one **role**, set when the SA is created and changed only
   via Settings > Users & Accounts > Service Accounts.
 - Own one or more **API Keys**. Keys carry their own scope list.
@@ -15,8 +15,9 @@ External systems authenticate as a **service account**, which is just a
 
 1. In Settings > Users & Accounts > Service Accounts, click an SA and then
    **Mint key**.
-2. Provide a key name. Scopes are inherited from the SA's role; the key
-   gets one scope string per `(resource, action)` permission on the role.
+2. Provide a name. The current UI derives scopes from the service account's role, so use a role limited
+   to the public scope alphabet below. The mint API accepts an explicit `scopes` list for narrower keys.
+   Effective access is capped by the service account's current role.
 3. The full secret is shown exactly once: `biokey_<prefix>.<secret>`.
    Copy it. bioAF stores only a bcrypt hash.
 
@@ -28,9 +29,10 @@ Pass the full token as a Bearer header on every request:
 Authorization: Bearer biokey_AbCdEfGhIjKlMnOp.<random-secret>
 ```
 
-Internal API endpoints (under `/api/...`, excluding `/api/v1/integrations`)
-expect a JWT, not a key, and will return 401 if presented with a key.
-Conversely, the integration surface returns 401 if presented with a JWT.
+The Integration API requires an API key and rejects a browser-session JWT. The shared middleware also
+recognizes API keys on internal routes: their permission checks intersect the role with the key's scopes.
+Do not rely on blanket key rejection there. Internal routes are not a stable integration contract;
+external clients should use `/api/v1/integrations`.
 
 ## Authorization (scope intersection)
 
@@ -44,9 +46,9 @@ allowed = key.scopes & role.permissions
 If the request's required scope (e.g. `projects:create`) is not in the
 intersection, the request returns `403 Forbidden`.
 
-This means: shortening a key's scope list narrows what an integration can
-do without changing the SA. Changing the SA's role can narrow or broaden
-every key under that SA at once.
+A key cannot exceed either its stored scopes or its service account's current role. Changing the role can
+remove access immediately or restore access within existing scopes; it does not add new scopes to an
+existing key. Choose narrower scopes at mint time, or revoke and mint a replacement.
 
 ## Public scope alphabet
 
@@ -65,21 +67,20 @@ The scopes accepted at mint time on the public surface:
 | `samples:edit` | PATCH `/samples/{id}` |
 | `files:view` | GET `/files`, `/files/{id}` |
 
-Internal role permissions outside this alphabet (e.g. `pipelines:run`)
+Internal role permissions outside this alphabet (e.g. `pipelines:launch`)
 cannot be granted to a key, even if the SA's role has them.
 
 ## Revoking a key
 
 Revocation is immediate. From the SA detail modal, click **Revoke** on the
-key row. Revoked keys return `401 invalid_api_key` on the next request and
+key row. Revoked keys return HTTP 401 on the next request and
 are flagged `revoked` in the keys table. Use revoke + re-mint to rotate.
 
 Disabling a service account revokes all of its keys.
 
 ## Audit trail
 
-Every API-key authenticated request that mutates state writes an
-`audit_log` row with both `user_id` (the SA's user id) and `api_key_id`.
+Audited API-key mutations record both `user_id` (the service account's user ID) and `api_key_id`.
 The Settings > Users & Accounts > API Activity tab joins these so each
 row shows the service account display name plus the key name that made
 the call.

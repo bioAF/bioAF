@@ -25,7 +25,8 @@ loops. To make a retry safe even before the first call lands, send an
 
 ## Idempotency-Key
 
-Optional on every `POST` and `PATCH`. If present:
+Supported on the three create endpoints: `POST /projects`, `POST /experiments` and `POST /samples`.
+PATCH handlers do not read this header. On a supported POST, if the header is present:
 
 1. bioAF looks up `(api_key_id, Idempotency-Key)` in the idempotency cache.
 2. If found and the request body fingerprint matches: the cached response
@@ -35,15 +36,20 @@ Optional on every `POST` and `PATCH`. If present:
 4. If not found: the request runs normally. The response status and body
    are then cached for 24 hours.
 
+Replays preserve the cached status code, including `201` for a successful create.
 Use a stable, request-unique value (e.g. a UUID or a deterministic hash
 of the source row). bioAF treats the key as opaque.
 
 ## Pagination (cursor)
 
+This is the public Integration API contract. Internal `/api/experiments` instead uses `page`/`page_size`
+(1-100 items per page), name search and a deleted-status filter; do not exchange pagination parameters
+between the two surfaces.
+
 List endpoints return up to `limit` items (default 50, max 200) and a
 `next_cursor` (opaque string) when more are available. To fetch the next
 page, pass `?cursor=<value>`. Cursors are monotonically decreasing by id;
-the API never reorders rows mid-pagination.
+rows are selected in descending ID order. Concurrent writes are not a snapshot of the whole result set.
 
 ```http
 GET /samples?experiment_id=42&limit=50
@@ -66,8 +72,8 @@ Reads of these fields are always allowed.
 
 ## Error envelope
 
-Errors use FastAPI's standard `{"detail": ...}` shape. The `detail` value
-is a short snake_case string suitable for client-side switch:
+Errors use FastAPI's standard `{"detail": ...}` shape. Some route errors use a short snake_case code,
+while authentication and other errors can use human-readable text. Do not assume every detail is a code:
 
 ```json
 { "detail": "external_id_already_exists" }
@@ -87,8 +93,8 @@ Validation errors (Pydantic) instead return the list-of-issues shape:
 
 | Code | Meaning |
 | --- | --- |
-| 200 | Read, update, or replayed POST/PATCH succeeded. |
-| 201 | Create succeeded; resource exists at the returned id. |
+| 200 | Read or update succeeded. |
+| 201 | Create succeeded, or its successful cached response was replayed. |
 | 400 | Forbidden field in payload (e.g. `status`, `qc_status`). |
 | 401 | Missing, malformed, or revoked key. |
 | 403 | Key authenticated but lacks the required scope (or SA role does). |
@@ -99,12 +105,12 @@ Validation errors (Pydantic) instead return the list-of-issues shape:
 
 ## external_id vs code vs uuid
 
-Every project, experiment, and sample carries three identifiers:
+The public identity fields differ by resource:
 
 | Field | Source | Visible | Purpose |
 | --- | --- | --- | --- |
 | `id` | bioAF | Yes | Internal integer primary key. Stable. |
-| `code` | bioAF, auto-generated | Yes | Human-readable, e.g. `bioap-0008`. |
+| `code` | bioAF, auto-generated | Projects and experiments only | Human-readable, e.g. `bioap-0008`; samples have no `code` field. |
 | `external_id` | External system | Yes | The LIMS-side identifier. |
 | `uuid` | bioAF, auto-generated | No (internal) | System uniqueness; not part of the public surface. |
 

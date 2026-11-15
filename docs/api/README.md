@@ -25,13 +25,13 @@ behind each endpoint.
   QC and status writes are not permitted.
 - [Files](files.md): read-only metadata. Bytes flow only through the
   internal upload pipeline.
-- [Webhooks](webhooks.md): event catalog, delivery format, HMAC signature,
+- [Webhooks](webhooks.md): event types, delivery format, HMAC signature,
   retry and dead-letter behavior.
 
 ## What this API is not
 
 - Not a file-upload surface. Use the internal ingest pipeline; external
-  systems learn about new files via webhooks and can read metadata only.
+  systems can retrieve file metadata or subscribe to file events.
 - Not a status-machine controller. Experiment and sample status moves are
   driven by bioAF internal services (pipeline completion, QC review, etc.).
   Public POST and PATCH reject `status`/`qc_status` writes.

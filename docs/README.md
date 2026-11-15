@@ -1,39 +1,62 @@
 # bioAF Documentation
 
-Welcome to the bioAF documentation. bioAF is a turnkey computational biology platform for small biotech companies, deployed on Google Cloud Platform.
+bioAF combines research records, analysis tools and cloud infrastructure management. GCP is the reference
+deployment; AWS implementations cover several workload paths but full platform parity is incomplete.
+See [architecture and support status](architecture.md) before choosing a deployment.
 
-## Quick Links
+## Start Here
 
-- [Quick Start Guide](../README.md#quick-start) - Deploy in 30 minutes
-- [Deployment Guide](deployment-guide.md) - Full deployment walkthrough
-- [Life After bioAF](life-after-bioaf.md) - Data portability and asset access
+- [Quick Start](../README.md#quick-start): installation entry points.
+- [Deployment Guide](deployment-guide.md): install, update, recover and remove an installation.
+- [Configuration](configuration.md): settings sources, compute mode, logging and operational limits.
+- [Life After bioAF](life-after-bioaf.md): preserve data and infrastructure records before teardown.
 
-## User Guides
+## Role Guides
 
-- [Bench Scientist Guide](user-guide-bench.md) - Experiment registration, sample management, QC results
-- [Computational Biologist Guide](user-guide-compbio.md) - Pipelines, notebooks, environments, data management
-- [Admin Guide](user-guide-admin.md) - User management, components, costs, backups, notifications
-- [Paper Validation](guides/paper-validation.md) - Reproduce a published paper's analysis and compare the result
+Built-in roles are starting points. Actual actions depend on effective permissions and enabled components.
 
-## Architecture
+- [Bench Scientist Guide](user-guide-bench.md)
+- [Computational Biologist Guide](user-guide-compbio.md)
+- [Admin Guide](user-guide-admin.md)
 
-- [ADR Index](adr-index.md) - All Architecture Decision Records
-- [Architecture Spec](../documentation/bioAF-architecture-spec-v0_3.md) - System architecture
-- [Product Spec](../documentation/bioAF-product-spec-v0_5.md) - Full product specification
+## Workflow Guides
+
+| Guide | Covers |
+| --- | --- |
+| [Compute Stack Setup](guides/compute-stack-setup.md) | Kubernetes, cloud status, Work Nodes and simulation |
+| [SSH and Exec Access](guides/ssh-access.md) | Generated connection commands, prerequisites and audit limits |
+| [Custom Pipelines](guides/custom-pipelines.md) | Code, variables, environments and output contracts |
+| [Custom QC Configuration](guides/custom-qc-config.md) | Metrics and dashboard sections |
+| [Automated Pipelines](guides/automated-pipelines.md) | Experiment auto-run configuration and current ingest limitations |
+| [Cross-Experiment Projects](guides/cross-experiment-projects.md) | Membership, scope and provenance |
+| [Reference Data](guides/reference-data.md) | Upload, URL import, versions and deprecation |
+| [Naming Profiles](guides/naming-profiles.md) | Parse-only filename rules |
+| [Analysis Snapshots](guides/analysis-snapshots.md) | Python and R SDK examples |
+| [Data Exports](guides/data-exports.md) | File archives, size limits and signed links |
+| [GEO Export](guides/geo-export.md) | Metadata packages and SuperSeries |
+| [Literature and AI Workflows](guides/literature-and-ai.md) | Search, reviews, provider settings and assistant approval |
+| [Paper Validation](guides/paper-validation.md) | Beta reproduction studies and evidence limits |
+
+## Architecture and Development
+
+- [Current architecture](architecture.md), with the [SVG diagram](../assets/bioAF_Architecture.svg).
+- [Development Guide](development.md): reproducible setup, tests and shared implementation contracts.
+- [Contributing](../CONTRIBUTING.md) and [AI Guides](../ai_guides/README.md).
+- [Architecture Decision Records](../decisions/README.md): historical decisions and their recorded statuses.
+- [Backend dependencies](../backend/DEPENDENCIES.md), [frontend dependencies](../frontend/DEPENDENCIES.md),
+  and [internal API contracts](../backend/contracts/README.md).
 
 ## API Reference
 
-The bioAF Integration API is the public, key-authenticated REST surface for
-LIMS and other external integrations.
+The public Integration API uses service accounts and scoped API keys under `/api/v1/integrations`.
 
-- [Integration API overview](api/README.md)
+- [Overview](api/README.md)
 - [Authentication and Authorization](api/auth.md)
-- [Conventions](api/conventions.md): error envelope, idempotency, pagination, status codes
-- Per-resource contracts: [Projects](api/projects.md), [Experiments](api/experiments.md), [Samples](api/samples.md), [Files](api/files.md)
-- [Webhooks](api/webhooks.md): event catalog, signature, retry/dead-letter
+- [Conventions](api/conventions.md)
+- [Projects](api/projects.md), [Experiments](api/experiments.md), [Samples](api/samples.md), [Files](api/files.md)
+- [Webhooks](api/webhooks.md)
 
-The authoritative schema is the live OpenAPI document served at
-`/api/v1/integrations/openapi.json` (Swagger UI at
-`/api/v1/integrations/docs`). The internal/admin API (under `/api/...`,
-JWT-authenticated) auto-generates an OpenAPI spec at `/docs` when
-`BIOAF_ENVIRONMENT=development`; it is disabled in production.
+Its authoritative schema is `/api/v1/integrations/openapi.json`, and its Swagger UI is
+`/api/v1/integrations/docs`. The internal application API has a separate committed OpenAPI artifact.
+Internal `/docs` and `/openapi.json` are available only with `BIOAF_ENVIRONMENT=development`.
+Internal experiment pagination uses `page`/`page_size`; Integration API pagination uses cursors.
