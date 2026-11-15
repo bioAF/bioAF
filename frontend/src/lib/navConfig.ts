@@ -127,6 +127,7 @@ export const navConfig: NavSection[] = [
       { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" }, capability: "work_nodes" },
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
       { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" } },
+      { label: "System Settings", path: "/settings/system", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Platform Info", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

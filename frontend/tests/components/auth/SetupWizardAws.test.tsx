@@ -110,6 +110,7 @@ async function advanceToAwsStep(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(screen.getByRole("heading", { name: "Organization Name" })).toBeInTheDocument());
 
   await user.type(screen.getByLabelText(/organization name/i), "Acme Bio");
+  await user.click(screen.getByRole("radio", { name: "Do not share" }));
   await user.click(screen.getByRole("button", { name: /save organization/i }));
   await waitFor(() => expect(screen.getByRole("heading", { name: "AWS Credentials" })).toBeInTheDocument());
 }
