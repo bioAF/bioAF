@@ -80,6 +80,7 @@ and the [documentation hub](../docs/README.md) for current behavior and support 
 | [ADR-072](ADR-072-safe-database-upgrades-recoverable-restores.md) | Safe Database Upgrades and Recoverable Restores | Proposed | 2026-11-14 |
 | [ADR-073](ADR-073-run-owned-storage-parameters-as-data.md) | Run-Owned Storage and Pipeline Parameters as Data | Proposed | 2026-11-14 |
 | [ADR-074](ADR-074-bounded-data-export-architecture.md) | Bounded Data-Export Architecture | Proposed | 2026-11-14 |
+| [ADR-075](ADR-075-opt-in-installation-metrics.md) | Opt-in Installation Metrics | Proposed | 2026-11-15 |
 
 ## Historical Status and Current Behavior
 
