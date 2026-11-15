@@ -13,6 +13,13 @@
 #              checked; a generation without them is kept in the record (its recovery set) but is no rollback.
 #   candidate  an operation that started and has not yet run its images (update, build or setup, and its tag);
 #              still present at the next operation means that one was interrupted or failed
+#   update_operation
+#              the latest update's own identity (ADR-075): id (a random UUID), target tag, from_version (the
+#              source when it first started), started_at, status (in_progress | completed) and completed_at,
+#              written once. A retry of the same unfinished target keeps id, start and source, even after the
+#              target image started and the candidate was cleared; a different target, or any update after a
+#              completed one, is a new operation. Telemetry only: no deployment decision reads it except
+#              whether an interrupted update to the running target still needs its readiness checks.
 #   recovery   on a generation an update installed: the updater backups made since the first unfinished operation
 #              before it started (the database as the generation before had it, and any partial attempt's).
 #              Retention never removes current's or previous's set, nor anything made since a pending
@@ -83,6 +90,7 @@ import datetime, json, os, sys, tempfile
 from pathlib import Path
 
 path, backups, change, *args = sys.argv[1:]
+output = None
 UPDATER_BACKUPS = ("bioaf_pre_update_*.sql.gz", "bioaf_pre_upgrade_*.dump", "bioaf_pre_upgrade_*.json")
 
 
@@ -146,6 +154,30 @@ elif change == "running":
         }
         record["current"]["local_tag"] = local_tag(record["current"])
     record["candidate"] = None
+elif change == "operation-start":
+    import uuid
+
+    tag, source = args
+    op = record.get("update_operation") or {}
+    if op.get("status") == "in_progress" and op.get("target") == tag:
+        print(op["id"], op["started_at"], op["from_version"] or "-")
+        sys.exit(0)  # a retry of the same unfinished update: unchanged
+    op = {
+        "id": str(uuid.uuid4()), "target": tag, "from_version": source, "started_at": now,
+        "status": "in_progress", "completed_at": None,
+    }
+    record["update_operation"] = op
+    output = f"{op['id']} {op['started_at']} {source or '-'}"
+elif change == "operation-complete":
+    (tag,) = args
+    op = record.get("update_operation") or {}
+    if op.get("target") != tag or op.get("status") not in ("in_progress", "completed"):
+        sys.exit(1)
+    if op["status"] == "completed":
+        print(op["completed_at"])
+        sys.exit(0)  # completion is written once
+    op["status"], op["completed_at"] = "completed", now
+    output = now
 elif change == "presence":
     # args: <generation>=<1|0> for each generation checked; also names a generation recorded before local tags.
     before = json.dumps(record, sort_keys=True)
@@ -170,12 +202,40 @@ try:
 except BaseException:
     os.unlink(tmp)
     raise
+if output is not None:
+    print(output)
 PY
 }
 
 deploy_mark_candidate() {
     # Record that <operation> toward <tag> started; it stays recorded until deploy_record_running sees it run.
     _deploy_update candidate "$1" "$2"
+}
+
+deploy_operation_start() {
+    # deploy_operation_start <tag> <source version>: create this update's operation, or resume the unfinished one
+    # toward the same tag. Prints "<id> <started_at> <source version>" ("-" for an unknown source).
+    _deploy_update operation-start "$1" "$2"
+}
+
+deploy_operation_complete() {
+    # deploy_operation_complete <tag>: mark the operation toward <tag> completed; prints its completion time.
+    _deploy_update operation-complete "$1"
+}
+
+deploy_operation_unfinished() {
+    # deploy_operation_unfinished <tag>: true when an update toward <tag> started and never completed.
+    local path
+    path="$(deploy_state_dir)/deployments.json"
+    [ -f "$path" ] || return 1
+    python3 -I - "$path" "$1" <<'PY'
+import json, sys
+try:
+    op = json.load(open(sys.argv[1])).get("update_operation") or {}
+except (ValueError, AttributeError):
+    sys.exit(1)
+sys.exit(0 if op.get("status") == "in_progress" and op.get("target") == sys.argv[2] else 1)
+PY
 }
 
 deploy_record_running() {

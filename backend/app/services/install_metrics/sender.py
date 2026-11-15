@@ -23,6 +23,7 @@ from sqlalchemy import text
 
 from app.services.install_metrics import outbox
 from app.services.install_metrics import payload as allowlist
+from app.services.install_metrics import upgrades
 from app.services.install_metrics.state import InstallMetricsService, override_active, utcnow
 
 logger = logging.getLogger("bioaf.install_metrics")
@@ -125,6 +126,8 @@ async def send_pending(
 
     async with factory() as session:
         state = await InstallMetricsService.reconcile(session, now)
+        # A completed host upgrade whose updater could not reach the backend (app/services/install_metrics/upgrades.py).
+        await upgrades.reconcile_from_status(session, now)
         expired = await session.execute(
             text(
                 "UPDATE install_metric_events SET status = 'expired', payload = NULL, settled_at = :now "

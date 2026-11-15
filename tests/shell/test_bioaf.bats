@@ -429,6 +429,8 @@ case "$args" in
         fi
         exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+    *"app.cli.record_upgrade_metric"*)
+        echo "record_upgrade_metric args=[$args]" >> "$log"; exit "${FAKE_RECORD_STATUS:-0}" ;;
 esac
 exit 0
 STUB
@@ -1650,4 +1652,182 @@ run_waiter() {
     [ "$status" -eq 0 ]
     grep -q '^BIOAF_IMAGE_TAG=v2.0.0$' "$tmp/.env"
     python3 -c "import json; c=json.load(open('$tmp/host-state/deployments.json'))['candidate']; assert c['operation']=='build' and c['tag']=='v2.0.0', c"
+}
+
+# ---------------------------------------------------------------------------
+# Update operation identity and the installation metrics hook (ADR-075)
+#
+# Each update has an operation in host-state/deployments.json: a UUID, its original start and source
+# version, its target, status and completion time. A retry of the same unfinished target keeps them.
+# After readiness and final host completion the updater asks the backend to reserve the metrics report.
+# ---------------------------------------------------------------------------
+
+operation() {
+    # operation <tmp> <field>: one field of the recorded update operation.
+    python3 -c 'import json, sys; print((json.load(open(sys.argv[1])).get("update_operation") or {}).get(sys.argv[2]) or "")' \
+        "$1/host-state/deployments.json" "$2"
+}
+
+status_field() {
+    python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1/update-status/current.json" "$2"
+}
+
+run_update() {
+    # run_update <tmp> <target> [env...]: one update through the stubbed harness.
+    local tmp="$1" target="$2"; shift 2
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 "$@" bash -c "
+        source '$tmp/harness.sh'; cmd_update $target --yes"
+}
+
+@test "a successful update records its operation and then asks the backend to record the upgrade" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0
+    [ "$status" -eq 0 ]
+
+    id="$(operation "$tmp" id)"
+    [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+    [ "$(operation "$tmp" status)" = completed ]
+    [ "$(operation "$tmp" target)" = v2.0.0 ]
+    [ "$(operation "$tmp" from_version)" = 1.0.0 ]
+    [ -n "$(operation "$tmp" completed_at)" ]
+    # Shared status publishes the operation and its completion evidence.
+    [ "$(status_field "$tmp" operation_id)" = "$id" ]
+    [ "$(status_field "$tmp" operation_started_at)" = "$(operation "$tmp" started_at)" ]
+    [ "$(status_field "$tmp" operation_completed_at)" = "$(operation "$tmp" completed_at)" ]
+    # The backend is asked once, after the database upgrade, with the operation's own facts.
+    grep -q "^record_upgrade_metric args=.*--operation-id $id --from-version 1.0.0 --to-version 2.0.0 " "$tmp/log"
+    [ "$(grep -E '^(schema_upgrade run|record_upgrade_metric)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'schema_upgrade\nrecord_upgrade_metric')" ]
+}
+
+@test "a failed update keeps its operation unfinished and records no upgrade" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_RUN_STATUS=1 FAKE_SCHEMA_STATUS='{"settled": false}'
+    [ "$status" -ne 0 ]
+    [ "$(operation "$tmp" status)" = in_progress ]
+    [ -z "$(operation "$tmp" completed_at)" ]
+    ! grep -q record_upgrade_metric "$tmp/log"
+}
+
+@test "a readiness failure records no upgrade" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_READY=no BIOAF_READY_TIMEOUT_SECONDS=0
+    [ "$status" -ne 0 ]
+    [ "$(operation "$tmp" status)" = in_progress ]
+    ! grep -q record_upgrade_metric "$tmp/log"
+}
+
+@test "a retry after the target image started keeps the operation's id, start and source version" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_RUN_STATUS=1 FAKE_SCHEMA_STATUS='{"settled": false}'
+    [ "$status" -ne 0 ]
+    [ "$(cat "$tmp/state/backend")" = v2.0.0 ]   # the target image runs; its database upgrade did not finish
+    id="$(operation "$tmp" id)"; started="$(operation "$tmp" started_at)"
+    sleep 1
+
+    run_update "$tmp" 2.0.0 FAKE_SCHEMA_STATUS='{"settled": false}'
+    [ "$status" -eq 0 ]
+    [ "$(operation "$tmp" id)" = "$id" ]
+    [ "$(operation "$tmp" started_at)" = "$started" ]
+    [ "$(operation "$tmp" from_version)" = 1.0.0 ]
+    [ "$(operation "$tmp" status)" = completed ]
+    grep -q "^record_upgrade_metric args=.*--operation-id $id --from-version 1.0.0 --to-version 2.0.0 --started-at $started " "$tmp/log"
+}
+
+@test "an interrupted update whose target already runs settled is finished with readiness, not skipped" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_READY=no BIOAF_READY_TIMEOUT_SECONDS=0
+    [ "$status" -ne 0 ]
+    id="$(operation "$tmp" id)"
+
+    run_update "$tmp" 2.0.0 FAKE_SCHEMA_STATUS='{"settled": true}'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Nothing to update"* ]]
+    [ "$(operation "$tmp" status)" = completed ]
+    grep -q "^record_upgrade_metric args=.*--operation-id $id " "$tmp/log"
+}
+
+@test "a settled update with no unfinished operation is a no-op that records nothing" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v2.0.0
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_SCHEMA_STATUS='{"settled": true}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Nothing to update"* ]]
+    [ ! -e "$tmp/host-state/deployments.json" ] || [ -z "$(operation "$tmp" id)" ]
+    ! grep -q record_upgrade_metric "$tmp/log" 2>/dev/null
+}
+
+@test "a later update to a different target is a new operation" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0
+    first="$(operation "$tmp" id)"
+    run_update "$tmp" 3.0.0
+    [ "$status" -eq 0 ]
+    [ "$(operation "$tmp" id)" != "$first" ]
+    [ "$(operation "$tmp" from_version)" = 2.0.0 ]
+    [ "$(grep -c '^record_upgrade_metric' "$tmp/log")" = 2 ]
+}
+
+@test "a failed metrics record never changes the update's outcome" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_RECORD_STATUS=1
+    [ "$status" -eq 0 ]
+    [ "$(status_field "$tmp" status)" = completed ]
+    grep -q '^record_upgrade_metric' "$tmp/log"
+}
+
+@test "a damaged deployment record suppresses the report but never stops the update" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    mkdir -m 700 "$tmp/host-state"; echo '{not json' > "$tmp/host-state/deployments.json"
+    run_update "$tmp" 2.0.0
+    [ "$status" -eq 0 ]
+    [ "$(status_field "$tmp" status)" = completed ]
+    [ "$(cat "$tmp/host-state/deployments.json")" = '{not json' ]
+    ! grep -q record_upgrade_metric "$tmp/log"
+}
+
+@test "recording the operation keeps the rest of the deployment record" {
+    tmp="$(mktemp -d)"
+    mkdir -m 700 "$tmp/host-state"
+    cat > "$tmp/host-state/deployments.json" <<'JSON'
+{"format": 1, "current": {"tag": "v1.0.0", "backend": "sha256:b", "frontend": "sha256:f"}, "previous": null,
+ "candidate": {"operation": "update", "tag": "v2.0.0", "started_at": "2026-01-01T00:00:00+00:00"}, "extra": 7}
+JSON
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; deploy_operation_start v2.0.0 1.0.0 && deploy_operation_complete v2.0.0"
+    [ "$status" -eq 0 ]
+    python3 - "$tmp/host-state/deployments.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert r["current"] == {"tag": "v1.0.0", "backend": "sha256:b", "frontend": "sha256:f"}, r
+assert r["candidate"]["tag"] == "v2.0.0" and r["extra"] == 7, r
+op = r["update_operation"]
+assert op["status"] == "completed" and op["target"] == "v2.0.0" and op["from_version"] == "1.0.0", op
+PY
+}
+
+@test "a completed operation's completion time never changes" {
+    tmp="$(mktemp -d)"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'
+        deploy_operation_start v2.0.0 1.0.0 >/dev/null; first=\$(deploy_operation_complete v2.0.0); sleep 1
+        again=\$(deploy_operation_complete v2.0.0); [ \"\$first\" = \"\$again\" ] && [ -n \"\$first\" ]"
+    [ "$status" -eq 0 ]
+}
+
+@test "a local build records no update operation and asks for no upgrade report" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"
+    run env FAKE_LOG="$tmp/log" bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc'; DC_BUILD='$tmp/fake-dc build'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'
+        get_current_version() { echo 2.0.0; }
+        cmd_build"
+    [ "$status" -eq 0 ]
+    [ -z "$(operation "$tmp" id 2>/dev/null)" ]
+    ! grep -q record_upgrade_metric "$tmp/log" 2>/dev/null
 }

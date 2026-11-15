@@ -377,3 +377,29 @@ async def test_no_database_transaction_is_open_during_the_network_call(session, 
     await sender.send_pending(tracking_factory, now=NOW, transport=Probe())
 
     assert seen == [False]
+
+
+@pytest.mark.asyncio
+async def test_each_pass_reconciles_a_completed_upgrade_the_updater_could_not_record(
+    session, admin_user, metrics_on, tmp_path, monkeypatch
+):
+    await _opt_in(session)
+    started = NOW + timedelta(hours=1)
+    (tmp_path / "current.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "from_version": "2026.11.26",
+                "to_version": "2026.12.1",
+                "operation_id": "8f6b1e0c-2d4a-4c1e-9a77-0b5f3c2d1e00",
+                "operation_started_at": started.isoformat(),
+                "operation_completed_at": (started + timedelta(minutes=10)).isoformat(),
+            }
+        )
+    )
+    monkeypatch.setattr(settings, "update_status_dir", str(tmp_path))
+    capture = Capture()
+
+    await _send(capture, now=started + timedelta(minutes=11))
+
+    assert sorted(b["event"] for b in capture.bodies()) == ["bioaf_installation_observed", "bioaf_upgrade_completed"]
