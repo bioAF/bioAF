@@ -10,7 +10,8 @@
   a backup never replaces an existing one of the same name, and dump files are private and removed when the
   operation ends.
 - Database backups record a checksum when they are made, and a restore checks it, the backup's size, free disk
-  space and archive readability before touching any database. A restore now succeeds or fails as a whole: an
+  space (including room on the database disk, which the backend now sees read-only) and archive readability
+  before touching any database, and stops the import if the database disk runs low. A restore now succeeds or fails as a whole: an
   import error no longer opens a review of a partly restored copy. Backups made before this release are listed as
   unverified and need an explicit, audited confirmation to restore.
 
@@ -26,6 +27,8 @@
   Associate dialog, Plot Archive, glossary scans) now search by name and page through every experiment instead of
   stopping at the first 100 or 500 (#104, #105). Deleted experiments no longer appear in experiment lists unless
   the deleted status is chosen.
+- Backup & Recovery shows the restore review's Accept and Reject as soon as a restore is ready, instead of only
+  after the page is reloaded.
 
 ### Updates
 
@@ -36,3 +39,4 @@
   backups beyond the two newest of each kind, reports a build cache over 5 GiB, and stops if the disk would fall
   below its floor (#110). The images that ran before keep their own tag (`local_tag` in the record), so a
   rebuild of the same version cannot remove them, and setting `BIOAF_IMAGE_TAG` to that tag rolls back.
+- The update agent's log (`host-only/agent.log`) rotates at 10 MiB, keeping two older files.

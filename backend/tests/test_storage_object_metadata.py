@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import pathlib
 import stat
 from unittest.mock import MagicMock
 
@@ -258,11 +259,11 @@ async def test_os_umask_does_not_widen_the_record(local_store, monkeypatch):
 # --- confinement of the metadata area (review finding 1) ---------------------------------------------------
 
 
-def _metadata_root(root) -> "os.PathLike":
+def _metadata_root(root) -> "pathlib.Path":
     import pathlib
 
-    found = [p for p in pathlib.Path(root).rglob(METADATA_DIR)]
-    return found[0] if found else None
+    [found] = pathlib.Path(root).rglob(METADATA_DIR)
+    return found
 
 
 @pytest.mark.parametrize("where", ["container", "key-dir", "area"])
