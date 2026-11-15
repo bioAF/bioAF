@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from tests.plugins.db_url import database_url
 from tests.support import fixture_routes, worker_schema
 
-MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 42}
+MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 43}
 
 
 @pytest.fixture(autouse=True)
