@@ -193,6 +193,68 @@ async def test_a_child_that_cannot_be_reaped_is_reported_as_not_stopped(monkeypa
         await br.run_child(["pg_restore"], env={}, timeout=0.05, stop_grace=0.05, kill_wait=0.05)
 
 
+async def _started_child(tmp_path, **kwargs):
+    """Start a long child under run_child; return (task, pid) once it is running."""
+    marker = tmp_path / "pid"
+    task = asyncio.create_task(
+        br.run_child(
+            _python(f"import os,time; open({str(marker)!r},'w').write(str(os.getpid())); time.sleep(60)"),
+            env=dict(os.environ),
+            **kwargs,
+        )
+    )
+    deadline = time.monotonic() + 10
+    while not marker.exists() or not marker.read_text():
+        assert time.monotonic() < deadline
+        await asyncio.sleep(0.02)
+    return task, int(marker.read_text())
+
+
+async def test_a_failing_monitor_stops_and_waits_for_the_child(tmp_path, monkeypatch):
+    """A monitor that fails any way (here the disk probe's OSError) stops the child before the error leaves."""
+    monkeypatch.setattr(br, "WATCH_SECONDS", 0.05)
+    probes = []
+
+    def watch():
+        probes.append(1)
+        if len(probes) > 1:
+            raise OSError(5, "Input/output error")
+
+    task, pid = await _started_child(tmp_path, watch=watch)
+    with pytest.raises(OSError, match="Input/output"):
+        await task
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+async def test_a_failing_monitor_whose_child_cannot_be_stopped_reports_not_stopped(monkeypatch):
+    class Stuck:
+        returncode = None
+        pid = 999999
+        stderr = None
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
+        async def wait(self):
+            await asyncio.Event().wait()
+
+    async def spawn(*args, **kwargs):
+        return Stuck()
+
+    def watch():
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(br.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(br, "WATCH_SECONDS", 0.01)
+    with pytest.raises(br.ChildNotStopped) as raised:
+        await br.run_child(["pg_restore"], env={}, stop_grace=0.05, kill_wait=0.05, watch=watch)
+    assert isinstance(raised.value.__context__, OSError)
+
+
 async def test_a_missing_binary_is_its_own_category():
     result = await br.run_child(["/nonexistent/pg_dump"], env={})
     assert result.returncode is None and result.category == "missing_binary"

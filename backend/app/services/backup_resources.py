@@ -180,8 +180,9 @@ async def run_child(
 ) -> ChildResult:
     """Run one child to completion (or stop it on timeout or cancellation); see the module docstring.
 
-    ``watch`` runs every WATCH_SECONDS while the child runs; a ``ResourceLimit`` it raises stops the child and
-    is raised to the caller.
+    ``watch`` runs every WATCH_SECONDS while the child runs; any error it raises (a ``ResourceLimit``, or the probe's
+    own failure such as ``OSError``) stops and waits for the child, then is raised to the caller. If the child cannot
+    be stopped, ``ChildNotStopped`` is raised instead, with the monitor's error as its context.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -224,7 +225,7 @@ async def run_child(
             if watch is not None:
                 try:
                     watch()
-                except ResourceLimit:
+                except Exception:
                     await _stop(proc, waiter, stop_grace, kill_wait)
                     raise
     except asyncio.CancelledError:

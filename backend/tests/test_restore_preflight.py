@@ -447,6 +447,54 @@ async def test_the_import_stops_when_the_database_volume_runs_low(harness, monke
     assert not any(c[0] == "swap" for c in harness.calls)
 
 
+async def test_a_failed_disk_probe_during_the_import_stops_pg_restore_first(harness, monkeypatch, db_volume, tmp_path):  # noqa: F811
+    """The database-volume probe can fail (OSError) mid-import: pg_restore is stopped and gone before the review
+    copy is dropped, and the restore fails without a swap."""
+    import asyncio
+
+    from app.services import backup_resources as br
+
+    _use(monkeypatch, FakeBackupStorage())
+    _disk(monkeypatch, scratch_free_gib=80, db_free_gib=20, db_dir=db_volume)
+    real_usage = br.shutil.disk_usage
+    monkeypatch.setattr(br, "WATCH_SECONDS", 0.05)
+    marker = tmp_path / "import-pid"
+    real_exec = asyncio.subprocess.create_subprocess_exec
+    alive_at_drop: list[bool] = []
+
+    async def slow_import(*argv, **kwargs):
+        if "--single-transaction" in argv:
+
+            def failing(path):
+                if str(path).startswith(db_volume) and marker.exists():
+                    raise OSError(5, "Input/output error")
+                return real_usage(path)
+
+            monkeypatch.setattr(br.shutil, "disk_usage", failing)
+            code = f"import os,time; open({str(marker)!r},'w').write(str(os.getpid())); time.sleep(30)"
+            return await real_exec(sys.executable, "-c", code, **kwargs)
+        return await real_exec(sys.executable, "-c", "pass", **kwargs)
+
+    real_drop = backup_service._drop_review_copy
+
+    async def drop(reference):
+        try:
+            os.kill(int(marker.read_text()), 0)
+            alive_at_drop.append(True)
+        except ProcessLookupError:
+            alive_at_drop.append(False)
+        await real_drop(reference)
+
+    monkeypatch.setattr(backup_service.asyncio, "create_subprocess_exec", slow_import)
+    monkeypatch.setattr(backup_service, "_drop_review_copy", drop)
+    result = await asyncio.wait_for(_start(), 20)
+    assert result["status"] == "error"
+    assert alive_at_drop == [False]
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)
+    assert not any(c[0] == "swap" for c in harness.calls)
+
+
 @needs_initdb
 async def test_the_database_volume_check_reads_the_real_primary_size(monkeypatch, tmp_path):
     """On a real server: the primary's size is read and a restore with room proceeds; without room it is refused."""
