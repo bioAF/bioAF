@@ -98,6 +98,8 @@ class CaseDatabase:
             "BIOAF_DATABASE_URL": self.url,
             # Required by settings (plan 21); the upgrade lifecycle does not depend on it.
             "BIOAF_COMPUTE_MODE": "local",
+            # Children never report installation metrics (ADR-075); the parent's setting does not reach them.
+            "BIOAF_INSTALL_METRICS_DISABLED": "1",
             "BIOAF_ENCRYPTION_KEYS": runner.TEST_ENCRYPTION_KEY,
             "BIOAF_JWT_SECRET_KEY": runner.TEST_JWT_SECRET,
             "BIOAF_UPGRADE_PG_BIN_DIR": str(pg_bin_dir()),

@@ -172,3 +172,18 @@ def test_production_compose_passes_the_runtime_overrides_but_never_disables_repo
     assert env["BIOAF_POSTHOG_HOST"] == "${BIOAF_POSTHOG_HOST:-}"
     dockerfile = (REPO / "docker" / "Dockerfile.backend").read_text()
     assert "INSTALL_METRICS_DISABLED" not in dockerfile
+
+
+def test_subprocess_launchers_pass_the_override_to_their_children():
+    """A parent's settings do not reach a child: each launcher that clears BIOAF_* sets it again."""
+    from tests.support import case_db
+
+    case = case_db.CaseDatabase()
+    try:
+        assert case.env()["BIOAF_INSTALL_METRICS_DISABLED"] == "1"
+    finally:
+        import shutil
+
+        shutil.rmtree(case.dir, ignore_errors=True)
+    runner_source = (BACKEND / "tests" / "support" / "historical_runner.py").read_text()
+    assert '"BIOAF_INSTALL_METRICS_DISABLED": "1"' in runner_source

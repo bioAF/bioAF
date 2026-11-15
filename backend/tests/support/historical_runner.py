@@ -148,6 +148,8 @@ def build(commit: str, head: str, url: str) -> Manifest:
         "BIOAF_ENCRYPTION_KEYS": TEST_ENCRYPTION_KEY,
         "BIOAF_JWT_SECRET_KEY": TEST_JWT_SECRET,
         "BIOAF_ENVIRONMENT": "test",
+        # Releases with installation metrics never report from a test build (ADR-075).
+        "BIOAF_INSTALL_METRICS_DISABLED": "1",
     }
     proc = subprocess.run(
         [sys.executable, "-I", "-c", BOOTSTRAP, str(root), url, head],
