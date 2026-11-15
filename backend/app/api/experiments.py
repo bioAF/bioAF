@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.pagination import PageNumber, UnboundedPageSize
@@ -77,11 +79,13 @@ def _experiment_response(exp) -> ExperimentResponse:
 async def list_experiments(
     current_user: dict = require_permission("experiments", "view"),
     page: PageNumber = 1,
-    page_size: UnboundedPageSize = 25,
+    # Pickers page through every experiment (issues #104, #105); a page holds at most 100.
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
     project_id: int | None = None,
     status: str | None = None,
     owner_user_id: int | None = None,
     search: str | None = None,
+    name: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
@@ -95,6 +99,7 @@ async def list_experiments(
         status=status,
         owner_user_id=owner_user_id,
         search=search,
+        name=name,
     )
 
     return ExperimentListResponse(

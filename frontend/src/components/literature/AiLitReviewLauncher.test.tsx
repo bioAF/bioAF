@@ -64,9 +64,12 @@ beforeEach(() => {
       return Promise.resolve({ projects, total: projects.length });
     }
     if (url.includes("/api/experiments")) {
+      // The server applies the project filter (project_id), as the real list does.
+      const project = new URL(url, "http://x").searchParams.get("project_id");
+      const matching = experiments.filter((e) => !project || String(e.project?.id) === project);
       return Promise.resolve({
-        experiments,
-        total: experiments.length,
+        experiments: matching,
+        total: matching.length,
         page: 1,
         page_size: 100,
       });
@@ -174,4 +177,22 @@ test("submitting calls runLitReview with the chosen experiment id", async () => 
   await waitFor(() => {
     expect(mockRun).toHaveBeenCalledWith(103);
   });
+});
+
+test("an experiment past the first page is reachable by name (#105)", async () => {
+  const many = Array.from({ length: 620 }, (_, i) => ({ id: 1000 + i, name: `Bulk ${i}`, project: null }));
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/projects")) return Promise.resolve({ projects, total: projects.length });
+    const params = new URL(url, "http://x").searchParams;
+    const name = params.get("name") ?? "";
+    const matching = many.filter((e) => e.name.includes(name));
+    const page = Number(params.get("page"));
+    return Promise.resolve({ experiments: matching.slice((page - 1) * 100, page * 100), total: matching.length });
+  });
+  const user = userEvent.setup();
+  render(<AiLitReviewLauncher onSubmitted={() => {}} />);
+  await user.type(await screen.findByRole("searchbox", { name: "Search names" }), "Bulk 612");
+  const option = await screen.findByRole("option", { name: "Bulk 612" });
+  await user.selectOptions(screen.getByLabelText(/experiment/i), option);
+  expect(screen.getByRole("button", { name: /run/i })).not.toBeDisabled();
 });

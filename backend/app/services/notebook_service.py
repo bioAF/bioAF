@@ -24,6 +24,7 @@ from app.services.machine_types import machine_type_capacity
 from app.services.session_bucket import _bucket_filter
 from app.adapters.models import TerminationResult
 from app.adapters.registry import get_notebook_adapter
+from app.services.launch_scope import resolve_launch_scope
 
 logger = logging.getLogger("bioaf.notebooks")
 
@@ -110,6 +111,8 @@ class NotebookService:
             raise ConflictError(f"Quota exceeded: {message}")
 
         cpu_cores, memory_gb = NotebookService.get_resource_profile(resource_profile)
+        scope = await resolve_launch_scope(session, org_id, project_id=project_id, experiment_id=experiment_id)
+        project_id, experiment_id = scope.project_id, scope.experiment_id
 
         notebook_session = NotebookSession(
             user_id=user_id,

@@ -11514,6 +11514,17 @@
             "title": "Input File Ids",
             "type": "array"
           },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
           "resource_profile": {
             "default": "small",
             "enum": [
@@ -14368,6 +14379,17 @@
           },
           "filename": {
             "title": "Filename",
+            "type": "string"
+          },
+          "integrity": {
+            "default": "unknown",
+            "enum": [
+              "checksummed",
+              "unverified",
+              "invalid",
+              "unknown"
+            ],
+            "title": "Integrity",
             "type": "string"
           },
           "size_bytes": {
@@ -23422,6 +23444,11 @@
       },
       "StartPostgresRestoreRequest": {
         "properties": {
+          "allow_unverified": {
+            "default": false,
+            "title": "Allow Unverified",
+            "type": "boolean"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"
@@ -30782,6 +30809,8 @@
             "required": false,
             "schema": {
               "default": 25,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Page Size",
               "type": "integer"
             }
@@ -30848,6 +30877,22 @@
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
             }
           }
         ],

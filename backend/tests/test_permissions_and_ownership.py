@@ -1127,3 +1127,33 @@ async def test_a_scope_without_the_role_grant_is_not_enough(client, session, adm
     response = await client.post("/api/samples/bulk/delete", headers=headers, json={"sample_ids": []})
     assert response.status_code == 403
     assert response.json()["detail"] == "role_missing"
+
+
+# --- lock (issue #107): the grant the Lock control follows ---
+
+
+@pytest.mark.asyncio
+async def test_lock_locks_a_user_in_the_same_organization(client, admin_headers, viewer_user, session):
+    response = await client.post(f"/api/users/{viewer_user.id}/lock", headers=admin_headers)
+    assert response.status_code == 200
+    await session.refresh(viewer_user)
+    assert viewer_user.status == "locked"
+
+
+@pytest.mark.asyncio
+async def test_lock_needs_users_deactivate(client, session, admin_user, viewer_user):
+    headers = await _custom_role_headers(session, admin_user.organization_id, "lk@test.com", [("users", "view")])
+    response = await client.post(f"/api/users/{viewer_user.id}/lock", headers=headers)
+    assert response.status_code == 403
+    await session.refresh(viewer_user)
+    assert viewer_user.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_lock_cannot_reach_another_organizations_user(client, admin_headers, foreign, session):
+    response = await client.post(f"/api/users/{foreign.user.id}/lock", headers=admin_headers)
+    missing = await client.post("/api/users/999999/lock", headers=admin_headers)
+    assert response.status_code == 404 and missing.status_code == 404
+    assert response.json() == missing.json()  # existence elsewhere is not revealed
+    await session.refresh(foreign.user)
+    assert foreign.user.status == "active"

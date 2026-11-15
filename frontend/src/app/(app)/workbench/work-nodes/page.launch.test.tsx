@@ -248,3 +248,35 @@ test("a launch still provisioning does not block the next one, and each outcome 
   await act(async () => replies[1].resolve({}));
   expect(screen.getByText("Zone exhausted")).toBeInTheDocument();
 });
+
+test("an experiment past the first hundred is found by name and launches with its project (#104)", async () => {
+  mockPost.mockResolvedValue({ id: 1, status: "starting" });
+  serve();
+  const base = mockGet.getMockImplementation()!;
+  const many = Array.from({ length: 180 }, (_, i) => ({ id: 500 + i, name: `Deep ${i}`, project: { id: 7, name: "Project Alpha" } }));
+  mockGet.mockImplementation((url: string, ...rest: unknown[]) => {
+    const u = new URL(url, "http://x");
+    if (u.pathname === "/api/experiments") {
+      const name = u.searchParams.get("name") ?? "";
+      const page = Number(u.searchParams.get("page"));
+      const matching = many.filter((e) => e.name.includes(name));
+      return Promise.resolve({ experiments: matching.slice((page - 1) * 100, page * 100), total: matching.length });
+    }
+    return base(url, ...rest);
+  });
+  render(<WorkNodesPage />);
+  const dialog = await openDialog();
+  fireEvent.click(within(within(dialog).getByRole("group", { name: "Machine Profile" })).getAllByRole("button").find((b) => !b.hasAttribute("disabled"))!);
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Workbench template" }), { target: { value: "2" } });
+  await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Version" })).toBeInTheDocument());
+  fireEvent.change(within(dialog).getByRole("searchbox", { name: "Search names" }), { target: { value: "Deep 170" } });
+  await within(dialog).findByRole("option", { name: "Deep 170" });
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Select experiment" }), { target: { value: "670" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Next: Review" }));
+  expect(await within(dialog).findByText("Deep 170")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Launch Work Node" }));
+  const confirm = await screen.findByRole("dialog", { name: "Launch without inputs?" });
+  fireEvent.click(within(confirm).getByRole("button", { name: "Launch anyway" }));
+  await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  expect(mockPost.mock.calls.at(-1)?.[1]).toMatchObject({ experiment_id: 670, project_id: 7 });
+});

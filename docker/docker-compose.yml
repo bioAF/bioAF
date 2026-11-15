@@ -46,6 +46,8 @@ services:
       BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS: ${BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS:-3600}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
+      # A restore checks the database volume has room for the restored copy and its WAL before creating it.
+      BIOAF_RESTORE_DB_VOLUME_DIR: /var/lib/bioaf/db-volume
     volumes:
       - ../update-requests:/app/update-requests
       - ../update-status:/app/update-status
@@ -53,6 +55,8 @@ services:
       # app/schema_upgrade.py). On the host, beside ./bioaf backup's dumps, so they outlive the
       # container. Read fresh on every update, so the first update from any older ./bioaf gets it.
       - ../backups:/app/backups
+      # The database's volume, read-only, used only to measure its free space (BIOAF_RESTORE_DB_VOLUME_DIR).
+      - pgdata:/var/lib/bioaf/db-volume:ro
       # Mount the host .env read-write so the entrypoint can bootstrap
       # BIOAF_ENCRYPTION_KEYS on upgrades from < 0.13.0. See backend/entrypoint.sh
       # and decisions/ADR-047-data-at-rest-encryption.md. Mount is a no-op

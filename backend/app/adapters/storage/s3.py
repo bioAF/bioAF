@@ -37,6 +37,7 @@ from app.adapters.models import (
     BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
+    validate_object_metadata,
     SignedDownload,
     StorageMetrics,
     StorageObjectNotFound,
@@ -122,6 +123,16 @@ def _summarize_s3_lifecycle(rules) -> list[str]:
         if "Days" in expiration:
             summaries.append(f"Delete after {expiration['Days']} days")
     return summaries
+
+
+def _extra_args(content_type: str | None, metadata: dict[str, str] | None) -> dict | None:
+    """boto3 ExtraArgs for an upload; Metadata applies to single-part and multipart uploads alike."""
+    extra: dict = {}
+    if content_type:
+        extra["ContentType"] = content_type
+    if metadata:
+        extra["Metadata"] = metadata
+    return extra or None
 
 
 class S3StorageProvider(StorageProvider):
@@ -392,19 +403,35 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         await asyncio.to_thread(self._s3_write_bytes, uri, data, content_type, creds)
 
-    async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
+    async def upload_file(
+        self,
+        uri: str,
+        file_obj: BinaryIO,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
         if self.is_local:
-            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj)
+            await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds)
+        await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds, metadata)
 
-    async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
+    async def upload_filename(
+        self,
+        uri: str,
+        local_path: str,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        metadata = validate_object_metadata(metadata)
         if self.is_local:
-            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path)
+            await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds)
+        await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds, metadata)
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -470,8 +497,9 @@ class S3StorageProvider(StorageProvider):
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         if self.is_local:
-            size = await asyncio.to_thread(self._local_fs().size, uri)
-            return ObjectMetadata(uri=uri, size_bytes=size)
+            fs = self._local_fs()
+            size = await asyncio.to_thread(fs.size, uri)
+            return ObjectMetadata(uri=uri, size_bytes=size, metadata=await asyncio.to_thread(fs.read_metadata, uri))
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_object_metadata, uri, creds)
 
@@ -654,20 +682,18 @@ class S3StorageProvider(StorageProvider):
         bucket, key = self._parse_uri(uri)
         self._get_s3_client(creds).put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
 
-    def _s3_upload_file(self, uri: str, file_obj, content_type, creds) -> None:
+    def _s3_upload_file(self, uri: str, file_obj, content_type, creds, metadata=None) -> None:
         bucket, key = self._parse_uri(uri)
         if hasattr(file_obj, "seek"):
             try:
                 file_obj.seek(0)
             except (OSError, ValueError):
                 pass
-        extra = {"ContentType": content_type} if content_type else None
-        self._get_s3_client(creds).upload_fileobj(file_obj, bucket, key, ExtraArgs=extra)
+        self._get_s3_client(creds).upload_fileobj(file_obj, bucket, key, ExtraArgs=_extra_args(content_type, metadata))
 
-    def _s3_upload_filename(self, uri: str, local_path: str, content_type, creds) -> None:
+    def _s3_upload_filename(self, uri: str, local_path: str, content_type, creds, metadata=None) -> None:
         bucket, key = self._parse_uri(uri)
-        extra = {"ContentType": content_type} if content_type else None
-        self._get_s3_client(creds).upload_file(local_path, bucket, key, ExtraArgs=extra)
+        self._get_s3_client(creds).upload_file(local_path, bucket, key, ExtraArgs=_extra_args(content_type, metadata))
 
     def _s3_download_to_file(self, uri: str, file_obj, creds) -> None:
         from botocore.exceptions import ClientError
@@ -795,6 +821,7 @@ class S3StorageProvider(StorageProvider):
             content_type=resp.get("ContentType"),
             storage_class=resp.get("StorageClass", "STANDARD"),
             updated=str(resp["LastModified"]) if resp.get("LastModified") else None,
+            metadata=dict(resp.get("Metadata") or {}),
         )
 
     def _s3_get_bucket_info(self, uri: str, creds) -> dict:

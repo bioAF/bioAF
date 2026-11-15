@@ -581,6 +581,7 @@ jobs:
       - shell-tests
       - update-agent-systemd
       - security-scan
+      - dependency-review
       - docs-lint
     if: always() && github.event_name == 'pull_request'
     permissions:
@@ -670,6 +671,44 @@ jobs:
         uses: trufflesecurity/trufflehog@v3.88.8
         with:
           extra_args: --only-verified
+
+  # Newly introduced high or critical vulnerabilities fail the pull request in every dependency scope. Accepted risk
+  # comes only from the base branch's .github/security-exceptions.json, read by the base branch's adapter, so a pull
+  # request cannot grant itself an exception; an invalid record fails this job. Existing findings in the tree are the
+  # scheduled audit's job (dependency-audit.yml), so an old finding never blocks an unrelated pull request.
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the base branch's exception policy
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          sparse-checkout: |
+            .github/security-exceptions.json
+            scripts/ci/dependency_report.py
+          sparse-checkout-cone-mode: false
+
+      - name: Approved exceptions for introduced advisories
+        id: policy
+        run: |
+          if [ -f base/scripts/ci/dependency_report.py ] && [ -f base/.github/security-exceptions.json ]; then
+            python3 base/scripts/ci/dependency_report.py allow-ghsas \
+              --exceptions base/.github/security-exceptions.json >> "$GITHUB_OUTPUT"
+          else
+            echo "The base branch has no exception policy; no advisory is allowed."
+            echo "ghsas=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Review introduced dependencies
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime, development, unknown
+          vulnerability-check: true
+          license-check: false
+          allow-ghsas: ${{ steps.policy.outputs.ghsas }}
 
   docs-lint:
     name: Docs & ADR Lint

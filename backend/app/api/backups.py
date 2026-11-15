@@ -100,7 +100,8 @@ async def trigger_postgres_backup(
     """Trigger a manual PostgreSQL backup to GCS."""
     result = await BackupService.run_postgres_backup(session, current_user["org_id"])
     if result["status"] == "error":
-        raise HTTPException(500, detail=result.get("message", "Backup failed"))
+        status_code = {"busy": 409, "limit": 400}.get(result.get("reason", ""), 500)
+        raise HTTPException(status_code, detail=result.get("message", "Backup failed"))
     return result
 
 
@@ -191,10 +192,21 @@ async def start_postgres_restore(
     session: AsyncSession = Depends(get_session),
 ):
     """Start a database restore from a pg_dump backup. Enters review mode."""
-    result = await RestoreService.start(session, current_user["org_id"], body.filename)
+    result = await RestoreService.start(
+        session,
+        current_user["org_id"],
+        body.filename,
+        allow_unverified=body.allow_unverified,
+        user_id=int(current_user["sub"]),
+    )
     if result["status"] == "error":
-        conflict = "already active" in result["message"] or "still running" in result["message"]
-        status_code = 409 if conflict else 500
+        reason = result.get("reason")
+        if reason == "busy" or "already active" in result["message"]:
+            status_code = 409
+        elif reason in ("unverified", "integrity", "limit") or result["message"] == "Invalid backup filename":
+            status_code = 400
+        else:
+            status_code = 500
         raise HTTPException(status_code, detail=result["message"])
     return result
 

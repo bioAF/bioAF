@@ -10,7 +10,9 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import time
+import weakref
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -18,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.platform.platform_config_service import PlatformConfigService
+from app.services import backup_integrity, backup_resources
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import BACKUP_FAILURE
@@ -405,11 +408,13 @@ class BackupService:
             return [], 0
 
         total = len(files)
+        integrity = await _snapshot_integrity(bucket_name, [f["filename"] for f in files])
         snapshots = [
             {
                 "filename": f["filename"],
                 "date": f["timestamp"].isoformat(),
                 "size_bytes": f["size_bytes"],
+                "integrity": integrity[f["filename"]],
             }
             for f in files
         ]
@@ -417,126 +422,35 @@ class BackupService:
 
     @staticmethod
     async def run_postgres_backup(session: AsyncSession, org_id: int) -> dict:
-        """Run pg_dump, upload to GCS, then clean up the local temp file.
+        """Run pg_dump into a private workspace, upload it, rotate old backups, and remove the local copy.
 
-        Parses DATABASE_URL to extract connection parameters, runs pg_dump
-        in custom format (-Fc), uploads to the backups bucket, and rotates
-        old backups based on the retention setting.
+        One backup runs at a time (admitted before the first await). The dump never replaces an existing backup
+        of the same name. A failure returns and logs a reference, the phase, pg_dump's exit status and a safe
+        category; never pg_dump's stderr or an exception's text, which can hold SQL, row data or signed URLs.
         """
-        bucket_name = await _get_backups_bucket(session)
-        if not bucket_name:
-            return {"status": "error", "message": "No backups bucket configured"}
-
-        start = time.monotonic()
-        now = datetime.now(timezone.utc)
-        filename = f"pgdump-{now.strftime(_TIMESTAMP_FMT)}.dump"
-        output_path = f"/tmp/{filename}"
-
-        # Parse connection params from DATABASE_URL
-        url = settings.database_url.replace("+asyncpg", "")
-        parsed = urlparse(url)
-        host = parsed.hostname or "localhost"
-        port = str(parsed.port or 5432)
-        user = parsed.username or "bioaf_app"
-        password = parsed.password or ""
-        dbname = parsed.path.lstrip("/") or "bioaf"
-
-        env = {**os.environ, "PGPASSWORD": password}
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "pg_dump",
-                "-h",
-                host,
-                "-p",
-                port,
-                "-U",
-                user,
-                "-d",
-                dbname,
-                "-Fc",
-                "-f",
-                output_path,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                logger.error("pg_dump failed (exit %d): %s", process.returncode, stderr.decode())
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                return {"status": "error", "message": stderr.decode()[:500]}
-
-            size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-
-            # Upload to storage
-            from app.adapters.registry import get_storage_adapter
-
-            adapter = get_storage_adapter()
-            await adapter.upload_filename(adapter.build_uri(bucket_name, f"postgres/{filename}"), output_path)
-
-            # Remove local temp file
-            os.remove(output_path)
-
-            # Rotate old backups (use DB-stored retention, not config default)
-            retention = await BackupService._get_setting(session, "postgres_retention_days")
-            deleted = await _rotate_gcs_blobs(bucket_name, "postgres/", _PG_FILENAME_RE, retention)
-            if deleted:
-                logger.info("Rotated %d old postgres backups", deleted)
-
-            duration = time.monotonic() - start
-            logger.info("pg_dump completed: %s (%d bytes, %.1fs)", filename, size, duration)
-
-            await log_action(
-                session,
-                user_id=None,
-                entity_type="backup",
-                entity_id=0,
-                action="backup_completed",
-                details={
-                    "tier": "postgres",
-                    "filename": filename,
-                    "size_bytes": size,
-                    "duration_seconds": round(duration, 1),
-                },
-            )
-            await session.commit()
-
+        if _backup_state["stuck"]:
             return {
-                "status": "completed",
-                "filename": filename,
-                "size_bytes": size,
-                "duration_seconds": round(duration, 1),
+                "status": "error",
+                "reason": "busy",
+                "message": "An earlier database backup could not stop its database tool. Restart bioAF before "
+                "starting another backup.",
             }
-
-        except FileNotFoundError:
-            logger.error("pg_dump not found. Install postgresql-client in the container.")
-            await log_action(
-                session,
-                user_id=None,
-                entity_type="backup",
-                entity_id=0,
-                action="backup_failed",
-                details={"tier": "postgres", "reason": "pg_dump binary not found"},
-            )
-            await session.commit()
-            return {"status": "error", "message": "pg_dump binary not found"}
-        except Exception as e:
-            logger.exception("pg_dump backup failed")
-            # Clean up temp file on failure
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            await log_action(
-                session,
-                user_id=None,
-                entity_type="backup",
-                entity_id=0,
-                action="backup_failed",
-                details={"tier": "postgres", "reason": str(e)[:500]},
-            )
-            await session.commit()
-            return {"status": "error", "message": "Backup failed; check server logs."}
+        if _backup_state["running"]:
+            return {
+                "status": "error",
+                "reason": "busy",
+                "message": "A database backup is already running. Try again when it finishes.",
+            }
+        _backup_state["running"] = True
+        try:
+            return await _run_postgres_backup(session)
+        except _BackupStuck as stuck:
+            # Keep the exclusion: the child may still be writing. Only a restart (a new process) clears it.
+            _backup_state["stuck"] = True
+            await _record_backup_failure(session, stuck.reference, {"phase": "stop", "category": "child_not_stopped"})
+            return _backup_failure(stuck.reference)
+        finally:
+            _backup_state["running"] = False
 
     @staticmethod
     async def list_tfstate_files(session: AsyncSession) -> list[dict]:
@@ -845,6 +759,300 @@ class BackupService:
 
 
 # ---------------------------------------------------------------------------
+# PostgreSQL backup creation
+# ---------------------------------------------------------------------------
+
+# One backup at a time in this process (the image runs one serving process, app/runtime.py).
+_backup_state: dict = {"running": False, "stuck": False}
+
+
+class _BackupStuck(Exception):
+    """A backup's child did not stop; its workspace is kept and no backup may start until a restart."""
+
+    def __init__(self, reference: str):
+        super().__init__(reference)
+        self.reference = reference
+
+
+def _reference(kind: str) -> str:
+    """An operation reference shared by the response, the log lines and the audit record."""
+    return f"{kind}-{secrets.token_hex(4)}"
+
+
+def _pg_connection() -> tuple[list[str], dict[str, str]]:
+    """libpq connection arguments for the configured database, with the password only in the environment."""
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    args = ["-h", parsed.hostname or "localhost", "-p", str(parsed.port or 5432), "-U", parsed.username or "bioaf_app"]
+    return args, {**os.environ, "PGPASSWORD": parsed.password or ""}
+
+
+async def _record_backup_failure(session: AsyncSession, reference: str, details: dict) -> None:
+    await log_action(
+        session,
+        user_id=None,
+        entity_type="backup",
+        entity_id=0,
+        action="backup_failed",
+        details={"tier": "postgres", "reference": reference, **details},
+    )
+    await session.commit()
+
+
+async def _snapshot_integrity(bucket_name: str, names: list[str]) -> dict[str, str]:
+    """Each backup's integrity state (backup_integrity.classify), or ``unknown`` when it could not be read."""
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+    try:
+        legacy = await _legacy_inventory(adapter, bucket_name)
+    except Exception as exc:
+        logger.warning("Backup integrity inventory unavailable (%s)", type(exc).__name__)
+        return {n: "unknown" for n in names}
+    states = {}
+    for name in names:
+        try:
+            stored = await adapter.get_object_metadata(adapter.build_uri(bucket_name, f"postgres/{name}"))
+            states[name] = backup_integrity.classify(name, stored.metadata, legacy=legacy)[0]
+        except Exception as exc:
+            logger.warning("Backup integrity of %s unavailable (%s)", name, type(exc).__name__)
+            states[name] = "unknown"
+    return states
+
+
+async def _database_bytes(session: AsyncSession) -> int:
+    """The database's size, or 0 when it cannot be read (the floor alone then applies)."""
+    from sqlalchemy import text
+
+    try:
+        value = (await session.execute(text("SELECT pg_database_size(current_database())"))).scalar()
+        return int(value) if isinstance(value, int) else 0
+    except Exception as exc:
+        logger.warning("Could not read the database size for the backup space check (%s)", type(exc).__name__)
+        return 0
+
+
+def _backup_failure(reference: str) -> dict:
+    return {
+        "status": "error",
+        "reference": reference,
+        "message": f"The database backup failed (reference {reference}). "
+        "The server log has the details under that reference.",
+    }
+
+
+async def _unusable_archive(dump, size: int) -> str | None:
+    """Why a fresh dump cannot be kept (``empty_dump``/``archive_unreadable``), or None. Reads the TOC only."""
+    if size == 0:
+        return "empty_dump"
+    listing = await backup_resources.run_child(
+        [_pg_tool("pg_restore"), "--list", str(dump)],
+        env=dict(os.environ),
+        timeout=settings.restore_toc_timeout_seconds,
+    )
+    return None if listing.returncode == 0 and not listing.timed_out else "archive_unreadable"
+
+
+async def _legacy_inventory(adapter, bucket_name: str) -> frozenset[str]:
+    """The backups older than integrity markers, recording the inventory the first time it is needed.
+
+    A listing that fails raises: an inventory written from a failed listing would silently disqualify every
+    older backup.
+    """
+    from app.adapters.models import StorageObjectNotFound
+
+    uri = adapter.build_uri(bucket_name, backup_integrity.CUTOVER_KEY)
+    try:
+        return backup_integrity.parse_cutover(await adapter.read_bytes(uri))
+    except StorageObjectNotFound:
+        pass
+    # The inventory is written once. Concurrent first callers (a listing and a backup) are serialized and the
+    # loser reads the winner's record, so no later write can add a newer backup to it. One serving process
+    # (app/runtime.py) makes the in-process lock sufficient.
+    async with _cutover_lock():
+        try:
+            return backup_integrity.parse_cutover(await adapter.read_bytes(uri))
+        except StorageObjectNotFound:
+            pass
+        return await _record_cutover(adapter, bucket_name, uri)
+
+
+_CUTOVER_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+
+
+def _cutover_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _CUTOVER_LOCKS.get(loop)
+    if lock is None:
+        lock = _CUTOVER_LOCKS[loop] = asyncio.Lock()
+    return lock
+
+
+async def _record_cutover(adapter, bucket_name: str, uri: str) -> frozenset[str]:
+    objects = await adapter.list_objects(adapter.build_uri(bucket_name, "postgres/"))
+    names = [o.storage_uri.rsplit("/", 1)[-1] for o in objects]
+    names = [n for n in names if _PG_FILENAME_RE.match(n)]
+    await adapter.write_bytes(
+        uri,
+        backup_integrity.cutover_document(names, created_at=_now().isoformat()),
+        content_type="application/json",
+    )
+    logger.info("Backup integrity cutover recorded: %d earlier backups are unverified", len(names))
+    return frozenset(names)
+
+
+async def _marker_confirmed(adapter, uri: str, filename: str, digest: str, size: int) -> bool:
+    try:
+        stored = await adapter.get_object_metadata(uri)
+    except Exception as exc:
+        logger.error("Reading back a new backup's metadata failed (%s)", type(exc).__name__)
+        return False
+    state, expected = backup_integrity.classify(filename, stored.metadata, legacy=frozenset())
+    return state == "checksummed" and expected == digest and stored.size_bytes in (None, size)
+
+
+async def _discard_upload(adapter, uri: str, reference: str) -> None:
+    try:
+        await adapter.delete(uri)
+    except Exception as exc:
+        logger.error("Backup %s: removing the unmarked upload failed (%s)", reference, type(exc).__name__)
+
+
+async def _run_postgres_backup(session: AsyncSession) -> dict:
+    from app.adapters.registry import get_storage_adapter
+
+    bucket_name = await _get_backups_bucket(session)
+    if not bucket_name:
+        return {"status": "error", "message": "No backups bucket configured"}
+
+    reference = _reference("backup")
+    start = time.monotonic()
+    now = datetime.now(timezone.utc)
+    filename = f"pgdump-{now.strftime(_TIMESTAMP_FMT)}.dump"
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    dbname = parsed.path.lstrip("/") or "bioaf"
+    phase = "prepare"
+    try:
+        async with backup_resources.private_workspace("backup") as workspace:
+            try:
+                # The same scratch floor as restores: the dump (at most about the database's size) must fit.
+                try:
+                    _check_scratch(await _database_bytes(session))
+                except backup_resources.ResourceLimit:
+                    logger.error("Backup %s refused: not enough free scratch space for the dump", reference)
+                    await _record_backup_failure(session, reference, {"phase": "prepare", "category": "scratch_space"})
+                    return {
+                        "status": "error",
+                        "reason": "limit",
+                        "reference": reference,
+                        "message": "The server does not have enough free disk space to make a backup.",
+                    }
+                dump = workspace.new_file("backup.dump")
+                conn_args, env = _pg_connection()
+                phase = "dump"
+                child = await backup_resources.run_child(
+                    [_pg_tool("pg_dump"), *conn_args, "-d", dbname, "-Fc", "-f", str(dump)], env=env
+                )
+                if child.returncode is None:
+                    logger.error("Backup %s: pg_dump not found. Install postgresql-client in the container.", reference)
+                    await _record_backup_failure(session, reference, {"reason": "pg_dump binary not found"})
+                    return {"status": "error", "reference": reference, "message": "pg_dump binary not found"}
+                if child.returncode != 0:
+                    logger.error(
+                        "Backup %s failed: pg_dump exited %d (%s)", reference, child.returncode, child.category
+                    )
+                    await _record_backup_failure(
+                        session,
+                        reference,
+                        {"phase": phase, "exit_status": child.returncode, "category": child.category},
+                    )
+                    return _backup_failure(reference)
+
+                size = dump.stat().st_size
+                phase = "verify"
+                unusable = await _unusable_archive(dump, size)
+                if unusable:
+                    logger.error("Backup %s failed: the dump is not a usable archive (%s)", reference, unusable)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": unusable})
+                    return _backup_failure(reference)
+                digest = await asyncio.to_thread(backup_integrity.file_sha256, dump)
+
+                adapter = get_storage_adapter()
+                uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
+                phase = "cutover"
+                await _legacy_inventory(adapter, bucket_name)  # recorded before the first marked backup exists
+                phase = "upload"
+                if await adapter.exists(uri):
+                    logger.error("Backup %s: %s already exists; it was not replaced", reference, filename)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": "name_exists"})
+                    return {
+                        "status": "error",
+                        "reference": reference,
+                        "message": f"A backup named {filename} already exists, so it was not replaced. Try again.",
+                    }
+                await backup_resources.finish_before_cleanup(
+                    adapter.upload_filename(uri, str(dump), metadata=backup_integrity.marker(filename, digest))
+                )
+                phase = "confirm"
+                if not await _marker_confirmed(adapter, uri, filename, digest, size):
+                    logger.error("Backup %s failed: the stored backup does not carry its checksum marker", reference)
+                    await _discard_upload(adapter, uri, reference)
+                    await _record_backup_failure(session, reference, {"phase": phase, "category": "marker_missing"})
+                    return _backup_failure(reference)
+            except backup_resources.ChildNotStopped:
+                workspace.retain()  # the child may still be writing its dump
+                raise
+
+        # Rotate old backups (use DB-stored retention, not config default). The new backup is already stored,
+        # so a rotation failure is logged and does not turn a completed backup into a failed one.
+        phase = "rotate"
+        try:
+            retention = await BackupService._get_setting(session, "postgres_retention_days")
+            deleted = await _rotate_gcs_blobs(bucket_name, "postgres/", _PG_FILENAME_RE, retention)
+            if deleted:
+                logger.info("Rotated %d old postgres backups", deleted)
+        except Exception as exc:
+            logger.error("Backup %s: rotating old backups failed (%s)", reference, type(exc).__name__)
+        phase = "record"
+
+        duration = time.monotonic() - start
+        logger.info("Backup %s: pg_dump completed: %s (%d bytes, %.1fs)", reference, filename, size, duration)
+        await log_action(
+            session,
+            user_id=None,
+            entity_type="backup",
+            entity_id=0,
+            action="backup_completed",
+            details={
+                "tier": "postgres",
+                "reference": reference,
+                "filename": filename,
+                "size_bytes": size,
+                "duration_seconds": round(duration, 1),
+            },
+        )
+        await session.commit()
+        return {
+            "status": "completed",
+            "reference": reference,
+            "filename": filename,
+            "size_bytes": size,
+            "duration_seconds": round(duration, 1),
+        }
+    except backup_resources.ChildNotStopped:
+        logger.error(
+            "Backup %s: %s did not stop, so its workspace was kept and no new backup can start. "
+            "Restart bioAF; the workspace is removed by the next backup.",
+            reference,
+            "pg_dump" if phase == "dump" else "pg_restore --list",
+        )
+        raise _BackupStuck(reference) from None
+    except Exception as exc:
+        logger.error("Backup %s failed during %s (%s)", reference, phase, type(exc).__name__)
+        await _record_backup_failure(session, reference, {"phase": phase, "category": type(exc).__name__})
+        return _backup_failure(reference)
+
+
+# ---------------------------------------------------------------------------
 # Database Restore
 # ---------------------------------------------------------------------------
 
@@ -928,6 +1136,386 @@ _RECOVERY_REQUIRED = (
 )
 
 
+_RESTORE_PREPARING = "A restore is already being prepared. Try again when it finishes."
+_PREPARATION_STUCK = (
+    "An earlier restore could not stop its database import. Restart bioAF before starting another restore."
+)
+
+
+def _admit_preparation(filename: str) -> dict | None:
+    """Refuse, or take the restore admission (synchronously: no await happens before it is held)."""
+    if _restore_state["active"]:
+        return {"status": "error", "reason": "busy", "message": "A restore review is already active"}
+    if _restore_state["phase"] == "preparing":
+        return {"status": "error", "reason": "busy", "message": _RESTORE_PREPARING}
+    if _restore_state["phase"] == "preparation_stuck":
+        return {"status": "error", "reason": "busy", "message": _PREPARATION_STUCK}
+    # Reject anything that isn't a real pg_dump produced by this service: the name becomes an object key.
+    if not _PG_FILENAME_RE.fullmatch(filename):
+        return {"status": "error", "message": "Invalid backup filename"}
+    _restore_state["phase"] = "preparing"
+    return None
+
+
+def _restore_failure(reference: str) -> dict:
+    return {
+        "status": "error",
+        "reference": reference,
+        "message": f"Restore failed (reference {reference}). The server log has the details under that reference.",
+    }
+
+
+class PreparationUncertain(RuntimeError):
+    """A failed start could not confirm traffic is back on the primary; its admission and review copy are kept."""
+
+
+async def _undo_activation(reference: str) -> None:
+    """The swap to the review copy failed: put traffic back on the primary before anything is cleaned up."""
+    from app.database import swap_database
+
+    original_url = _restore_state["original_url"]
+    _restore_state.update(
+        active=False, phase="preparing", _decision=None, started_at=None, expires_at=None, backup_filename=""
+    )
+    try:
+        await runtime.shielded(swap_database(original_url), role="restore-swap-back")
+    except Exception as exc:
+        logger.error(
+            "Restore %s: the swap failed and returning to the primary also failed (%s)", reference, type(exc).__name__
+        )
+        raise PreparationUncertain(reference) from None
+
+
+async def _drop_review_copy(reference: str) -> None:
+    try:
+        await runtime.shielded(_run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"]), role="restore-drop-copy")
+    except Exception as exc:
+        logger.error("Restore %s: dropping bioaf_restore failed (%s)", reference, type(exc).__name__)
+
+
+class _Refused(Exception):
+    """A preflight refusal: ``reason`` for the route, ``message`` for the administrator; nothing was changed."""
+
+    def __init__(self, reason: str, message: str, category: str):
+        super().__init__(category)
+        self.reason, self.message, self.category = reason, message, category
+
+
+_LIMIT_MESSAGES = {
+    "dump_too_large": "This backup is larger than a restore may download ({limit}).",
+    "scratch_space": "The server does not have enough free disk space to prepare this restore.",
+    "download_timeout": "Downloading the backup took longer than a restore allows. Try again later.",
+    "db_volume_space": "The database disk does not have enough free space for a restored copy of the database.",
+}
+
+
+def _pg_tool(name: str) -> str:
+    """The image's pinned PostgreSQL 16 client when present (Dockerfile.backend), else the one on PATH."""
+    pinned = os.path.join(settings.upgrade_pg_bin_dir, name)
+    return pinned if os.path.exists(pinned) else name
+
+
+async def _expected_backup(
+    adapter, bucket_name: str, uri: str, filename: str, allow_unverified: bool
+) -> tuple[str | None, int]:
+    """The SHA-256 recorded at creation (None for an opted-in legacy backup) and the bytes to make room for, read
+    before any byte is downloaded. An unknown size reserves the whole limit."""
+    stored = await adapter.get_object_metadata(uri)
+    legacy = await _legacy_inventory(adapter, bucket_name)
+    state, expected = backup_integrity.classify(filename, stored.metadata, legacy=legacy)
+    if state == "unverified" and not allow_unverified:
+        raise _Refused(
+            "unverified",
+            "This backup was made before bioAF recorded checksums, so its contents cannot be verified. "
+            "Confirm the unverified restore to use it anyway.",
+            "unverified",
+        )
+    if state not in ("checksummed", "unverified"):
+        raise _Refused(
+            "integrity", "This backup's checksum record is missing or damaged, so it cannot be restored.", "invalid"
+        )
+    limit = settings.restore_max_dump_bytes
+    if stored.size_bytes is not None and stored.size_bytes > limit:
+        raise _Refused("limit", _LIMIT_MESSAGES["dump_too_large"].format(limit=_human_bytes(limit)), "dump_too_large")
+    return expected, stored.size_bytes if stored.size_bytes is not None else limit
+
+
+def _human_bytes(n: int) -> str:
+    return f"{n / 1024**3:g} GiB" if n >= 1024**3 else f"{n} bytes"
+
+
+def _check_scratch(needed: int) -> None:
+    backup_resources.require_scratch(
+        settings.backup_scratch_dir,
+        needed,
+        floor_min=settings.restore_scratch_floor_min_bytes,
+        floor_percent=settings.restore_scratch_floor_percent,
+    )
+
+
+async def _primary_database_bytes() -> int:
+    """The primary database's size, read through the maintenance connection."""
+    import asyncpg
+
+    parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
+    conn = await asyncpg.connect(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 5432,
+        user=parsed.username or "bioaf_app",
+        password=parsed.password or "",
+        database="postgres",
+    )
+    try:
+        return int(await conn.fetchval("SELECT pg_database_size($1)", parsed.path.lstrip("/") or "bioaf"))
+    finally:
+        await conn.close()
+
+
+async def _db_volume_check(dump_bytes: int, reference: str):
+    """Require room for the restored copy and its WAL (2 x max(primary size, dump size)) above the floor on the
+    database volume; return a watch for the import.
+
+    Unconfigured (no mount, e.g. development) is reported as not measured. Configured but not visible refuses:
+    a restore cannot claim room it could not see.
+    """
+    directory = settings.restore_db_volume_dir
+    if not directory:
+        logger.warning(
+            "Restore %s: database volume headroom not measured (BIOAF_RESTORE_DB_VOLUME_DIR unset)", reference
+        )
+        return None
+    if not os.path.isdir(directory):
+        raise _Refused(
+            "limit",
+            "The database disk is not visible to the backend, so the restore could not check it has room.",
+            "db_volume_unavailable",
+        )
+
+    needed = 2 * max(await _primary_database_bytes(), dump_bytes)
+
+    def require(more: int) -> None:
+        try:
+            backup_resources.require_scratch(
+                directory,
+                more,
+                floor_min=settings.restore_scratch_floor_min_bytes,
+                floor_percent=settings.restore_scratch_floor_percent,
+            )
+        except backup_resources.ResourceLimit:
+            raise backup_resources.ResourceLimit("db_volume_space") from None
+
+    require(needed)
+    return lambda: require(0)
+
+
+async def _audit_unverified(session: AsyncSession | None, user_id: int | None, filename: str, reference: str) -> None:
+    logger.warning("Restore %s: %s is an unverified backup; restoring it on explicit request", reference, filename)
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="backup",
+        entity_id=0,
+        action="restore_unverified_authorized",
+        details={"tier": "postgres", "filename": filename, "reference": reference},
+    )
+    if session is not None:
+        await session.commit()
+
+
+async def _prepare_review(
+    session: AsyncSession, filename: str, reference: str, *, allow_unverified: bool = False, user_id: int | None = None
+) -> dict:
+    """The admitted part of a restore start; the caller releases or keeps the admission.
+
+    Nothing touches bioaf_restore until the backup passed preflight: its recorded checksum and identity (read
+    before the download), the size and scratch limits, the downloaded bytes against that checksum, and a readable
+    table of contents. The import is all or nothing (--single-transaction, --exit-on-error); any nonzero exit
+    fails the restore before review.
+    """
+    from app.adapters.models import StorageObjectNotFound
+    from app.adapters.registry import get_storage_adapter
+
+    bucket_name = await _get_backups_bucket(session)
+    if not bucket_name:
+        return {"status": "error", "message": "No backups bucket configured"}
+
+    phase = "preflight"
+    created = False
+    started = time.monotonic()
+    try:
+        async with backup_resources.private_workspace("restore") as workspace:
+            try:
+                adapter = get_storage_adapter()
+                uri = adapter.build_uri(bucket_name, f"postgres/{filename}")
+                try:
+                    expected, needed = await _expected_backup(adapter, bucket_name, uri, filename, allow_unverified)
+                except StorageObjectNotFound:
+                    return {"status": "error", "message": f"Backup file not found: {filename}"}
+                if expected is None:
+                    await _audit_unverified(session, user_id, filename, reference)
+
+                phase = "download"
+                _check_scratch(needed)
+                dump = workspace.new_file("backup.dump")
+                try:
+                    size = await backup_resources.bounded_download(
+                        adapter,
+                        uri,
+                        dump,
+                        max_bytes=settings.restore_max_dump_bytes,
+                        timeout=settings.restore_download_timeout_seconds,
+                        # Bytes still to come must keep fitting above the floor as the dump lands.
+                        space_check=lambda written: _check_scratch(max(needed - written, 0)),
+                    )
+                except StorageObjectNotFound:
+                    return {"status": "error", "message": f"Backup file not found: {filename}"}
+                _check_scratch(0)
+                logger.info("Restore %s: downloaded %s (%d bytes)", reference, filename, size)
+
+                phase = "verify"
+                if expected is not None:
+                    if await asyncio.to_thread(backup_integrity.file_sha256, dump) != expected:
+                        raise _Refused(
+                            "integrity",
+                            "The downloaded backup does not match the checksum recorded when it was made, so it "
+                            "was not restored.",
+                            "checksum_mismatch",
+                        )
+                    logger.info("Restore %s: checksum matches the one recorded at creation", reference)
+                listing = await backup_resources.run_child(
+                    [_pg_tool("pg_restore"), "--list", str(dump)],
+                    env=dict(os.environ),
+                    timeout=settings.restore_toc_timeout_seconds,
+                )
+                if listing.returncode != 0 or listing.timed_out:
+                    raise _Refused(
+                        "integrity",
+                        "The backup file is not a readable database archive, so it was not restored.",
+                        "archive_unreadable",
+                    )
+
+                phase = "database_volume"
+                watch = await _db_volume_check(size, reference)
+
+                phase = "create_database"
+                created = True
+                await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore", "CREATE DATABASE bioaf_restore"])
+                logger.info("Restore %s: created bioaf_restore", reference)
+
+                phase = "pg_restore"
+                conn_args, env = _pg_connection()
+                child = await backup_resources.run_child(
+                    [
+                        _pg_tool("pg_restore"),
+                        *conn_args,
+                        "-d",
+                        "bioaf_restore",
+                        "-Fc",
+                        "--exit-on-error",
+                        "--single-transaction",
+                        "--no-owner",
+                        "--no-acl",
+                        str(dump),
+                    ],
+                    env=env,
+                    timeout=settings.restore_pg_restore_timeout_seconds,
+                    watch=watch,
+                )
+            except backup_resources.ChildNotStopped:
+                workspace.retain()
+                raise
+        if child.returncode is None:
+            raise FileNotFoundError("pg_restore")
+        if child.returncode != 0 or child.timed_out:
+            logger.error(
+                "Restore %s failed: pg_restore exited %s (%s%s); nothing was committed to bioaf_restore",
+                reference,
+                child.returncode,
+                child.category,
+                ", timed out" if child.timed_out else "",
+            )
+            await _drop_review_copy(reference)
+            return _restore_failure(reference)
+
+        # Pause automatic work and wait for in-flight work to settle: during the
+        # review, nothing automatic may write the review copy, and nothing external may start.
+        phase = "pause_work"
+        owner = runtime.current_owner()
+        busy = await _pause_work(owner)
+        if busy:
+            await _resume_work(owner)
+            logger.warning(
+                "Restore %s refused before the swap: background work still running (roles=%s)",
+                reference,
+                ",".join(busy),
+            )
+            await _drop_review_copy(reference)
+            return {
+                "status": "error",
+                "reason": "busy",
+                "message": "Background work is still running, so the database cannot be swapped safely. "
+                "Try the restore again when it finishes.",
+            }
+        _restore_state["_owner"] = owner
+
+        # Swap connection to bioaf_restore
+        phase = "swap"
+        from app.database import swap_database
+
+        restore_url = _build_restore_url()
+        _restore_state["original_url"] = settings.database_url
+        _restore_state["restore_url"] = restore_url
+        _restore_state["backup_filename"] = filename
+        _restore_state["active"] = True
+        _restore_state["phase"] = "reviewing"
+        _restore_state["_decision"] = asyncio.Lock()
+        _restore_state["started_at"] = _now()
+        _restore_state["expires_at"] = _now() + timedelta(seconds=RESTORE_REVIEW_SECONDS)
+
+        try:
+            await swap_database(restore_url)
+        except BaseException:
+            await _undo_activation(reference)
+            raise
+        logger.info(
+            "Restore %s: swapped to bioaf_restore for review (%.1fs to prepare)", reference, time.monotonic() - started
+        )
+
+        # Start timeout task
+        _restore_state["_timeout_task"] = runtime.spawn(_restore_timeout(), role="restore-review-timeout")
+
+        return {
+            "status": "reviewing",
+            "reference": reference,
+            "message": f"Restore from {filename} active. You have 1 hour to review.",
+        }
+
+    except (backup_resources.ChildNotStopped, PreparationUncertain):
+        raise
+    except (_Refused, backup_resources.ResourceLimit) as refusal:
+        if isinstance(refusal, backup_resources.ResourceLimit):
+            message = _LIMIT_MESSAGES[refusal.category].format(limit=_human_bytes(settings.restore_max_dump_bytes))
+            refusal = _Refused("limit", message, refusal.category)
+        logger.warning("Restore %s refused during %s (%s)", reference, phase, refusal.category)
+        if created:
+            await _drop_review_copy(reference)
+        return {"status": "error", "reason": refusal.reason, "reference": reference, "message": refusal.message}
+    except asyncio.CancelledError:
+        logger.warning("Restore %s cancelled during %s", reference, phase)
+        if not _restore_state["active"]:
+            await _resume_work(runtime.current_owner())
+            if created:
+                await _drop_review_copy(reference)
+        raise
+    except Exception as exc:
+        logger.error("Restore %s failed during %s (%s)", reference, phase, type(exc).__name__)
+        if not _restore_state["active"]:
+            await _resume_work(runtime.current_owner())
+            if created:
+                await _drop_review_copy(reference)
+        return _restore_failure(reference)
+
+
 class RestoreService:
     """Manages the database restore review flow."""
 
@@ -947,129 +1535,46 @@ class RestoreService:
         }
 
     @staticmethod
-    async def start(session: AsyncSession, org_id: int, filename: str) -> dict:
-        """Download backup from GCS, restore to bioaf_restore, swap connection."""
-        if _restore_state["active"]:
-            return {"status": "error", "message": "A restore review is already active"}
+    async def start(
+        session: AsyncSession,
+        org_id: int,
+        filename: str,
+        *,
+        allow_unverified: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        """Download a backup, restore it into bioaf_restore, and swap traffic to it for review.
 
-        # Reject anything that isn't a real pg_dump produced by this service.
-        # The filename feeds into local paths, the GCS blob key, and a subprocess
-        # arg; allowing slashes, '..', or null bytes here is a path-traversal
-        # foothold even for authenticated admins.
-        if not _PG_FILENAME_RE.fullmatch(filename):
-            return {"status": "error", "message": "Invalid backup filename"}
-        # `basename` is a no-op for filenames that passed the regex above (the
-        # pattern forbids slashes), but it is a CodeQL-recognised path-injection
-        # barrier. The regex provides semantic safety; this satisfies the
-        # taint-flow tracker so it stops flagging the sinks below.
-        filename = os.path.basename(filename)
-
-        bucket_name = await _get_backups_bucket(session)
-        if not bucket_name:
-            return {"status": "error", "message": "No backups bucket configured"}
-
-        dump_path = f"/tmp/{filename}"
-
+        Admission is taken before the first await: one restore prepares or is reviewed at a time, installation
+        wide. The dump goes into a private workspace (backup_resources), under a name the code chooses. A failure
+        returns a reference that the log lines share, never pg_restore's stderr or an exception's text.
+        """
+        refusal = _admit_preparation(filename)
+        if refusal:
+            return refusal
+        reference = _reference("restore")
+        keep_admission = False
         try:
-            # Download dump from storage
-            from app.adapters.models import StorageObjectNotFound
-            from app.adapters.registry import get_storage_adapter
-
-            try:
-                adapter = get_storage_adapter()
-                await adapter.download_to_filename(adapter.build_uri(bucket_name, f"postgres/{filename}"), dump_path)
-            except StorageObjectNotFound:
-                return {"status": "error", "message": f"Backup file not found: {filename}"}
-            logger.info("Downloaded %s from storage (%d bytes)", filename, os.path.getsize(dump_path))
-
-            # Create bioaf_restore database
-            await _run_admin_sql(
-                [
-                    "DROP DATABASE IF EXISTS bioaf_restore",
-                    "CREATE DATABASE bioaf_restore",
-                ]
-            )
-            logger.info("Created bioaf_restore database")
-
-            # Run pg_restore
-            parsed = urlparse(settings.database_url.replace("+asyncpg", ""))
-            env = {**os.environ, "PGPASSWORD": parsed.password or ""}
-            process = await asyncio.create_subprocess_exec(
-                "pg_restore",
-                "-h",
-                parsed.hostname or "localhost",
-                "-p",
-                str(parsed.port or 5432),
-                "-U",
-                parsed.username or "bioaf_app",
-                "-d",
-                "bioaf_restore",
-                "-Fc",
-                "--no-owner",
-                "--no-acl",
-                dump_path,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await process.communicate()
-
-            # pg_restore returns non-zero for warnings (e.g., "role does not exist")
-            # which are not fatal. Only log, don't fail.
-            if process.returncode != 0:
-                logger.warning("pg_restore warnings (exit %d): %s", process.returncode, stderr.decode()[:500])
-
-            os.remove(dump_path)
-
-            # Pause automatic work and wait for in-flight work to settle: during the
-            # review, nothing automatic may write the review copy, and nothing external may start.
-            owner = runtime.current_owner()
-            busy = await _pause_work(owner)
-            if busy:
-                await _resume_work(owner)
-                logger.warning(
-                    "Restore refused before the swap: background work still running (roles=%s)", ",".join(busy)
+            async with asyncio.timeout(settings.restore_preparation_timeout_seconds):
+                return await _prepare_review(
+                    session, filename, reference, allow_unverified=allow_unverified, user_id=user_id
                 )
-                await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
-                return {
-                    "status": "error",
-                    "message": "Background work is still running, so the database cannot be swapped safely. "
-                    "Try the restore again when it finishes.",
-                }
-            _restore_state["_owner"] = owner
-
-            # Swap connection to bioaf_restore
-            from app.database import swap_database
-
-            restore_url = _build_restore_url()
-            _restore_state["original_url"] = settings.database_url
-            _restore_state["restore_url"] = restore_url
-            _restore_state["backup_filename"] = filename
-            _restore_state["active"] = True
-            _restore_state["phase"] = "reviewing"
-            _restore_state["_decision"] = asyncio.Lock()
-            _restore_state["started_at"] = _now()
-            _restore_state["expires_at"] = _now() + timedelta(seconds=RESTORE_REVIEW_SECONDS)
-
-            await swap_database(restore_url)
-            logger.info("Swapped to bioaf_restore for review")
-
-            # Start timeout task
-            _restore_state["_timeout_task"] = runtime.spawn(_restore_timeout(), role="restore-review-timeout")
-
-            return {"status": "reviewing", "message": f"Restore from {filename} active. You have 1 hour to review."}
-
-        except Exception:
-            logger.exception("Restore failed")
-            if not _restore_state["active"]:
-                await _resume_work(runtime.current_owner())
-            if os.path.exists(dump_path):
-                os.remove(dump_path)
-            try:
-                await _run_admin_sql(["DROP DATABASE IF EXISTS bioaf_restore"])
-            except Exception:
-                pass
-            return {"status": "error", "message": "Restore failed; check server logs."}
+        except TimeoutError:
+            logger.error("Restore %s failed: preparation exceeded its time limit", reference)
+            return _restore_failure(reference)
+        except (backup_resources.ChildNotStopped, PreparationUncertain):
+            keep_admission = True
+            _restore_state["phase"] = "preparation_stuck"
+            logger.error(
+                "Restore %s could not be cleaned up safely, so bioaf_restore was kept and no new restore can "
+                "start. Restart bioAF; if traffic is not on the primary database, repair it first, then drop "
+                "the bioaf_restore database.",
+                reference,
+            )
+            return _restore_failure(reference)
+        finally:
+            if not keep_admission and _restore_state["phase"] == "preparing":
+                _restore_state["phase"] = "idle"
 
     @staticmethod
     async def accept() -> dict:

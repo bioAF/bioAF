@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { ExperimentFileUploader } from "@/components/files/ExperimentFileUploader";
@@ -12,7 +13,6 @@ import type {
   FileResponse,
   FileListResponse,
   FileProvenance,
-  ExperimentListResponse,
   SampleBrief,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -72,7 +72,6 @@ export function FileBrowser({
   const confirm = useConfirm();
   const [projectsDenied, setProjectsDenied] = useState(false);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
-  const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [filterType, setFilterType] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [filterSampleId, setFilterSampleId] = useState("");
@@ -97,7 +96,6 @@ export function FileBrowser({
   const [linkingFileIds, setLinkingFileIds] = useState<number[]>([]);
   const [linkProjectId, setLinkProjectId] = useState("");
   const [linkExperimentId, setLinkExperimentId] = useState("");
-  const [linkExperiments, setLinkExperiments] = useState<{ id: number; name: string }[]>([]);
   const [linkSampleId, setLinkSampleId] = useState("");
   const [linkSamples, setLinkSamples] = useState<{ id: number; label: string }[]>([]);
 
@@ -161,15 +159,6 @@ export function FileBrowser({
   const loadError = list.error && !list.stale ? loadFailureMessage("Files") : null;
   const fetchFiles = list.refresh;
 
-  const fetchMeta = useCallback(async () => {
-    try {
-      const expData = await api.get<ExperimentListResponse>("/api/experiments?page_size=100");
-      setExperiments(expData.experiments.map((e) => ({ id: e.id, name: e.name })));
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const fetchProjects = useCallback(async () => {
     const options = await loadProjectOptions();
     setProjects(options.projects.map((p) => ({ id: p.id, name: p.name })));
@@ -178,11 +167,10 @@ export function FileBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The file list loads itself (useResource above); the pickers load once.
+  // The file list loads itself (useResource above), and the experiment pickers page themselves.
   useEffect(() => {
-    fetchMeta();
     fetchProjects();
-  }, [fetchMeta, fetchProjects]);
+  }, [fetchProjects]);
 
   // Deep link: open a specific file's detail directly (e.g. a notification for a
   // file lands here). Fetched by id so it works regardless of the current page.
@@ -215,20 +203,11 @@ export function FileBrowser({
       .catch(() => setSamples([]));
   }, [experimentId]);
 
-  // Reload link experiments when link project changes
+  // A new link project starts the experiment and sample choice over.
   useEffect(() => {
     setLinkExperimentId("");
     setLinkSampleId("");
     setLinkSamples([]);
-    const qs = linkProjectId
-      ? `?project_id=${linkProjectId}&page_size=100`
-      : "?page_size=100";
-    api
-      .get<ExperimentListResponse>(`/api/experiments${qs}`)
-      .then((data) =>
-        setLinkExperiments(data.experiments.map((e) => ({ id: e.id, name: e.name }))),
-      )
-      .catch(() => setLinkExperiments([]));
   }, [linkProjectId]);
 
   // Load samples when link experiment changes
@@ -397,10 +376,8 @@ export function FileBrowser({
     setSelectedIds(new Set());
   };
 
-  const experimentName = (expId: number | null) => {
-    if (expId == null) return null;
-    return experiments.find((e) => e.id === expId)?.name ?? `#${expId}`;
-  };
+  const experimentName = (file: FileResponse) =>
+    file.provenance?.experiment_name ?? (file.experiment_id != null ? `#${file.experiment_id}` : null);
 
   const projectName = (projId: number | null) => {
     if (projId == null) return null;
@@ -528,21 +505,18 @@ export function FileBrowser({
         )}
 
         {showExperimentFilter && (
-          <select aria-label="Filter by experiment id"
-            value={filterExperimentId}
-            onChange={(e) => {
-              setFilterExperimentId(e.target.value);
-              setPage(1);
-            }}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-          >
-            <option value="">All experiments</option>
-            {experiments.map((e) => (
-              <option key={e.id} value={String(e.id)}>
-                {e.name}
-              </option>
-            ))}
-          </select>
+          <div className="w-64">
+            <ExperimentPicker
+              label="Filter by experiment id"
+              value={filterExperimentId ? Number(filterExperimentId) : null}
+              onChange={(id) => {
+                setFilterExperimentId(id == null ? "" : String(id));
+                setPage(1);
+              }}
+              noneLabel="All experiments"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+            />
+          </div>
         )}
 
         {samples.length > 0 && (
@@ -959,7 +933,7 @@ export function FileBrowser({
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Experiment</dt>
                 <dd className="mt-0.5 text-sm text-gray-900">
-                  {viewingFile.experiment_id ? experimentName(viewingFile.experiment_id) : "---"}
+                  {viewingFile.experiment_id ? experimentName(viewingFile) : "---"}
                 </dd>
               </div>
               <div>
@@ -1125,19 +1099,14 @@ export function FileBrowser({
                 >
                   Experiment
                 </label>
-                <select
+                <ExperimentPicker
                   id="fb-link-experiment"
-                  value={linkExperimentId}
-                  onChange={(e) => setLinkExperimentId(e.target.value)}
+                  label="Experiment"
+                  value={linkExperimentId ? Number(linkExperimentId) : null}
+                  onChange={(id) => setLinkExperimentId(id == null ? "" : String(id))}
+                  projectId={linkProjectId ? Number(linkProjectId) : null}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-                >
-                  <option value="">No experiment</option>
-                  {linkExperiments.map((exp) => (
-                    <option key={exp.id} value={String(exp.id)}>
-                      {exp.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div>

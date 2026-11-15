@@ -38,6 +38,8 @@ export interface SessionLaunchRequest {
   session_type: SessionType;
   resource_profile: ResourceProfile;
   experiment_id?: number | null;
+  /** The project the session works in; an experiment launch records its experiment's own project. */
+  project_id?: number | null;
   image_uri?: string | null;
   input_file_ids?: number[];
   environment_version_id?: number | null;

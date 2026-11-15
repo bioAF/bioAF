@@ -18,8 +18,6 @@ import type {
   SessionProvenance,
   ResourceProfile,
   SessionType,
-  Experiment,
-  ExperimentListResponse,
   EnvironmentResponse,
   EnvironmentListResponse,
   Project,
@@ -40,6 +38,8 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
 import { useLaunchSelection } from "@/components/launch/useLaunchSelection";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
+import type { ExperimentOption } from "@/lib/experimentOptions";
 import { usePermissionGate } from "@/hooks/useInfrastructureActions";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
@@ -82,7 +82,6 @@ export default function NotebooksPage() {
   const [profileAvailability, setProfileAvailability] = useState<Record<string, boolean>>({});
   const [poolMachineType, setPoolMachineType] = useState<string>("");
   const [profileNotice, setProfileNotice] = useState<string>("");
-  const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsDenied, setProjectsDenied] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
@@ -106,7 +105,6 @@ export default function NotebooksPage() {
   const [pendingLaunch, setPendingLaunch] = useState<SessionType | null>(null);
 
   useEffect(() => {
-    loadExperiments();
     loadProjects();
     loadEnvironments();
     loadResourceProfiles();
@@ -177,16 +175,6 @@ export default function NotebooksPage() {
     } catch (e) {
       logError("loading resource profiles", e);
       toast.error(loadFailureMessage("Resource profile availability"));
-    }
-  }
-
-  async function loadExperiments() {
-    try {
-      const data = await api.get<ExperimentListResponse>("/api/experiments?page_size=100");
-      setExperiments(data.experiments);
-    } catch (e) {
-      logError("loading experiments", e);
-      toast.error(loadFailureMessage("Experiments"));
     }
   }
 
@@ -271,8 +259,9 @@ export default function NotebooksPage() {
         ).length
       : 0;
 
-  function handleExperimentChange(expId: number | null) {
-    selection.selectExperiment(expId);
+  function handleExperimentChange(expId: number | null, exp: ExperimentOption | null) {
+    // The experiment's project becomes the launch's; a standalone experiment has none.
+    selection.selectExperiment(expId, expId == null ? null : (exp?.project?.id ?? null));
   }
 
   function handleLaunch(sessionType: SessionType) {
@@ -304,6 +293,7 @@ export default function NotebooksPage() {
           session_type: sessionType,
           resource_profile: selectedProfile,
           experiment_id: scopeType === "experiment" ? selectedExperiment : undefined,
+          project_id: scopeType === "project" ? (selectedProject ?? undefined) : undefined,
           image_uri: imageUri,
           input_file_ids: selectedFileIds.length > 0 ? selectedFileIds : undefined,
           environment_version_id: selectedVersionId,
@@ -850,17 +840,11 @@ export default function NotebooksPage() {
               </button>
             </div>
             {scopeType === "experiment" ? (
-              <select
-                aria-label="Experiment"
-                value={selectedExperiment || ""}
-                onChange={(e) => handleExperimentChange(e.target.value ? Number(e.target.value) : null)}
-                className="border rounded px-3 py-2 text-sm w-full"
-              >
-                <option value="">No experiment</option>
-                {experiments.map((exp) => (
-                  <option key={exp.id} value={exp.id}>{exp.name}{exp.code ? ` (${exp.code})` : ""}</option>
-                ))}
-              </select>
+              <ExperimentPicker
+                label="Experiment"
+                value={selectedExperiment || null}
+                onChange={handleExperimentChange}
+              />
             ) : (
               <select
                 aria-label="Project"

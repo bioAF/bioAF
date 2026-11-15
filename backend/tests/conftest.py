@@ -420,6 +420,18 @@ def _no_accession_manifest_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _private_backup_scratch(monkeypatch, tmp_path_factory):
+    """Each test's backup and restore workspaces live under its own root.
+
+    Entering a workspace removes earlier ones of the same kind (the caller holds that kind's reservation),
+    so parallel workers sharing the default root would remove each other's live workspaces.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "backup_scratch_dir", str(tmp_path_factory.mktemp("backup-scratch")))
+
+
+@pytest.fixture(autouse=True)
 def request_clock():
     """Source pacing, cooldowns, and retry backoff run on virtual time.
 

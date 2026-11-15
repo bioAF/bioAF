@@ -19,18 +19,28 @@ delivery 4 matrix):
 - Listings match keys literally, sort by key, honour ``recursive=False`` (nothing past the next
   ``/``) and return nothing for ``max_results <= 0``. ``uploaded_at`` is the destination's mtime.
 - Streams use ``shutil.copyfileobj``'s bounded buffer and are never closed here.
+- Custom object metadata lives outside every container, at ``<root>/.bioaf-object-metadata/<container>/<key>``
+  (directory 0700, records 0600, replaced atomically), so no listing sees it and no URI can address it. It
+  follows its object: a write drops the old record before the bytes change and writes the new one after, so an
+  interruption leaves an object with no metadata rather than with someone else's; copy carries it (or clears the
+  destination's), and delete removes it.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import secrets
 import shutil
+import stat
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import BinaryIO
 
-from app.adapters.models import StorageObjectNotFound, StoredObject
+from app.adapters.models import StorageObjectNotFound, StoredObject, validate_object_metadata
 from app.exceptions import ValidationError
+
+METADATA_DIR = ".bioaf-object-metadata"
 
 
 class LocalObjectFilesystem:
@@ -49,7 +59,7 @@ class LocalObjectFilesystem:
         return real == base or real.startswith(base + os.sep)
 
     def _container_root(self, container: str, uri: str) -> str:
-        if not container or container in (".", "..") or any(c in container for c in ("/", "\\", "\0")):
+        if not container or container in (".", "..", METADATA_DIR) or any(c in container for c in ("/", "\\", "\0")):
             raise ValidationError(f"Storage URI names an unsafe container: {uri!r}")
         return os.path.join(self._base(), container)
 
@@ -75,6 +85,126 @@ class LocalObjectFilesystem:
         if not self._inside(real):
             raise ValidationError(f"Storage path escapes the object root: {uri!r}")
         return real
+
+    # -- metadata records ---------------------------------------------------------------------
+
+    def _outside(self, uri: str, exc: Exception | None = None) -> ValidationError:
+        return ValidationError(f"Object metadata for {uri!r} is not inside the store")
+
+    def _metadata_dir(self, uri: str, *, create: bool) -> tuple[int | None, str]:
+        """A descriptor for the directory holding ``uri``'s record, and the record's name.
+
+        Reached from the store root one component at a time, each opened relative to the descriptor of the one
+        before with O_NOFOLLOW, so a link anywhere in the metadata area is refused and nothing can be swapped
+        underneath: every later read, write or delete is made relative to this descriptor, never by pathname.
+        Returns ``(None, name)`` when a directory is missing and ``create`` is false (nothing is recorded).
+        The caller closes the descriptor.
+        """
+        container, key = self._parse_uri(uri)
+        self._lexical(uri)
+        segments = [seg for seg in key.split("/") if seg]
+        parts, name = [METADATA_DIR, container, *segments[:-1]], segments[-1]
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        try:
+            fd = os.open(self._base(), os.O_RDONLY | os.O_DIRECTORY)
+        except FileNotFoundError:
+            if not create:
+                return None, name  # no store yet, so nothing is recorded
+            os.makedirs(self._base(), exist_ok=True)
+            fd = os.open(self._base(), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for depth, part in enumerate(parts):
+                try:
+                    child = os.open(part, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    if not create:
+                        os.close(fd)
+                        return None, name
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=fd)
+                    except FileExistsError:
+                        pass
+                    try:
+                        child = os.open(part, flags, dir_fd=fd)
+                    except OSError as exc:
+                        raise self._outside(uri) from exc
+                except OSError as exc:  # a link (ELOOP) or not a directory (ENOTDIR)
+                    raise self._outside(uri) from exc
+                os.close(fd)
+                fd = child
+                if depth == 0:
+                    os.fchmod(fd, 0o700)
+            return fd, name
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _check_metadata(self, uri: str) -> None:
+        """Refuse before anything is changed if ``uri``'s record would not be confined to the store."""
+        fd, name = self._metadata_dir(uri, create=False)
+        if fd is None:
+            return
+        try:
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode):
+                raise self._outside(uri)
+        except FileNotFoundError:
+            pass
+        finally:
+            os.close(fd)
+
+    def _clear_metadata(self, uri: str) -> None:
+        fd, name = self._metadata_dir(uri, create=False)
+        if fd is None:
+            return
+        try:
+            os.unlink(name, dir_fd=fd)  # a link here is removed itself, never followed
+        except FileNotFoundError:
+            pass
+        finally:
+            os.close(fd)
+
+    def _write_metadata(self, uri: str, metadata: dict[str, str] | None) -> None:
+        if not metadata:
+            return
+        fd, name = self._metadata_dir(uri, create=True)
+        assert fd is not None
+        tmp = f".tmp-{secrets.token_hex(8)}"
+        try:
+            out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+            try:
+                with os.fdopen(out, "w") as f:
+                    json.dump(metadata, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.rename(tmp, name, src_dir_fd=fd, dst_dir_fd=fd)
+            except BaseException:
+                try:
+                    os.unlink(tmp, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+                raise
+        finally:
+            os.close(fd)
+
+    def read_metadata(self, uri: str) -> dict[str, str]:
+        self._file(uri)
+        fd, name = self._metadata_dir(uri, create=False)
+        if fd is None:
+            return {}
+        try:
+            record = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+        except FileNotFoundError:
+            return {}
+        except OSError as exc:  # the record is a link (ELOOP)
+            raise self._outside(uri) from exc
+        finally:
+            os.close(fd)
+        with os.fdopen(record) as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                raise self._outside(uri)
+            data = json.load(f)
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
     def _file(self, uri: str) -> str:
         path = self.path(uri)
@@ -133,23 +263,34 @@ class LocalObjectFilesystem:
         return path
 
     def write_bytes(self, uri: str, data: bytes) -> None:
-        with open(self._writable(uri), "wb") as f:
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        with open(path, "wb") as f:
             f.write(data)
 
-    def write_stream(self, uri: str, file_obj: BinaryIO) -> None:
+    def write_stream(self, uri: str, file_obj: BinaryIO, metadata: dict[str, str] | None = None) -> None:
+        metadata = validate_object_metadata(metadata)
         # Rewind a seekable stream (the upload is the whole object); a pipe is read from where it is.
         try:
             file_obj.seek(0)
         except (AttributeError, OSError, ValueError):
             pass
-        with open(self._writable(uri), "wb") as f:
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        with open(path, "wb") as f:
             shutil.copyfileobj(file_obj, f)
+        self._write_metadata(uri, metadata)
 
-    def upload_filename(self, uri: str, local_path: str) -> None:
-        shutil.copyfile(local_path, self._writable(uri))
+    def upload_filename(self, uri: str, local_path: str, metadata: dict[str, str] | None = None) -> None:
+        metadata = validate_object_metadata(metadata)
+        path = self._writable(uri)
+        self._clear_metadata(uri)
+        shutil.copyfile(local_path, path)
+        self._write_metadata(uri, metadata)
 
     def delete(self, uri: str) -> None:
         """Remove the object; idempotent. A symlink is unlinked itself, never its target."""
+        self._check_metadata(uri)  # refuse before anything is removed if the record is not confined
         lexical = self._lexical(uri)
         self.path(uri)  # containment of what the link points at, too
         if os.path.islink(lexical) or os.path.isfile(lexical):
@@ -157,16 +298,20 @@ class LocalObjectFilesystem:
                 os.unlink(lexical)
             except FileNotFoundError:
                 pass
+        self._clear_metadata(uri)
 
     def copy(self, source_uri: str, dest_uri: str) -> None:
         src = self._file(source_uri)
         dest = self._writable(dest_uri)
         if os.path.exists(dest) and os.path.samefile(src, dest):
             return
+        metadata = self.read_metadata(source_uri)
+        self._clear_metadata(dest_uri)
         try:
             shutil.copyfile(src, dest)
         except FileNotFoundError as e:
             raise StorageObjectNotFound(source_uri) from e
+        self._write_metadata(dest_uri, metadata)
 
     def move(self, source_uri: str, dest_uri: str) -> None:
         """Copy, verify, then delete the source; any failure leaves the source in place."""

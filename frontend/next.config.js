@@ -3,6 +3,12 @@ const { version } = require("./package.json");
 
 const nextConfig = {
   output: "standalone",
+  // No page uses next/image, so the server-side optimizer (/_next/image, which fetches and decodes images with
+  // sharp) is attack surface with no consumer. Disabled, the server answers it 404 before reading any parameter.
+  // scripts/ci/frontend_image_smoke.sh checks that directly and through nginx.
+  images: { unoptimized: true },
+  // With the optimizer off nothing loads sharp, so its native libvips build stays out of the runtime image.
+  outputFileTracingExcludes: { "*": ["node_modules/sharp/**", "node_modules/@img/**"] },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
     NEXT_PUBLIC_APP_VERSION: version,

@@ -51,6 +51,15 @@ type PendingAction =
   | { type: "reactivate"; user: User }
   | { type: "delete"; user: User };
 
+// The grant each status-changing route enforces (backend/app/api/users.py); the controls follow it.
+const ACTION_GRANTS: Partial<Record<PendingAction["type"], [string, string]>> = {
+  deactivate: ["users", "deactivate"],
+  lock: ["users", "deactivate"],
+  activate: ["users", "deactivate"],
+  reactivate: ["users", "deactivate"],
+  delete: ["users", "delete"],
+};
+
 export default function SettingsUsersPage() {
   return (
     <Suspense fallback={null}>
@@ -130,6 +139,13 @@ function SettingsUsersPageInner() {
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
     clearMessages();
+    // The grant may have changed since the dialog opened (a new session, a role change): check it again.
+    const grant = ACTION_GRANTS[pendingAction.type];
+    if (grant && !canAccess(grant[0], grant[1])) {
+      setError("You no longer have permission to do this.");
+      setPendingAction(null);
+      return;
+    }
     setConfirmBusy(true);
 
     try {
@@ -345,7 +361,7 @@ function SettingsUsersPageInner() {
             setViewingUser(null);
           }}
         />
-        {!isDeactivated && (
+        {!isDeactivated && canAccess("users", "deactivate") && (
           <button
             onClick={() => {
               setPendingAction({ type: "lock", user });
@@ -356,7 +372,7 @@ function SettingsUsersPageInner() {
             Lock
           </button>
         )}
-        {!isDeactivated && (
+        {!isDeactivated && canAccess("users", "deactivate") && (
           <button
             onClick={() => {
               setPendingAction({ type: "deactivate", user });
@@ -367,7 +383,7 @@ function SettingsUsersPageInner() {
             Deactivate
           </button>
         )}
-        {isDeactivated && (
+        {isDeactivated && canAccess("users", "deactivate") && (
           <button
             onClick={() => {
               setPendingAction({ type: "reactivate", user });
@@ -378,7 +394,7 @@ function SettingsUsersPageInner() {
             Reactivate
           </button>
         )}
-        {isDeactivated && !user.last_login && (
+        {isDeactivated && !user.last_login && canAccess("users", "delete") && (
           <Button variant="danger" size="sm"
             onClick={() => {
               setPendingAction({ type: "delete", user });

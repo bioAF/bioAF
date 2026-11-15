@@ -37,6 +37,16 @@ teardown() {
     grep -q "exited with code 3" "$REPO/update-status/current.json"
 }
 
+@test "an update refused because another one is running keeps its trigger and the running status" {
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 75' > "$REPO/bioaf"
+    chmod +x "$REPO/bioaf"
+    mkdir -p "$REPO/update-status"
+    printf '{"status": "in_progress", "step": "pull"}' > "$REPO/update-status/current.json"
+    run bash -c "source '$REPO/scripts/update-agent.sh'; process_trigger '$REPO/update-requests/update_7.json'"
+    [ -e "$REPO/update-requests/update_7.json" ]
+    grep -q '"status": "in_progress"' "$REPO/update-status/current.json"
+}
+
 # ---------------------------------------------------------------------------
 # The trigger boundary (plan 23). update-requests/ is writable from the backend container, so every
 # name and payload there is untrusted. These run the actual agent with a stub updater.
@@ -487,4 +497,21 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
         [ ! -s "$REPO/host-only/agent.log" ]
         [ "$(cat "$REPO/updater-calls")" = "update 9.9.9 --yes" ]
     done
+}
+
+@test "the private log rotates past its size limit, keeping two old files" {
+    stub_updater 0
+    rm -f "$REPO/update-requests/update_7.json"
+    mkdir -m 700 -p "$REPO/host-only"
+    for round in 1 2 3; do
+        head -c 200 /dev/zero | tr '\0' 'x' > "$REPO/host-only/agent.log"; chmod 600 "$REPO/host-only/agent.log"
+        echo "round-$round" >> "$REPO/host-only/agent.log"
+        agent_round AGENT_LOG_MAX_BYTES=100
+        [ "$status" -eq 0 ]
+    done
+    grep -q "round-3" "$REPO/host-only/agent.log.1"
+    grep -q "round-2" "$REPO/host-only/agent.log.2"
+    [ ! -e "$REPO/host-only/agent.log.3" ]
+    [ "$(python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$REPO/host-only/agent.log.1")" = 0o600 ]
+    ! grep -q "round" "$REPO/host-only/agent.log"
 }

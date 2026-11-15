@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
 import { literature, type LitReviewRun } from "@/lib/literature";
 import { useProjectOptions } from "@/hooks/useProjectOptions";
 import { PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
@@ -9,10 +8,8 @@ import { PickerNotice } from "@/components/shared/PickerNotice";
 import { Button } from "@/components/ui/Button";
 import { isAbortError } from "@/lib/abort";
 import { watchJob } from "@/lib/watchJob";
-import type { Experiment, ExperimentListResponse } from "@/lib/types";
-
-// What the picker keeps of each experiment: the project link drives the filter and labels.
-type LauncherExperiment = Pick<Experiment, "id" | "name" | "project">;
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
+import type { ExperimentOption } from "@/lib/experimentOptions";
 
 interface Props {
   onSubmitted?: (run: LitReviewRun) => void;
@@ -20,7 +17,6 @@ interface Props {
 
 export function AiLitReviewLauncher({ onSubmitted }: Props) {
   const projectOptions = useProjectOptions({ path: "/api/projects?page_size=200" });
-  const [experiments, setExperiments] = useState<LauncherExperiment[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [experimentId, setExperimentId] = useState<string>("");
   const [running, setRunning] = useState(false);
@@ -37,38 +33,7 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
     [],
   );
 
-  useEffect(() => {
-    api
-      .get<ExperimentListResponse>("/api/experiments?page_size=500")
-      .then((d) =>
-        setExperiments(
-          d.experiments.map((e) => ({
-            id: e.id,
-            name: e.name,
-            project: e.project
-              ? { id: e.project.id, name: e.project.name }
-              : null,
-          })),
-        ),
-      )
-      .catch(() => setExperiments([]));
-  }, []);
-
-  const filteredExperiments = useMemo(() => {
-    if (!projectId) return experiments;
-    const pid = Number(projectId);
-    return experiments.filter((e) => e.project?.id === pid);
-  }, [experiments, projectId]);
-
-  // Clear the experiment selection if the project filter removes it.
-  useEffect(() => {
-    if (!experimentId) return;
-    if (!filteredExperiments.some((e) => String(e.id) === experimentId)) {
-      setExperimentId("");
-    }
-  }, [filteredExperiments, experimentId]);
-
-  const labelFor = (e: LauncherExperiment): string => {
+  const labelFor = (e: ExperimentOption): string => {
     if (!projectId && e.project) return `${e.project.name} > ${e.name}`;
     return e.name;
   };
@@ -156,7 +121,11 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
           <select
             id="ai-lit-review-project"
             value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
+            onChange={(e) => {
+              // A new project filter starts the experiment choice over: never run on one it hides.
+              setProjectId(e.target.value);
+              setExperimentId("");
+            }}
             disabled={projectOptions.unavailable}
             className="border border-gray-300 rounded px-3 py-2 text-sm w-64 disabled:bg-gray-50 disabled:text-gray-400"
           >
@@ -175,19 +144,18 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
           >
             Experiment
           </label>
-          <select
-            id="ai-lit-review-experiment"
-            value={experimentId}
-            onChange={(e) => setExperimentId(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm w-80"
-          >
-            <option value="">Select an experiment</option>
-            {filteredExperiments.map((e) => (
-              <option key={e.id} value={String(e.id)}>
-                {labelFor(e)}
-              </option>
-            ))}
-          </select>
+          <div className="w-80">
+            <ExperimentPicker
+              id="ai-lit-review-experiment"
+              label="Experiment"
+              value={experimentId ? Number(experimentId) : null}
+              onChange={(id) => setExperimentId(id == null ? "" : String(id))}
+              projectId={projectId ? Number(projectId) : null}
+              noneLabel="Select an experiment"
+              optionLabel={labelFor}
+              className="border border-gray-300 rounded px-3 py-2 text-sm w-full"
+            />
+          </div>
         </div>
         <Button
           onClick={submit}

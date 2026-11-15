@@ -1,0 +1,29 @@
+# The frontend image's build context (docker/Dockerfile.frontend: npm ci, then COPY . .).
+# .gitignore does not apply to a Docker build: anything here that is not excluded is sent to the builder and
+# copied into the builder stage. Proven by backend/tests/test_image_contents.py and the Build workflow.
+
+# Installed and generated output: the image installs and builds its own.
+node_modules/
+.next/
+.swc/
+out/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.eslintcache
+
+# Local environment, credentials and data. No .env file is a build input.
+**/.env
+**/.env.*
+**/*credentials*.json
+**/service-account*.json
+**/*.pem
+**/*.key
+**/*.dump
+**/*.sql.gz
+
+# Editor and OS clutter.
+.git/
+.DS_Store
+**/.DS_Store

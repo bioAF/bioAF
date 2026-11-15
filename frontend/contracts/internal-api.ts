@@ -12277,6 +12277,8 @@ export interface components {
              * @default []
              */
             input_file_ids: number[];
+            /** Project Id */
+            project_id?: number | null;
             /**
              * Resource Profile
              * @default small
@@ -13165,6 +13167,12 @@ export interface components {
             date: string;
             /** Filename */
             filename: string;
+            /**
+             * Integrity
+             * @default unknown
+             * @enum {string}
+             */
+            integrity: "checksummed" | "unverified" | "invalid" | "unknown";
             /** Size Bytes */
             size_bytes?: number | null;
         };
@@ -15943,6 +15951,11 @@ export interface components {
         };
         /** StartPostgresRestoreRequest */
         StartPostgresRestoreRequest: {
+            /**
+             * Allow Unverified
+             * @default false
+             */
+            allow_unverified: boolean;
             /** Filename */
             filename: string;
         };
@@ -19919,6 +19932,7 @@ export interface operations {
                 status?: string | null;
                 owner_user_id?: number | null;
                 search?: string | null;
+                name?: string | null;
             };
             header?: never;
             path?: never;

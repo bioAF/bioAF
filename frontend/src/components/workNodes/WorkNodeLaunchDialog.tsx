@@ -22,11 +22,11 @@ import {
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
 import type { WorkNodeRecreatePrefill } from "@/lib/sessionRecreate";
 import { useLaunchSelection } from "@/components/launch/useLaunchSelection";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
+import { experimentById, type ExperimentOption } from "@/lib/experimentOptions";
 import type {
   EnvironmentListResponse,
   EnvironmentResponse,
-  Experiment,
-  ExperimentListResponse,
   GitHubRepo,
   MachineType,
   ProjectListResponse,
@@ -41,7 +41,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 interface LaunchOptions {
   projects: ProjectOptions;
-  experiments: Experiment[];
   machineTypes: MachineType[];
   environments: EnvironmentResponse[];
 }
@@ -51,16 +50,15 @@ interface LaunchOptions {
  * launches on an experiment, and the picker says why.
  */
 async function loadLaunchOptions(signal: AbortSignal): Promise<LaunchOptions> {
-  const [projects, expData, machineTypes, envData] = await Promise.all([
+  const [projects, machineTypes, envData] = await Promise.all([
     api.get<ProjectListResponse>(DEFAULT_PROJECTS_PATH, { signal }).then(projectOptionsFrom, (e) => {
       if (isAbortError(e)) throw e;
       return projectOptionsFromError(e);
     }),
-    api.get<ExperimentListResponse>("/api/experiments?page_size=100", { signal }),
     api.get<MachineType[]>("/api/v1/work-nodes/machine-types", { signal }),
     api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node", { signal }),
   ]);
-  return { projects, experiments: expData.experiments, machineTypes, environments: envData.environments };
+  return { projects, machineTypes, environments: envData.environments };
 }
 
 /**
@@ -128,7 +126,16 @@ export function WorkNodeLaunchDialog({
   );
   const projects = options.data?.projects.projects ?? [];
   const projectsDenied = options.data?.projects.status === "denied";
-  const experiments = options.data?.experiments ?? [];
+  // The chosen experiment's name for the review; a prefilled one is read by id.
+  const [pickedExperiment, setPickedExperiment] = useState<ExperimentOption | null>(null);
+  const prefilledExperiment = useResource(
+    selectedExperimentId != null && pickedExperiment?.id !== selectedExperimentId
+      ? `experiment|${selectedExperimentId}`
+      : null,
+    (signal) => experimentById(selectedExperimentId as number, signal),
+  );
+  const reviewExperiment =
+    pickedExperiment?.id === selectedExperimentId ? pickedExperiment : prefilledExperiment.data;
   const machineTypes = options.data?.machineTypes ?? [];
   const environments = options.data?.environments ?? [];
   const workNodeProfiles = resolveWorkNodeProfiles(machineTypes);
@@ -157,9 +164,9 @@ export function WorkNodeLaunchDialog({
     selection.selectProject(projectId);
   }
 
-  function handleExperimentSelect(experimentId: number) {
+  function handleExperimentSelect(experimentId: number, exp: ExperimentOption | null) {
     // A standalone experiment has no project; the node is then tied to the experiment alone.
-    const exp = experiments.find((e) => e.id === experimentId);
+    setPickedExperiment(exp);
     selection.selectExperiment(experimentId, exp?.project?.id ?? null);
   }
 
@@ -448,21 +455,11 @@ export function WorkNodeLaunchDialog({
                 </button>
               </div>
               {scopeType === "experiment" ? (
-                <Select
-                  aria-label="Select experiment"
-                  value={selectedExperimentId || ""}
-                  onChange={(e) =>
-                    e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
-                  }
-                >
-                  <option value="">No experiment</option>
-                  {experiments.map((exp) => (
-                    <option key={exp.id} value={exp.id}>
-                      {exp.name}
-                      {exp.code ? ` (${exp.code})` : ""}
-                    </option>
-                  ))}
-                </Select>
+                <ExperimentPicker
+                  label="Select experiment"
+                  value={selectedExperimentId || null}
+                  onChange={(id, exp) => (id != null ? handleExperimentSelect(id, exp) : null)}
+                />
               ) : (
                 <Select
                   aria-label="Select project"
@@ -557,7 +554,7 @@ export function WorkNodeLaunchDialog({
                 <span className="text-gray-500">{scopeType === "experiment" ? "Experiment" : "Project"}</span>
                 <span>
                   {scopeType === "experiment"
-                    ? experiments.find((e) => e.id === selectedExperimentId)?.name
+                    ? reviewExperiment?.name
                     : projects.find((p) => p.id === selectedProjectId)?.name}
                 </span>
               </div>

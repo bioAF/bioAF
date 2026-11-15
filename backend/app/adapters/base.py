@@ -392,12 +392,30 @@ class StorageProvider(ABC):
         """Upload bytes to an object, replacing any existing object."""
         raise NotImplementedError
 
-    async def upload_file(self, uri: str, file_obj: BinaryIO, *, content_type: str | None = None) -> None:
-        """Stream a file-like object to an object (does not buffer the whole body)."""
+    async def upload_file(
+        self,
+        uri: str,
+        file_obj: BinaryIO,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        """Stream a file-like object to an object (does not buffer the whole body).
+
+        ``metadata`` (``validate_object_metadata``) is stored with the object in the same write and returned by
+        ``get_object_metadata``; an upload without it leaves the object with none, replacing any earlier.
+        """
         raise NotImplementedError
 
-    async def upload_filename(self, uri: str, local_path: str, *, content_type: str | None = None) -> None:
-        """Upload a local file to an object."""
+    async def upload_filename(
+        self,
+        uri: str,
+        local_path: str,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
+        """Upload a local file to an object; ``metadata`` as for ``upload_file``."""
         raise NotImplementedError
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:

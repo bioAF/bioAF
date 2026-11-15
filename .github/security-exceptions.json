@@ -1,0 +1,24 @@
+{
+  "_about": "The only record of accepted dependency risk (scripts/ci/dependency_report.py). Each entry: one advisory in one package, at most 30 days from approval; an extension is a new approval. allow_pr_introduction lets the PR dependency check accept the advisory everywhere (its allow-ghsas input is advisory-wide), so set it only when the approval says so. frontend/DEPENDENCIES.md explains each entry.",
+  "exceptions": [
+    {
+      "ghsa": "GHSA-gcqx-w48m-w2h4",
+      "package": "deepmerge",
+      "paths": [
+        "frontend: jest > @jest/core > jest-config > deepmerge",
+        "frontend: jest > jest-cli > jest-config > deepmerge"
+      ],
+      "versions": ">=4.2.0 <=4.3.1 (4.3.1 installed; no patched release)",
+      "severity": "low",
+      "scope": "development",
+      "rationale": "No patched deepmerge release exists, and jest-config 30.5.2 (latest) still requires ^4.3.1.",
+      "mitigation": "jest-config merges only Jest's configuration objects from this repository's jest.config.js during tests; no request, upload or other untrusted input reaches deepmerge, and it is not in any image.",
+      "owner": "brent-mills-engineering",
+      "approved_by": "Brent Mills",
+      "approval_reference": "Owner approval recorded 2026-11-14 (30-day initial exception)",
+      "approval_date": "2026-11-14",
+      "expires": "2026-12-14",
+      "allow_pr_introduction": false
+    }
+  ]
+}

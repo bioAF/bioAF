@@ -515,6 +515,47 @@ configuration failure.
    same way with `gunzip -c backups/<file>.sql.gz | ... exec -T db psql -U bioaf -d bioaf`.
    Alembic downgrades are not a substitute: they do not undo data repairs.
 
+### Disk use and deployment generations
+
+`./bioaf update`, `./bioaf build` and `./bioaf setup` run one at a time on a host. A second one started while
+another runs stops at once with "Another bioAF update, build or setup is running" (exit status 75) and changes
+nothing; an in-app update refused that way is retried by the update agent when the first finishes.
+
+Each records, in `host-state/deployments.json` (readable by the host operator only), which backend and frontend
+images run now (**current**, by image ID), which ran before (**previous**), and an operation that has started
+but whose images are not yet running (**candidate**). The current and previous generations' images also carry
+their own local tag, shown as `local_tag` (`gen-<backend>-<frontend>`), so a rebuild under the same version
+cannot remove the images a rollback needs; `images_present` is `false` if a generation's images are no longer
+on the host (for example, removed by hand), and that generation cannot be rolled back to. If an update or build is interrupted, the next one says
+"An earlier ... did not finish" and replaces it. `./bioaf build` changes the deployed version
+(`BIOAF_IMAGE_TAG` in `docker/.env`) only after the build succeeds; the new images become current when
+`./bioaf start` or `restart` runs them.
+
+Before pulling or building, the updater frees space and checks it has enough:
+
+| What | Rule | Override |
+| --- | --- | --- |
+| bioAF images | Removed unless a container (running or stopped) uses them, they are the current, previous or candidate generation, or they carry the version being installed. Other images are never touched. | - |
+| Build cache | Never removed: it belongs to the host's shared Docker builder. Over 5 GiB, the updater says so and gives the command to free it | `BIOAF_BUILD_CACHE_BYTES` |
+| Updater backups in `backups/` | The backups each update made (its recovery set) are kept for the current and previous generations. Of the rest, the 2 newest of each kind (`bioaf_pre_update_*.sql.gz`, `bioaf_pre_upgrade_*.dump` with its `.json`) are kept. Nothing is removed without a readable record. Backups from `./bioaf backup` (`bioaf_<timestamp>.sql.gz`) are never removed. | `BIOAF_KEEP_UPDATE_DUMPS` |
+| Free space | 3.5 GiB for new images plus 1.5x the database for the backup must leave max(3 GiB, 10% of the disk) free, or the update stops before changing anything | `BIOAF_NEW_IMAGES_BYTES`, `BIOAF_DISK_FLOOR_MIN_BYTES`, `BIOAF_DISK_FLOOR_PERCENT` |
+| Update agent log | `host-only/agent.log` rotates at 10 MiB, keeping `agent.log.1` and `agent.log.2` | `AGENT_LOG_MAX_BYTES` (agent environment) |
+
+These budgets are provisional starting values. Removing an image's tag does not always free its bytes: layers
+shared with kept images stay. During an update the host holds up to three generations of images (the incoming
+one, current, and previous) until the next update removes the oldest.
+
+Rolling back images is not the same as restoring the database: the previous generation's images may not run
+against a database the new release migrated. To go back, follow the restore steps above with the backup listed
+as the current generation's `recovery` in `host-state/deployments.json` (made before that update), set
+`BIOAF_IMAGE_TAG` in `docker/.env` to the previous generation's `local_tag` shown there, and run
+`./bioaf restart`. The two generations then swap: the one you returned to is current, and the one you left is
+previous, so you can return to it the same way.
+
+If the record is missing or damaged, the updater reports it and removes no images. A damaged record can be
+deleted to start fresh: the next update or start records what is running, and images are pruned again from the
+update after that.
+
 ## Reinstalling
 
 If you need to start fresh (e.g., after changing database credentials):

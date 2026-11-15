@@ -197,6 +197,21 @@ class Settings(BaseSettings):
     # Data exports (app/services/data_export). Scratch shares the host disk with Docker and
     # PostgreSQL; exports refuse to build below a free-space floor (data_export/resources.py).
     export_scratch_dir: str = "/tmp/bioaf-exports"
+    # Database backup creation and restore (app/services/backup_resources.py): one private workspace per
+    # operation, removed when it ends.
+    backup_scratch_dir: str = "/tmp/bioaf-backups"
+    # Restore preparation limits: the owner-approved provisional envelope, to be replaced by measured values
+    # from a representative install. Dump bytes are counted as they are written, not taken from metadata.
+    restore_max_dump_bytes: int = 10 * 1024**3
+    restore_scratch_floor_min_bytes: int = 3 * 1024**3
+    restore_scratch_floor_percent: int = 10
+    restore_download_timeout_seconds: int = 15 * 60
+    restore_toc_timeout_seconds: int = 60
+    restore_pg_restore_timeout_seconds: int = 30 * 60
+    restore_preparation_timeout_seconds: int = 45 * 60
+    # The PostgreSQL data volume, mounted read-only into the backend (docker-compose.yml) so a restore can check
+    # the restored copy and its WAL fit there. Empty: not mounted, and the headroom is reported as not measured.
+    restore_db_volume_dir: str = ""
     # A direct download whose client accepts no bytes for this long is closed (nginx's own
     # client send_timeout is pinned to the same 60 s in docker/nginx.conf).
     export_transfer_stall_seconds: int = 60

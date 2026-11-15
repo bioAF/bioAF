@@ -23,10 +23,13 @@ are left as strings.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
+from app.exceptions import ValidationError
 
 
 class JobState(str, Enum):
@@ -244,6 +247,33 @@ class ObjectMetadata(BaseModel):
     storage_class: str | None = None
     updated: str | None = None
     provider_details: dict = Field(default_factory=dict)
+    # Custom metadata written with the object (``upload_file``/``upload_filename`` ``metadata``); empty when none.
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+# Custom object metadata every backend can carry unchanged: S3 lowercases keys and allows 2 KiB in all, and
+# GCS and HTTP headers take printable ASCII.
+_METADATA_KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+_METADATA_VALUE_MAX = 1024
+_METADATA_TOTAL_MAX = 2048
+
+
+def validate_object_metadata(metadata: dict[str, str] | None) -> dict[str, str] | None:
+    """The metadata unchanged, or ``ValidationError`` before anything is written."""
+    if metadata is None:
+        return None
+    if not isinstance(metadata, dict):
+        raise ValidationError("Object metadata must be a mapping of strings")
+    total = 0
+    for key, value in metadata.items():
+        if not isinstance(key, str) or not _METADATA_KEY.match(key):
+            raise ValidationError("Object metadata keys are lowercase letters, digits and hyphens")
+        if not isinstance(value, str) or len(value) > _METADATA_VALUE_MAX or not all(" " <= c <= "~" for c in value):
+            raise ValidationError(f"Object metadata value for {key} must be printable ASCII up to 1024 characters")
+        total += len(key) + len(value)
+    if total > _METADATA_TOTAL_MAX:
+        raise ValidationError("Object metadata is larger than 2 KiB")
+    return dict(metadata)
 
 
 class StoredObject(BaseModel):

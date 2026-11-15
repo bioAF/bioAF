@@ -6,3 +6,6 @@
 
 # AI guides: the shared working model. Owner-approved changes only.
 /ai_guides/ @brent-mills-engineering
+
+# Accepted dependency risk: owner-approved exceptions only.
+/.github/security-exceptions.json @brent-mills-engineering

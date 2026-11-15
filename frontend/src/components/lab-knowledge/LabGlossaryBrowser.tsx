@@ -9,6 +9,8 @@ import { useResource } from "@/hooks/useResource";
 
 import { clickableCard } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
+import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
+import type { ExperimentOption } from "@/lib/experimentOptions";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface UserSummary {
@@ -624,12 +626,6 @@ function ImportModal({
   );
 }
 
-interface ExperimentOption {
-  id: number;
-  name: string;
-  project: { id: number; name: string } | null;
-}
-
 interface DataSearchItem {
   kind: "file" | "lab_document";
   id: number;
@@ -657,7 +653,6 @@ function ScanModal({
   const [err, setErr] = useState<string | null>(null);
 
   // Experiment source.
-  const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [experimentId, setExperimentId] = useState("");
 
   // Document source: search-and-select across both stores (D2).
@@ -665,20 +660,6 @@ function ScanModal({
   const [docResults, setDocResults] = useState<DataSearchItem[]>([]);
   const [docSelected, setDocSelected] = useState<DataSearchItem | null>(null);
 
-  useEffect(() => {
-    api
-      .get<{ experiments: ExperimentOption[] }>("/api/experiments?page_size=500")
-      .then((d) =>
-        setExperiments(
-          d.experiments.map((e) => ({
-            id: e.id,
-            name: e.name,
-            project: e.project ? { id: e.project.id, name: e.project.name } : null,
-          })),
-        ),
-      )
-      .catch(() => setExperiments([]));
-  }, []);
 
   // Debounced unified document/file search (D2 + D3 share the endpoint).
   useEffect(() => {
@@ -748,19 +729,14 @@ function ScanModal({
           </select>
 
           {scanType === "experiment" && (
-            <select
-              value={experimentId}
-              onChange={(e) => setExperimentId(e.target.value)}
-              aria-label="Experiment"
+            <ExperimentPicker
+              label="Experiment"
+              value={experimentId ? Number(experimentId) : null}
+              onChange={(id) => setExperimentId(id == null ? "" : String(id))}
+              noneLabel="Select an experiment"
+              optionLabel={labelFor}
               className="border rounded px-2 py-1.5 text-sm w-full"
-            >
-              <option value="">Select an experiment</option>
-              {experiments.map((e) => (
-                <option key={e.id} value={String(e.id)}>
-                  {labelFor(e)}
-                </option>
-              ))}
-            </select>
+            />
           )}
 
           {scanType === "document" && (

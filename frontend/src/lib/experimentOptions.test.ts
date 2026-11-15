@@ -11,18 +11,20 @@ beforeEach(() => mockGet.mockReset());
 
 test("reads every page", async () => {
   mockGet
-    .mockResolvedValueOnce({ experiments: experiments(1, 200), total: 250 })
+    .mockResolvedValueOnce({ experiments: experiments(1, 100), total: 250 })
+    .mockResolvedValueOnce({ experiments: experiments(101, 100), total: 250 })
     .mockResolvedValueOnce({ experiments: experiments(201, 50), total: 250 });
 
   const all = await listAllExperiments();
 
   expect(all).toHaveLength(250);
-  expect(mockGet).toHaveBeenNthCalledWith(1, "/api/experiments?page=1&page_size=200");
-  expect(mockGet).toHaveBeenNthCalledWith(2, "/api/experiments?page=2&page_size=200");
+  // The experiments list holds at most 100 a page (backend cap, issues #104/#105).
+  expect(mockGet).toHaveBeenNthCalledWith(1, "/api/experiments?page=1&page_size=100");
+  expect(mockGet).toHaveBeenNthCalledWith(3, "/api/experiments?page=3&page_size=100");
 });
 
 test("stops at the total when the last page is full", async () => {
-  mockGet.mockResolvedValueOnce({ experiments: experiments(1, 200), total: 200 });
+  mockGet.mockResolvedValueOnce({ experiments: experiments(1, 100), total: 100 });
 
   await listAllExperiments();
 
@@ -34,13 +36,13 @@ test("keeps the project narrowing on every page", async () => {
 
   await listAllExperiments(7);
 
-  expect(mockGet).toHaveBeenCalledWith("/api/experiments?project_id=7&page=1&page_size=200");
+  expect(mockGet).toHaveBeenCalledWith("/api/experiments?project_id=7&page=1&page_size=100");
 });
 
 test("lists an experiment once if the pages shift underneath it", async () => {
   mockGet
-    .mockResolvedValueOnce({ experiments: experiments(1, 200), total: 201 })
-    .mockResolvedValueOnce({ experiments: experiments(200, 1), total: 201 });
+    .mockResolvedValueOnce({ experiments: experiments(1, 100), total: 101 })
+    .mockResolvedValueOnce({ experiments: experiments(100, 1), total: 101 });
 
-  expect(await listAllExperiments()).toHaveLength(200);
+  expect(await listAllExperiments()).toHaveLength(100);
 });

@@ -35,6 +35,8 @@ class NotebookLaunchRequest(BaseModel):
     session_type: str
     resource_profile: Literal["small", "medium", "large", "xlarge", "2xlarge"] = "small"
     experiment_id: int | None = None
+    # The project the session works in; an experiment launched without one records the experiment's own project.
+    project_id: int | None = None
     input_file_ids: list[int] = []
     environment_version_id: int | None = None
 
@@ -227,15 +229,13 @@ async def launch_session(
     environment_version_id = body.environment_version_id
 
     if environment_version_id:
-        from app.models.environment_version import EnvironmentVersion
-        from sqlalchemy import select as sa_select
+        from app.exceptions import NotFoundError
+        from app.services.launch_scope import owned_environment_version
 
-        ev_result = await session.execute(
-            sa_select(EnvironmentVersion).where(EnvironmentVersion.id == environment_version_id)
-        )
-        env_version = ev_result.scalar_one_or_none()
-        if not env_version:
-            raise HTTPException(400, "Environment version not found")
+        try:
+            env_version = await owned_environment_version(session, org_id, environment_version_id)
+        except NotFoundError:
+            raise HTTPException(400, "Environment version not found") from None
         if env_version.status != "ready":
             raise HTTPException(
                 400,
@@ -267,6 +267,7 @@ async def launch_session(
         session_type=body.session_type,
         resource_profile=body.resource_profile,
         experiment_id=body.experiment_id,
+        project_id=body.project_id,
         image=image,
         input_file_ids=body.input_file_ids or None,
         environment_version_id=environment_version_id,

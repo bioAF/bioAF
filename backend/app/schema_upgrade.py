@@ -50,6 +50,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection, make_url
 
 from app.config import settings
+from app.services.backup_integrity import file_sha256, tables_with_data
 
 logger = logging.getLogger("bioaf.schema_upgrade")
 
@@ -147,18 +148,10 @@ def verify_archive(path: Path, tables: list[str]) -> None:
     listing = subprocess.run([pg_bin("pg_restore"), "--list", str(path)], capture_output=True, text=True)
     if listing.returncode != 0:
         raise BackupFailed(f"pg_restore --list could not read the dump: {listing.stderr.strip()[:500]}")
-    with_data = {
-        line.split()[-2] for line in listing.stdout.splitlines() if " TABLE DATA " in line and not line.startswith(";")
-    }
+    with_data = tables_with_data(listing.stdout)
     missing = sorted(set(tables) - with_data)
     if missing:
         raise BackupFailed(f"the dump has no data for {len(missing)} table(s), e.g. {missing[:5]}")
-
-
-def file_sha256(path: Path) -> str:
-    """SHA-256 of a file read in blocks: a dump can be larger than the backend's memory limit."""
-    with path.open("rb") as f:
-        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def _is_mounted(path: Path) -> bool:
