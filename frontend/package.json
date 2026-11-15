@@ -42,7 +42,7 @@
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.1",
     "ts-jest": "^29.4.6",
-    "typescript": "^5.3.3"
+    "typescript": "^7.0.2"
   },
   "comments": {
     "overrides": "Security floors for transitive packages a parent's range would let resolve to a vulnerable version. DEPENDENCIES.md records the advisory and parent for each entry and when one may be removed."
