@@ -213,11 +213,10 @@ async def _started_child(tmp_path, **kwargs):
 async def test_a_failing_monitor_stops_and_waits_for_the_child(tmp_path, monkeypatch):
     """A monitor that fails any way (here the disk probe's OSError) stops the child before the error leaves."""
     monkeypatch.setattr(br, "WATCH_SECONDS", 0.05)
-    probes = []
+    started = tmp_path / "pid"
 
     def watch():
-        probes.append(1)
-        if len(probes) > 1:
+        if started.exists() and started.read_text():  # fail only once the child is known to be running
             raise OSError(5, "Input/output error")
 
     task, pid = await _started_child(tmp_path, watch=watch)
