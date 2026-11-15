@@ -67,9 +67,11 @@ transport.
 (UUID, original start time and source version, target, status, completion time) in private host
 state, keeps it across retries of the same unfinished target, and publishes it with completion
 evidence in shared update status. After readiness and final host completion the updater runs a
-backend CLI that reserves the upgrade event without network I/O; a bounded backend reconciliation
-covers a failed final call. Only operations that began inside the current uninterrupted enabled
-interval qualify.
+backend CLI (`python -m app.cli.record_upgrade_metric`) that reserves the upgrade event without network
+I/O; each sender pass reconciles the same facts from `update-status/current.json` (read without following
+links, completions under 7 days old) if that call failed. Only operations that began inside the current
+uninterrupted enabled interval qualify. An interrupted update whose target image already runs settled is
+finished with its readiness checks rather than treated as a no-op.
 
 ## Rationale
 
@@ -92,8 +94,10 @@ interval qualify.
 - Counts are best-effort observations of consenting installations, not inventory. A cancelled or
   lost baseline can leave an installation first observed through an upgrade.
 - A restored backup restores identity and choice as of the backup. A deliberate clone needs the
-  documented identity reset, which clears queued reports.
-- CI, development and tests must keep `BIOAF_INSTALL_METRICS_DISABLED=1`, and sender tests must use an
-  injected transport.
+  documented identity reset (`./bioaf reset-install-metrics-identity --confirm`), which clears the ID, the
+  choice and queued reports.
+- CI, development and tests must keep `BIOAF_INSTALL_METRICS_DISABLED=1` (workflow-level `env`, development
+  Compose, test subprocess launchers, `tests/conftest.py`), and the suite's default sender transport refuses
+  every request, so sender tests inject their own.
 - Any new kind of collection needs its own consent design; this choice authorizes only these events.
 - The public notice is [docs/installation-metrics.md](../docs/installation-metrics.md).
