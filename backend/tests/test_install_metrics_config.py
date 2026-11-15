@@ -121,7 +121,9 @@ async def test_the_suite_transport_blocks_egress_even_with_production_shaped_con
 ):
     """A test that accidentally enables reporting still cannot reach the real project."""
     configure()  # override off, the release's real destination
-    state = await InstallMetricsService.choose(session, choice="enabled", notice_version=NOTICE_VERSION, revision=0)
+    state = await InstallMetricsService.choose(
+        session, choice="enabled", notice_version=NOTICE_VERSION, revision=0, now=NOW
+    )
     await session.commit()
     assert state.installation_id is not None
 
