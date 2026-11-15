@@ -121,6 +121,9 @@ dev = [
     "scipy",
     "packaging",
     "coverage",
+    # tests/server_loop runs the backup and restore child tests on the server's event loop (uvicorn[standard]
+    # installs uvloop at runtime; the tests import it directly).
+    "uvloop",
 ]
 
 [tool.uv]

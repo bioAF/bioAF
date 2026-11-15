@@ -363,6 +363,7 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
     { name = "scipy" },
+    { name = "uvloop" },
 ]
 
 [package.metadata]
@@ -428,6 +429,7 @@ dev = [
     { name = "respx", specifier = ">=0.21" },
     { name = "ruff", specifier = "==0.15.17" },
     { name = "scipy" },
+    { name = "uvloop" },
 ]
 
 [[package]]
