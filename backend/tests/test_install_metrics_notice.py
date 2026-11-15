@@ -13,3 +13,11 @@ def test_the_frontend_notice_version_matches_the_backend():
 
     assert match is not None
     assert match.group(1) == NOTICE_VERSION
+
+
+def test_the_public_notice_names_the_responsible_party_and_a_deletion_contact():
+    notice = (Path(__file__).resolve().parents[2] / "docs" / "installation-metrics.md").read_text()
+
+    assert "privacy@bioaf.co" in notice
+    assert "**Responsible party:** bioAF" in notice
+    assert "publishes a verified privacy contact here" not in notice

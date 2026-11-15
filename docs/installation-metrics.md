@@ -70,6 +70,8 @@ It is pseudonymous rather than anonymous: it links one installation's reports to
 
 ## Where reports go
 
+**Responsible party:** bioAF (the bioAF team), reachable at [privacy@bioaf.co](mailto:privacy@bioaf.co).
+
 Reports go directly from the bioAF backend to **PostHog** (US Cloud, `https://us.i.posthog.com`), which
 processes them for the bioAF team. bioAF uses no browser analytics, session replay, cookies, feature flags
 or advertising integrations for this feature.
@@ -92,12 +94,14 @@ cleaned up, is confirmed by the bioAF team before reporting is activated and rec
   every report still waiting to be sent is cancelled. A request already in flight may still complete.
 - **Re-enable** at any time. The installation keeps the same installation ID. Nothing from while reporting
   was off is sent later, and a cancelled report is never re-sent.
-- **Deletion.** Turning reporting off does not erase reports already received. To request deletion, contact
-  the bioAF privacy contact below with your installation ID (shown in Settings > System Settings). Your
-  contact details are used only to handle the request and are never added to the metrics.
+- **Deletion.** Turning reporting off does not erase reports already received. To have them removed:
+  1. Turn reporting off in **Settings > System Settings**.
+  2. Email [privacy@bioaf.co](mailto:privacy@bioaf.co) with your installation ID (shown in Settings > System
+     Settings).
+  3. The bioAF team verifies the request, deletes the events and profile for that installation ID in PostHog,
+     and confirms by email when it is done.
 
-**Privacy contact:** the bioAF team publishes a verified privacy contact here before installation metrics are
-activated in a release.
+  Your contact details are used only to handle the request and are never added to the metrics.
 
 ## Operator controls
 
