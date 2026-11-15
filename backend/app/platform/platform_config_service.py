@@ -96,6 +96,17 @@ class PlatformConfigService:
         )
 
     @staticmethod
+    async def get_for_update(session: AsyncSession, key: str) -> str | None:
+        """Read ``key`` and lock its row until the caller's transaction ends (None when absent)."""
+        row = (
+            await session.execute(
+                text("SELECT value FROM platform_config WHERE key = :k FOR UPDATE"),
+                {"k": key},
+            )
+        ).scalar_one_or_none()
+        return PlatformConfigService._maybe_decrypt(key, row)
+
+    @staticmethod
     async def insert_if_absent(session: AsyncSession, key: str, value: str) -> str | None:
         """Store ``value`` only if ``key`` has none; return what is stored afterwards.
 

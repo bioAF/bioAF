@@ -108,7 +108,7 @@ async def test_startup_runs_its_steps_in_order_and_starts_owned_workers(startup)
             "glossary_orphans",
         ]
         roles = owner.roles()
-        assert len(roles) == 29
+        assert len(roles) == 30
         assert {"pipeline-monitor", "pubsub-listener", "webhook-worker", "postgres-backup"} <= set(roles)
         assert _subscriber_count() > before
         workers = owner.tasks()

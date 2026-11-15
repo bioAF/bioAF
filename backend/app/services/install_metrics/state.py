@@ -131,11 +131,9 @@ async def _initial(session: AsyncSession) -> InstallMetricsState:
 
 async def _locked(session: AsyncSession) -> InstallMetricsState:
     await PlatformConfigService.insert_if_absent(session, STATE_KEY, (await _initial(session)).to_json())
-    raw = (
-        await session.execute(text("SELECT value FROM platform_config WHERE key = :k FOR UPDATE"), {"k": STATE_KEY})
-    ).scalar_one()
+    raw = await PlatformConfigService.get_for_update(session, STATE_KEY)
     try:
-        return InstallMetricsState.from_json(raw)
+        return InstallMetricsState.from_json(raw or "")
     except (ValueError, TypeError):
         logger.error("install_metrics state=unreadable")
         raise StateUnavailable("state_unreadable") from None
