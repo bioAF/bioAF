@@ -266,6 +266,19 @@ async def test_children_write_private_files(tmp_path):
     assert result.returncode == 0 and _mode(out) == 0o600
 
 
+async def test_children_run_on_the_servers_event_loop(tmp_path):
+    """The server runs on uvloop (uvicorn's default when installed), which refuses Popen's ``umask``: a child
+    must start there too, still writing private files."""
+    uvloop = pytest.importorskip("uvloop")
+    out = tmp_path / "made-by-child"
+
+    async def run():
+        return await br.run_child(_python(f"open({str(out)!r},'w').write('x')"), env=dict(os.environ))
+
+    result = await asyncio.to_thread(uvloop.run, run())
+    assert result.returncode == 0 and _mode(out) == 0o600
+
+
 # --- adapter work ------------------------------------------------------------------------------------------
 
 

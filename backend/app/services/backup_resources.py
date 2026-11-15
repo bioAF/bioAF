@@ -155,6 +155,11 @@ def classify_stderr(stderr: bytes) -> str:
     return "unclassified"
 
 
+# The private umask is set by a shell that then execs the child (same pid): the server's event loop (uvloop)
+# refuses Popen's ``umask`` argument.
+PRIVATE_UMASK_PREFIX = ("/bin/sh", "-c", 'umask 077 && exec "$@"', "sh")
+
+
 async def _stop(proc, waiter: asyncio.Future, stop_grace: float, kill_wait: float) -> None:
     for signal_child, wait in ((proc.terminate, stop_grace), (proc.kill, kill_wait)):
         if waiter.done():
@@ -186,12 +191,12 @@ async def run_child(
     """
     try:
         proc = await asyncio.create_subprocess_exec(
+            *PRIVATE_UMASK_PREFIX,
             *argv,
             env=env,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            umask=0o077,
         )
     except FileNotFoundError:
         return ChildResult(None, "missing_binary")
@@ -235,6 +240,8 @@ async def run_child(
         await _stop(proc, waiter, stop_grace, kill_wait)
         return ChildResult(proc.returncode, classify_stderr(bytes(tail)), timed_out=True)
     waiter.result()
+    if proc.returncode in (126, 127) and shutil.which(argv[0]) is None:
+        return ChildResult(None, "missing_binary")  # the shell could not exec it (126 or 127 by shell)
     return ChildResult(proc.returncode, classify_stderr(bytes(tail)))
 
 

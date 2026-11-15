@@ -643,6 +643,10 @@ def _fake_pg_dump(
     spawned: list[list[str]] = []
 
     async def exec_(*argv, **kwargs):
+        from app.services.backup_resources import PRIVATE_UMASK_PREFIX
+
+        if argv[: len(PRIVATE_UMASK_PREFIX)] == PRIVATE_UMASK_PREFIX:
+            argv = argv[len(PRIVATE_UMASK_PREFIX) :]
         if Path(argv[0]).name == "pg_restore":
             assert "--list" in argv
             return await real_exec(sys.executable, "-c", f"import sys; sys.exit({list_exit})", **kwargs)
