@@ -123,6 +123,11 @@ async def setup_complete(session: AsyncSession) -> bool:
     return row is not None
 
 
+async def setup_finished(session: AsyncSession, state: InstallMetricsState) -> bool:
+    """Only an installation whose setup has completed may capture or send a report."""
+    return state.setup_completed or await setup_complete(session)
+
+
 async def _initial(session: AsyncSession) -> InstallMetricsState:
     """State for a database the migration never classified (created from the models)."""
     complete = await setup_complete(session)

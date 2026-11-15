@@ -24,7 +24,7 @@ from sqlalchemy import text
 from app.services.install_metrics import outbox
 from app.services.install_metrics import payload as allowlist
 from app.services.install_metrics import upgrades
-from app.services.install_metrics.state import InstallMetricsService, override_active, utcnow
+from app.services.install_metrics.state import InstallMetricsService, override_active, setup_finished, utcnow
 
 logger = logging.getLogger("bioaf.install_metrics")
 
@@ -171,10 +171,14 @@ async def send_pending(
                     {"id": event_id},
                 )
             ).first()
+            finished = await setup_finished(session, state)
             await session.commit()
         if not state.effective(override_active()):
             break
         if row is None:
+            continue
+        if not finished:
+            await _settle(factory, event_id, now, status=outbox.CANCELLED, error="setup_incomplete")
             continue
         event, created_at, attempts = row
         if state.enabled_since is None or created_at < state.enabled_since:

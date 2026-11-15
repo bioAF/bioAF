@@ -53,7 +53,8 @@ periodic job `install-metrics-sender` (first after one minute, then every five) 
 application's `TaskOwner`, pauses during a restore review, and sends at most 5 reports per pass with a
 3-second timeout, backs off up to 24 hours, expires reports after 7
 days, holds at most 100 pending upgrade reports, and never holds a database transaction across a
-network call. It rechecks consent, the enabled interval and the operator override before each send.
+network call. It rechecks consent, completed setup, the enabled interval and the operator override before
+each send; a report queued before setup completed is cancelled, never sent.
 Withdrawal or `BIOAF_INSTALL_METRICS_DISABLED=1` cancels everything pending (a startup step applies an
 override changed across a restart); re-enabling never replays it.
 
@@ -69,8 +70,8 @@ state, keeps it across retries of the same unfinished target, and publishes it w
 evidence in shared update status. After readiness and final host completion the updater runs a
 backend CLI (`python -m app.cli.record_upgrade_metric`) that reserves the upgrade event without network
 I/O; each sender pass reconciles the same facts from `update-status/current.json` (read without following
-links, completions under 7 days old) if that call failed. Only operations that began inside the current
-uninterrupted enabled interval qualify. An interrupted update whose target image already runs settled is
+links, completions under 7 days old) if that call failed. Only operations on an installation whose setup has
+completed, and that began inside the current uninterrupted enabled interval, qualify. An interrupted update whose target image already runs settled is
 finished with its readiness checks rather than treated as a no-op.
 
 ## Rationale

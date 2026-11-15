@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.install_metrics import outbox
 from app.services.install_metrics import payload as allowlist
-from app.services.install_metrics.state import _locked, override_active, utcnow
+from app.services.install_metrics.state import _locked, override_active, setup_finished, utcnow
 
 logger = logging.getLogger("bioaf.install_metrics")
 
@@ -92,6 +92,8 @@ async def record(session: AsyncSession, operation: UpgradeOperation, now: dateti
     state = await _locked(session)
     if not state.effective(override_active()) or state.installation_id is None:
         outcome = "not_reporting"
+    elif not await setup_finished(session, state):
+        outcome = "setup_incomplete"
     elif state.enabled_since is None or operation.started_at < state.enabled_since:
         outcome = "before_interval"
     elif await outbox.pending_upgrades(session) >= outbox.MAX_PENDING_UPGRADES:

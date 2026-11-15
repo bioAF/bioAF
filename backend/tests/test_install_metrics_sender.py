@@ -403,3 +403,46 @@ async def test_each_pass_reconciles_a_completed_upgrade_the_updater_could_not_re
     await _send(capture, now=started + timedelta(minutes=11))
 
     assert sorted(b["event"] for b in capture.bodies()) == ["bioaf_installation_observed", "bioaf_upgrade_completed"]
+
+
+@pytest.mark.asyncio
+async def test_an_unfinished_setup_never_reaches_the_sender(session, metrics_on, tmp_path, monkeypatch):
+    """Opted in during the wizard, setup not finished: a completed upgrade is neither captured nor sent."""
+    from app.models.organization import Organization
+    from app.services.install_metrics import outbox
+    from app.services.install_metrics import payload as allowlist
+
+    session.add(Organization(name="Lab", setup_complete=False))
+    await session.commit()
+    state = await _opt_in(session)
+    started = NOW + timedelta(hours=1)
+    (tmp_path / "current.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "from_version": "2026.11.26",
+                "to_version": "2026.12.1",
+                "operation_id": "8f6b1e0c-2d4a-4c1e-9a77-0b5f3c2d1e00",
+                "operation_started_at": started.isoformat(),
+                "operation_completed_at": (started + timedelta(minutes=10)).isoformat(),
+            }
+        )
+    )
+    monkeypatch.setattr(settings, "update_status_dir", str(tmp_path))
+    # A report already queued by any path is held back from dispatch too.
+    await outbox.reserve(
+        session,
+        source_key=outbox.upgrade_source(state.installation_id, "0b5f3c2d-1e00-4c1e-9a77-8f6b1e0c2d4a"),
+        name=allowlist.UPGRADE_COMPLETED,
+        installation_id=state.installation_id,
+        moment=started,
+        bioaf_version="2026.12.1",
+        from_version="2026.11.26",
+    )
+    await session.commit()
+    capture = Capture()
+
+    await _send(capture, now=started + timedelta(minutes=11))
+
+    assert capture.requests == []
+    assert [r.status for r in await _rows(session)] == ["cancelled"]

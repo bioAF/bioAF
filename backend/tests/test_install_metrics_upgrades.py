@@ -306,3 +306,15 @@ async def test_the_cli_reserves_without_network_and_refuses_bad_arguments(sessio
     bad[1] = "SECRET-not-a-uuid"
     assert await cli.run(bad, database.async_session_factory, now=COMPLETED) != 0
     assert "SECRET" not in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_an_opted_in_installation_whose_setup_is_unfinished_records_no_upgrade(session, reporting):
+    from app.models.organization import Organization
+
+    session.add(Organization(name="Lab", setup_complete=False))
+    await session.commit()
+    await _enable(session)
+
+    assert await _record(session) == "setup_incomplete"
+    assert await _upgrade_reports(session) == []
