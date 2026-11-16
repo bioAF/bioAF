@@ -40,9 +40,11 @@ class _LaunchSpy:
     def __init__(self, status="running"):
         self.status = status
         self.calls = []  # list of PipelineRunLaunchRequest
+        self.input_file_ids = []  # the launch's input-file restriction, per call
 
-    async def __call__(self, session, org_id, user_id, data, *, via_assistant=False):
+    async def __call__(self, session, org_id, user_id, data, *, via_assistant=False, input_file_ids=None):
         self.calls.append(data)
+        self.input_file_ids.append(input_file_ids)
         run = PipelineRun(
             organization_id=org_id,
             experiment_id=data.experiment_id,

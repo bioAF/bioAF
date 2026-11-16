@@ -1,6 +1,7 @@
 import copy
 import logging
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -800,10 +801,23 @@ class PipelineRunService:
         return PipelineRunService._in_requested_order(samples, sample_ids)
 
     @staticmethod
-    def _sheet_inputs(samples: list, include_derived: bool, org_id: int) -> list[SheetSampleInput]:
-        """Typed snapshots of authorized, loaded samples, each with its eligible files decided here."""
+    def _sheet_inputs(
+        samples: list, include_derived: bool, org_id: int, only: Collection[int] | None = None
+    ) -> list[SheetSampleInput]:
+        """Typed snapshots of authorized, loaded samples, each with its eligible files decided here.
+
+        ``only`` narrows the eligible files to that set of file IDs; it never widens them.
+        """
+        allowed = None if only is None else set(only)
         return [
-            SheetSampleInput.from_sample(s, PipelineRunService._launchable_files(s.files, include_derived, org_id))
+            SheetSampleInput.from_sample(
+                s,
+                [
+                    f
+                    for f in PipelineRunService._launchable_files(s.files, include_derived, org_id)
+                    if allowed is None or f.id in allowed
+                ],
+            )
             for s in samples
         ]
 
@@ -926,8 +940,13 @@ class PipelineRunService:
         *,
         via_assistant: bool = False,
         recorded: RecordedLaunch | None = None,
+        input_file_ids: Collection[int] | None = None,
     ) -> PipelineRun:
         """Launch a pipeline run: the core orchestration method.
+
+        ``input_file_ids`` (internal callers only, never the API body) narrows each selected sample's
+        input files to that set, for a caller that has already decided exactly which files the run may
+        consume (a validation study's verified inputs).
 
         ``recorded`` (reproduction) is what the original run recorded. Its parameters and reference
         label are used as recorded, and the launch is refused, before anything is created or
@@ -953,7 +972,7 @@ class PipelineRunService:
         # (which compounded the dataset every run); include_derived_inputs opts in.
         # The sheet, the missing-file decision and the input provenance below all
         # read these typed snapshots, never the ORM samples' linked files.
-        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id)
+        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id, input_file_ids)
         orm_samples = {s.id: s for s in selected}
 
         # 3b. The samplesheet contract, which decides both whether this pipeline

@@ -551,9 +551,32 @@ class ValidationDriverService:
             plan.differential_design_json, await _load_runnable_samples(session, study.experiment_id), contract
         )
 
+        # The launch consumes exactly what the eligibility check approved: the selected samples and
+        # their current-acquisition FASTQs, never an unselected sample or an older acquisition's file.
+        # A study with no acquisition run (data supplied another way) has no such binding.
+        input_file_ids: list[int] | None = None
+        sample_ids: list[int] | None = None
+        if study.data_run_id is not None:
+            selected = await selected_input_files(session, study)
+            if not selected:
+                return await ValidationDriverService._fail(
+                    session, study, "No fetched FASTQ from the current acquisition matches the approved design."
+                )
+            input_file_ids = sorted(f.id for f in selected)
+            sample_ids = sorted(
+                set(
+                    (
+                        await session.execute(
+                            select(sample_files.c.sample_id).where(sample_files.c.file_id.in_(input_file_ids))
+                        )
+                    ).scalars()
+                )
+            )
+
         launch = PipelineRunLaunchRequest(
             pipeline_key=plan.pipeline_key,
             experiment_id=study.experiment_id,
+            sample_ids=sample_ids,
             parameters=dict(plan.parameters_json or {}),
             reference_genome=plan.reference_genome,
             sample_values=sample_values,
@@ -565,7 +588,7 @@ class ValidationDriverService:
             # Some fetched samples may lack usable FASTQ; drop them rather than fail the whole run.
             drop_samples_without_files=True,
         )
-        run = await ValidationDriverService._launch(session, study, launch)
+        run = await ValidationDriverService._launch(session, study, launch, input_file_ids=input_file_ids)
         study.analysis_run_id = run.id
         if run.status in _RUN_FAILED:
             return await ValidationDriverService._fail(session, study, "analysis run failed to launch")
@@ -896,10 +919,22 @@ class ValidationDriverService:
         return True  # stays in acquiring_data until the fetch completes
 
     @staticmethod
-    async def _launch(session: AsyncSession, study: ValidationStudy, launch: PipelineRunLaunchRequest):
+    async def _launch(
+        session: AsyncSession,
+        study: ValidationStudy,
+        launch: PipelineRunLaunchRequest,
+        *,
+        input_file_ids: list[int] | None = None,
+    ):
         from app.services.pipeline_run_service import PipelineRunService
 
-        return await PipelineRunService.launch_run(session, study.organization_id, study.requested_by_user_id, launch)
+        if input_file_ids is None:
+            return await PipelineRunService.launch_run(
+                session, study.organization_id, study.requested_by_user_id, launch
+            )
+        return await PipelineRunService.launch_run(
+            session, study.organization_id, study.requested_by_user_id, launch, input_file_ids=input_file_ids
+        )
 
     @staticmethod
     async def _load_run(session: AsyncSession, run_id: int | None):

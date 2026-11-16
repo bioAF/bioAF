@@ -220,3 +220,47 @@ async def test_fastqs_fetched_before_verification_existed_stay_usable(session, a
     await ValidationDriverService.advance_active_studies(session)
     await session.refresh(study)
     assert study.state == "setup"
+
+
+async def test_launch_consumes_exactly_the_verified_selection(session, admin_user, monkeypatch):
+    """The launch runs the inputs eligibility approved: selected samples, current-acquisition FASTQs only."""
+    study, files, spy = await _acquiring(
+        session,
+        admin_user,
+        monkeypatch,
+        inputs=[("SRR1", "verified"), ("SRR2", "verified"), ("SRR3", "checksum_mismatch")],
+    )
+    # An older acquisition's FASTQ for a selected sample: not part of this study's verified inputs.
+    old = await _run(session, admin_user, study.experiment_id, name="nf-core/fetchngs", status="completed")
+    stale = File(
+        organization_id=admin_user.organization_id,
+        storage_uri=f"s3://r/runs/{old.id}/fastq/SRR1_1.fastq.gz",
+        filename="SRR1_1.fastq.gz",
+        file_type="fastq",
+        source_type="pipeline_output",
+        source_pipeline_run_id=old.id,
+        experiment_id=study.experiment_id,
+        tags_json=["read:R1"],
+    )
+    session.add(stale)
+    await session.flush()
+    await session.execute(
+        text("INSERT INTO sample_files (sample_id, file_id) SELECT sample_id, :f FROM sample_files WHERE file_id = :g"),
+        {"f": stale.id, "g": files["SRR1"].id},
+    )
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+    await session.refresh(study)
+    assert study.state == "setup"
+    await ValidationDriverService.advance_active_studies(session)
+
+    [launch] = spy.calls
+    selected = {files["SRR1"].id, files["SRR2"].id}
+    assert set(spy.input_file_ids[0]) == selected
+    linked = (
+        await session.execute(
+            text("SELECT sample_id FROM sample_files WHERE file_id = ANY(:ids)"), {"ids": sorted(selected)}
+        )
+    ).scalars()
+    assert sorted(launch.sample_ids) == sorted(linked)
