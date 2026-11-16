@@ -15,11 +15,16 @@ from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage.digest import ordered_md5
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
+    DIGEST_CHUNK_BYTES,
+    ObjectChanged,
+    ObjectDigest,
+    ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
@@ -526,6 +531,31 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_object_metadata, uri, creds)
 
+    async def object_identity(self, uri: str) -> ObjectIdentity:
+        if self.is_local:
+            size, version = await asyncio.to_thread(self._local_fs().identity, uri)
+            return ObjectIdentity(uri=uri, size_bytes=size, version=version)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_object_identity, uri, creds)
+
+    async def stream_md5(
+        self, identity: ObjectIdentity, *, chunk_size: int = DIGEST_CHUNK_BYTES, on_progress=None
+    ) -> ObjectDigest:
+        if self.is_local:
+            read, close = await asyncio.to_thread(self._local_fs().open_version, identity.uri, identity.version)
+        else:
+            creds = await self._get_credentials()
+            read, close = self._gcs_generation_reader(identity, creds)
+        return await ordered_md5(
+            read,
+            close,
+            uri=identity.uri,
+            version=identity.version,
+            expected_size=identity.size_bytes,
+            chunk_size=chunk_size,
+            on_progress=on_progress,
+        )
+
     async def get_bucket_info(self, uri: str) -> dict:
         if self.is_local:
             # The local filesystem store has no object versioning.
@@ -713,6 +743,50 @@ class GcsStorageProvider(StorageProvider):
             updated=str(blob.updated) if blob.updated else None,
             metadata=dict(blob.metadata or {}),
         )
+
+    def _gcs_object_identity(self, uri: str, creds) -> ObjectIdentity:
+        from app.services.file_verification_service import normalize_md5
+
+        bucket, key = self._parse_uri(uri)
+        blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        if not blob.exists():
+            raise StorageObjectNotFound(uri)
+        blob.reload()
+        native = None
+        # Composite objects carry no md5Hash; their CRC32C is not an MD5 and is never substituted.
+        if blob.md5_hash:
+            try:
+                native = normalize_md5(blob.md5_hash, allow_base64=True)
+            except Exception:
+                native = None
+        return ObjectIdentity(
+            uri=uri, size_bytes=blob.size or 0, version=f"generation:{blob.generation}", native_md5=native
+        )
+
+    def _gcs_generation_reader(self, identity: ObjectIdentity, creds):
+        """Ordered ranged reads of exactly the identified generation; a replaced object is ObjectChanged."""
+        from google.api_core.exceptions import NotFound, PreconditionFailed
+
+        bucket, key = self._parse_uri(identity.uri)
+        generation = int(identity.version.partition(":")[2])
+        blob = self._get_gcs_client(creds).bucket(bucket).blob(key, generation=generation)
+        offset = 0
+
+        def read(n: int) -> bytes:
+            nonlocal offset
+            if offset >= identity.size_bytes:
+                return b""
+            end = min(offset + n, identity.size_bytes) - 1
+            try:
+                chunk = blob.download_as_bytes(start=offset, end=end, checksum=None)
+            except (NotFound, PreconditionFailed) as e:
+                raise ObjectChanged(identity.uri) from e
+            offset += len(chunk)
+            if not chunk:
+                raise ObjectChanged(identity.uri)
+            return chunk
+
+        return read, lambda: None
 
     def _gcs_generate_signed_url(self, uri: str, method: str, expiry_seconds: int, content_type, creds) -> str:
         bucket, key = self._parse_uri(uri)

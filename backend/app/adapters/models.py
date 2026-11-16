@@ -237,6 +237,44 @@ class StorageObjectNotFound(Exception):
         super().__init__(message or f"Storage object not found: {uri}")
 
 
+class ObjectChanged(Exception):
+    """The object no longer matches the identity a digest was bound to (replaced, rewritten, or gone)."""
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+        super().__init__(f"Storage object changed: {uri}")
+
+
+# Bounded read size for whole-object digests (one active digest per process by default).
+DIGEST_CHUNK_BYTES = 8 * 1024 * 1024
+
+
+class ObjectIdentity(BaseModel):
+    """One exact stored object: its size, its version identity, and a trustworthy native MD5 if any.
+
+    ``version`` is opaque and backend-specific (``versionid:<id>`` or ``etag:<etag>`` on S3,
+    ``generation:<n>`` on GCS, ``local:<dev>:<ino>:<mtime_ns>:<size>`` on a filesystem). A digest is
+    evidence only for the version it was computed from. ``native_md5`` is lowercase hex, set only
+    when the provider's digest is of the whole final object; otherwise an expectation must stream.
+    """
+
+    uri: str
+    size_bytes: int
+    version: str
+    native_md5: str | None = None
+
+
+class ObjectDigest(BaseModel):
+    """A whole-object digest observed by bioAF: ``provider`` (trusted native) or ``streamed``."""
+
+    uri: str
+    algorithm: str = "md5"
+    hex: str
+    size_bytes: int
+    version: str
+    method: str
+
+
 class ObjectMetadata(BaseModel):
     """Metadata for a single stored object (size/checksum without downloading)."""
 
