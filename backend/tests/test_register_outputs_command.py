@@ -376,3 +376,37 @@ async def test_existing_files_made_ready_are_counted_truthfully(
     assert "Existing files made ready: 1" in out
     assert "Webhook deliveries recorded: 1" in out
     assert [e for e, _ in await _deliveries(command_env)] == ["file.ready"]
+
+
+async def test_a_notification_failure_names_existing_files_made_ready(
+    session, admin_user, store, command_env, monkeypatch, capsys
+):
+    """An older output made ready whose file.ready could not be recorded is named for reconciliation."""
+    await _subscribe(session, admin_user.organization_id, admin_user.id)
+    run = await _run(session, admin_user.organization_id)
+    outdir = _outputs(monkeypatch, store, run, ["old.txt"])
+    await _write(store, outdir, ["old.txt"])
+    old = File(
+        organization_id=admin_user.organization_id,
+        storage_uri=f"{outdir}/old.txt",
+        source_storage_uri=f"{outdir}/old.txt",
+        filename="old.txt",
+        file_type="other",
+        source_type="pipeline_output",
+        source_pipeline_run_id=run.id,
+    )
+    session.add(old)
+    await session.commit()
+    old_id = old.id
+    monkeypatch.setattr(cli, "DRAIN_SECONDS", 0.2)
+
+    async def slow(*a, **k):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(webhook_dispatcher, "dispatch_event", slow)
+    code = await cli._main(_args(run_id=run.id, force=True))
+    out = capsys.readouterr().out
+    assert code != 0, out
+    assert "Existing files made ready: 1" in out
+    assert f"Affected file IDs: {old_id}." in out
+    assert "Affected file IDs: none" not in out

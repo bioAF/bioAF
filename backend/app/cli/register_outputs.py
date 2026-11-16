@@ -281,8 +281,11 @@ async def _main(args: argparse.Namespace) -> int:
             )
             for failure in report.failures:
                 print(f"  - {failure}")
+            # New files and existing files this run started toward readiness: either may be missing
+            # its file.registered or file.ready notification.
+            affected = sorted(set(report.registered) | {f.id for f in report.existing})
             print(
-                f"  Affected file IDs: {', '.join(str(i) for i in report.registered) or 'none'}. Rerunning this "
+                f"  Affected file IDs: {', '.join(str(i) for i in affected) or 'none'}. Rerunning this "
                 "command or replaying deliveries does not recreate a notification that was never persisted; "
                 "reconcile these files with your LIMS."
             )
