@@ -259,8 +259,15 @@ class NfsStorageProvider(StorageProvider):
         await asyncio.to_thread(self._fs.download_to_filename, uri, local_path)
 
     async def delete(self, uri: str, *, generation: int | None = None) -> None:
-        # A filesystem has no object generations; ignore ``generation``.
+        # A filesystem has no object generations; ignore ``generation``. A protected managed copy is
+        # published read-only, so it is removed by the managed-artifact procedure, never a bare unlink.
+        if self._is_managed(uri):
+            await self.remove_managed_artifact(uri)
+            return
         await asyncio.to_thread(self._fs.delete, uri)
+
+    def _is_managed(self, uri: str) -> bool:
+        return nfs_managed_copy.is_managed_key(self._parse_uri(uri)[1])
 
     async def exists(self, uri: str) -> bool:
         return await asyncio.to_thread(self._fs.exists, uri)
@@ -281,6 +288,10 @@ class NfsStorageProvider(StorageProvider):
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         # Copy-verify-delete: leave the source intact if the copy fails.
+        if self._is_managed(source_uri):
+            await asyncio.to_thread(self._fs.copy, source_uri, dest_uri)
+            await self.remove_managed_artifact(source_uri)
+            return dest_uri
         await asyncio.to_thread(self._fs.move, source_uri, dest_uri)
         return dest_uri
 

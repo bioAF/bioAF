@@ -180,6 +180,25 @@ async def test_cleanup_removes_only_managed_artifacts(nfs):
     await nfs.remove_managed_artifact(copy.uri)  # idempotent
 
 
+async def test_ordinary_deletion_removes_a_protected_copy(nfs):
+    """The canonical copy of a verified file is deleted through the normal storage API."""
+    await _write_source(nfs)
+    copy = await _copy(nfs)
+    await nfs.delete(copy.uri)
+    assert not await nfs.exists(copy.uri)
+    assert await nfs.exists(SOURCE)
+    await nfs.delete(copy.uri)  # idempotent, like deleting any missing object
+
+
+async def test_moving_a_protected_copy_removes_its_artifact(nfs):
+    await _write_source(nfs)
+    copy = await _copy(nfs)
+    dest = "file://raw/archive/a.fastq.gz"
+    assert await nfs.move(copy.uri, dest) == dest
+    assert await nfs.read_bytes(dest) == PAYLOAD
+    assert not await nfs.exists(copy.uri)
+
+
 # --- separation preflight ---------------------------------------------------------------------
 
 
