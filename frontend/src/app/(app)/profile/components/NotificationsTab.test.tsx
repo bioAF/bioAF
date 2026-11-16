@@ -141,3 +141,13 @@ test("saves the current preferences", async () => {
   await waitFor(() => expect(mockPut).toHaveBeenCalledWith("/api/notifications/preferences", expect.anything()));
   expect(await screen.findByText(/preferences saved/i)).toBeInTheDocument();
 });
+
+test("checksum verification failures can be switched off like any other notification", async () => {
+  mockGet.mockResolvedValue([]);
+  render(<NotificationsTab />);
+  await screen.findByText("File verification failed");
+
+  expect(
+    screen.getByRole("button", { name: "In-App notifications for File verification failed" }),
+  ).toBeInTheDocument();
+});

@@ -232,6 +232,18 @@ class Settings(BaseSettings):
     # webhooks then reach public HTTPS receivers only. An invalid value refuses startup.
     webhook_internal_destinations: Any = ()
 
+    # Checksum verification worker (app/services/file_verification_worker.py). One active digest job per
+    # process; reads in bounded chunks; a lease is renewed while work progresses and reclaimed after a
+    # crash. A job past its deadline is abandoned and retried.
+    file_verification_lease_seconds: int = 300
+    file_verification_chunk_bytes: int = 8 * 1024 * 1024
+    file_verification_job_deadline_seconds: int = 6 * 3600
+    # NFS protected copies (app/adapters/storage/nfs_managed_copy.py): the UIDs pipelines, notebooks and
+    # uploads write NFS as (comma-separated), which must differ from the backend's, and the free space kept
+    # in reserve beyond one extra copy. Without producer UIDs, checksum-required NFS files are refused.
+    nfs_producer_uids: str = ""
+    nfs_managed_copy_reserve_bytes: int = 1024 * 1024 * 1024
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

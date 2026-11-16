@@ -31,14 +31,16 @@ class FakeStorage:
         self.objects: dict[str, ObjectMetadata | BaseException] = {}
         self.calls: list[str] = []
 
-    async def get_object_metadata(self, uri: str) -> ObjectMetadata:
+    async def object_identity(self, uri: str):
+        from types import SimpleNamespace
+
         self.calls.append(uri)
         found = self.objects.get(uri)
         if found is None:
             raise StorageObjectNotFound(uri)
         if isinstance(found, BaseException):
             raise found
-        return found
+        return SimpleNamespace(uri=uri, size_bytes=found.size_bytes, version="v1", native_md5=None)
 
 
 @pytest.fixture

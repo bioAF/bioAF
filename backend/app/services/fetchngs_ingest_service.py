@@ -344,3 +344,29 @@ class FetchngsIngestService:
             linked,
         )
         return created
+
+
+async def resolve_fetchngs_expectation(session: AsyncSession, file: File, context: dict) -> str | None:
+    """The expected MD5 a fetchngs samplesheet gives for ``file``, or None when its row has none.
+
+    The CSV value is an expectation (fetchngs's own download check is not proof of the final stored
+    object). A file whose samplesheet cannot be read, or whose row cannot be found, raises: that is a
+    discovery failure to retry, never evidence that no checksum was supplied. A malformed value raises
+    ValidationError.
+    """
+    from app.adapters import registry
+    from app.services.file_verification_service import normalize_md5
+
+    uri = context.get("samplesheet_uri")
+    if not uri:
+        raise LookupError("no samplesheet recorded for this file")
+    csv_text = await registry.get_storage_adapter().read_text(uri)
+    basename = (file.source_storage_uri or file.storage_uri or file.gcs_uri).rsplit("/", 1)[-1]
+    for raw_row in csv.DictReader(io.StringIO(csv_text)):
+        row = {(k or "").strip().lower(): v for k, v in raw_row.items()}
+        for column, read in _FASTQ_COLUMNS:
+            value = (row.get(column) or "").strip()
+            if value and value.rsplit("/", 1)[-1] == basename:
+                md5 = _row_md5(row, read[-1])
+                return normalize_md5(md5) if md5 else None
+    raise LookupError("the file is not listed in its samplesheet")

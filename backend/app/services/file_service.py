@@ -214,7 +214,7 @@ class FileService:
             return "failed"
 
         try:
-            observed = await get_storage_adapter().get_object_metadata(uri)
+            observed = await get_storage_adapter().object_identity(uri)
         except StorageObjectNotFound:
             return await _fail("object_missing", True)
         except Exception:
@@ -224,8 +224,18 @@ class FileService:
             return await _fail("size_unavailable", True)
         if expected_size is not None and size != expected_size:
             return await _fail("size_mismatch", False)
-        if record is not None and record.status == "verified" and record.observed_bytes not in (None, size):
-            return await _fail("size_mismatch", False)
+        if record is not None and record.status == "verified":
+            stale = record.observed_bytes not in (None, size) or (
+                record.observed_object_version is not None and observed.version != record.observed_object_version
+            )
+            if stale:
+                # The object changed after it was proved: the old evidence cannot carry over.
+                record.status = "queued"
+                record.observed_checksum = None
+                record.verified_at = None
+                record.next_attempt_at = datetime.now(timezone.utc)
+                await session.flush()
+                return "pending"
 
         file.size_bytes = size
         if record is not None and record.status == "verified":

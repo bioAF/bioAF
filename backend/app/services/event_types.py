@@ -105,6 +105,9 @@ LITERATURE_PAPER_DISMISSED = "literature.paper_dismissed"
 # Validation study events (lit_validation). `error` is an infrastructure failure, not a verdict on
 # the paper, and the only way out of it is a human clicking Retry. Nobody can click what nobody is
 # told about, and the study's fetched data is deleted once the retry window closes.
+# A file's checksum verification needs a person: a mismatch, exhausted retries, or a configuration
+# problem (app/services/file_verification_worker.py).
+FILE_VERIFICATION_FAILED = "file_verification_failed"
 VALIDATION_STUDY_ERROR = "validation.study_error"
 
 # Public LIMS integration events (ADR-051). Project events are internal-only
@@ -214,6 +217,7 @@ ALL_EVENT_TYPES = [
     LITERATURE_COMMENT_REPLIED,
     LITERATURE_PAPER_DISMISSED,
     VALIDATION_STUDY_ERROR,
+    FILE_VERIFICATION_FAILED,
 ]
 
 # Every event type a user can actually be notified about, and therefore every one that must have a

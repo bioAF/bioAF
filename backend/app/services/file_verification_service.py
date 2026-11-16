@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -68,6 +69,43 @@ def normalize_md5(value: Any, *, allow_base64: bool = False) -> str:
             if len(raw) == 16:
                 return raw.hex()
     raise ValidationError("MD5 checksum must be 32 hexadecimal characters")
+
+
+def agreed_upload_md5(expected: str | None, actual: str | None) -> str | None:
+    """The MD5 an upload asserts: initiation's expectation and/or completion's value, normalized.
+
+    Both are client assertions, not observations. When both are given they must agree (the existing
+    upload rule); an empty completion value asserts nothing.
+    """
+    agreed = normalize_md5(expected) if expected else None
+    claimed = normalize_md5(actual) if actual and actual.strip() else None
+    if agreed and claimed and agreed != claimed:
+        raise ValidationError(f"MD5 mismatch: expected {agreed}, got {claimed}")
+    return agreed or claimed
+
+
+@dataclass(frozen=True)
+class Expectation:
+    """What a registration path knows about a file's checksum when it registers it."""
+
+    kind: str  # "none" | "md5" | "pending"
+    source: str
+    value: str | None = None
+    context: dict = field(default_factory=dict)
+
+    @classmethod
+    def none(cls, source: str) -> "Expectation":
+        """The source was resolved and carries no checksum."""
+        return cls("none", source)
+
+    @classmethod
+    def md5(cls, source: str, value: str) -> "Expectation":
+        return cls("md5", source, value=value)
+
+    @classmethod
+    def pending(cls, source: str, context: dict) -> "Expectation":
+        """The source may carry a checksum but is not resolved yet."""
+        return cls("pending", source, context=dict(context))
 
 
 async def current_record(session: AsyncSession, file_id: int, *, lock: bool = False) -> FileVerification | None:
@@ -167,6 +205,94 @@ class FileVerificationService:
         return record
 
     @staticmethod
+    async def begin(session: AsyncSession, file: File, expectation: Expectation) -> str:
+        """Start a registered file on its way to readiness, in the registering transaction.
+
+        Returns ``ready``, ``already_ready``, ``pending`` (the worker or discovery continues),
+        ``checksum_mismatch``, or ``failed``. Only a metadata read happens here: an explicit MD5 is
+        compared at once only against a trustworthy native digest of the final object; anything
+        else (no native digest, an NFS store needing a protected copy) is left queued for the worker.
+        """
+        from app.adapters.registry import get_storage_adapter
+        from app.services.file_service import FileService
+
+        if expectation.kind == "pending":
+            await FileVerificationService.await_expectation(
+                session, file, source=expectation.source, context=expectation.context
+            )
+            return "pending"
+        if expectation.kind == "none":
+            record = await FileVerificationService.record_not_required(session, file, source=expectation.source)
+            if record.status != NOT_REQUIRED:
+                return "pending"  # an earlier expectation still applies
+            return await FileService.mark_ready(session, file.id, file.organization_id)
+
+        record = await FileVerificationService.record_expectation(
+            session, file, source=expectation.source, md5=expectation.value or ""
+        )
+        if record.status == VERIFIED:
+            return await FileService.mark_ready(session, file.id, file.organization_id)
+        if record.status != QUEUED:
+            return record.status
+        adapter = get_storage_adapter()
+        if hasattr(adapter, "prepare_managed_copy"):
+            return "pending"
+        uri = file.storage_uri or file.gcs_uri
+        try:
+            identity = await adapter.object_identity(uri)
+        except Exception:
+            return "pending"  # the worker retries the read with its own schedule
+        if not identity.native_md5:
+            return "pending"
+        record.observed_checksum = identity.native_md5
+        record.observed_method = "provider"
+        record.observed_bytes = identity.size_bytes
+        record.observed_uri = uri
+        record.observed_object_version = identity.version
+        record.next_attempt_at = None
+        if identity.native_md5 != record.expected_checksum:
+            record.status = CHECKSUM_MISMATCH
+            record.error_code = "checksum_mismatch"
+            record.retryable = False
+            await session.flush()
+            await notify_failure(session, file, "checksum_mismatch")
+            return CHECKSUM_MISMATCH
+        record.status = VERIFIED
+        record.verified_at = _now()
+        await session.flush()
+        return await FileService.mark_ready(session, file.id, file.organization_id)
+
+    @staticmethod
+    async def retry(session: AsyncSession, file_id: int, org_id: int) -> FileVerification | None:
+        """Requeue a failed or mismatched verification after correction (an authorized retry).
+
+        None when the organization has no such record. Work already pending or verified is refused
+        (StateError): a retry never resets a running attempt or redoes a proof. The attempt budget
+        restarts; no registration event is produced.
+        """
+        from app.exceptions import StateError
+
+        record = (
+            await session.execute(
+                select(FileVerification)
+                .where(FileVerification.file_id == file_id, FileVerification.organization_id == org_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            return None
+        if record.status not in (FAILED, CHECKSUM_MISMATCH):
+            raise StateError("Only a failed or mismatched verification can be retried")
+        artifact_uuid, artifact_uri = record.artifact_uuid, record.artifact_uri
+        _reset_work(record)
+        # Keep the previous protected copy recorded so the next attempt removes it first.
+        record.artifact_uuid, record.artifact_uri = artifact_uuid, artifact_uri
+        record.status = QUEUED if record.expected_checksum is not None else WAITING_EXPECTATION
+        record.next_attempt_at = _now()
+        await session.flush()
+        return record
+
+    @staticmethod
     def view(file: File, record: FileVerification | None) -> dict[str, Any] | None:
         """The ``verification`` object of file responses. Never starts any work."""
         if record is None:
@@ -196,3 +322,48 @@ class FileVerificationService:
             "error_code": record.error_code,
             "retryable": record.retryable,
         }
+
+
+FAILURE_MESSAGES = {
+    "checksum_mismatch": "The file's checksum does not match the expected value.",
+    "storage_unavailable": "Storage could not be read to verify the file.",
+    "object_missing": "The file's stored object could not be found.",
+    "object_changed": "The stored file changed while it was being verified.",
+    "storage_permission_denied": "bioAF is not allowed to read the stored file.",
+    "nfs_separation_unavailable": "Protected storage for verification is not configured.",
+    "nfs_capacity_insufficient": "There is not enough storage space to verify the file.",
+    "managed_copy_refused": "The file could not be copied safely for verification.",
+    "verification_timeout": "Verifying the file took too long.",
+    "expectation_discovery_failed": "The file's expected checksum could not be read.",
+    "file_deleted": "The file was deleted before verification finished.",
+}
+
+
+async def notify_failure(session: AsyncSession, file: File, code: str) -> None:
+    """Tell the file's responsible user (uploader, else the producing run's submitter) after commit.
+
+    The message is plain and safe: a file name and a reason, never a URI, checksum, or raw error."""
+    from app.services.event_types import FILE_VERIFICATION_FAILED
+    from app.services.post_commit_events import defer_event
+
+    user_id = file.uploader_user_id
+    if user_id is None and file.source_pipeline_run_id is not None:
+        from app.models.pipeline_run import PipelineRun
+
+        run = await session.get(PipelineRun, file.source_pipeline_run_id)
+        user_id = run.submitted_by_user_id if run is not None else None
+    defer_event(
+        session,
+        FILE_VERIFICATION_FAILED,
+        {
+            "event_type": FILE_VERIFICATION_FAILED,
+            "org_id": file.organization_id,
+            "user_id": user_id,
+            "title": "File verification failed",
+            "message": f"{file.filename}: {FAILURE_MESSAGES.get(code, 'The file could not be verified.')}",
+            "summary": f"File verification failed: {file.filename}",
+            "entity_type": "file",
+            "entity_id": file.id,
+            "metadata": {"error_code": code},
+        },
+    )
