@@ -33,7 +33,7 @@ describe("InstallMetricsSummary", () => {
       INSTALL_METRICS_NOTICE_URL,
     );
     for (const gone of ["distinct_id", "$geoip_disable", "registration_kind", "What a report contains", "PostHog"]) {
-      expect(screen.queryByText(new RegExp(gone.replace("$", "\\$")))).not.toBeInTheDocument();
+      expect(screen.queryByText(gone, { exact: false })).not.toBeInTheDocument();
     }
   });
 });
