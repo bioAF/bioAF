@@ -156,3 +156,16 @@ test("a refused test event is explained inside the open subscription dialog", as
   fireEvent.click(within(dialog).getByRole("button", { name: "Send test event" }));
   expect(await within(dialog).findByText(DENIED)).toBeInTheDocument();
 });
+
+test("a delivery with no response yet shows the shared not-set dash", async () => {
+  api.listWebhookDeliveries.mockResolvedValue([
+    { id: 3, subscription_id: 7, event_id: "e3", event_type: "file.ready", status: "pending",
+      attempt_count: 0, next_attempt_at: null, last_response_status: null, last_attempted_at: null,
+      created_at: "2026-11-16T00:00:00Z", delivered_at: null },
+  ]);
+  render(<WebhooksTab />);
+  fireEvent.click(await screen.findByText("LIMS bridge"));
+  const dialog = await screen.findByRole("dialog");
+  expect(await within(dialog).findByLabelText("Response not set")).toBeInTheDocument();
+  expect(within(dialog).getByText("Waiting to send", { selector: "span" })).toBeInTheDocument();
+});

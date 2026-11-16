@@ -15,6 +15,7 @@ import { RevealSecretModal } from "./RevealSecretModal";
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { NotSet } from "@/components/shared/NotSet";
 
 const VALID_EVENTS = [
   "experiment.created",
@@ -473,7 +474,7 @@ export function WebhooksTab() {
                       <span title={d.status}>{deliveryStatusLabel(d)}</span>
                     </td>
                     <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
-                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? "-"}</td>
+                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? <NotSet label="Response" />}</td>
                     <td className="px-2 py-2 text-xs">
                       <button
                         onClick={() => handleReplay(d.id)}

@@ -892,7 +892,7 @@ export function FileBrowser({
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Size</dt>
-                <dd className="mt-0.5 text-sm text-gray-900">{formatBytes(viewingFile.size_bytes, "file", { missing: "-" })}</dd>
+                <dd className="mt-0.5 text-sm text-gray-900">{viewingFile.size_bytes == null ? <NotSet label="Size" /> : formatBytes(viewingFile.size_bytes, "file", { missing: "" })}</dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Uploaded</dt>
