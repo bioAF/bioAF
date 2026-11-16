@@ -7694,7 +7694,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Register Outputs */
+        /**
+         * Register Outputs
+         * @description Register a session's output files.
+         *
+         *     Only the caller's own organization's session, and only objects inside that session's storage
+         *     namespace (``sessions/<id>/`` in the working or results store): a client-supplied URI must never
+         *     make bioAF read or announce an arbitrary object. Each output may carry its own ``external_id``.
+         */
         post: operations["register_outputs_api_v1_notebooks_sessions__session_id__register_outputs_post"];
         delete?: never;
         options?: never;

@@ -256,7 +256,11 @@ async def input_eligibility(session: AsyncSession, study: ValidationStudy) -> tu
     mismatch, failed, pending = [], [], []
     for f in files:
         record = records.get(f.id)
-        status = record.status if record is not None else None
+        if record is None:
+            # Registered before checksum verification existed: not proven, but not invalidated either.
+            # Every newly fetched FASTQ gets a record when it is attached.
+            continue
+        status = record.status
         if status == "checksum_mismatch":
             mismatch.append(f.id)
         elif status == "failed":

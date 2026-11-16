@@ -105,7 +105,7 @@ class _Report:
     incomplete: bool = False
 
 
-_MAPPED = set(webhook_dispatcher.INTERNAL_EVENTS)
+_MAPPED = frozenset(webhook_dispatcher.INTERNAL_EVENTS)
 
 
 async def _commit_and_drain(session: AsyncSession, binding, owner: runtime.TaskOwner, report: _Report) -> None:

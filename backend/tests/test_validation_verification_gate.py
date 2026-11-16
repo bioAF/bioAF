@@ -209,3 +209,14 @@ async def test_setup_refuses_to_launch_on_inputs_that_became_unusable(session, a
     await ValidationDriverService.advance_active_studies(session)
     await session.refresh(study)
     assert study.state == "error" and spy.calls == []
+
+
+async def test_fastqs_fetched_before_verification_existed_stay_usable(session, admin_user, monkeypatch):
+    """No verification record means the file predates the contract: unproven, but not invalidated."""
+    study, files, _ = await _acquiring(session, admin_user, monkeypatch, inputs=[("SRR1", None), ("SRR2", None)])
+    for f in files.values():
+        f.ready_at = None
+    await session.flush()
+    await ValidationDriverService.advance_active_studies(session)
+    await session.refresh(study)
+    assert study.state == "setup"

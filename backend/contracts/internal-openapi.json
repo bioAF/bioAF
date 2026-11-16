@@ -48638,6 +48638,7 @@
     },
     "/api/v1/notebooks/sessions/{session_id}/register-outputs": {
       "post": {
+        "description": "Register a session's output files.\n\nOnly the caller's own organization's session, and only objects inside that session's storage\nnamespace (``sessions/<id>/`` in the working or results store): a client-supplied URI must never\nmake bioAF read or announce an arbitrary object. Each output may carry its own ``external_id``.",
         "operationId": "register_outputs_api_v1_notebooks_sessions__session_id__register_outputs_post",
         "parameters": [
           {
