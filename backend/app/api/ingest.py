@@ -8,7 +8,6 @@ from app.database import get_session
 from app.models.file import File
 from app.models.ingest_event import IngestEvent
 from app.models.project import Project
-from app.models.sample import Sample
 from app.services.sample_service import SampleService
 from app.schemas.ingest import (
     BulkReassignRequest,
@@ -225,21 +224,8 @@ async def claim_sample(
     current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
-    user_id = int(current_user["sub"])
-    result = await session.execute(select(Sample).where(Sample.id == sample_id))
-    sample = result.scalar_one_or_none()
-    if not sample:
-        raise HTTPException(404, "Sample not found")
-    if not sample.is_unclaimed:
-        raise HTTPException(400, "Sample is not unclaimed")
-
-    if body.name and body.name != sample.external_id:
-        await SampleService.refuse_ambiguous_label(session, sample.experiment_id, body.name)
-    sample.is_unclaimed = False
-    if body.name:
-        sample.external_id = body.name
-    await session.flush()
-
-    await log_action(session, user_id=user_id, entity_type="sample", entity_id=sample.id, action="claim")
+    sample = await SampleService.claim(
+        session, sample_id, int(current_user["org_id"]), int(current_user["sub"]), name=body.name
+    )
     await session.commit()
     return {"id": sample.id, "external_id": sample.external_id, "is_unclaimed": False}

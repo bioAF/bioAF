@@ -1100,9 +1100,9 @@ class PipelineRunService:
         # Decided on the snapshots, applied to the loaded records by sample id:
         # the sheet computation never changes a sample.
         field_updates = sheet.sample_field_updates()
-        for sample_id, updates in field_updates.items():
-            for field, value in updates.items():
-                setattr(orm_samples[sample_id], field, value)
+        from app.services.sample_service import SampleService
+
+        await SampleService.apply_field_updates(session, orm_samples, field_updates)
 
         # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
         # having refused the job; see launch_outcome for the case where it had in fact accepted it.

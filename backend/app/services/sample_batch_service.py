@@ -123,3 +123,7 @@ class SampleBatchService:
                     details={"sample_batch_id": batch_id, "batch_name": batch.name},
                     previous_value={"sample_batch_id": old_batch_id},
                 )
+                if old_batch_id != batch_id:
+                    from app.services.sample_service import SampleService
+
+                    await SampleService._announce_updated(session, sample, {"sample_batch_id"})

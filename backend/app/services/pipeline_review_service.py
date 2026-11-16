@@ -174,6 +174,9 @@ class PipelineReviewService:
                         details={"qc_status": new_qc, "qc_notes": new_notes, "via": "pipeline_review"},
                         previous_value=previous_qc,
                     )
+                    from app.services.sample_service import SampleService
+
+                    await SampleService._announce_qc(session, sample, previous_qc["qc_status"], previous_qc["qc_notes"])
 
         # 4. Audit log for the review itself
         await log_action(
