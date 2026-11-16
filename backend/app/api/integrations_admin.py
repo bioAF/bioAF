@@ -22,7 +22,9 @@ from app.models.audit_log import AuditLog
 from app.models.role import Role
 from app.models.user import User
 from app.models.webhook import WebhookDelivery, WebhookSubscription
+from app.exceptions import WebhookDestinationRefusedError
 from app.services import api_key_service, service_account_service, webhook_service
+from app.services.webhook_transport import REFUSAL_MESSAGES, DestinationRefused
 
 router = APIRouter(prefix="/api/admin", tags=["admin-integrations"])
 
@@ -260,6 +262,13 @@ class WebhookDeliveryOut(BaseModel):
     delivered_at: datetime | None
 
 
+def _refused(e: DestinationRefused) -> WebhookDestinationRefusedError:
+    """A refused address as a plain explanation, with its reason code for API clients."""
+    return WebhookDestinationRefusedError(
+        REFUSAL_MESSAGES.get(e.code, REFUSAL_MESSAGES["destination_denied"]), details={"reason": e.code}
+    )
+
+
 @router.get("/webhooks", response_model=list[WebhookSubscriptionOut])
 async def list_webhooks(
     user: dict = require_permission("notifications", "configure"),
@@ -284,6 +293,8 @@ async def create_webhook(
             events=body.events,
             created_by_user_id=int(user["sub"]),
         )
+    except DestinationRefused as e:
+        raise _refused(e) from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await session.commit()
@@ -310,6 +321,8 @@ async def update_webhook(
         )
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
+    except DestinationRefused as e:
+        raise _refused(e) from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await session.commit()
@@ -396,6 +409,8 @@ async def replay_webhook_delivery(
         raise HTTPException(404, "delivery_not_found")
     try:
         clone = await webhook_service.replay_delivery(session, delivery_id, int(user["sub"]))
+    except DestinationRefused as e:
+        raise _refused(e) from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await session.commit()
@@ -412,6 +427,8 @@ async def fire_test_webhook(
         delivery = await webhook_service.fire_test_event(session, sub_id, int(user["org_id"]), int(user["sub"]))
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
+    except DestinationRefused as e:
+        raise _refused(e) from e
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await session.commit()

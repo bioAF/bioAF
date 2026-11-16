@@ -56,6 +56,22 @@ _OPERATION_TIMEOUT = httpx.Timeout(connect=5.0, read=5.0, write=5.0, pool=1.0)
 INVALID_DESTINATION = "invalid_destination"
 DESTINATION_DENIED = "destination_denied"
 DNS_FAILED = "dns_failed"
+
+# What a person setting up a webhook reads for each refusal (the code stays available to clients).
+REFUSAL_MESSAGES = {
+    DESTINATION_DENIED: (
+        "bioAF isn’t allowed to connect to this address. Check the address with the administrator of the "
+        "system you want to connect."
+    ),
+    INVALID_DESTINATION: (
+        "This isn’t a valid webhook address. Enter the full https:// address the other system gave you, for "
+        "example https://lims.example.com/hooks/bioaf."
+    ),
+    DNS_FAILED: (
+        "bioAF couldn’t find this address. Check that the server name is spelled correctly and that the "
+        "server can be reached from bioAF."
+    ),
+}
 TLS_FAILED = "tls_failed"
 REQUEST_TIMEOUT = "request_timeout"
 TRANSPORT_FAILED = "transport_failed"

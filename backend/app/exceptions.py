@@ -77,6 +77,16 @@ class SamplesMissingFilesError(ValidationError):
     code = "samples_missing_files"
 
 
+class WebhookDestinationRefusedError(UnprocessableError):
+    """A webhook address bioAF may not, or cannot, connect to.
+
+    ``details["reason"]`` is the refusal code (``destination_denied``, ``invalid_destination``,
+    ``dns_failed``); the message is the plain explanation for that reason.
+    """
+
+    code = "webhook_destination_refused"
+
+
 class PipelineNotSampleLaunchableError(ValidationError):
     """The pipeline does not consume per-sample sequencing reads, so it cannot be
     launched from bioAF samples at all.

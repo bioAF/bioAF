@@ -282,3 +282,26 @@ async def test_api_replay_and_test_refuse_unsafe_subscriptions(client, admin_tok
     assert r.status_code == 422
     r = await client.post(f"/api/admin/webhooks/deliveries/{original.id}/replay", headers=headers)
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("url", "reason", "phrase"),
+    [
+        ("https://10.24.8.19/h", "destination_denied", "isn’t allowed to connect to this address"),
+        ("http://hooks.example/h", "invalid_destination", "valid webhook address"),
+        ("https://nowhere.invalid/h", "dns_failed", "couldn’t find this address"),
+    ],
+)
+async def test_a_refused_address_is_explained_plainly_with_a_reason_code(client, admin_token, url, reason, phrase):
+    """Each kind of refusal has its own plain explanation; the code stays available for clients."""
+    r = await client.post(
+        "/api/admin/webhooks",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"name": "x", "url": url, "events": [WEBHOOK_EXPERIMENT_CREATED]},
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert body["code"] == "webhook_destination_refused"
+    assert body["details"]["reason"] == reason
+    assert phrase in body["detail"]
+    assert reason not in body["detail"] and "refused:" not in body["detail"]
