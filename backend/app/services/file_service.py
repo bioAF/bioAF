@@ -7,12 +7,43 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import StorageUnavailableError
+from sqlalchemy.exc import IntegrityError
+
+from app.exceptions import ConflictError, StorageUnavailableError, ValidationError
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.file_service")
+
+EXTERNAL_ID_MAX_LENGTH = 255
+
+
+class SourceIdentityAmbiguous(ConflictError):
+    """More than one legacy File claims one pipeline output; nothing is registered until reconciled."""
+
+    code = "source_identity_ambiguous"
+
+    def __init__(self) -> None:
+        super().__init__("source_identity_ambiguous", plain_body=True)
+
+
+def validate_external_id(value: str | None) -> str | None:
+    """An opaque caller identifier: 1-255 characters, kept exactly as supplied, or None."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= EXTERNAL_ID_MAX_LENGTH:
+        raise ValidationError(f"external_id must be 1-{EXTERNAL_ID_MAX_LENGTH} characters")
+    return value
+
+
+def _conflict_for(exc: IntegrityError) -> ConflictError | None:
+    message = str(exc.orig)
+    if "uq_files_org_external_id" in message:
+        return ConflictError("external_id_already_exists", plain_body=True)
+    if "uq_files_pipeline_source_identity" in message:
+        return ConflictError("source_identity_conflict", plain_body=True)
+    return None
 
 
 class FileService:
@@ -33,7 +64,20 @@ class FileService:
         source_pipeline_run_id: int | None = None,
         artifact_type: str | None = None,
         is_global: bool = False,
+        external_id: str | None = None,
+        source_storage_uri: str | None = None,
     ) -> File:
+        """Create one File row on the caller's session (the caller commits).
+
+        ``external_id`` is the caller's own identifier, or None. A pipeline output records where it
+        was found as its durable source identity (``source_storage_uri``, by default the URI it is
+        registered at). A duplicate external ID or source identity raises ConflictError and leaves
+        the caller's transaction usable: the insert runs in a savepoint, so the unique indexes decide
+        races without poisoning the session.
+        """
+        external_id = validate_external_id(external_id)
+        if source_type == "pipeline_output" and source_pipeline_run_id is not None and source_storage_uri is None:
+            source_storage_uri = storage_uri
         file = File(
             organization_id=org_id,
             storage_uri=storage_uri,
@@ -49,9 +93,18 @@ class FileService:
             source_pipeline_run_id=source_pipeline_run_id,
             artifact_type=artifact_type,
             is_global=is_global,
+            external_id=external_id,
+            source_storage_uri=source_storage_uri,
         )
-        session.add(file)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(file)
+                await session.flush()
+        except IntegrityError as exc:
+            conflict = _conflict_for(exc)
+            if conflict is None:
+                raise
+            raise conflict from None
 
         await log_action(
             session,
@@ -62,6 +115,42 @@ class FileService:
             details={"filename": filename, "file_type": file_type, "size_bytes": size_bytes},
         )
         return file
+
+    @staticmethod
+    async def find_registered_outputs(
+        session: AsyncSession, org_id: int, run_id: int, uris: Sequence[str]
+    ) -> dict[str, File]:
+        """Files already registered for these pipeline-output URIs, in (organization, run) scope.
+
+        A URI matches a File's durable source identity or its current canonical URI, so an original
+        output still present after its bytes were relocated is the same File. Deleted Files count:
+        a rescan must not resurrect a deleted registration. Raises SourceIdentityAmbiguous when a URI
+        matches more than one File (unreconciled legacy duplicates).
+        """
+        wanted = [u for u in dict.fromkeys(uris) if u]
+        if not wanted:
+            return {}
+        rows = (
+            (
+                await session.execute(
+                    select(File).where(
+                        File.organization_id == org_id,
+                        File.source_pipeline_run_id == run_id,
+                        or_(File.source_storage_uri.in_(wanted), File.storage_uri.in_(wanted)),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        found: dict[str, File] = {}
+        for uri in wanted:
+            matches = {f.id: f for f in rows if uri in (f.source_storage_uri, f.storage_uri)}
+            if len(matches) > 1:
+                raise SourceIdentityAmbiguous()
+            if matches:
+                found[uri] = next(iter(matches.values()))
+        return found
 
     @staticmethod
     async def get_file(
