@@ -50,6 +50,17 @@ def require_permission(resource: str, action: str):
     return Depends(checker)
 
 
+def signed_in():
+    """Any signed-in caller, for routes that act only on the caller's own records (their
+    notifications and notification preferences). Listed in SELF_SERVICE_ROUTES of the route
+    permission contract."""
+
+    async def caller(request: Request) -> dict:
+        return request.state.current_user
+
+    return Depends(caller)
+
+
 def require_any_permission(permissions: list[tuple[str, str]]):
     """Pass if the user's role holds ANY of the listed (resource, action)
     permissions. Used where a surface is reachable from more than one place,

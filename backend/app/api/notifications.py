@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_permission, signed_in
 from app.schemas.notification import (
     NotificationListResponse,
     NotificationPreferenceResponse,
@@ -30,7 +30,7 @@ async def list_notifications(
     severity: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: dict = require_permission("notifications", "view"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     notifications, total = await NotificationService.list_notifications(
@@ -52,7 +52,7 @@ async def list_notifications(
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
 async def unread_count(
-    current_user: dict = require_permission("notifications", "view"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     count = await NotificationService.get_unread_count(session, int(current_user["sub"]))
@@ -62,7 +62,7 @@ async def unread_count(
 @router.patch("/{notification_id}/read", response_model=NotificationResponse)
 async def mark_read(
     notification_id: int,
-    current_user: dict = require_permission("notifications", "configure"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     notification = await NotificationService.mark_read(session, notification_id, int(current_user["sub"]))
@@ -74,7 +74,7 @@ async def mark_read(
 
 @router.post("/mark-all-read")
 async def mark_all_read(
-    current_user: dict = require_permission("notifications", "configure"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     count = await NotificationService.mark_all_read(session, int(current_user["sub"]))
@@ -85,7 +85,7 @@ async def mark_all_read(
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: int,
-    current_user: dict = require_permission("notifications", "configure"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     deleted = await NotificationService.delete_notification(session, notification_id, int(current_user["sub"]))
@@ -100,7 +100,7 @@ async def delete_notification(
 
 @router.get("/preferences", response_model=list[NotificationPreferenceResponse])
 async def get_preferences(
-    current_user: dict = require_permission("notifications", "view"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     prefs = await NotificationService.get_preferences(session, int(current_user["sub"]))
@@ -110,7 +110,7 @@ async def get_preferences(
 @router.put("/preferences", response_model=list[NotificationPreferenceResponse])
 async def update_preferences(
     body: NotificationPreferencesUpdate,
-    current_user: dict = require_permission("notifications", "configure"),
+    current_user: dict = signed_in(),
     session: AsyncSession = Depends(get_session),
 ):
     prefs = await NotificationService.update_preferences(
