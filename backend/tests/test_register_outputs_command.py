@@ -147,7 +147,8 @@ async def test_a_recovered_file_and_its_deliveries_survive_the_command(
     assert code == 0, out
     rows = await _deliveries(real_factory)
     assert sorted(e for e, _ in rows) == ["file.ready", "file.ready", "file.registered", "file.registered"]
-    assert "registered 2" in out and "ready 2" in out and "4 delivery row(s) persisted" in out
+    assert "New files registered: 2 (ready: 2, waiting for checksum verification: 0)" in out
+    assert "Existing files made ready: 0" in out and "Webhook deliveries recorded: 4" in out
     # Nothing is left subscribed after the command.
     assert not any(event_bus._subscribers.get(e) for e in webhook_dispatcher.INTERNAL_EVENTS)
 
@@ -174,7 +175,7 @@ async def test_no_matching_subscription_is_a_success(session, admin_user, store,
     await _write(store, outdir, ["a.txt"])
 
     assert await cli._main(_args(run_id=run.id)) == 0
-    assert "no matching subscriptions" in capsys.readouterr().out
+    assert "no matching webhook subscription" in capsys.readouterr().out
     assert await _deliveries(command_env) == []
 
 
@@ -275,7 +276,7 @@ async def test_pending_verification_is_handed_to_the_server_worker(
 
     assert await cli._main(_args(run_id=run.id)) == 0
     out = capsys.readouterr().out
-    assert "pending 1" in out
+    assert "waiting for checksum verification: 1" in out
     async with real_factory() as s:
         fastq = (await s.execute(select(File).where(File.filename == "SRR1_1.fastq.gz"))).scalar_one()
 
@@ -346,3 +347,32 @@ async def test_ambiguous_legacy_outputs_fail_the_command_by_name(
     async with command_env() as s:
         assert len((await s.execute(select(File).where(File.filename == "ok.txt"))).scalars().all()) == 1
         assert len((await s.execute(select(File).where(File.filename == "dup.txt"))).scalars().all()) == 2
+
+
+async def test_existing_files_made_ready_are_counted_truthfully(
+    session, admin_user, store, command_env, monkeypatch, capsys
+):
+    """An older output the command brings to ready is reported as such, not as zero."""
+    await _subscribe(session, admin_user.organization_id, admin_user.id)
+    run = await _run(session, admin_user.organization_id)
+    outdir = _outputs(monkeypatch, store, run, ["old.txt"])
+    await _write(store, outdir, ["old.txt"])
+    session.add(
+        File(
+            organization_id=admin_user.organization_id,
+            storage_uri=f"{outdir}/old.txt",
+            source_storage_uri=f"{outdir}/old.txt",
+            filename="old.txt",
+            file_type="other",
+            source_type="pipeline_output",
+            source_pipeline_run_id=run.id,
+        )
+    )
+    await session.commit()
+
+    assert await cli._main(_args(run_id=run.id, force=True)) == 0
+    out = capsys.readouterr().out
+    assert "New files registered: 0" in out
+    assert "Existing files made ready: 1" in out
+    assert "Webhook deliveries recorded: 1" in out
+    assert [e for e, _ in await _deliveries(command_env)] == ["file.ready"]

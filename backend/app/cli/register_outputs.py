@@ -64,7 +64,12 @@ async def register_outputs_for_run(
     return len(await _register_run(session, run))
 
 
-async def _register_run(session: AsyncSession, run: PipelineRun, ambiguous: set[str] | None = None) -> list[File]:
+async def _register_run(
+    session: AsyncSession,
+    run: PipelineRun,
+    ambiguous: set[str] | None = None,
+    resumed: list[File] | None = None,
+) -> list[File]:
     """Collect and register one run's outputs; the newly registered files.
 
     URIs refused as ``source_identity_ambiguous`` are added to ``ambiguous``."""
@@ -99,12 +104,15 @@ async def _register_run(session: AsyncSession, run: PipelineRun, ambiguous: set[
             for f in collected
         ],
         ambiguous=ambiguous,
+        resumed=resumed,
     )
 
 
 @dataclass
 class _Report:
     registered: list[int] = field(default_factory=list)
+    # Already-registered outputs this run started on their way to readiness.
+    existing: list[File] = field(default_factory=list)
     deliveries: int = 0
     no_subscribers: int = 0
     failures: list[str] = field(default_factory=list)
@@ -191,7 +199,7 @@ async def _main(args: argparse.Namespace) -> int:
                         print(f"WARNING: Run {run.id} has status '{run.status}', skipping.")
                         return 0
                     try:
-                        files = await _register_run(session, run, report.ambiguous)
+                        files = await _register_run(session, run, report.ambiguous, report.existing)
                         report.registered += [f.id for f in files]
                         await _commit_and_drain(session, binding, owner, report)
                     except Exception as exc:
@@ -223,7 +231,7 @@ async def _main(args: argparse.Namespace) -> int:
                         )
                         if existing.first() and not args.force:
                             continue
-                        files = await _register_run(session, run, report.ambiguous)
+                        files = await _register_run(session, run, report.ambiguous, report.existing)
                         if files:
                             print(f"  Run {run.id} ({run.pipeline_name}): registered {len(files)} files")
                             report.registered += [f.id for f in files]
@@ -236,14 +244,27 @@ async def _main(args: argparse.Namespace) -> int:
                     print(f"\nDone. Registered {len(report.registered)} files across {len(runs)} runs.")
 
         ready, pending = await _verification_counts(base_factory, report.registered)
+        existing_ready, existing_pending = await _verification_counts(base_factory, [f.id for f in report.existing])
         print(
-            f"Summary: registered {len(report.registered)}, ready {ready}, pending {pending}; "
-            f"{report.deliveries} delivery row(s) persisted"
-            + (f", {report.no_subscribers} event(s) with no matching subscriptions" if report.no_subscribers else "")
+            f"New files registered: {len(report.registered)} (ready: {ready}, "
+            f"waiting for checksum verification: {pending})."
+        )
+        print(
+            f"Existing files made ready: {existing_ready}"
+            + (f" (waiting for checksum verification: {existing_pending})" if existing_pending else "")
             + "."
         )
-        if pending:
-            print("Checksum verification of the pending files continues in the bioAF server's background worker.")
+        print(
+            f"Webhook deliveries recorded: {report.deliveries}"
+            + (
+                f"; events with no matching webhook subscription: {report.no_subscribers}"
+                if report.no_subscribers
+                else ""
+            )
+            + "."
+        )
+        if pending or existing_pending:
+            print("Checksum verification of the waiting files continues in the bioAF server's background worker.")
         if report.ambiguous:
             status = 1
             print(

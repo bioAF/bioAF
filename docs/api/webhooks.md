@@ -99,8 +99,10 @@ body `id`.
 
 `./bioaf register-outputs` registers outputs a pipeline run left unregistered, even for old runs. A
 newly recorded file sends `file.registered` (and `file.ready` when it can be verified immediately) with
-the current time, not the run's. Rerunning the command, `--force` included, sends nothing for files
-that already exist. The command writes delivery rows itself and exits nonzero, naming the affected
+the current time, not the run's. A file registered earlier is never announced as registered again; if
+it was never made ready (it was registered before readiness existed), the command makes it ready and
+sends `file.ready` once. Rerunning the command, `--force` included, then sends nothing more. The
+summary counts new files registered and existing files made ready separately. The command writes delivery rows itself and exits nonzero, naming the affected
 files, if any notification could not be persisted; the files stay registered. No matching subscription
 is not an error. A file whose checksum needs a full read is verified later by the bioAF server, which
 then sends `file.ready`. Receivers are contacted only by the server.

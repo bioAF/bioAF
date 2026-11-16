@@ -33,14 +33,16 @@ def _output_expectation(run: PipelineRun, uri: str) -> Expectation:
 
 class PipelineOutputService:
     @staticmethod
-    async def _resume_readiness(session: AsyncSession, run: PipelineRun, file: File) -> None:
+    async def _resume_readiness(session: AsyncSession, run: PipelineRun, file: File) -> bool:
+        """Start an existing, never-ready output on its way to readiness; whether it was started."""
         from app.services.file_verification_service import current_record
 
         if file.ready_at is not None or file.deleted_at is not None or file.storage_deleted:
-            return
+            return False
         if await current_record(session, file.id) is not None:
-            return  # verification already owns this file
+            return False  # verification already owns this file
         await FileVerificationService.begin(session, file, _output_expectation(run, file.storage_uri or file.gcs_uri))
+        return True
 
     @staticmethod
     def _match_samples(
@@ -152,12 +154,14 @@ class PipelineOutputService:
         collected_files: list[dict],
         *,
         ambiguous: set[str] | None = None,
+        resumed: list[File] | None = None,
     ) -> list[File]:
         """Create File records for pipeline outputs and link to the run's samples.
 
         ``ambiguous``, when given, receives every collected URI refused as
         ``source_identity_ambiguous`` (it matches more than one unreconciled legacy File), so a
-        caller can report the refusal rather than only the log carrying it.
+        caller can report the refusal rather than only the log carrying it. ``resumed``, when given,
+        receives each already-registered output this call started on its way to readiness.
 
         Args:
             session: DB session (caller commits).
@@ -255,7 +259,9 @@ class PipelineOutputService:
             if gcs_uri in existing:
                 # Already registered: never announced again, but a file still unready with no
                 # verification started (registered before readiness existed) is brought forward.
-                await PipelineOutputService._resume_readiness(session, run, existing[gcs_uri])
+                if await PipelineOutputService._resume_readiness(session, run, existing[gcs_uri]):
+                    if resumed is not None:
+                        resumed.append(existing[gcs_uri])
                 continue
 
             filename = file_dict["filename"]
