@@ -105,8 +105,37 @@ class File(Base):
     deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     is_global: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The caller's own identifier for this file (a LIMS file ID), opaque and kept exactly as supplied.
+    # NULL means none was assigned; it is never filled in from the bioAF id, a name, a path, or a
+    # checksum. Unique per organization when set, deleted records included, so it is never reassigned.
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Where registration first saw a pipeline output. storage_uri is where the canonical bytes are now
+    # and can change (a protected verification copy, file organization); this does not, so rediscovering
+    # the original output finds the same File. Unique per (organization, source run) when set.
+    source_storage_uri: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # When the file's bytes were first verified available (FileService.mark_ready). NULL means readiness
+    # has not been established under that contract, not that an older file is unusable. Historical: it
+    # is not reset on deletion.
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (Index("idx_files_experiment_id", "experiment_id"),)
+    __table_args__ = (
+        Index("idx_files_experiment_id", "experiment_id"),
+        Index(
+            "uq_files_org_external_id",
+            "organization_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_files_pipeline_source_identity",
+            "organization_id",
+            "source_pipeline_run_id",
+            "source_storage_uri",
+            unique=True,
+            postgresql_where=text("source_storage_uri IS NOT NULL"),
+        ),
+    )
 
     organization = relationship("Organization")
     # Both of these point at `users`, so each names its own column: SQLAlchemy
