@@ -44,7 +44,11 @@ async def test_a_webhook_drain_sends_one_request_per_recorded_attempt(session, a
     )
     await session.commit()
     await webhook_dispatcher.dispatch_event(
-        INTEGRATION_EXPERIMENT_CREATED, {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}}
+        INTEGRATION_EXPERIMENT_CREATED,
+        {
+            "organization_id": admin_user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
     with respx.mock:
         route = respx.post("https://hooks.example/one")

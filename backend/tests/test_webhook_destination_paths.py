@@ -56,7 +56,11 @@ async def _legacy(session, user, url: str, *, active=True) -> WebhookSubscriptio
 
 async def _dispatch(user):
     await webhook_dispatcher.dispatch_event(
-        INTEGRATION_EXPERIMENT_CREATED, {"organization_id": user.organization_id, "data": {"experiment_id": 1}}
+        INTEGRATION_EXPERIMENT_CREATED,
+        {
+            "organization_id": user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
 
 
@@ -155,7 +159,11 @@ async def test_test_event_and_replay_refuse_an_unsafe_subscription(session, admi
     await session.rollback()
 
     await webhook_dispatcher.dispatch_event(
-        INTEGRATION_EXPERIMENT_CREATED, {"organization_id": org_id, "data": {"experiment_id": 1}}
+        INTEGRATION_EXPERIMENT_CREATED,
+        {
+            "organization_id": org_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
     original = await _delivery(session, legacy_id)
     with pytest.raises(DestinationRefused):
