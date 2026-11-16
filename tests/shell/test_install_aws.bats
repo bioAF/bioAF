@@ -13,7 +13,7 @@ setup_file() {
         for tool in "$dir"/*; do
             name="${tool##*/}"
             case "$name" in gcloud | gsutil | bq | aws | aws_completer | brew | curl | sleep) continue ;; esac
-            [ -e "$SYSTEM_BIN/$name" ] || ln -s "$tool" "$SYSTEM_BIN/$name"
+            [ -e "$SYSTEM_BIN/$name" ] || [ -L "$SYSTEM_BIN/$name" ] || ln -s "$tool" "$SYSTEM_BIN/$name"
         done
     done
 }
