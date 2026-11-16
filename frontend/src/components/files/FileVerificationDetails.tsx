@@ -82,7 +82,7 @@ function Checksum({ label, value }: { label: string; value: string | null }) {
               type="button"
               onClick={copy}
               aria-label={`Copy ${label.toLowerCase().replace("md5", "MD5")}`}
-              className="text-xs text-blue-600 hover:underline shrink-0"
+              className="text-xs text-bioaf-600 hover:underline shrink-0"
             >
               {copied ? "Copied" : "Copy"}
             </button>
