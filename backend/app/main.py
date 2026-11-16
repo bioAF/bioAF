@@ -82,7 +82,8 @@ _BEFORE_LISTENER = 18
 
 
 async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
-    """Start the periodic jobs, the Pub/Sub listener, and the webhook worker, all owned.
+    """Start the periodic jobs, the Pub/Sub listener, the webhook worker, and the file verification
+    worker, all owned.
 
     Periodic jobs watch the owner's stop signal, so closing admission ends them between
     iterations; an iteration in progress gets the drain to finish.
@@ -109,6 +110,10 @@ async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
 
     await startup.run_steps([startup.Step("webhook_dispatcher", subscribe_webhooks)], ctx)
     owner.spawn(_webhook_run_worker_loop(stop_event=owner.stopping), role="webhook-worker", worker=True)
+    # Checksum verification of registered files (01C.2): durable records, leased claims, owned here.
+    from app.services.file_verification_worker import run_worker_loop as _verification_run_worker_loop
+
+    owner.spawn(_verification_run_worker_loop(stop_event=owner.stopping), role="file-verification-worker", worker=True)
     owner.spawn(run_periodic(idempotency, stopping=owner.stopping), role=idempotency.role, worker=True)
 
 
