@@ -51,6 +51,35 @@ redirect it. See [Installation Metrics](installation-metrics.md).
 A partial or invalid pair disables delivery rather than mixing destinations. Production Compose forwards all
 three from `docker/.env`.
 
+## Webhook Destination Settings
+
+Webhook subscriptions reach public HTTPS receivers by default; no allowlist entry is needed for them.
+An internal LIMS on a private network needs an operator exception. Only whoever controls the backend's
+environment can set it: admins manage subscriptions in the application but cannot grant exceptions there.
+
+| Backend setting | Default | Meaning |
+| --- | --- | --- |
+| `BIOAF_WEBHOOK_INTERNAL_DESTINATIONS` | Unset (`[]`: public receivers only) | JSON list of internal receiver exceptions; read at startup, so a change needs a backend restart |
+
+Example:
+
+```json
+[{"organization_id": 1, "origin": "https://lims.lab.example:8443", "cidrs": ["10.24.8.19/32"]}]
+```
+
+- `organization_id` must match the subscription's organization and `origin` must match its URL's scheme,
+  host, and port exactly (no path, query, or wildcard).
+- `cidrs` lists each receiver address exactly: a `/32` inside RFC1918 IPv4 or a `/128` inside IPv6 ULA.
+  Subnets, public addresses, metadata, loopback, link-local, shared, and reserved addresses are rejected.
+- Exceptions never allow plain HTTP or unverified TLS: give the internal receiver a certificate the
+  backend trusts.
+- An invalid value stops the backend at startup; the error names the setting, not its value.
+
+Production Compose forwards the setting from `docker/.env`. Address classification cannot see
+installation-specific NAT64 or routing translation; deployments that use such translation also need
+network egress rules that block metadata and unauthorized internal destinations. See
+[Webhooks](api/webhooks.md#allowed-destinations).
+
 ## Export and Restore Settings
 
 These are application defaults; production Compose forwards only the settings listed in its service

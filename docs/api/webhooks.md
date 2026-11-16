@@ -3,6 +3,31 @@
 Subscriptions are managed under **Settings > Users & Accounts > Webhooks**. The backend maps selected
 internal events to public webhook names and persists deliveries for active matching subscriptions.
 
+## Allowed Destinations
+
+A subscription URL must be an absolute `https://` URL with a host and valid port, without user
+information (`user:pass@`) or a fragment. The host is resolved when the subscription is created or its
+URL changed, when it is reactivated, when an admin sends a test or replays a delivery, and again on
+every delivery attempt. Every address it resolves to must be public. Loopback, private, link-local
+(including cloud metadata), shared, multicast, reserved, and known IPv4-translation addresses are refused.
+A private-network LIMS needs an operator exception; see
+[Webhook Destination Settings](../configuration.md#webhook-destination-settings).
+
+bioAF connects only to the address it authorized, keeps the original hostname for TLS and the `Host`
+header, verifies the certificate, ignores proxy environment variables, and does not follow redirects:
+a `3xx` response is an ordinary failed attempt. Receiver response bodies are never read or stored.
+
+A refused change is rejected with `422` and leaves the subscription as it was; a resolver failure is
+rejected the same way and can be retried. Disabling a subscription is always allowed.
+
+Subscriptions created before these checks are checked on every attempt too. A delivery to a
+destination that is malformed or no longer allowed makes no request and fails at once (status `failed`,
+no further attempts). Correct the URL, then Replay the delivery.
+
+Deliveries record a safe diagnostic code instead of the receiver's body or a raw error:
+`invalid_destination`, `destination_denied`, `dns_failed`, `tls_failed`, `request_timeout`,
+`transport_failed`, or `http_non_2xx` (with the response status code).
+
 ## Event Types
 
 | Event | Meaning |
@@ -59,7 +84,9 @@ not by itself reject a replay. The body must be used as received, before JSON re
 ## Retries and Replay
 
 The durable worker sends one HTTP request per recorded attempt. Any HTTP 2xx is success; non-2xx or network
-failure schedules another attempt. The request timeout is 10 seconds, and the normal five-attempt cap uses
+failure schedules another attempt; a refused destination does not (see
+[Allowed Destinations](#allowed-destinations)). Each attempt has a 10-second total deadline covering
+resolution, connection, TLS, sending, and the response headers, and the normal five-attempt cap uses
 retry delays of 60, 300, 1800 and 7200 seconds after the initial attempt. A fifth failure becomes
 `dead_letter`.
 

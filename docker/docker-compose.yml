@@ -50,6 +50,9 @@ services:
       BIOAF_INSTALL_METRICS_DISABLED: ${BIOAF_INSTALL_METRICS_DISABLED:-false}
       BIOAF_POSTHOG_PROJECT_TOKEN: ${BIOAF_POSTHOG_PROJECT_TOKEN:-}
       BIOAF_POSTHOG_HOST: ${BIOAF_POSTHOG_HOST:-}
+      # Internal webhook receivers (docs/configuration.md#webhook-destination-settings). Empty: public
+      # HTTPS receivers only. A JSON list set by the operator in the host env file; restart to apply.
+      BIOAF_WEBHOOK_INTERNAL_DESTINATIONS: ${BIOAF_WEBHOOK_INTERNAL_DESTINATIONS:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
       # A restore checks the database volume has room for the restored copy and its WAL before creating it.
