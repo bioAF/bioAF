@@ -1591,6 +1591,10 @@ class PipelineRunService:
                 parameters=original.parameters_json,
                 reference_genome=original.reference_genome,
             ),
+            # The files the original consumed, never whatever its samples are linked to today: a
+            # launch narrowed to exact inputs (a validation study's verified FASTQs) reproduces with
+            # them, and a file linked since cannot change the sheet. None for a run that recorded none.
+            input_file_ids=await PipelineRunService._recorded_input_file_ids(session, original),
         )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run
@@ -1627,6 +1631,18 @@ class PipelineRunService:
             if stated:
                 values[str(sample_id)] = stated
         return values
+
+    @staticmethod
+    async def _recorded_input_file_ids(session: AsyncSession, run: PipelineRun) -> list[int] | None:
+        """The input files a run recorded consuming (junction first, then the legacy id list)."""
+        recorded = list(
+            (
+                await session.execute(
+                    select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run.id)
+                )
+            ).scalars()
+        )
+        return sorted(recorded or (run.input_files_json or [])) or None
 
     @staticmethod
     async def _used_derived_inputs(session: AsyncSession, run_id: int) -> bool:

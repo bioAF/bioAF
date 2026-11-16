@@ -1076,3 +1076,69 @@ async def test_a_custom_reproduction_refused_for_its_version_says_why_plainly(
     assert plain in detail
     for technical in ("expected", "status '"):
         assert technical not in detail
+
+
+@pytest.mark.asyncio
+async def test_reproducing_a_restricted_launch_reuses_its_recorded_inputs(session, admin_user, compute):
+    """A launch narrowed to exact input files (a validation study's verified inputs) reproduces with
+    those same files, even after older FASTQs of the same sample are linked."""
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    seed = await _launchable_run(
+        session,
+        org_id,
+        user_id,
+        stored_key="nf-core/scrnaseq",
+        file_source_type="pipeline_output",
+        launch_fields={"include_derived_inputs": True},
+    )
+    exp_id = seed.experiment_id
+    sample = (await session.execute(select(Sample).where(Sample.experiment_id == exp_id))).scalar_one()
+    current = (await session.execute(select(File).where(File.experiment_id == exp_id))).scalars().all()
+    allowed = [f.id for f in current]
+    for f in current:
+        f.lane = 1
+        f.read_type = "R1" if "_R1_" in f.filename else "R2"
+        f.source_run_accession = "SRR_NEW"
+    for read in ("R1", "R2"):
+        old = File(
+            organization_id=org_id,
+            experiment_id=exp_id,
+            filename=f"S1_L002_{read}_001.fastq.gz",
+            storage_uri=f"gs://bucket/old/S1_L002_{read}_001.fastq.gz",
+            file_type="fastq",
+            source_type="pipeline_output",
+            lane=2,
+            read_type=read,
+            source_run_accession="SRR_OLD",
+        )
+        session.add(old)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=old.id))
+    await session.commit()
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        scoped = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key="nf-core/scrnaseq",
+                experiment_id=exp_id,
+                parameters={"aligner": "cellranger"},
+                include_derived_inputs=True,
+            ),
+            input_file_ids=allowed,
+        )
+    assert sorted(scoped.input_files_json) == sorted(allowed)
+    scoped.status = "completed"
+    await session.commit()
+    scoped_id, sheet = scoped.id, scoped.samplesheet_csv
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        reproduced = await PipelineRunService.reproduce_run(session, scoped_id, org_id, user_id)
+    assert reproduced.samplesheet_csv == sheet
+    assert sorted(reproduced.input_files_json) == sorted(allowed)
