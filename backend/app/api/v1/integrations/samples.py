@@ -30,11 +30,23 @@ from app.services.sample_service import SampleService
 router = APIRouter(prefix="/samples", tags=["Samples"])
 
 
-def _sample_out(sample: Sample) -> SampleOut:
+async def _sample_outs(session: AsyncSession, rows: list[Sample]) -> list[SampleOut]:
+    """Responses with each sample's experiment external ID, batch-loaded for the page."""
+    ids = {s.experiment_id for s in rows}
+    ext = {}
+    if ids:
+        ext = dict(
+            (await session.execute(select(Experiment.id, Experiment.external_id).where(Experiment.id.in_(ids)))).all()
+        )
+    return [_sample_out(s, ext.get(s.experiment_id)) for s in rows]
+
+
+def _sample_out(sample: Sample, experiment_external_id: str | None = None) -> SampleOut:
     return SampleOut(
         id=sample.id,
         external_id=sample.external_id,
         experiment_id=sample.experiment_id,
+        experiment_external_id=experiment_external_id,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,
@@ -147,7 +159,7 @@ async def create_sample(
         select(Sample).options(selectinload(Sample.custom_fields)).where(Sample.id == sample.id)
     )
     sample = result.scalar_one()
-    out = _sample_out(sample)
+    out = (await _sample_outs(session, [sample]))[0]
     if idempotency_key is not None:
         await idempotency_service.record(
             session,
@@ -202,7 +214,7 @@ async def list_samples(
     if len(rows) > limit:
         next_cursor = str(rows[limit - 1].id)
         rows = rows[:limit]
-    return SampleListOut(items=[_sample_out(s) for s in rows], next_cursor=next_cursor)
+    return SampleListOut(items=await _sample_outs(session, rows), next_cursor=next_cursor)
 
 
 @router.get(
@@ -224,7 +236,7 @@ async def get_sample(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "sample_not_found")
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]
 
 
 @router.get(
@@ -256,7 +268,7 @@ async def get_sample_by_external(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "sample_not_found")
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]
 
 
 @router.patch(
@@ -315,4 +327,4 @@ async def patch_sample(
     )
     await session.commit()
     await session.refresh(row, attribute_names=["custom_fields"])
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]

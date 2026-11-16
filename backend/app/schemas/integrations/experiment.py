@@ -38,6 +38,7 @@ class ExperimentOut(BaseModel):
     name: str
     code: str | None
     project_id: int | None
+    project_external_id: str | None = None
     status: str
     hypothesis: str | None
     description: str | None

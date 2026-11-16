@@ -1,8 +1,8 @@
 """The one mapping from a Sample row to its ``SampleResponse`` wire shape.
 
 The sample must be loaded through ``SampleService.get_sample`` or
-``SampleService.list_samples``: both eager-load the batch summaries and custom
-fields read here, so building a response issues no SQL.
+``SampleService.list_samples``: both eager-load the batch summaries, custom
+fields and experiment read here, so building a response issues no SQL.
 
 ``file_count`` is not derived from the row. Only the experiment sample listing
 loads files and reports their count; detail, create and the update routes
@@ -16,6 +16,8 @@ def sample_response(s, *, file_count: int = 0) -> SampleResponse:
     return SampleResponse(
         id=s.id,
         external_id=s.external_id,
+        experiment_id=s.experiment_id,
+        experiment_external_id=s.experiment.external_id if s.experiment is not None else None,
         relabeled_from=s.relabeled_from,
         organism=s.organism,
         tissue_type=s.tissue_type,

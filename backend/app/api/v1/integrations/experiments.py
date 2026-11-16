@@ -31,13 +31,23 @@ from app.services.experiment_service import ExperimentService
 router = APIRouter(prefix="/experiments", tags=["Experiments"])
 
 
-def _experiment_out(exp: Experiment) -> ExperimentOut:
+async def _experiment_outs(session: AsyncSession, rows: list[Experiment]) -> list[ExperimentOut]:
+    """Responses with each experiment's project external ID, batch-loaded for the page."""
+    ids = {e.project_id for e in rows if e.project_id is not None}
+    ext = {}
+    if ids:
+        ext = dict((await session.execute(select(Project.id, Project.external_id).where(Project.id.in_(ids)))).all())
+    return [_experiment_out(e, ext.get(e.project_id)) for e in rows]
+
+
+def _experiment_out(exp: Experiment, project_external_id: str | None = None) -> ExperimentOut:
     return ExperimentOut(
         id=exp.id,
         external_id=exp.external_id,
         name=exp.name,
         code=exp.code,
         project_id=exp.project_id,
+        project_external_id=project_external_id,
         status=exp.status,
         hypothesis=exp.hypothesis,
         description=exp.description,
@@ -150,7 +160,7 @@ async def create_experiment(
         select(Experiment).options(selectinload(Experiment.custom_fields)).where(Experiment.id == exp.id)
     )
     exp = result.scalar_one()
-    out = _experiment_out(exp)
+    out = (await _experiment_outs(session, [exp]))[0]
     if idempotency_key is not None:
         await idempotency_service.record(
             session,
@@ -205,7 +215,7 @@ async def list_experiments(
     if len(rows) > limit:
         next_cursor = str(rows[limit - 1].id)
         rows = rows[:limit]
-    return ExperimentListOut(items=[_experiment_out(e) for e in rows], next_cursor=next_cursor)
+    return ExperimentListOut(items=await _experiment_outs(session, rows), next_cursor=next_cursor)
 
 
 @router.get(
@@ -226,7 +236,7 @@ async def get_experiment(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "experiment_not_found")
-    return _experiment_out(row)
+    return (await _experiment_outs(session, [row]))[0]
 
 
 @router.get(
@@ -247,7 +257,7 @@ async def get_experiment_by_external(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "experiment_not_found")
-    return _experiment_out(row)
+    return (await _experiment_outs(session, [row]))[0]
 
 
 @router.patch(
@@ -294,4 +304,4 @@ async def patch_experiment(
     )
     await session.commit()
     await session.refresh(row, attribute_names=["custom_fields"])
-    return _experiment_out(row)
+    return (await _experiment_outs(session, [row]))[0]

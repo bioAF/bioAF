@@ -10945,6 +10945,10 @@ export interface components {
             naming_profile_id?: number | null;
             owner?: components["schemas"]["UserSummary"] | null;
             project?: components["schemas"]["ProjectSummary"] | null;
+            /** Project External Id */
+            project_external_id?: string | null;
+            /** Project Id */
+            project_id?: number | null;
             /** Protocol Version */
             protocol_version?: string | null;
             /**
@@ -11034,6 +11038,10 @@ export interface components {
             naming_profile_id?: number | null;
             owner?: components["schemas"]["UserSummary"] | null;
             project?: components["schemas"]["ProjectSummary"] | null;
+            /** Project External Id */
+            project_external_id?: string | null;
+            /** Project Id */
+            project_id?: number | null;
             /** Protocol Version */
             protocol_version?: string | null;
             /**
@@ -14817,6 +14825,10 @@ export interface components {
             custom_fields: components["schemas"]["SampleCustomFieldResponse"][];
             /** Donor Source */
             donor_source: string | null;
+            /** Experiment External Id */
+            experiment_external_id?: string | null;
+            /** Experiment Id */
+            experiment_id?: number | null;
             /** External Id */
             external_id: string | null;
             /**
