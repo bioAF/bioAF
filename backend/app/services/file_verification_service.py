@@ -341,17 +341,18 @@ class FileVerificationService:
 
 
 FAILURE_MESSAGES = {
-    "checksum_mismatch": "The file's checksum does not match the expected value.",
-    "storage_unavailable": "Storage could not be read to verify the file.",
-    "object_missing": "The file's stored object could not be found.",
-    "object_changed": "The stored file changed while it was being verified.",
+    # The same words the File details panel shows (frontend: FileVerificationDetails.tsx REASONS).
+    "checksum_mismatch": "The stored file’s checksum does not match the supplied checksum.",
+    "storage_unavailable": "Storage could not be read to check the file.",
+    "object_missing": "The stored file could not be found.",
+    "object_changed": "The stored file changed while it was being checked.",
     "storage_permission_denied": "bioAF is not allowed to read the stored file.",
-    "nfs_separation_unavailable": "Protected storage for verification is not configured.",
-    "nfs_capacity_insufficient": "There is not enough storage space to verify the file.",
-    "managed_copy_refused": "The file could not be copied safely for verification.",
-    "verification_timeout": "Verifying the file took too long.",
-    "expectation_discovery_failed": "The file's expected checksum could not be read.",
-    "file_deleted": "The file was deleted before verification finished.",
+    "nfs_separation_unavailable": "Protected storage for checking files is not set up.",
+    "nfs_capacity_insufficient": "There is not enough storage space to check the file.",
+    "managed_copy_refused": "The file could not be copied safely for checking.",
+    "verification_timeout": "Checking the file took too long.",
+    "expectation_discovery_failed": "The supplied checksum could not be read.",
+    "file_deleted": "The file was deleted before the check finished.",
 }
 
 
@@ -378,7 +379,7 @@ async def notify_failure(session: AsyncSession, file: File, code: str) -> None:
             # The router delivers to this user in addition to its rule-selected roles.
             "target_user_id": user_id,
             "title": "File verification failed",
-            "message": f"{file.filename}: {FAILURE_MESSAGES.get(code, 'The file could not be verified.')}",
+            "message": f"{file.filename}: {FAILURE_MESSAGES.get(code, 'The file could not be checked.')}",
             "summary": f"File verification failed: {file.filename}",
             "entity_type": "file",
             "entity_id": file.id,

@@ -275,3 +275,13 @@ async def test_a_target_user_from_another_organization_is_never_notified(session
     )
     rows = (await session.execute(select(Notification).where(Notification.user_id == outsider.id))).scalars().all()
     assert rows == []
+
+
+def test_failure_notices_use_the_file_details_wording():
+    """The notification and the File details panel explain a failure in the same words."""
+    from app.services.file_verification_service import FAILURE_MESSAGES
+
+    assert FAILURE_MESSAGES["checksum_mismatch"] == "The stored file’s checksum does not match the supplied checksum."
+    assert FAILURE_MESSAGES["storage_unavailable"] == "Storage could not be read to check the file."
+    assert FAILURE_MESSAGES["expectation_discovery_failed"] == "The supplied checksum could not be read."
+    assert not any("verif" in m.lower() for m in FAILURE_MESSAGES.values())

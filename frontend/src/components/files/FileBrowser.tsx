@@ -5,6 +5,7 @@ import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { ExperimentFileUploader } from "@/components/files/ExperimentFileUploader";
+import { NotSet } from "@/components/shared/NotSet";
 import { FileVerificationDetails } from "@/components/files/FileVerificationDetails";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -924,19 +925,19 @@ export function FileBrowser({
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Uploader</dt>
                 <dd className="mt-0.5 text-sm text-gray-900">
-                  {viewingFile.uploader?.name ?? viewingFile.uploader?.email ?? "---"}
+                  {viewingFile.uploader?.name ?? viewingFile.uploader?.email ?? <NotSet label="Uploader" />}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Project</dt>
                 <dd className="mt-0.5 text-sm text-gray-900">
-                  {viewingFile.project_id ? projectName(viewingFile.project_id) : "---"}
+                  {viewingFile.project_id ? projectName(viewingFile.project_id) : <NotSet label="Project" />}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs font-medium text-gray-500 uppercase">Experiment</dt>
                 <dd className="mt-0.5 text-sm text-gray-900">
-                  {viewingFile.experiment_id ? experimentName(viewingFile) : "---"}
+                  {viewingFile.experiment_id ? experimentName(viewingFile) : <NotSet label="Experiment" />}
                 </dd>
               </div>
               <div>
@@ -951,13 +952,7 @@ export function FileBrowser({
                           #{id}
                         </span>
                       ))
-                    : "---"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium text-gray-500 uppercase">MD5</dt>
-                <dd className="mt-0.5 text-sm text-gray-900 font-mono text-xs break-all">
-                  {viewingFile.md5_checksum ?? "---"}
+                    : <NotSet label="Sample" />}
                 </dd>
               </div>
               {viewingFile.tags.length > 0 && (
@@ -975,18 +970,14 @@ export function FileBrowser({
                   </dd>
                 </div>
               )}
-              <div className="col-span-2">
-                <dt className="text-xs font-medium text-gray-500 uppercase">GCS URI</dt>
-                <dd className="mt-0.5 text-xs text-gray-600 font-mono break-all">
-                  {viewingFile.storage_uri}
-                </dd>
-              </div>
             </dl>
 
             <FileVerificationDetails
               externalId={viewingFile.external_id}
               verification={viewingFile.verification}
               readyAt={viewingFile.ready_at}
+              storageUri={viewingFile.storage_uri}
+              recordedChecksum={viewingFile.md5_checksum}
               canRetry={canEditFiles}
               retrying={retryingVerification}
               onRetry={async () => {

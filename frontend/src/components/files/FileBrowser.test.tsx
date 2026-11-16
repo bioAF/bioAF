@@ -345,8 +345,8 @@ test("file details show the external ID and checksum verification, and can retry
   fireEvent.click(screen.getByText("sample.fastq.gz"));
 
   expect(await screen.findByText("LIMS-F-1")).toBeInTheDocument();
-  expect(screen.getByText("Verification failed")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Retry verification" }));
+  expect(screen.getByText("Could not check file")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Check file again" }));
 
   await waitFor(() =>
     expect(mockPost).toHaveBeenCalledWith(
@@ -355,6 +355,6 @@ test("file details show the external ID and checksum verification, and can retry
     ),
   );
   expect(
-    await screen.findByText("Queued for verification"),
+    await screen.findByText("Waiting to check file"),
   ).toBeInTheDocument();
 });
