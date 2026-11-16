@@ -1,7 +1,7 @@
 # Installation Metrics
 
 bioAF can share a small set of optional installation metrics with the bioAF team. Nothing is sent unless an
-installation admin chooses **Share installation metrics**. This page is the public notice for that choice:
+installation admin chooses to share them. This page is the public notice for that choice:
 what is sent, why, to whom, how long it is kept, and how to stop or request deletion.
 
 The design is recorded in [ADR-075](../decisions/ADR-075-opt-in-installation-metrics.md).
@@ -17,8 +17,9 @@ licensing or billing, and they are not combined with support, billing, GitHub, S
 - **New installations** see the choice on the setup wizard's Organization Name step. Neither option is
   preselected, and the step cannot continue until one is chosen. Both choices lead to the same setup.
 - **Existing installations** (set up before this feature, or set up without making the choice) ask the first
-  admin with the `infrastructure:configure` permission who enters the app. Closing the dialog leaves the
-  choice undecided; it is asked again in a later session.
+  admin with the `infrastructure:configure` permission who enters the app, with **Share**, **Don't share** and
+  **Decide later**. Decide later, or closing the dialog, leaves the choice undecided; it is asked again in a
+  later session.
 - Once either choice is saved, the dialog never appears again for this installation, for any admin, browser
   or release. Change the choice at any time in **Settings > System Settings**.
 - The choice applies to the whole installation, and only a person signed in with an admin session can make

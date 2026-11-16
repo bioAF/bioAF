@@ -122,7 +122,7 @@ export function OrganizationStep({
           className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
       </div>
       <section aria-labelledby="setup-install-metrics" className="space-y-2">
-        <h3 id="setup-install-metrics" className="text-sm font-medium text-gray-700">Installation metrics</h3>
+        <h3 id="setup-install-metrics" className="text-sm font-medium text-gray-700">Help improve bioAF</h3>
         {metricsCommitted && metricsChosenElsewhere ? (
           <p role="status" className="text-sm text-gray-600">
             Another administrator already chose: {CHOICE_LABEL[metricsCommitted]}. Reporting follows that choice.
@@ -134,7 +134,7 @@ export function OrganizationStep({
             Settings.
           </p>
         ) : (
-          <InstallMetricsDisclosure value={metricsChoice} onChange={setMetricsChoice} alreadyCompleted={false} />
+          <InstallMetricsDisclosure value={metricsChoice} onChange={setMetricsChoice} />
         )}
       </section>
       <Button className="w-full" onClick={onSave} disabled={!metricsCommitted && !metricsChoice}>

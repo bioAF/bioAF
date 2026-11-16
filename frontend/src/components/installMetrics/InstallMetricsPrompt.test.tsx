@@ -50,25 +50,25 @@ beforeEach(() => {
   );
 });
 
-test("a pending installation asks an admin, noting only today's observation would be reported", async () => {
+test("a pending installation asks an admin with three direct actions", async () => {
   render(<InstallMetricsPrompt />);
 
-  expect(await screen.findByRole("dialog", { name: "Installation metrics" })).toBeInTheDocument();
-  expect(screen.getByText(/first observed today/)).toBeInTheDocument();
-  expect(screen.getByRole("radio", { name: "Share installation metrics" })).not.toBeChecked();
-  expect(screen.getByRole("radio", { name: "Do not share" })).not.toBeChecked();
-  expect(screen.getByRole("button", { name: "Save choice" })).toBeDisabled();
+  expect(await screen.findByRole("dialog", { name: "Help improve bioAF" })).toBeInTheDocument();
+  expect(screen.getByText(/Nothing is sent unless you agree/)).toBeInTheDocument();
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  for (const name of ["Share", "Don't share", "Decide later"]) {
+    expect(screen.getByRole("button", { name })).toBeEnabled();
+  }
 });
 
 test.each([
-  ["Share installation metrics", "enabled"],
-  ["Do not share", "disabled"],
-])("choosing %s saves it against the revision read and closes", async (label, choice) => {
+  ["Share", "enabled"],
+  ["Don't share", "disabled"],
+])("%s saves the choice against the revision read and closes", async (label, choice) => {
   render(<InstallMetricsPrompt />);
-  await screen.findByRole("dialog", { name: "Installation metrics" });
+  await screen.findByRole("dialog", { name: "Help improve bioAF" });
 
-  fireEvent.click(screen.getByRole("radio", { name: label }));
-  fireEvent.click(screen.getByRole("button", { name: "Save choice" }));
+  fireEvent.click(screen.getByRole("button", { name: label }));
 
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(mockPut).toHaveBeenCalledWith("/api/system-settings/install-metrics", {
@@ -80,7 +80,7 @@ test.each([
 
 test("closing leaves the choice pending and saves nothing", async () => {
   render(<InstallMetricsPrompt />);
-  await screen.findByRole("dialog", { name: "Installation metrics" });
+  await screen.findByRole("dialog", { name: "Help improve bioAF" });
 
   fireEvent.click(screen.getByRole("button", { name: "Decide later" }));
 
@@ -91,14 +91,13 @@ test("closing leaves the choice pending and saves nothing", async () => {
 test("a failed save stays open, says so, and can be retried", async () => {
   mockPut.mockRejectedValueOnce(Object.assign(new Error("boom"), { status: 500 }));
   render(<InstallMetricsPrompt />);
-  await screen.findByRole("dialog", { name: "Installation metrics" });
+  await screen.findByRole("dialog", { name: "Help improve bioAF" });
 
-  fireEvent.click(screen.getByRole("radio", { name: "Do not share" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save choice" }));
+  fireEvent.click(screen.getByRole("button", { name: "Don't share" }));
 
   expect(await screen.findByText(/was not saved/)).toBeInTheDocument();
   expect(screen.getByRole("dialog")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Save choice" }));
+  fireEvent.click(screen.getByRole("button", { name: "Don't share" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
 
@@ -108,10 +107,9 @@ test("a choice another admin saved first is respected and the prompt closes", as
     settings({ preference: "disabled", prompt_required: false, revision: 5 }),
   );
   render(<InstallMetricsPrompt />);
-  await screen.findByRole("dialog", { name: "Installation metrics" });
+  await screen.findByRole("dialog", { name: "Help improve bioAF" });
 
-  fireEvent.click(screen.getByRole("radio", { name: "Share installation metrics" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save choice" }));
+  fireEvent.click(screen.getByRole("button", { name: "Share" }));
 
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(mockPut).toHaveBeenCalledTimes(1);

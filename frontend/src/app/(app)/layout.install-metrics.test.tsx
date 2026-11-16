@@ -39,7 +39,7 @@ test("an admin entering the app with a pending choice is asked", async () => {
     </AppLayout>,
   );
 
-  expect(await screen.findByRole("dialog", { name: "Installation metrics" })).toBeInTheDocument();
+  expect(await screen.findByRole("dialog", { name: "Help improve bioAF" })).toBeInTheDocument();
   expect(screen.getByTestId("page")).toBeInTheDocument();
   expect(mockGet).toHaveBeenCalledWith("/api/system-settings", expect.anything());
 });

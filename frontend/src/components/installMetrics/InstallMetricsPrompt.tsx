@@ -12,7 +12,7 @@ import {
   type InstallMetricsChoice,
   type InstallMetricsSettings,
 } from "@/lib/installMetrics";
-import { InstallMetricsDisclosure } from "./InstallMetricsDisclosure";
+import { InstallMetricsSummary } from "./InstallMetricsDisclosure";
 
 /**
  * Asks an admin who can configure the installation for the installation metrics choice while it is still
@@ -25,7 +25,6 @@ export function InstallMetricsPrompt() {
   const allowed = !loading && Boolean(canAccess?.("infrastructure", "configure"));
   const [current, setCurrent] = useState<InstallMetricsSettings | null>(null);
   const [open, setOpen] = useState(false);
-  const [choice, setChoice] = useState<InstallMetricsChoice | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -48,8 +47,7 @@ export function InstallMetricsPrompt() {
 
   if (!open || !current) return null;
 
-  const save = async () => {
-    if (!choice) return;
+  const save = async (choice: InstallMetricsChoice) => {
     setSaving(true);
     setError("");
     try {
@@ -78,26 +76,24 @@ export function InstallMetricsPrompt() {
   return (
     <Modal
       open
-      title="Installation metrics"
+      title="Help improve bioAF"
       onClose={() => setOpen(false)}
       size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={() => setOpen(false)}>
+          <Button variant="secondary" onClick={() => setOpen(false)} disabled={saving}>
             Decide later
           </Button>
-          <Button onClick={() => void save()} disabled={!choice || saving}>
-            Save choice
+          <Button variant="secondary" onClick={() => void save("disabled")} disabled={saving}>
+            Don&apos;t share
+          </Button>
+          <Button onClick={() => void save("enabled")} disabled={saving}>
+            Share
           </Button>
         </>
       }
     >
-      <InstallMetricsDisclosure
-        value={choice}
-        onChange={setChoice}
-        alreadyCompleted={current.setup_completed}
-        name="install-metrics-prompt"
-      />
+      <InstallMetricsSummary />
       {error && (
         <p role="alert" className="mt-3 text-sm text-red-700">
           {error}

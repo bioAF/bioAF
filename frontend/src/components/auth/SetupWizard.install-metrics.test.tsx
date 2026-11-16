@@ -99,7 +99,8 @@ const save = () => screen.getByRole("button", { name: "Save Organization Name" }
 test("the disclosure is shown with neither choice selected and the step cannot be saved", async () => {
   await toOrganizationStep();
 
-  expect(screen.getByText(/Help improve bioAF by sharing optional installation metrics/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Help improve bioAF" })).toBeInTheDocument();
+  expect(screen.getByText(/Nothing is sent unless you agree/)).toBeInTheDocument();
   expect(screen.getByRole("radio", { name: "Share installation metrics" })).not.toBeChecked();
   expect(screen.getByRole("radio", { name: "Do not share" })).not.toBeChecked();
   expect(save()).toBeDisabled();

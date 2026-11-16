@@ -114,7 +114,6 @@ export default function SystemSettingsPage() {
           <InstallMetricsDisclosure
             value={choice}
             onChange={setChoice}
-            alreadyCompleted={metrics.setup_completed && metrics.installation_id === null}
             name="install-metrics-settings"
             disabled={saving}
           />
