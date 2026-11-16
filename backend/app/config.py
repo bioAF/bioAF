@@ -2,6 +2,7 @@ import logging
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
@@ -225,6 +226,12 @@ class Settings(BaseSettings):
     posthog_project_token: str = ""
     posthog_host: str = ""
 
+    # Internal webhook receivers (app/services/webhook_transport.py). Operator-only, set through the
+    # BIOAF_WEBHOOK_INTERNAL_DESTINATIONS environment variable as a JSON list of
+    # {"organization_id", "origin", "cidrs"} entries; changing it needs a restart. Empty by default:
+    # webhooks then reach public HTTPS receivers only. An invalid value refuses startup.
+    webhook_internal_destinations: Any = ()
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""
@@ -236,6 +243,13 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_compute_mode(cls, value: object) -> ComputeMode:
         return parse_compute_mode(value)
+
+    @field_validator("webhook_internal_destinations", mode="before")
+    @classmethod
+    def _parse_webhook_internal_destinations(cls, value: object) -> tuple:
+        from app.services.webhook_transport import parse_internal_destinations
+
+        return parse_internal_destinations(value)
 
     @field_validator("log_delivery", mode="before")
     @classmethod

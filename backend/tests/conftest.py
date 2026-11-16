@@ -491,6 +491,22 @@ def url_network(monkeypatch):
     return network
 
 
+@pytest.fixture(autouse=True)
+def webhook_network(monkeypatch):
+    """No webhook attempt resolves or dials the real network (tests/support/webhook_network.py).
+
+    ``*.example`` hosts resolve to one public address by default; every dial is recorded and refused
+    unless a test routes it to a local server. A respx mock still intercepts above the dial.
+    """
+    from app.services import webhook_transport
+    from tests.support.webhook_network import WebhookNetwork
+
+    network = WebhookNetwork()
+    monkeypatch.setattr(webhook_transport, "_resolve", network.resolve)
+    monkeypatch.setattr(webhook_transport, "_network_backend", network.backend)
+    return network
+
+
 @pytest.fixture
 def billing_clock():
     """Fix the billing reference instant and host timezone (tests/support/billing_clock.py)."""

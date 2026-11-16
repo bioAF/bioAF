@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
+from app.services.outbound_destination import is_public_address
 from app.platform.platform_config_service import PlatformConfigService
 
 logger = logging.getLogger("bioaf.lab_document_upload")
@@ -57,17 +58,8 @@ _NON_PUBLIC = "URL host is not allowed (resolves to a non-public address)"
 _MALFORMED = "URL is malformed"
 
 
-def _is_public_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """One predicate for IP literals and resolver answers alike.
-
-    ``is_global`` alone is not the boundary: on Python 3.12 it is true for
-    multicast and for the well-known NAT64 prefix 64:ff9b::/96, which the explicit
-    exclusions refuse. The explicit exclusions alone missed shared address space
-    (100.64.0.0/10), which ``is_global`` refuses. An address must pass both.
-    """
-    return ip.is_global and not (
-        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-    )
+# The shared predicate (app/services/outbound_destination.py), kept under its historical name.
+_is_public_address = is_public_address
 
 
 def _assert_public_url(url: str) -> None:
