@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app.services import audit_service
 from app.services.event_types import ALL_WEBHOOK_EVENT_TYPES
+from app.services.webhook_transport import authorize_webhook_destination
 
 TEST_EVENT_TYPE = "webhook.test"
 VALID_EVENT_TYPES: frozenset[str] = frozenset(list(ALL_WEBHOOK_EVENT_TYPES) + [TEST_EVENT_TYPE])
@@ -56,8 +57,11 @@ async def create_subscription(
     created_by_user_id: int,
 ) -> tuple[WebhookSubscription, str]:
     """Create a new subscription. Returns (row, plaintext_secret) where the
-    plaintext is shown to the admin exactly once at create time."""
+    plaintext is shown to the admin exactly once at create time.
+
+    Raises DestinationRefused (a ValueError) when the URL is not an authorized destination."""
     validate_event_types(events)
+    await authorize_webhook_destination(url, org_id)
     secret = _generate_secret()
     row = WebhookSubscription(
         organization_id=org_id,
@@ -75,7 +79,8 @@ async def create_subscription(
         entity_type="webhook_subscription",
         entity_id=row.id,
         action="create",
-        details={"name": name, "url": url, "events": events},
+        # Never the URL: its path and query can carry receiver credentials.
+        details={"name": name, "url_changed": True, "events": events},
     )
     return row, secret
 
@@ -111,13 +116,18 @@ async def update_subscription(
     ).scalar_one_or_none()
     if row is None:
         raise LookupError(f"webhook_subscription {sub_id} not found")
+    # A new URL, or reactivating a stored one, must be an authorized destination. Checked before any
+    # change so a refusal leaves the previous configuration intact. Disabling is always allowed.
+    reactivating = is_active is True and not row.is_active
+    if url is not None or reactivating:
+        await authorize_webhook_destination(url if url is not None else row.url, org_id)
     updates: dict = {}
     if name is not None:
         row.name = name
         updates["name"] = name
     if url is not None:
+        updates["url_changed"] = url != row.url
         row.url = url
-        updates["url"] = url
     if events is not None:
         validate_event_types(events)
         row.events = events
@@ -188,12 +198,18 @@ async def list_deliveries(
 
 
 async def replay_delivery(session: AsyncSession, delivery_id: int, actor_user_id: int) -> WebhookDelivery:
-    """Clone an existing delivery into a fresh pending row."""
+    """Clone an existing delivery into a fresh pending row, keeping its event body and id.
+
+    Refuses (DestinationRefused) when the subscription's URL is not an authorized destination now."""
     from datetime import datetime, timezone
 
     row = (await session.execute(select(WebhookDelivery).where(WebhookDelivery.id == delivery_id))).scalar_one_or_none()
     if row is None:
         raise LookupError(f"webhook_delivery {delivery_id} not found")
+    sub = await session.get(WebhookSubscription, row.subscription_id)
+    if sub is None:
+        raise LookupError(f"webhook_delivery {delivery_id} not found")
+    await authorize_webhook_destination(sub.url, sub.organization_id)
     clone = WebhookDelivery(
         subscription_id=row.subscription_id,
         event_id=row.event_id,
@@ -230,6 +246,7 @@ async def fire_test_event(session: AsyncSession, sub_id: int, org_id: int, actor
     ).scalar_one_or_none()
     if sub is None:
         raise LookupError(f"webhook_subscription {sub_id} not found")
+    await authorize_webhook_destination(sub.url, org_id)
     payload = {
         "id": envelope_id(),
         "event": TEST_EVENT_TYPE,

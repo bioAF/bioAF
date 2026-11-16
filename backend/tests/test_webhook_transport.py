@@ -80,9 +80,7 @@ def _ca_and_leaf(tmp_path, hostnames: list[str]):
     cert_path.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
     key_path = tmp_path / "leaf.key"
     key_path.write_bytes(
-        key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
-        )
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
     )
     return ca_path, cert_path, key_path
 

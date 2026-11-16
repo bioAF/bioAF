@@ -394,7 +394,10 @@ async def replay_webhook_delivery(
     ).scalar_one_or_none()
     if delivery is None:
         raise HTTPException(404, "delivery_not_found")
-    clone = await webhook_service.replay_delivery(session, delivery_id, int(user["sub"]))
+    try:
+        clone = await webhook_service.replay_delivery(session, delivery_id, int(user["sub"]))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
     await session.commit()
     return WebhookDeliveryOut.model_validate(clone)
 
@@ -409,6 +412,8 @@ async def fire_test_webhook(
         delivery = await webhook_service.fire_test_event(session, sub_id, int(user["org_id"]), int(user["sub"]))
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
     await session.commit()
     return WebhookDeliveryOut.model_validate(delivery)
 
