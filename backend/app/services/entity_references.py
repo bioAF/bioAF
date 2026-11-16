@@ -15,7 +15,7 @@ inconsistent link raises ``InconsistentReference`` without naming the foreign id
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import cast, Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +30,9 @@ class InconsistentReference(Exception):
     """A relationship crosses an organization boundary or names a missing record."""
 
 
-async def _project_external_ids(session: AsyncSession, project_ids: Iterable[int], org_id: int) -> dict[int, Any]:
+async def _project_external_ids(
+    session: AsyncSession, project_ids: Iterable[int | None], org_id: int
+) -> dict[int, Any]:
     ids = {p for p in project_ids if p is not None}
     if not ids:
         return {}
@@ -49,7 +51,7 @@ async def _project_external_ids(session: AsyncSession, project_ids: Iterable[int
     return found
 
 
-async def _experiments(session: AsyncSession, experiment_ids: Iterable[int], org_id: int) -> dict[int, tuple]:
+async def _experiments(session: AsyncSession, experiment_ids: Iterable[int | None], org_id: int) -> dict[int, tuple]:
     ids = {e for e in experiment_ids if e is not None}
     if not ids:
         return {}
@@ -206,7 +208,7 @@ async def file_identity_map(session: AsyncSession, files: list[File]) -> dict[in
 
     by_file: dict[int, list[int]] = {fid: [] for fid in file_ids}
     for fid, sid in links:
-        by_file[fid].append(sid)
+        by_file[cast(int, fid)].append(cast(int, sid))
     result: dict[int, dict[str, Any]] = {}
     for f in files:
         org = f.organization_id

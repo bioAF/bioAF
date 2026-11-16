@@ -318,13 +318,13 @@ def fs_adapter(request, monkeypatch, tmp_path):
         return NfsStorageProvider(root=str(tmp_path)), "file://raw/run/a.fastq.gz"
     monkeypatch.setenv("BIOAF_COMPUTE_MODE", "local")
     if request.param == "s3_local":
-        from app.adapters.storage import s3 as module
+        from app.adapters.storage import s3 as s3_module
 
-        monkeypatch.setattr(module, "LOCAL_DATA_ROOT", str(tmp_path))
+        monkeypatch.setattr(s3_module, "LOCAL_DATA_ROOT", str(tmp_path))
         return S3StorageProvider(org_slug="t"), "s3://bioaf-raw-t/run/a.fastq.gz"
-    from app.adapters.storage import gcs as module
+    from app.adapters.storage import gcs as gcs_module
 
-    monkeypatch.setattr(module, "LOCAL_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(gcs_module, "LOCAL_DATA_ROOT", str(tmp_path))
     return GcsStorageProvider(org_slug="t"), "gs://bioaf-raw-t/run/a.fastq.gz"
 
 

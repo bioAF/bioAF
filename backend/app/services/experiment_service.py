@@ -449,7 +449,9 @@ class ExperimentService:
                 {"field_name": fd.field_name, "default_value": fd.default_value, "is_required": fd.is_required}
                 for fd in data.field_defaults
             ]
-            after = sorted((fd.field_name, fd.default_value, bool(fd.is_required)) for fd in data.field_defaults)
+            after: list[tuple] = sorted(
+                (fd.field_name, fd.default_value, bool(fd.is_required)) for fd in data.field_defaults
+            )
             if before != after:
                 changed.add("field_defaults")
 

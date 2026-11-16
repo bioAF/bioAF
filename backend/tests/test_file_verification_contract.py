@@ -120,7 +120,8 @@ async def test_status_view_distinguishes_every_state(session, admin_user):
     org = admin_user.organization_id
     legacy = await _file(session, org)
     legacy.md5_checksum = HEX
-    assert FileVerificationService.view(legacy, None)["status"] == "unverified_legacy"
+    legacy_view = FileVerificationService.view(legacy, None)
+    assert legacy_view is not None and legacy_view["status"] == "unverified_legacy"
 
     f = await _file(session, org, external_id="y")
     record = await FileVerificationService.record_expectation(session, f, source="upload_assertion", md5=HEX)

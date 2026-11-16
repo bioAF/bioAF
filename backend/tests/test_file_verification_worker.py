@@ -199,6 +199,7 @@ async def test_transient_failures_follow_the_schedule_then_fail_visibly(session,
         assert record.attempt_count == attempt
         if attempt < 5:
             assert record.status == "queued" and record.error_code == "storage_unavailable" and record.retryable
+            assert record.next_attempt_at is not None
             delays.append(round((record.next_attempt_at - before).total_seconds() / 10) * 10)
             await _make_due(file_id)
     assert delays == [60, 300, 1800, 7200]
@@ -666,11 +667,11 @@ def test_one_active_digest_job_is_the_default_and_concurrency_is_bounded():
 
     from app.config import Settings
 
-    assert Settings().file_verification_concurrency == 1
-    assert Settings(file_verification_concurrency=4).file_verification_concurrency == 4
+    assert Settings(compute_mode="local").file_verification_concurrency == 1
+    assert Settings(compute_mode="local", file_verification_concurrency=4).file_verification_concurrency == 4
     for bad in (0, -1, 9):
         with pytest.raises(ValidationError):
-            Settings(file_verification_concurrency=bad)
+            Settings(compute_mode="local", file_verification_concurrency=bad)
 
 
 async def test_configured_concurrency_runs_that_many_jobs_at_once(session, admin_user, fake, monkeypatch):
