@@ -1142,3 +1142,118 @@ async def test_reproducing_a_restricted_launch_reuses_its_recorded_inputs(sessio
         reproduced = await PipelineRunService.reproduce_run(session, scoped_id, org_id, user_id)
     assert reproduced.samplesheet_csv == sheet
     assert sorted(reproduced.input_files_json) == sorted(allowed)
+
+
+# --- the recorded input selection is the only one a reproduction uses ---------------------------
+
+
+async def _input_ids(session, run_id):
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    return sorted(
+        (
+            await session.execute(
+                select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+@pytest.mark.parametrize("loss", ["deleted", "storage_deleted"])
+@pytest.mark.asyncio
+async def test_an_unavailable_recorded_input_is_refused_by_file_id(
+    client, session, admin_user, admin_token, compute, loss
+):
+    """Never silently replaced or dropped: the refusal names the missing input."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    [first, *_] = await _input_ids(session, original.id)
+    f = await session.get(File, first)
+    if loss == "deleted":
+        f.deleted_at = datetime.now(timezone.utc)
+    else:
+        f.storage_deleted = True
+    # A replacement linked to the same sample since must not stand in for it.
+    sample = (await session.execute(select(Sample).where(Sample.experiment_id == original.experiment_id))).scalar_one()
+    newer = File(
+        organization_id=admin_user.organization_id,
+        experiment_id=original.experiment_id,
+        gcs_uri=f"gs://bucket/{admin_user.organization_id}/newer/{f.filename}",
+        filename=f.filename,
+        file_type="fastq",
+        source_type="upload",
+    )
+    session.add(newer)
+    await session.flush()
+    await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=newer.id))
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 400, response.text
+    assert str(first) in response.text and "no longer available" in response.text
+    assert await _count(session, PipelineRun) == runs_before
+    assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.parametrize("record", ["unknown", "malformed", "disagree"])
+@pytest.mark.asyncio
+async def test_a_run_whose_input_selection_cannot_be_established_is_refused(
+    client, session, admin_user, admin_token, compute, record
+):
+    """Unknown is not "none": today's files are never selected in its place."""
+    from sqlalchemy import delete
+
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    run = await session.get(PipelineRun, original.id)
+    if record == "unknown":
+        await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id))
+        run.input_files_json = None
+    elif record == "malformed":
+        await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id))
+        run.input_files_json = {"ids": [1]}
+    else:
+        run.input_files_json = [*run.input_files_json, 999999]
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 400, response.text
+    assert "input files" in response.text
+    assert await _count(session, PipelineRun) == runs_before
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_run_recorded_only_in_its_input_list_reproduces_from_it(
+    client, session, admin_user, admin_token, compute
+):
+    """A run from before input links were kept still states its inputs in input_files_json."""
+    from sqlalchemy import delete
+
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == original.id))
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_recorded_no_inputs_is_distinct_from_unknown(session, admin_user):
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="p", status="completed")
+    session.add(run)
+    await session.flush()
+    run.input_files_json = []
+    assert await PipelineRunService._recorded_input_file_ids(session, run) == []
+    run.input_files_json = None
+    with pytest.raises(Exception, match="input files"):
+        await PipelineRunService._recorded_input_file_ids(session, run)

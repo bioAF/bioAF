@@ -1087,10 +1087,10 @@ class PipelineRunService:
                 if f.id not in seen_file_ids:
                     session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
                     seen_file_ids.add(f.id)
-        if seen_file_ids:
-            # Also populate input_files_json for backward compat
-            run.input_files_json = sorted(seen_file_ids)
-            await session.flush()
+        # The launcher's copy of the same list, written even when empty: "recorded no inputs" must
+        # stay distinguishable from a run whose inputs are unknown (reproduction refuses those).
+        run.input_files_json = sorted(seen_file_ids)
+        await session.flush()
 
         # 8b. Keep what this run was actually given. Re-deriving the sheet later
         # reads today's samples, today's files and today's mapping, none of which
@@ -1568,6 +1568,22 @@ class PipelineRunService:
             )
         sample_ids = PipelineRunService._recorded_sample_order(original)
 
+        # The original analysis's inputs, and only them: files linked since are not used, and a recorded
+        # input that is gone is refused by ID rather than replaced. With the explicit, confirmed drop of
+        # samples without files, the inputs still available are used; the sheet check below then
+        # allows only whole rows to be missing, so a sample is never run on part of its original reads.
+        from app.services.recorded_inputs import unavailable_inputs
+
+        input_file_ids = await PipelineRunService._recorded_input_file_ids(session, original)
+        missing = await unavailable_inputs(session, org_id, input_file_ids)
+        if missing and not drop_samples_without_files:
+            raise ValidationError(
+                "This run cannot be reproduced exactly: input files it used are no longer available (file IDs: "
+                f"{', '.join(map(str, missing))}). bioAF does not substitute other files. To reproduce it "
+                "without the samples those files belonged to, confirm dropping samples without files."
+            )
+        input_file_ids = [i for i in input_file_ids if i not in set(missing)]
+
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
             experiment_id=original.experiment_id,
@@ -1591,10 +1607,7 @@ class PipelineRunService:
                 parameters=original.parameters_json,
                 reference_genome=original.reference_genome,
             ),
-            # The files the original consumed, never whatever its samples are linked to today: a
-            # launch narrowed to exact inputs (a validation study's verified FASTQs) reproduces with
-            # them, and a file linked since cannot change the sheet. None for a run that recorded none.
-            input_file_ids=await PipelineRunService._recorded_input_file_ids(session, original),
+            input_file_ids=input_file_ids,
         )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run
@@ -1633,16 +1646,12 @@ class PipelineRunService:
         return values
 
     @staticmethod
-    async def _recorded_input_file_ids(session: AsyncSession, run: PipelineRun) -> list[int] | None:
-        """The input files a run recorded consuming (junction first, then the legacy id list)."""
-        recorded = list(
-            (
-                await session.execute(
-                    select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run.id)
-                )
-            ).scalars()
-        )
-        return sorted(recorded or (run.input_files_json or [])) or None
+    async def _recorded_input_file_ids(session: AsyncSession, run: PipelineRun) -> list[int]:
+        """The input files a catalog run recorded consuming ([] when it recorded none); refuses when
+        the selection cannot be established (see app/services/recorded_inputs.py)."""
+        from app.services.recorded_inputs import recorded_input_ids
+
+        return await recorded_input_ids(session, run, links_required=False)
 
     @staticmethod
     async def _used_derived_inputs(session: AsyncSession, run_id: int) -> bool:
