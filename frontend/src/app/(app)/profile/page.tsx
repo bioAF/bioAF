@@ -10,18 +10,16 @@ import { NotificationsTab } from "./components/NotificationsTab";
 type TabKey = "account" | "session" | "ssh" | "notifications";
 
 export default function ProfilePage() {
-  const { canAccess, loading: permsLoading } = usePermissions();
+  const { loading: permsLoading } = usePermissions();
   const [activeTab, setActiveTab] = useState<TabKey>("account");
 
-  const canSeeNotifications = canAccess("notifications", "view");
-
+  // A user's own notification preferences need no permission beyond signing in: anyone can be
+  // sent a notification (the backend serves these routes to every signed-in user).
   const tabs: { key: TabKey; label: string }[] = [
     { key: "account", label: "Account" },
     { key: "session", label: "Session Credentials" },
     { key: "ssh", label: "Git SSH Key" },
-    ...(canSeeNotifications
-      ? [{ key: "notifications" as TabKey, label: "Notifications" }]
-      : []),
+    { key: "notifications", label: "Notifications" },
   ];
 
   // Honor ?tab= deep-links once permissions are known (so a gated tab is not
@@ -33,7 +31,7 @@ export default function ProfilePage() {
       setActiveTab(requested as TabKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permsLoading, canSeeNotifications]);
+  }, [permsLoading]);
 
   const selectTab = (key: TabKey) => {
     setActiveTab(key);
@@ -66,7 +64,7 @@ export default function ProfilePage() {
       {activeTab === "account" && <AccountTab />}
       {activeTab === "session" && <SessionCredentialsTab />}
       {activeTab === "ssh" && <SSHKeyTab />}
-      {activeTab === "notifications" && canSeeNotifications && <NotificationsTab />}
+      {activeTab === "notifications" && <NotificationsTab />}
     </main>
   );
 }

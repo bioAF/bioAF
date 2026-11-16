@@ -45,8 +45,11 @@ test("shows the Notifications tab when permitted", () => {
   expect(screen.getByText("NOTIF_TAB")).toBeInTheDocument();
 });
 
-test("hides the Notifications tab without the notifications:view permission", () => {
+test("every user has the Notifications tab: their own preferences need no extra permission", () => {
+  // Anyone can be sent a notification (a failed file check goes to its uploader), so anyone can
+  // choose how they receive them. Organization-wide notification settings stay with admins.
   mockCanAccess.mockImplementation((resource: string) => resource !== "notifications");
   render(<ProfilePage />);
-  expect(screen.queryByRole("button", { name: "Notifications" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+  expect(screen.getByText("NOTIF_TAB")).toBeInTheDocument();
 });
