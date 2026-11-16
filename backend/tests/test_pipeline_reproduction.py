@@ -1379,6 +1379,8 @@ async def test_unavailable_inputs_no_sample_claims_are_refused_without_a_drop_of
     for file_id in ids:
         (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
     await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(ids)))
+    # A run from before the per-row sample record was kept: nothing else says whose files they were.
+    (await session.get(PipelineRun, original.id)).samplesheet_snapshot_csv = None
     await session.commit()
 
     for drop in (False, True):
@@ -1388,3 +1390,36 @@ async def test_unavailable_inputs_no_sample_claims_are_refused_without_a_drop_of
         assert body["code"] != "samples_missing_files"
         assert "cannot tell which samples" in body["detail"] and "confirm dropping" not in body["detail"]
     assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_input_is_traced_to_its_sample_through_the_runs_own_record(
+    client, session, admin_user, admin_token, compute
+):
+    """Deleting a file removes its sample links; the original run's per-row record still says whose it was."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", samples=2
+    )
+    s2 = (await session.execute(select(Sample).where(Sample.external_id == "S2"))).scalar_one()
+    s2_files = [
+        f.id
+        for f in (await session.execute(select(File).where(File.filename.like("S2_%")))).scalars()
+        if f.id in await _input_ids(session, original.id)
+    ]
+    # What deleting a file in the app does: soft delete, and its sample links go.
+    for file_id in s2_files[:1]:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(s2_files[:1])))
+    await session.commit()
+
+    refused = await _reproduce_catalog(client, original.id, admin_token)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "samples_missing_files"
+    assert [s["id"] for s in refused.json()["details"]["samples_without_files"]] == [s2.id]
+
+    response = await _reproduce_catalog(client, original.id, admin_token, drop_samples_without_files=True)
+    assert response.status_code == 200, response.text
+    rows = compute.submit_job.call_args.args[0].sample_sheet.splitlines()[1:]
+    assert rows and all(row.startswith("S1,") for row in rows)

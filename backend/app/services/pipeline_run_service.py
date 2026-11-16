@@ -1594,7 +1594,7 @@ class PipelineRunService:
         missing = await unavailable_inputs(session, org_id, input_file_ids)
         if missing:
             affected, removed = await PipelineRunService._samples_losing_inputs(
-                session, sample_ids, input_file_ids, missing
+                session, original, sample_ids, input_file_ids, missing
             )
             if not drop_samples_without_files:
                 # The run page answers this code by offering to drop exactly these samples.
@@ -1646,13 +1646,19 @@ class PipelineRunService:
 
     @staticmethod
     async def _samples_losing_inputs(
-        session: AsyncSession, sample_ids: list[int] | None, input_file_ids: list[int], missing: list[int]
+        session: AsyncSession,
+        original: PipelineRun,
+        sample_ids: list[int] | None,
+        input_file_ids: list[int],
+        missing: list[int],
     ) -> tuple[set[int], set[int]]:
         """The run's samples that lost any recorded input, and every recorded input of those samples.
 
-        A missing file is attributed to the run's samples it is linked to (a deleted file keeps its
-        links). One that cannot be attributed to any of them is refused: bioAF cannot tell which
-        sample to drop, and must not keep a sample that may have lost reads.
+        Which sample a recorded input fed comes first from the original run's own record: its
+        identity snapshot names each sheet row's sample, and the row holds the file's URI. Deleting a
+        file removes its sample links, so current links are only a fallback (a run recorded before
+        the snapshot was kept). An input attributable to none of the run's samples is refused: bioAF
+        cannot tell which sample to drop, and must not keep a sample that may have lost reads.
         """
         from app.models.sample import sample_files
 
@@ -1670,7 +1676,8 @@ class PipelineRunService:
         )
         owners: dict[int, set[int]] = {}
         files_of: dict[int, set[int]] = {}
-        for sample_id, file_id in links:
+        recorded = await PipelineRunService._recorded_row_owners(session, original, run_samples, input_file_ids)
+        for sample_id, file_id in [*links, *recorded]:
             owners.setdefault(file_id, set()).add(sample_id)
             files_of.setdefault(sample_id, set()).add(file_id)
         orphaned = [f for f in missing if not owners.get(f)]
@@ -1683,6 +1690,51 @@ class PipelineRunService:
         affected = set().union(*(owners[f] for f in missing))
         removed = set().union(*(files_of[s] for s in affected)) | set(missing)
         return affected, removed
+
+    @staticmethod
+    async def _recorded_row_owners(
+        session: AsyncSession, original: PipelineRun, run_samples: list[int], input_file_ids: list[int]
+    ) -> list[tuple[int, int]]:
+        """(sample_id, file_id) pairs read from the original run's identity snapshot.
+
+        Each snapshot row ends with the uuid of the sample it was emitted for; a recorded input
+        belongs to a row when one of its URIs (current, original source, legacy) is a cell of it.
+        """
+        import csv
+        import io
+
+        from app.models.file import File
+
+        if not original.samplesheet_snapshot_csv or not run_samples or not input_file_ids:
+            return []
+        uuid_to_sample = {
+            str(u): i
+            for i, u in (await session.execute(select(Sample.id, Sample.uuid).where(Sample.id.in_(run_samples)))).all()
+            if u is not None
+        }
+        uris_of: dict[str, set[int]] = {}
+        for file_id, *uris in (
+            await session.execute(
+                select(File.id, File.storage_uri, File.gcs_uri, File.source_storage_uri).where(
+                    File.id.in_(input_file_ids)
+                )
+            )
+        ).all():
+            for uri in uris:
+                if uri:
+                    uris_of.setdefault(uri, set()).add(file_id)
+        pairs: list[tuple[int, int]] = []
+        rows = list(csv.reader(io.StringIO(original.samplesheet_snapshot_csv)))
+        for row in rows[1:]:
+            if not row:
+                continue
+            sample_id = uuid_to_sample.get(row[-1])
+            if sample_id is None:
+                continue
+            for cell in row[:-1]:
+                for file_id in uris_of.get(cell, ()):
+                    pairs.append((sample_id, file_id))
+        return pairs
 
     @staticmethod
     async def _sample_refs(session: AsyncSession, sample_ids: set[int]) -> list[dict]:
