@@ -29,6 +29,28 @@ export interface FileProvenance {
   creator: UserSummary | null;
 }
 
+// Checksum verification of a file's stored bytes. The expected checksum is what a caller or source
+// asserted; the observed one is what bioAF read itself. Never inferred client-side.
+export interface FileVerification {
+  status: string;
+  algorithm: string | null;
+  expected_checksum: string | null;
+  observed_checksum: string | null;
+  method: string | null;
+  verified_at: string | null;
+  bytes_processed: number | null;
+  total_bytes: number | null;
+  error_code: string | null;
+  retryable: boolean | null;
+}
+
+export interface SampleReference {
+  sample_id: number;
+  external_id: string | null;
+  experiment_id: number;
+  experiment_external_id: string | null;
+}
+
 export interface FileResponse {
   id: number;
   filename: string;
@@ -50,6 +72,12 @@ export interface FileResponse {
   upload_timestamp: string;
   created_at: string;
   provenance?: FileProvenance | null;
+  external_id?: string | null;
+  project_external_id?: string | null;
+  experiment_external_id?: string | null;
+  samples?: SampleReference[];
+  ready_at?: string | null;
+  verification?: FileVerification | null;
 }
 
 export interface FileListResponse {

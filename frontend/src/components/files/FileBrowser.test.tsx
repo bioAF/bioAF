@@ -301,3 +301,60 @@ test("file detail shows the cloud-neutral storage_uri, not the legacy gcs_uri", 
   });
   expect(screen.queryByText("gs://old/legacy.fastq.gz")).not.toBeInTheDocument();
 });
+
+test("file details show the external ID and checksum verification, and can retry a failure", async () => {
+  const verification = {
+    status: "failed",
+    algorithm: "md5",
+    expected_checksum: "0123456789abcdef0123456789abcdef",
+    observed_checksum: null,
+    method: null,
+    verified_at: null,
+    bytes_processed: null,
+    total_bytes: null,
+    error_code: "storage_permission_denied",
+    retryable: false,
+  };
+  const failed = makeFile({
+    external_id: "LIMS-F-1",
+    ready_at: null,
+    verification,
+  });
+  mockGet.mockImplementation((url: string) => {
+    if (url.includes("/api/projects")) return Promise.resolve({ projects: [] });
+    if (url.includes("/api/experiments"))
+      return Promise.resolve({ experiments: [] });
+    return Promise.resolve({
+      files: [failed],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+  });
+  const mockPost = api.post as jest.Mock;
+  mockPost.mockReset();
+  mockPost.mockResolvedValue({
+    ...failed,
+    verification: { ...verification, status: "queued", error_code: null },
+  });
+
+  render(<FileBrowser />);
+  await waitFor(() =>
+    expect(screen.getByText("sample.fastq.gz")).toBeInTheDocument(),
+  );
+  fireEvent.click(screen.getByText("sample.fastq.gz"));
+
+  expect(await screen.findByText("LIMS-F-1")).toBeInTheDocument();
+  expect(screen.getByText("Verification failed")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry verification" }));
+
+  await waitFor(() =>
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/files/1/verification/retry",
+      {},
+    ),
+  );
+  expect(
+    await screen.findByText("Queued for verification"),
+  ).toBeInTheDocument();
+});

@@ -5,6 +5,7 @@ import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportPanel";
 import { ExperimentFileUploader } from "@/components/files/ExperimentFileUploader";
+import { FileVerificationDetails } from "@/components/files/FileVerificationDetails";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
@@ -103,6 +104,8 @@ export function FileBrowser({
   const isAdmin = user?.role_name === "admin";
   const { canAccess } = usePermissions();
   const canDownload = canAccess("files", "download");
+  const canEditFiles = canAccess("files", "edit");
+  const [retryingVerification, setRetryingVerification] = useState(false);
   const canViewLabDocs = canAccess("lab_documents", "view");
 
   // The file list and its lab-document hits are one read, keyed by the submitted search, the
@@ -979,6 +982,26 @@ export function FileBrowser({
                 </dd>
               </div>
             </dl>
+
+            <FileVerificationDetails
+              externalId={viewingFile.external_id}
+              verification={viewingFile.verification}
+              readyAt={viewingFile.ready_at}
+              canRetry={canEditFiles}
+              retrying={retryingVerification}
+              onRetry={async () => {
+                setRetryingVerification(true);
+                try {
+                  const updated = await api.post<FileResponse>(`/api/files/${viewingFile.id}/verification/retry`, {});
+                  setViewingFile(updated);
+                } catch (e) {
+                  logError("retrying file verification", e);
+                  toast.error("The verification could not be restarted. The technical detail is in the application logs.");
+                } finally {
+                  setRetryingVerification(false);
+                }
+              }}
+            />
 
             <div className="px-4 pb-4 flex gap-3">
               {canDownload && !viewingFile.storage_deleted && (
