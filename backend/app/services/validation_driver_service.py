@@ -32,6 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.registry import get_storage_adapter
 from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
+from app.models.file import File
+from app.models.file_verification import FileVerification
 from app.models.sample import Sample, sample_files
 from app.models.validation_study import VALIDATION_STUDY_TERMINAL_STATES, ValidationStudy
 from app.schemas.experiment import ExperimentCreate
@@ -191,6 +193,100 @@ async def _load_runnable_samples(session: AsyncSession, experiment_id: int) -> l
     )
 
 
+_ELIGIBLE = frozenset({"verified", "not_required"})
+_PENDING = frozenset({"waiting_expectation", "queued", "preparing", "verifying"})
+
+
+async def _design_picks(session: AsyncSession, study: ValidationStudy) -> set[str]:
+    plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    design = (plan.differential_design_json if plan else None) or {}
+    picked: set[str] = set()
+    for contrast in design.get("contrasts") or []:
+        picked.update(contrast.get("test_samples") or [])
+        picked.update(contrast.get("reference_samples") or [])
+    return picked
+
+
+async def selected_input_files(session: AsyncSession, study: ValidationStudy) -> list[File]:
+    """The FASTQs this study will consume, resolved without changing anything.
+
+    The approved design's picks are matched to fetched samples (verification state never hides a
+    fetched record); a QC-only study (no picks) uses every fetched sample. Only FASTQs of the current
+    acquisition (``data_run_id``) count, never historical acquisitions or unrelated artifacts.
+    """
+    if study.data_run_id is None or study.experiment_id is None:
+        return []
+    picks = {(p or "").strip().lower() for p in await _design_picks(session, study)}
+    samples = await _load_runnable_samples(session, study.experiment_id)
+    if picks:
+        samples = [s for s in samples if _sample_accession_keys(s) & picks]
+    if not samples:
+        return []
+    return list(
+        (
+            await session.execute(
+                select(File)
+                .join(sample_files, sample_files.c.file_id == File.id)
+                .where(
+                    sample_files.c.sample_id.in_([s.id for s in samples]),
+                    File.file_type == "fastq",
+                    File.source_pipeline_run_id == study.data_run_id,
+                    File.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
+async def input_eligibility(session: AsyncSession, study: ValidationStudy) -> tuple[str, list[int]]:
+    """``ok``, ``pending``, ``mismatch`` or ``failed`` for the study's selected inputs, with the IDs of
+    the files that decided it. Mismatch outranks failure, which outranks pending."""
+    files = await selected_input_files(session, study)
+    if not files:
+        return "ok", []
+    records = {
+        r.file_id: r
+        for r in (
+            await session.execute(select(FileVerification).where(FileVerification.file_id.in_([f.id for f in files])))
+        ).scalars()
+    }
+    mismatch, failed, pending = [], [], []
+    for f in files:
+        record = records.get(f.id)
+        status = record.status if record is not None else None
+        if status == "checksum_mismatch":
+            mismatch.append(f.id)
+        elif status == "failed":
+            failed.append(f.id)
+        elif status in _ELIGIBLE and f.ready_at is not None:
+            continue
+        else:
+            pending.append(f.id)
+    if mismatch:
+        return "mismatch", sorted(mismatch)
+    if failed:
+        return "failed", sorted(failed)
+    if pending:
+        return "pending", sorted(pending)
+    return "ok", []
+
+
+def _verification_failure_reason(outcome: str, file_ids: list[int]) -> str:
+    ids = ", ".join(str(i) for i in file_ids)
+    if outcome == "mismatch":
+        return (
+            "Fetched input failed checksum verification: the stored file does not match the expected MD5 "
+            f"(file IDs: {ids}). Correct or re-fetch the data before retrying."
+        )
+    return (
+        "Fetched input could not be checksum-verified after its retries (file IDs: "
+        f"{ids}). Fix the storage problem and retry the file's verification, then retry the study."
+    )
+
+
 class ValidationDriverService:
     # ---- Comprehension half (synchronous, request-driven) ----
 
@@ -311,6 +407,19 @@ class ValidationDriverService:
             await FetchngsIngestService.ingest_for_run(session, run, outdir=outdir)
             await FetchngsIngestService.attach_fastq_files(session, run, outdir=outdir)
 
+        # The inputs this study will consume must be verified (or legitimately checksum-optional)
+        # before anything downstream decides on them. Pending work waits here, design untouched; a
+        # mismatch or a terminal verification failure is an error, never a scientific verdict.
+        outcome, file_ids = await input_eligibility(session, study)
+        if outcome == "pending":
+            return False
+        if outcome in ("mismatch", "failed"):
+            study.evidence_json = {
+                **(study.evidence_json or {}),
+                "input_verification": {"outcome": outcome, "file_ids": file_ids, "data_run_id": study.data_run_id},
+            }
+            return await ValidationDriverService._fail(session, study, _verification_failure_reason(outcome, file_ids))
+
         if not await _has_runnable_samples(session, study.experiment_id):
             study.failure_reason = "fetched data was not usable (no runnable samples with FASTQ)"
             await ValidationStudyService.transition(
@@ -412,6 +521,16 @@ class ValidationDriverService:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         if plan is None or not plan.pipeline_key:
             return await ValidationDriverService._fail(session, study, "no pipeline in the approved plan")
+
+        outcome, file_ids = await input_eligibility(session, study)
+        if outcome != "ok":
+            return await ValidationDriverService._fail(
+                session,
+                study,
+                _verification_failure_reason(outcome, file_ids)
+                if outcome != "pending"
+                else f"Fetched inputs are not verified yet (file IDs: {', '.join(map(str, file_ids))}).",
+            )
 
         # Imported here for the same reason `_launch` does: `pipeline_run_service` is a heavy leaf
         # of the service graph and a module-level import ties this driver's import order to it.
