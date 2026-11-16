@@ -67,6 +67,7 @@ async function advanceToGcpStep(user: ReturnType<typeof userEvent.setup>) {
   // Step 2 -> 3: org name
   mockApiPost.mockResolvedValueOnce({});
   await user.type(screen.getByLabelText(/organization name/i), "Acme Bio");
+  await user.click(screen.getByRole("radio", { name: "Do not share" }));
   await user.click(screen.getByRole("button", { name: /save organization/i }));
   await waitFor(() => expect(screen.getByRole("heading", { name: "GCP Credentials" })).toBeInTheDocument());
 }

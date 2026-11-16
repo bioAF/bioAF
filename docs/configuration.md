@@ -37,6 +37,20 @@ of compute mode. SLURM is not implemented despite acceptance of its legacy value
 `stdout` emits JSON for a host collector; `direct` sends through the GCP logging adapter where nothing else
 collects container output. Do not configure both. See [Logging](deployment-guide.md#logging).
 
+## Installation Metrics Settings
+
+Reporting is opt-in and decided by an admin in the application; these host settings only restrict or
+redirect it. See [Installation Metrics](installation-metrics.md).
+
+| Backend setting | Default | Meaning |
+| --- | --- | --- |
+| `BIOAF_INSTALL_METRICS_DISABLED` | Unset (reporting follows the admin's choice) | `1` turns reporting off whatever was chosen and cancels pending reports; CI and development Compose set it |
+| `BIOAF_POSTHOG_PROJECT_TOKEN` | Unset (the release image's public token) | Replaces the destination token; must be set together with `BIOAF_POSTHOG_HOST` |
+| `BIOAF_POSTHOG_HOST` | Unset (`https://us.i.posthog.com`) | Replaces the ingestion host; an `https://` origin, set together with the token |
+
+A partial or invalid pair disables delivery rather than mixing destinations. Production Compose forwards all
+three from `docker/.env`.
+
 ## Export and Restore Settings
 
 These are application defaults; production Compose forwards only the settings listed in its service

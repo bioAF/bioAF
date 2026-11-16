@@ -332,6 +332,15 @@ From the UI, admins can click the **Install Update** button on the
 **Settings > Platform Info** page when a new version is available. This
 triggers the same update process through a host-side update agent.
 
+Each update is recorded as an operation in `host-state/deployments.json` (a random ID, its original start
+and source version, its target and completion time); a retry of the same unfinished target keeps it. When an
+update completes, the updater asks the backend to record it for
+[installation metrics](installation-metrics.md). A report is reserved only if an admin chose to share before
+the update started, and a failure there never changes the update's outcome. To stop all reporting on a host,
+set `BIOAF_INSTALL_METRICS_DISABLED=1` in `docker/.env` and restart the backend. A deliberate copy of an
+installation that keeps running beside the original needs its own identity:
+`./bioaf reset-install-metrics-identity --confirm`.
+
 ### The update agent
 
 The agent is the `bioaf-update-agent` systemd service. It runs as the

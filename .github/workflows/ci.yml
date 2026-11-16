@@ -17,6 +17,11 @@ defaults:
   run:
     shell: bash
 
+# No job reports installation metrics (ADR-075): every backend process started here, tests, schema
+# export, migration checks and smoke runs, inherits the operator override. Containers get it explicitly.
+env:
+  BIOAF_INSTALL_METRICS_DISABLED: "1"
+
 jobs:
   # ──────────────────────────────────────────────
   # Terraform validation

@@ -8,6 +8,11 @@ import os
 for _name in [name for name in os.environ if name.upper() == "BIOAF_COMPUTE_MODE"]:
     del os.environ[_name]
 os.environ["BIOAF_COMPUTE_MODE"] = "local"
+# No test reports installation metrics: the operator override is on over whatever the shell exports
+# (ADR-075). Sender tests switch it off on a local settings instance and inject their own transport.
+for _name in [name for name in os.environ if name.upper() == "BIOAF_INSTALL_METRICS_DISABLED"]:
+    del os.environ[_name]
+os.environ["BIOAF_INSTALL_METRICS_DISABLED"] = "1"
 # Two keys exercise the MultiFernet rotation path; only the first is the writer.
 os.environ.setdefault(
     "BIOAF_ENCRYPTION_KEYS",
@@ -417,6 +422,24 @@ def _no_accession_manifest_network(monkeypatch):
         raise RuntimeError(f"tests do not fetch {url}")
 
     monkeypatch.setattr(accession_manifest_service, "_http_fetch_text", _offline)
+
+
+@pytest.fixture(autouse=True)
+def _no_install_metrics_network(monkeypatch):
+    """No test reaches PostHog (ADR-075).
+
+    The sender's default transport refuses every request, so a test that enables reporting with
+    production-shaped configuration still cannot send. Sender tests inject their own MockTransport;
+    nothing falls through to a real network.
+    """
+    import httpx
+
+    from app.services.install_metrics import sender
+
+    def _refuse(request):
+        raise RuntimeError("tests do not send installation metrics")
+
+    monkeypatch.setattr(sender, "transport_factory", lambda: httpx.MockTransport(_refuse))
 
 
 @pytest.fixture(autouse=True)

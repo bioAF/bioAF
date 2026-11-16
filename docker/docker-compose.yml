@@ -44,6 +44,12 @@ services:
       # a signed link that cannot stay valid this long is refused rather than issued short.
       BIOAF_EXPORT_TRANSFER_STALL_SECONDS: ${BIOAF_EXPORT_TRANSFER_STALL_SECONDS:-60}
       BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS: ${BIOAF_EXPORT_SIGNED_MIN_TTL_SECONDS:-3600}
+      # Installation metrics (docs/installation-metrics.md): reported only after an admin opts in. Set
+      # BIOAF_INSTALL_METRICS_DISABLED=1 in the host env file to stop reporting whatever was chosen.
+      # The PostHog pair overrides the destination built into the image, both or neither.
+      BIOAF_INSTALL_METRICS_DISABLED: ${BIOAF_INSTALL_METRICS_DISABLED:-false}
+      BIOAF_POSTHOG_PROJECT_TOKEN: ${BIOAF_POSTHOG_PROJECT_TOKEN:-}
+      BIOAF_POSTHOG_HOST: ${BIOAF_POSTHOG_HOST:-}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
       # A restore checks the database volume has room for the restored copy and its WAL before creating it.

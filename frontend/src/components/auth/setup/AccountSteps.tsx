@@ -1,6 +1,8 @@
 "use client";
 
 import { Button } from "@/components/ui/Button";
+import { InstallMetricsDisclosure } from "@/components/installMetrics/InstallMetricsDisclosure";
+import { CHOICE_LABEL, type InstallMetricsChoice } from "@/lib/installMetrics";
 
 /** Setup's account steps. Views only: the wizard owns the values and the requests. */
 
@@ -95,10 +97,20 @@ export function AdminAccountStep({
 export function OrganizationStep({
   orgName,
   setOrgName,
+  metricsChoice,
+  setMetricsChoice,
+  metricsCommitted,
+  metricsChosenElsewhere = false,
   onSave,
 }: {
   orgName: string;
   setOrgName: (value: string) => void;
+  metricsChoice: InstallMetricsChoice | null;
+  setMetricsChoice: (choice: InstallMetricsChoice) => void;
+  /** The choice already saved for this installation; it is not asked again. */
+  metricsCommitted: InstallMetricsChoice | null;
+  /** The saved choice is another administrator's; say so instead of presenting it as this one's. */
+  metricsChosenElsewhere?: boolean;
   onSave: () => void;
 }) {
   return (
@@ -109,7 +121,23 @@ export function OrganizationStep({
           placeholder="e.g., Acme Biotech"
           className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
       </div>
-      <Button className="w-full" onClick={onSave}>
+      <section aria-labelledby="setup-install-metrics" className="space-y-2">
+        <h3 id="setup-install-metrics" className="text-sm font-medium text-gray-700">Help improve bioAF</h3>
+        {metricsCommitted && metricsChosenElsewhere ? (
+          <p role="status" className="text-sm text-gray-600">
+            Another administrator already chose: {CHOICE_LABEL[metricsCommitted]}. Reporting follows that choice.
+            You can change it in Settings &gt; System Settings.
+          </p>
+        ) : metricsCommitted ? (
+          <p className="text-sm text-gray-600">
+            Installation metrics: {CHOICE_LABEL[metricsCommitted]}. You can change this in Settings &gt; System
+            Settings.
+          </p>
+        ) : (
+          <InstallMetricsDisclosure value={metricsChoice} onChange={setMetricsChoice} />
+        )}
+      </section>
+      <Button className="w-full" onClick={onSave} disabled={!metricsCommitted && !metricsChoice}>
         Save Organization Name
       </Button>
     </div>

@@ -1343,12 +1343,26 @@ write_update_status() {
     [ "$status" = "in_progress" ] || stamp_key="completed_at"
     local -a fields=(status "$status" from_version "$_update_from" to_version "$_update_to" step "$step")
     [ -n "$error" ] && fields+=(error "$error")
+    # The operation and its completion evidence (ADR-075), for the backend's metrics reconciliation.
+    [ -n "${_update_operation:-}" ] && fields+=(operation_id "$_update_operation" operation_started_at "$_update_operation_started_at")
+    [ -n "${_update_operation_completed_at:-}" ] && fields+=(operation_completed_at "$_update_operation_completed_at")
     fields+=("$stamp_key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     if [ -z "$HOST_IO_PY" ]; then
         red "Could not record the update status: scripts/update_host_io.py was not loaded."
         return 1
     fi
     python3 -I -c "$HOST_IO_PY" write-status "$SCRIPT_DIR" "${fields[@]}"
+}
+
+record_upgrade_metric() {
+    # Ask the backend to reserve this completed update's installation metrics report (ADR-075). It reserves one
+    # only if the admin opted in before the update started, and sends nothing itself. A failure never changes the
+    # update's outcome: the backend also reconciles from update-status/current.json.
+    [ -n "${_update_operation:-}" ] && [ -n "${_update_operation_completed_at:-}" ] || return 0
+    $DC exec -T backend python -m app.cli.record_upgrade_metric \
+        --operation-id "$_update_operation" --from-version "${_update_from:-unknown}" --to-version "$_update_to" \
+        --started-at "$_update_operation_started_at" --completed-at "$_update_operation_completed_at" >/dev/null 2>&1 \
+        || yellow "Note: the backend did not record this upgrade for installation metrics; it will retry from the update status."
 }
 
 update_failed() {
@@ -1400,9 +1414,11 @@ cmd_update() {
 
     # Running the target image is not the same as being updated: its database upgrade may have
     # failed. Only a settled database upgrade makes this a no-op; otherwise retry just that part.
+    # An update to this target that started and never completed still needs its readiness checks: an image
+    # already at the target does not settle it.
     local retry_only=false
     if [ "$current_version" = "$target_version" ]; then
-        if db_upgrade_settled; then
+        if db_upgrade_settled && ! deploy_operation_unfinished "v${target_version}"; then
             green "Already running version $current_version. Nothing to update."
             exit 0
         fi
@@ -1439,6 +1455,17 @@ cmd_update() {
 
     _update_from="$current_version"
     _update_to="$target_version"
+
+    # This update's operation (installer/deployments.sh): a retry of the same unfinished target keeps its ID,
+    # original start and source version. A record that cannot be written only means no metrics report.
+    local operation=""
+    _update_operation="" _update_operation_started_at="" _update_operation_completed_at=""
+    if operation="$(deploy_operation_start "v${target_version}" "$current_version")" && [ -n "$operation" ]; then
+        read -r _update_operation _update_operation_started_at _update_from <<< "$operation"
+        [ "$_update_from" != "-" ] || _update_from=""
+    else
+        yellow "WARNING: This update's operation could not be recorded in host-state/deployments.json."
+    fi
 
     if [ "$retry_only" = false ]; then
         # Pre-flight: verify all release images exist before doing anything destructive.
@@ -1570,7 +1597,12 @@ cmd_update() {
     new_version=$(get_running_version)
     _update_to="$new_version"
     deploy_finish "v${target_version}"
+    if [ -n "${_update_operation:-}" ]; then
+        _update_operation_completed_at="$(deploy_operation_complete "v${target_version}")" \
+            || yellow "WARNING: This update's completion could not be recorded in host-state/deployments.json."
+    fi
     write_update_status completed done
+    record_upgrade_metric
 
     echo ""
     green "=================================================="
@@ -1693,6 +1725,11 @@ cmd_register_outputs() {
     $DC exec -T backend python -m app.cli.register_outputs "$@"
 }
 
+cmd_reset_install_metrics_identity() {
+    bold "=== Reset the installation metrics identity (for a deliberate copy of an installation) ==="
+    $DC exec -T backend python -m app.cli.reset_install_metrics_identity "$@"
+}
+
 cmd_rotate_encryption_keys() {
     bold "=== Re-encrypt sensitive columns under the current primary key ==="
     $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
@@ -1738,6 +1775,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  reset-install-metrics-identity --confirm"
+    echo "                      Give a deliberate copy of an installation its own"
+    echo "                      installation metrics identity (clears queued reports)."
     echo "  help                Show this help message"
     echo ""
     bold "Examples:"
@@ -1793,6 +1833,7 @@ case "$command" in
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
+    reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
         red "Unknown command: $command"

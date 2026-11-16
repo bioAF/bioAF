@@ -218,6 +218,13 @@ class Settings(BaseSettings):
     # A signed export link must stay usable at least this long after it is issued; shorter is refused.
     export_signed_min_ttl_seconds: int = 3600
 
+    # Installation metrics (ADR-075). The operator override wins over the admin's choice: it stops
+    # capture and cancels pending reports. The PostHog pair overrides the release defaults in
+    # app/install_metrics_release.py; both or neither, or delivery is disabled.
+    install_metrics_disabled: bool = False
+    posthog_project_token: str = ""
+    posthog_host: str = ""
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""

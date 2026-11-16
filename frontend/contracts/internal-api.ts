@@ -5848,6 +5848,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get System Settings */
+        get: operations["get_system_settings_api_system_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system-settings/install-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Install Metrics */
+        put: operations["put_install_metrics_api_system_settings_install_metrics_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/template-notebooks": {
         parameters: {
             query?: never;
@@ -11550,6 +11584,48 @@ export interface components {
             /** Filename */
             filename: string;
         };
+        /**
+         * InstallMetricsChoiceRequest
+         * @description Only the choice, the notice version it was made against, and the revision it was read at.
+         */
+        InstallMetricsChoiceRequest: {
+            /**
+             * Choice
+             * @enum {string}
+             */
+            choice: "enabled" | "disabled";
+            /** Notice Version */
+            notice_version: string;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * InstallMetricsSettings
+         * @description The installation metrics choice as an admin sees it (ADR-075).
+         */
+        InstallMetricsSettings: {
+            /** Decided At */
+            decided_at: string | null;
+            /** Effective */
+            effective: boolean;
+            /** Installation Id */
+            installation_id: string | null;
+            /** Notice Version */
+            notice_version: string;
+            /** Operator Override */
+            operator_override: boolean;
+            /**
+             * Preference
+             * @enum {string}
+             */
+            preference: "pending" | "enabled" | "disabled";
+            /** Prompt Required */
+            prompt_required: boolean;
+            /** Revision */
+            revision: number;
+            /** Setup Completed */
+            setup_completed: boolean;
+        };
         /** LabDocumentCreate */
         LabDocumentCreate: {
             /** Description */
@@ -16022,6 +16098,10 @@ export interface components {
             label: string;
             /** Prompt Fragment */
             prompt_fragment: string;
+        };
+        /** SystemSettingsResponse */
+        SystemSettingsResponse: {
+            install_metrics: components["schemas"]["InstallMetricsSettings"];
         };
         /** TemplateCloneRequest */
         TemplateCloneRequest: {
@@ -28786,6 +28866,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_system_settings_api_system_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsResponse"];
+                };
+            };
+        };
+    };
+    put_install_metrics_api_system_settings_install_metrics_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallMetricsChoiceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

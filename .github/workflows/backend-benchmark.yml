@@ -31,6 +31,10 @@ on:
 permissions:
   contents: read
 
+# Benchmark runs never report installation metrics (ADR-075).
+env:
+  BIOAF_INSTALL_METRICS_DISABLED: "1"
+
 jobs:
   benchmark:
     name: Benchmark (${{ inputs.scope }}, rounds ${{ inputs.test_bcrypt_rounds }}, ${{ inputs.durability }}, -n ${{ inputs.workers }})

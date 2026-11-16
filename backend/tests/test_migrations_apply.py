@@ -329,7 +329,7 @@ LEGACY_NULLABLE = {
 # Rows an empty-schema upgrade leaves behind. All global; migrations that backfill per
 # Organization (roles in 036, permissions in later ones) find no Organization and insert nothing,
 # so roles come only from seed_builtin_roles when a test or install creates an Organization.
-MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 42}
+MIGRATION_SEEDS = {"component_states": 8, "controlled_vocabularies": 67, "platform_config": 43}
 
 
 @pytest_asyncio.fixture

@@ -73,6 +73,7 @@ from app.models.nf_core_registry_refresh import NfCoreRegistryRefresh
 from app.models.api_key import ApiKey
 from app.models.project_custom_field import ProjectCustomField
 from app.models.idempotency_key import IdempotencyKey
+from app.models.install_metric_event import InstallMetricEvent
 from app.models.webhook import WebhookSubscription, WebhookDelivery
 from app.models.org_code_counter import OrgCodeCounter
 from app.models.llm_provider_config import LlmProviderConfig
@@ -205,6 +206,7 @@ __all__ = [
     "ApiKey",
     "ProjectCustomField",
     "IdempotencyKey",
+    "InstallMetricEvent",
     "WebhookSubscription",
     "WebhookDelivery",
     "OrgCodeCounter",

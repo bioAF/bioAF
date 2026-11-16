@@ -12,6 +12,7 @@ import { ToastProvider } from "@/components/shared/Toast";
 import { BootSplash } from "@/components/layout/BootSplash";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
 import { maintenanceMessage } from "@/components/layout/maintenanceMessage";
+import { InstallMetricsPrompt } from "@/components/installMetrics/InstallMetricsPrompt";
 
 /**
  * Shared shell for every authenticated page. It mounts the Sidebar + Header ONCE
@@ -106,6 +107,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </div>
+      {/* Asks for the installation metrics choice while it is pending (ADR-075). */}
+      <InstallMetricsPrompt />
     </ToastProvider>
   );
 }

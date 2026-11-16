@@ -317,8 +317,15 @@ def test_a_failed_migration_is_recorded_rolled_back_and_retryable(released):
     async def _block():
         conn = await case.connect()
         try:
-            # Migration 132 creates this table IF NOT EXISTS, then indexes columns this one lacks.
-            await conn.execute("CREATE TABLE sample_external_id_transitions (id int)")
+            # Every migration records its revision; refusing that write fails whichever migration runs next.
+            await conn.execute(
+                "CREATE FUNCTION block_upgrade() RETURNS trigger LANGUAGE plpgsql AS "
+                "$$ BEGIN RAISE EXCEPTION 'blocked by test'; END $$"
+            )
+            await conn.execute(
+                "CREATE TRIGGER block_upgrade BEFORE UPDATE ON alembic_version "
+                "FOR EACH ROW EXECUTE FUNCTION block_upgrade()"
+            )
         finally:
             await conn.close()
 
@@ -335,7 +342,8 @@ def test_a_failed_migration_is_recorded_rolled_back_and_retryable(released):
     async def _unblock():
         conn = await case.connect()
         try:
-            await conn.execute("DROP TABLE sample_external_id_transitions")
+            await conn.execute("DROP TRIGGER block_upgrade ON alembic_version")
+            await conn.execute("DROP FUNCTION block_upgrade()")
         finally:
             await conn.close()
 

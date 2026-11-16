@@ -401,6 +401,18 @@ def _nf_core_registry_refresh() -> Iteration:
     return iteration
 
 
+def _install_metrics_sender() -> Iteration:
+    """Deliver due installation metrics reports (ADR-075); a network call never holds a session."""
+    from app.services.install_metrics import sender
+
+    factory = _factory()
+
+    async def iteration() -> None:
+        await sender.send_pending(factory)
+
+    return iteration
+
+
 def _job(role, prepare, first, interval, message, enabled=None) -> PeriodicJob:
     return PeriodicJob(
         role=role, prepare=prepare, first_delay=first, interval=interval, error_message=message, enabled=enabled
@@ -489,5 +501,12 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         "nf-core registry refresh loop error: %s",
     ),
     _job("sdr-trigger", _with_session(_sdr_trigger), DAY, DAY, "SDR trigger loop error: %s"),
+    _job(
+        "install-metrics-sender",
+        _install_metrics_sender,
+        MINUTE,
+        5 * MINUTE,
+        "Installation metrics sender error: %s",
+    ),
     _job("idempotency-cleanup", _idempotency_cleanup, HOUR, HOUR, "Idempotency cleanup error: %s"),
 ]

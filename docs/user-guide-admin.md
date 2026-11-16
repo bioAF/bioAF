@@ -129,6 +129,15 @@ shared build cache is reported rather than automatically pruned. Read
 [Disk use and deployment generations](deployment-guide.md#disk-use-and-deployment-generations) before rollback.
 Image rollback does not reverse database migrations.
 
+## System Settings and Installation Metrics
+
+**Settings > System Settings** holds installation-wide settings. Its installation metrics section shows the
+saved choice, whether reporting is on, any operator override, and the installation ID. Admins with
+`infrastructure:configure` choose once, in the setup wizard or in a prompt on first entry for an installation
+that has not chosen; later changes and withdrawal happen here. Nothing is sent unless **Share installation
+metrics** is chosen. See [Installation Metrics](installation-metrics.md) for exactly what is sent, to whom,
+and how to request deletion.
+
 ## Audit and Operational Logs
 
 **Settings > Audit Log** shows explicitly audited actions and attribution, with filters for resource type,

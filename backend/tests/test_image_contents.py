@@ -181,6 +181,8 @@ def _tracked_copy(src: Path, dest: Path) -> None:
                 "uv.lock",
                 "entrypoint.sh",
                 "app/main.py",
+                # The release's public installation metrics destination (ADR-075).
+                "app/install_metrics_release.py",
                 "alembic",
                 "terraform/aws/modules/storage/main.tf",
                 "terraform/aws/modules/storage/.terraform.lock.hcl",

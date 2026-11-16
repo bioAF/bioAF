@@ -174,6 +174,30 @@ listing fields with name + type (`string`, `number`, `date`) + required
 flag. An [Experiment](#experiment) created from a template inherits its
 default [Naming Profile](#naming-profile) and can override it per-row.
 
+### Installation
+
+One persisted, deployed bioAF control plane: its database and host state, kept across
+ordinary restarts, upgrades and container replacement. Not an
+[Organization](#organization) (a tenant record inside an installation), not a process or
+container (many come and go during one installation's life), and not a future SaaS
+tenant.
+
+### Installation ID
+
+The random identity of one reporting [Installation](#installation), created when an
+admin first opts in to [Installation Metrics](#installation-metrics) and never rotated by
+later preference changes. Pseudonymous, not anonymous; derived from no hardware,
+host, network or Organization detail.
+
+### Installation Metrics
+
+The optional, opt-in lifecycle facts an [Installation](#installation) reports to the
+bioAF team: setup completion or first observation, and successful platform upgrades,
+each with a UTC reporting date and release versions, keyed by the
+[Installation ID](#installation-id). Never identities, Organization details, user
+activity or scientific data. See
+[ADR-075](../decisions/ADR-075-opt-in-installation-metrics.md).
+
 ### Lab Document
 
 An Organization-scoped record for operational or institutional knowledge, with
