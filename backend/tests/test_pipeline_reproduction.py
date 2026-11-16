@@ -1195,7 +1195,12 @@ async def test_an_unavailable_recorded_input_is_refused_by_file_id(
     response = await _reproduce_catalog(client, original.id, admin_token)
 
     assert response.status_code == 400, response.text
-    assert str(first) in response.text and "no longer available" in response.text
+    body = response.json()
+    assert str(first) in body["detail"] and "no longer available" in body["detail"]
+    # The code the run page answers with its "Drop and reproduce" offer, naming the affected sample.
+    assert body["code"] == "samples_missing_files"
+    assert [s["id"] for s in body["details"]["samples_without_files"]] == [sample.id]
+    assert body["details"]["unavailable_file_ids"] == [first]
     assert await _count(session, PipelineRun) == runs_before
     assert compute.submit_job.await_count == 0
 
@@ -1360,3 +1365,26 @@ async def test_a_drop_that_would_leave_no_samples_is_refused(session, admin_user
     ):
         await PipelineRunService.reproduce_run(session, original_id, org_id, user_id, drop_samples_without_files=True)
     assert await _count(session, PipelineRun) == runs_before
+
+
+@pytest.mark.asyncio
+async def test_unavailable_inputs_no_sample_claims_are_refused_without_a_drop_offer(
+    client, session, admin_user, admin_token, compute
+):
+    """Deleted and unlinked: nothing says which sample to drop, so no drop is offered or accepted."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    ids = await _input_ids(session, original.id)
+    for file_id in ids:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(ids)))
+    await session.commit()
+
+    for drop in (False, True):
+        response = await _reproduce_catalog(client, original.id, admin_token, drop_samples_without_files=drop)
+        assert response.status_code == 400, response.text
+        body = response.json()
+        assert body["code"] != "samples_missing_files"
+        assert "cannot tell which samples" in body["detail"] and "confirm dropping" not in body["detail"]
+    assert compute.submit_job.await_count == 0

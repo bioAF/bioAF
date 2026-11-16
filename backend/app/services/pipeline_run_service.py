@@ -1592,16 +1592,28 @@ class PipelineRunService:
 
         input_file_ids = await PipelineRunService._recorded_input_file_ids(session, original)
         missing = await unavailable_inputs(session, org_id, input_file_ids)
-        if missing and not drop_samples_without_files:
-            raise ValidationError(
-                "This run cannot be reproduced exactly: input files it used are no longer available (file IDs: "
-                f"{', '.join(map(str, missing))}). bioAF does not substitute other files. To reproduce it "
-                "without the samples those files belonged to, confirm dropping samples without files."
-            )
         if missing:
-            sample_ids, input_file_ids = await PipelineRunService._drop_samples_missing_inputs(
+            affected, removed = await PipelineRunService._samples_losing_inputs(
                 session, sample_ids, input_file_ids, missing
             )
+            if not drop_samples_without_files:
+                # The run page answers this code by offering to drop exactly these samples.
+                raise SamplesMissingFilesError(
+                    "This run cannot be reproduced exactly: input files these samples used are no longer "
+                    f"available (file IDs: {', '.join(map(str, missing))}). bioAF does not substitute other files.",
+                    details={
+                        "samples_without_files": await PipelineRunService._sample_refs(session, affected),
+                        "unavailable_file_ids": missing,
+                    },
+                )
+            if affected >= set(sample_ids or []):
+                # An empty selection would mean "every sample" to the launcher; refuse instead.
+                raise ValidationError(
+                    "This run cannot be reproduced: no sample has all of its original input files available "
+                    f"(missing file IDs: {', '.join(map(str, missing))})."
+                )
+            sample_ids = [s for s in sample_ids or [] if s not in affected]
+            input_file_ids = [f for f in input_file_ids if f not in removed]
 
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
@@ -1633,10 +1645,10 @@ class PipelineRunService:
         return new_run
 
     @staticmethod
-    async def _drop_samples_missing_inputs(
+    async def _samples_losing_inputs(
         session: AsyncSession, sample_ids: list[int] | None, input_file_ids: list[int], missing: list[int]
-    ) -> tuple[list[int], list[int]]:
-        """The run's samples and inputs without every sample that lost any recorded input.
+    ) -> tuple[set[int], set[int]]:
+        """The run's samples that lost any recorded input, and every recorded input of those samples.
 
         A missing file is attributed to the run's samples it is linked to (a deleted file keeps its
         links). One that cannot be attributed to any of them is refused: bioAF cannot tell which
@@ -1668,15 +1680,14 @@ class PipelineRunService:
                 f"longer linked to any of its samples (file IDs: {', '.join(map(str, orphaned))}), so bioAF "
                 "cannot tell which samples to drop."
             )
-        dropped = set().union(*(owners[f] for f in missing))
-        if dropped >= set(run_samples):
-            # An empty selection would mean "every sample" to the launcher; refuse instead.
-            raise ValidationError(
-                "This run cannot be reproduced: no sample has all of its original input files available "
-                f"(missing file IDs: {', '.join(map(str, missing))})."
-            )
-        removed = set().union(*(files_of[s] for s in dropped)) | set(missing)
-        return [s for s in run_samples if s not in dropped], [f for f in input_file_ids if f not in removed]
+        affected = set().union(*(owners[f] for f in missing))
+        removed = set().union(*(files_of[s] for s in affected)) | set(missing)
+        return affected, removed
+
+    @staticmethod
+    async def _sample_refs(session: AsyncSession, sample_ids: set[int]) -> list[dict]:
+        rows = (await session.execute(select(Sample.id, Sample.external_id).where(Sample.id.in_(sample_ids)))).all()
+        return [{"id": i, "external_id": e} for i, e in sorted(rows)]
 
     @staticmethod
     def _recorded_sample_order(original: PipelineRun) -> list[int] | None:
