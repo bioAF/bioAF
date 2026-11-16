@@ -116,6 +116,9 @@ def _read_pyproject_version() -> str:
     return data["project"]["version"]
 
 
+MAX_FILE_VERIFICATION_CONCURRENCY = 8
+
+
 class Settings(BaseSettings):
     # Application
     app_name: str = "bioAF"
@@ -233,8 +236,10 @@ class Settings(BaseSettings):
     webhook_internal_destinations: Any = ()
 
     # Checksum verification worker (app/services/file_verification_worker.py). One active digest job per
-    # process; reads in bounded chunks; a lease is renewed while work progresses and reclaimed after a
-    # crash. A job past its deadline is abandoned and retried.
+    # process by default (BIOAF_FILE_VERIFICATION_CONCURRENCY, 1-8); reads in bounded chunks; a lease is
+    # renewed while work progresses and reclaimed after a crash. A job past its deadline is abandoned and
+    # retried. Raise concurrency only after measuring the deployment's storage throughput and memory.
+    file_verification_concurrency: int = 1
     file_verification_lease_seconds: int = 300
     file_verification_chunk_bytes: int = 8 * 1024 * 1024
     file_verification_job_deadline_seconds: int = 6 * 3600
@@ -262,6 +267,13 @@ class Settings(BaseSettings):
         from app.services.webhook_transport import parse_internal_destinations
 
         return parse_internal_destinations(value)
+
+    @field_validator("file_verification_concurrency")
+    @classmethod
+    def _bound_file_verification_concurrency(cls, value: int) -> int:
+        if not 1 <= value <= MAX_FILE_VERIFICATION_CONCURRENCY:
+            raise ValueError(f"file_verification_concurrency must be between 1 and {MAX_FILE_VERIFICATION_CONCURRENCY}")
+        return value
 
     @field_validator("log_delivery", mode="before")
     @classmethod

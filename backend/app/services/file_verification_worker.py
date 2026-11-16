@@ -455,11 +455,19 @@ def _load_default_resolvers() -> None:
 
 
 async def run_worker_loop(stop_event: asyncio.Event | None = None) -> None:
-    """The owned poll loop: one active job per worker task, paused during a restore review."""
+    """The owned poll loop: ``file_verification_concurrency`` pollers (one by default), each with at
+    most one active job, all paused during a restore review. Claims are leased and skip locked rows,
+    so pollers never share a record."""
+    _load_default_resolvers()
+    concurrency = _settings().file_verification_concurrency
+    logger.info("file verification worker started (concurrency %d)", concurrency)
+    await asyncio.gather(*(_poll(stop_event) for _ in range(concurrency)))
+    logger.info("file verification worker stopped")
+
+
+async def _poll(stop_event: asyncio.Event | None) -> None:
     from app.tasks.periodic import wait_or_stop
 
-    _load_default_resolvers()
-    logger.info("file verification worker started")
     while True:
         if stop_event is not None and stop_event.is_set():
             break
@@ -475,4 +483,3 @@ async def run_worker_loop(stop_event: asyncio.Event | None = None) -> None:
             continue
         if await wait_or_stop(POLL_INTERVAL_SECONDS, stop_event):
             break
-    logger.info("file verification worker stopped")

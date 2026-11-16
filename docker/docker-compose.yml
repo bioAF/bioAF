@@ -56,6 +56,8 @@ services:
       # NFS checksum verification (docs/deployment-guide.md#provisioning-nfs-for-verification): the UIDs
       # producers write NFS as. Unset: checksum-required NFS files stay unready with a visible error.
       BIOAF_NFS_PRODUCER_UIDS: ${BIOAF_NFS_PRODUCER_UIDS:-}
+      # Checksum verifications run at once per backend (1-8; docs/configuration.md#file-verification-settings).
+      BIOAF_FILE_VERIFICATION_CONCURRENCY: ${BIOAF_FILE_VERIFICATION_CONCURRENCY:-1}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
       # A restore checks the database volume has room for the restored copy and its WAL before creating it.

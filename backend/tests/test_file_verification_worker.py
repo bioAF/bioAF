@@ -656,3 +656,50 @@ async def test_reattaching_keeps_a_scheduled_discovery_backoff(session, admin_us
         await s.commit()
     record = await _record(file_id)
     assert record.next_attempt_at == scheduled and record.attempt_count == 1
+
+
+# --- bounded concurrency ----------------------------------------------------------------------
+
+
+def test_one_active_digest_job_is_the_default_and_concurrency_is_bounded():
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    assert Settings().file_verification_concurrency == 1
+    assert Settings(file_verification_concurrency=4).file_verification_concurrency == 4
+    for bad in (0, -1, 9):
+        with pytest.raises(ValidationError):
+            Settings(file_verification_concurrency=bad)
+
+
+async def test_configured_concurrency_runs_that_many_jobs_at_once(session, admin_user, fake, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "file_verification_concurrency", 2)
+    ids = [await _expect_fake(session, admin_user, uri=f"s3://b/up/{name}.fastq.gz") for name in ("one", "two")]
+    active, peak, both = 0, 0, asyncio.Event()
+
+    async def overlap(_progress):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 2:
+            both.set()
+        try:
+            await asyncio.wait_for(both.wait(), timeout=5)
+        finally:
+            active -= 1
+
+    fake.on_stream = overlap
+    stop = asyncio.Event()
+    loop = asyncio.create_task(worker.run_worker_loop(stop))
+    await asyncio.wait_for(both.wait(), timeout=10)
+    for _ in range(100):
+        if [(await _record(i)).status for i in ids] == ["verified", "verified"]:
+            break
+        await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(loop, timeout=10)
+    assert peak == 2
+    assert [(await _record(i)).status for i in ids] == ["verified", "verified"]
