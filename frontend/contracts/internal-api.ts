@@ -11308,6 +11308,8 @@ export interface components {
             expected_size_bytes?: number | null;
             /** Experiment Id */
             experiment_id?: number | null;
+            /** External Id */
+            external_id?: string | null;
             /** Filename */
             filename: string;
             /**
@@ -21187,6 +21189,7 @@ export interface operations {
                 project_id?: number | null;
                 sample_ids?: number[] | null;
                 is_global?: boolean;
+                external_id?: string | null;
             };
             header?: never;
             path?: never;

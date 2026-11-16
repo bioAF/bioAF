@@ -188,7 +188,9 @@ class FileVerificationService:
         return record
 
     @staticmethod
-    async def begin(session: AsyncSession, file: File, expectation: Expectation) -> str:
+    async def begin(
+        session: AsyncSession, file: File, expectation: Expectation, *, expected_size: int | None = None
+    ) -> str:
         """Start a registered file on its way to readiness, in the registering transaction.
 
         Returns ``ready``, ``already_ready``, ``pending`` (the worker or discovery continues),
@@ -208,7 +210,7 @@ class FileVerificationService:
             record = await FileVerificationService.record_not_required(session, file, source=expectation.source)
             if record.status != NOT_REQUIRED:
                 return "pending"  # an earlier expectation still applies
-            return await FileService.mark_ready(session, file.id, file.organization_id)
+            return await FileService.mark_ready(session, file.id, file.organization_id, expected_size=expected_size)
 
         record = await FileVerificationService.record_expectation(
             session, file, source=expectation.source, md5=expectation.value or ""
@@ -243,7 +245,7 @@ class FileVerificationService:
         record.status = VERIFIED
         record.verified_at = _now()
         await session.flush()
-        return await FileService.mark_ready(session, file.id, file.organization_id)
+        return await FileService.mark_ready(session, file.id, file.organization_id, expected_size=expected_size)
 
     @staticmethod
     async def retry(session: AsyncSession, file_id: int, org_id: int) -> FileVerification | None:

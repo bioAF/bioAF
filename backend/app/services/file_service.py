@@ -220,7 +220,7 @@ class FileService:
         except Exception:
             return await _fail("storage_unavailable", True)
         size = observed.size_bytes
-        if size is None or size < 0:
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             return await _fail("size_unavailable", True)
         if expected_size is not None and size != expected_size:
             return await _fail("size_mismatch", False)
@@ -248,7 +248,7 @@ class FileService:
 
     @staticmethod
     async def find_registered_outputs(
-        session: AsyncSession, org_id: int, run_id: int, uris: Sequence[str]
+        session: AsyncSession, org_id: int, run_id: int, uris: Sequence[str], *, ambiguous: set[str] | None = None
     ) -> dict[str, File]:
         """Files already registered for these pipeline-output URIs, in (organization, run) scope.
 
@@ -277,7 +277,10 @@ class FileService:
         for uri in wanted:
             matches = {f.id: f for f in rows if uri in (f.source_storage_uri, f.storage_uri)}
             if len(matches) > 1:
-                raise SourceIdentityAmbiguous()
+                if ambiguous is None:
+                    raise SourceIdentityAmbiguous()
+                ambiguous.add(uri)
+                continue
             if matches:
                 found[uri] = next(iter(matches.values()))
         return found

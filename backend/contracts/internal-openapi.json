@@ -8299,6 +8299,19 @@
             ],
             "title": "Experiment Id"
           },
+          "external_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"
@@ -33059,6 +33072,24 @@
               "default": false,
               "title": "Is Global",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "External Id"
             }
           }
         ],

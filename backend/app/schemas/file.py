@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.experiment import UserSummary
 
@@ -13,6 +13,8 @@ class FileUploadInitiate(BaseModel):
     experiment_id: int | None = None
     sample_ids: list[int] = []
     is_global: bool = False
+    # The caller's identifier for the file (1-255 characters), kept exactly; used at completion.
+    external_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class FileUploadComplete(BaseModel):

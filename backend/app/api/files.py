@@ -119,6 +119,7 @@ async def initiate_upload(
         experiment_id=body.experiment_id,
         sample_ids=body.sample_ids,
         is_global=body.is_global,
+        external_id=body.external_id,
     )
     return FileUploadInitiateResponse(**result)
 
@@ -143,6 +144,7 @@ async def simple_upload(
     project_id: int | None = Query(None),
     sample_ids: list[int] | None = Query(None),
     is_global: bool = Query(False),
+    external_id: str | None = Query(None, min_length=1, max_length=255),
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -161,6 +163,7 @@ async def simple_upload(
             experiment_id=experiment_id,
             sample_ids=sample_ids,
             is_global=is_global,
+            external_id=external_id,
         )
     except DomainError:
         raise
