@@ -56,7 +56,9 @@ async def test_nothing_is_delivered_before_the_outer_commit(session, admin_user,
     assert [d["external_id"] for d in await capture.data("sample.created")] == ["A"]
 
 
-async def test_a_rolled_back_savepoint_publishes_nothing_while_its_sibling_does(session, admin_user, experiment, capture):
+async def test_a_rolled_back_savepoint_publishes_nothing_while_its_sibling_does(
+    session, admin_user, experiment, capture
+):
     exp_id, user_id = experiment.id, admin_user.id
     async with session.begin_nested():
         await SampleService.create_sample(session, exp_id, user_id, SampleCreate(external_id="KEPT"))

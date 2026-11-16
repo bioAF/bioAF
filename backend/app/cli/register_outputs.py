@@ -20,6 +20,9 @@ That is a notification failure on top of a registration that is already committe
 command does not reconstruct it, and readiness is never reset to force another event. Receivers are
 contacted later by the serving process, through its destination checks. Checksum work that needs a
 full read is left durable for the server's verification worker, which produces ``file.ready``.
+
+An output that matches more than one unreconciled legacy File is refused as
+``source_identity_ambiguous`` (no File, work, or event); the command names it and exits nonzero.
 """
 
 import argparse
@@ -61,8 +64,10 @@ async def register_outputs_for_run(
     return len(await _register_run(session, run))
 
 
-async def _register_run(session: AsyncSession, run: PipelineRun) -> list[File]:
-    """Collect and register one run's outputs; the newly registered files."""
+async def _register_run(session: AsyncSession, run: PipelineRun, ambiguous: set[str] | None = None) -> list[File]:
+    """Collect and register one run's outputs; the newly registered files.
+
+    URIs refused as ``source_identity_ambiguous`` are added to ``ambiguous``."""
     storage_adapter = get_storage_adapter()
     try:
         outdir = await RunOutputLocationService.authorized_uri(session, run, storage_adapter)
@@ -93,6 +98,7 @@ async def _register_run(session: AsyncSession, run: PipelineRun) -> list[File]:
             }
             for f in collected
         ],
+        ambiguous=ambiguous,
     )
 
 
@@ -103,6 +109,8 @@ class _Report:
     no_subscribers: int = 0
     failures: list[str] = field(default_factory=list)
     incomplete: bool = False
+    # Outputs refused because they match more than one unreconciled legacy File.
+    ambiguous: set[str] = field(default_factory=set)
 
 
 _MAPPED = frozenset(webhook_dispatcher.INTERNAL_EVENTS)
@@ -183,7 +191,7 @@ async def _main(args: argparse.Namespace) -> int:
                         print(f"WARNING: Run {run.id} has status '{run.status}', skipping.")
                         return 0
                     try:
-                        files = await _register_run(session, run)
+                        files = await _register_run(session, run, report.ambiguous)
                         report.registered += [f.id for f in files]
                         await _commit_and_drain(session, binding, owner, report)
                     except Exception as exc:
@@ -215,7 +223,7 @@ async def _main(args: argparse.Namespace) -> int:
                         )
                         if existing.first() and not args.force:
                             continue
-                        files = await _register_run(session, run)
+                        files = await _register_run(session, run, report.ambiguous)
                         if files:
                             print(f"  Run {run.id} ({run.pipeline_name}): registered {len(files)} files")
                             report.registered += [f.id for f in files]
@@ -236,6 +244,14 @@ async def _main(args: argparse.Namespace) -> int:
         )
         if pending:
             print("Checksum verification of the pending files continues in the bioAF server's background worker.")
+        if report.ambiguous:
+            status = 1
+            print(
+                "ERROR: these outputs were not registered (source_identity_ambiguous): each matches more than "
+                "one existing file record. Reconcile the duplicate records, then rerun this command:"
+            )
+            for uri in sorted(report.ambiguous):
+                print(f"  - {uri}")
         if report.failures:
             status = 1
             print(

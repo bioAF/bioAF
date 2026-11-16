@@ -224,8 +224,13 @@ class FetchngsIngestService:
         *,
         outdir: str,
         storage_adapter=None,
+        ambiguous: set[str] | None = None,
     ) -> list[File]:
         """Register a completed fetchngs run's downloaded FASTQ as File rows linked to its samples.
+
+        A FASTQ URI that matches more than one unreconciled legacy File is refused
+        (``source_identity_ambiguous``): no File is chosen, linked, or verified, and the URI is added
+        to ``ambiguous`` when the caller passes a set.
 
         The ingest (``ingest_for_run``) creates the Sample rows but no files; a downstream
         nf-core/rnaseq|scrnaseq run cannot launch without each sample's input files (the launch path's
@@ -270,22 +275,29 @@ class FetchngsIngestService:
         # and the study wrongly early-exited to missing_data even though the fetch succeeded.
         from app.services.file_verification_service import Expectation, FileVerificationService
 
-        # Every File this run already has, by original source and by current canonical URI, in the
-        # run's organization: a row the monitor registered for the downloaded FASTQ (reused and
-        # linked, never skipped), one a prior attach created, or one whose bytes were relocated to a
-        # protected verification copy (still the same File).
-        existing_by_uri: dict[str, File] = {}
-        for f in (
-            await session.execute(
-                select(File).where(
-                    File.organization_id == run.organization_id,
-                    File.source_pipeline_run_id == run.id,
-                )
+        # Every File this run already has at these FASTQ URIs, matched by original source or current
+        # canonical URI in the run's organization (the shared lookup every output path uses): a row
+        # the monitor registered for the downloaded FASTQ (reused and linked, never skipped), one a
+        # prior attach created, or one whose bytes were relocated to a protected verification copy.
+        wanted: list[str] = []
+        for raw_row in csv.DictReader(io.StringIO(csv_text)):
+            row = {(k or "").strip().lower(): v for k, v in raw_row.items()}
+            for column, _read in _FASTQ_COLUMNS:
+                value = (row.get(column) or "").strip()
+                candidate = _fastq_storage_uri(outdir, value) if value else None
+                if candidate is not None:
+                    wanted.append(candidate)
+        refused: set[str] = set() if ambiguous is None else ambiguous
+        existing_by_uri = await FileService.find_registered_outputs(
+            session, run.organization_id, run.id, wanted, ambiguous=refused
+        )
+        if refused:
+            logger.warning(
+                "fetchngs run %d: %d FASTQ match more than one legacy file and were not attached "
+                "(source_identity_ambiguous); reconcile the duplicates first",
+                run.id,
+                len(refused),
             )
-        ).scalars():
-            for uri in (f.source_storage_uri, f.storage_uri):
-                if uri is not None:
-                    existing_by_uri.setdefault(uri, f)
 
         samplesheet = {"samplesheet_uri": uri, "pipeline_run_id": run.id}
         created: list[File] = []
@@ -310,6 +322,8 @@ class FetchngsIngestService:
                         storage_uri = _fastq_storage_uri(outdir, value)
                         if storage_uri is None:
                             logger.warning("fetchngs run %d: unusable FASTQ path %r skipped", run.id, value)
+                            continue
+                        if storage_uri in refused:
                             continue
                         f = existing_by_uri.get(storage_uri)
                         is_new = f is None

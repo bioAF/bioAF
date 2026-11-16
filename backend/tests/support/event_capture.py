@@ -1,9 +1,9 @@
 """Record what the event bus publishes, for tests asserting post-commit events.
 
-    captured = EventCapture([INTEGRATION_FILE_READY])
-    ...commit...
-    await captured.settle()
-    assert captured.of(INTEGRATION_FILE_READY) == [...]
+captured = EventCapture([INTEGRATION_FILE_READY])
+...commit...
+await captured.settle()
+assert captured.of(INTEGRATION_FILE_READY) == [...]
 """
 
 from __future__ import annotations

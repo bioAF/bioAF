@@ -150,8 +150,14 @@ class PipelineOutputService:
         session: AsyncSession,
         run: PipelineRun,
         collected_files: list[dict],
+        *,
+        ambiguous: set[str] | None = None,
     ) -> list[File]:
         """Create File records for pipeline outputs and link to the run's samples.
+
+        ``ambiguous``, when given, receives every collected URI refused as
+        ``source_identity_ambiguous`` (it matches more than one unreconciled legacy File), so a
+        caller can report the refusal rather than only the log carrying it.
 
         Args:
             session: DB session (caller commits).
@@ -212,7 +218,8 @@ class PipelineOutputService:
         # (a relocated verification copy is still the same File). Ambiguous legacy duplicates are
         # refused until reconciled: no third File, no work, no event.
         uris = [f["gcs_uri"] for f in collected_files]
-        ambiguous: set[str] = set()
+        if ambiguous is None:
+            ambiguous = set()
         existing = await FileService.find_registered_outputs(
             session, run.organization_id, run.id, uris, ambiguous=ambiguous
         )

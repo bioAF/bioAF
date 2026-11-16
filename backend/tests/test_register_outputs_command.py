@@ -317,3 +317,32 @@ async def test_a_missing_database_url_is_an_error(monkeypatch):
     monkeypatch.delenv("BIOAF_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert await cli._main(_args()) != 0
+
+
+async def test_ambiguous_legacy_outputs_fail_the_command_by_name(
+    session, admin_user, store, command_env, monkeypatch, capsys
+):
+    """A collected output matching two unreconciled legacy Files is a structured, nonzero refusal."""
+    run = await _run(session, admin_user.organization_id)
+    outdir = _outputs(monkeypatch, store, run, ["dup.txt", "ok.txt"])
+    await _write(store, outdir, ["dup.txt", "ok.txt"])
+    for _ in range(2):
+        session.add(
+            File(
+                organization_id=admin_user.organization_id,
+                storage_uri=f"{outdir}/dup.txt",
+                filename="dup.txt",
+                file_type="other",
+                source_type="pipeline_output",
+                source_pipeline_run_id=run.id,
+            )
+        )
+    await session.commit()
+
+    code = await cli._main(_args(run_id=run.id))
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "source_identity_ambiguous" in out and f"{outdir}/dup.txt" in out
+    async with command_env() as s:
+        assert len((await s.execute(select(File).where(File.filename == "ok.txt"))).scalars().all()) == 1
+        assert len((await s.execute(select(File).where(File.filename == "dup.txt"))).scalars().all()) == 2

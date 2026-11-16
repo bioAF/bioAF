@@ -181,9 +181,7 @@ async def test_135_adds_readiness_and_verification_without_fabricating_state(ste
     async with engine.connect() as conn:
         assert (await conn.execute(text("SELECT count(*) FROM file_verifications"))).scalar_one() == 0
         await conn.execute(
-            text(
-                "INSERT INTO file_verifications (organization_id, file_id, status) VALUES (:o, :f, 'not_required')"
-            ),
+            text("INSERT INTO file_verifications (organization_id, file_id, status) VALUES (:o, :f, 'not_required')"),
             {"o": ids["org"], "f": ids["unique"]},
         )
         with pytest.raises(IntegrityError):

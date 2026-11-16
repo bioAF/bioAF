@@ -149,6 +149,68 @@ async def test_attachment_after_relocation_reuses_the_same_file(session, store, 
     assert len(await capture.deliveries()) == before
 
 
+async def test_attachment_refuses_an_ambiguous_legacy_source(session, admin_user, store, fetch, capture):
+    """Two legacy rows at one fetched URI: refused explicitly, never one picked, no new work."""
+    run, sample, out = fetch
+    uri = f"{out}/fastq/SRR1_1.fastq.gz"
+    for _ in range(2):
+        session.add(
+            File(
+                organization_id=admin_user.organization_id,
+                storage_uri=uri,
+                filename="SRR1_1.fastq.gz",
+                file_type="fastq",
+                source_type="pipeline_output",
+                source_pipeline_run_id=run.id,
+            )
+        )
+    await session.commit()
+
+    ambiguous: set[str] = set()
+    created = await FetchngsIngestService.attach_fastq_files(
+        session, run, outdir=out, storage_adapter=store, ambiguous=ambiguous
+    )
+    await session.commit()
+    assert ambiguous == {uri}
+    assert [f.filename for f in created] == ["SRR1_2.fastq.gz"]  # the unambiguous mate still attaches
+    at_uri = (await session.execute(select(File).where(File.storage_uri == uri))).scalars().all()
+    assert len(at_uri) == 2
+    records = (
+        (await session.execute(select(FileVerification).where(FileVerification.file_id.in_([f.id for f in at_uri]))))
+        .scalars()
+        .all()
+    )
+    assert records == []
+    from app.models.sample import sample_files
+
+    linked = (
+        await session.execute(select(sample_files).where(sample_files.c.file_id.in_([f.id for f in at_uri])))
+    ).all()
+    assert linked == []
+
+
+async def test_generic_registration_reports_ambiguous_outputs(session, admin_user, store, fetch):
+    run, _, out = fetch
+    uri = f"{out}/dup.txt"
+    for _ in range(2):
+        session.add(
+            File(
+                organization_id=admin_user.organization_id,
+                storage_uri=uri,
+                filename="dup.txt",
+                file_type="other",
+                source_type="pipeline_output",
+                source_pipeline_run_id=run.id,
+            )
+        )
+    await session.commit()
+    ambiguous: set[str] = set()
+    created = await PipelineOutputService.register_outputs(
+        session, run, [{"filename": "dup.txt", "gcs_uri": uri}], ambiguous=ambiguous
+    )
+    assert created == [] and ambiguous == {uri}
+
+
 # --- session and notebook outputs -------------------------------------------------------------
 
 
