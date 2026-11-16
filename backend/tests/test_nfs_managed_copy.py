@@ -303,3 +303,30 @@ async def test_a_producer_identity_cannot_alter_a_published_artifact():
         for dirpath, dirnames, filenames in os.walk(root):
             os.chmod(dirpath, 0o700)
         shutil.rmtree(root, ignore_errors=True)
+
+
+async def test_managed_cleanup_is_confined_to_the_nfs_root(tmp_path):
+    """A managed-looking URI naming a container outside the root is refused, never removed."""
+    from app.exceptions import ValidationError
+
+    root = tmp_path / "nfs-root"
+    root.mkdir()
+    file_id, artifact_id = uuid.uuid4(), uuid.uuid4()
+    outside = tmp_path / "verified-files" / str(file_id) / str(artifact_id) / "payload"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"outside the configured NFS root")
+    adapter = NfsStorageProvider(root=str(root))
+    uri = f"file://../verified-files/{file_id}/{artifact_id}/payload"
+    for operation in (adapter.delete, adapter.remove_managed_artifact):
+        with pytest.raises(ValidationError):
+            await operation(uri)
+    with pytest.raises(ValidationError):
+        await adapter.move(uri, "file://raw/elsewhere")
+    assert outside.read_bytes() == b"outside the configured NFS root"
+
+
+async def test_moving_a_protected_copy_onto_itself_keeps_it(nfs):
+    await _write_source(nfs)
+    copy = await _copy(nfs)
+    assert await nfs.move(copy.uri, copy.uri) == copy.uri
+    assert await nfs.read_bytes(copy.uri) == PAYLOAD

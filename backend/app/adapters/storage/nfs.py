@@ -289,8 +289,8 @@ class NfsStorageProvider(StorageProvider):
     async def move(self, source_uri: str, dest_uri: str) -> str:
         # Copy-verify-delete: leave the source intact if the copy fails.
         if self._is_managed(source_uri):
-            await asyncio.to_thread(self._fs.copy, source_uri, dest_uri)
-            await self.remove_managed_artifact(source_uri)
+            if await asyncio.to_thread(self._copy_managed_for_move, source_uri, dest_uri):
+                await self.remove_managed_artifact(source_uri)
             return dest_uri
         await asyncio.to_thread(self._fs.move, source_uri, dest_uri)
         return dest_uri
@@ -347,7 +347,20 @@ class NfsStorageProvider(StorageProvider):
             on_progress=on_progress,
         )
 
+    def _copy_managed_for_move(self, source_uri: str, dest_uri: str) -> bool:
+        """The copy half of moving a protected copy, with the filesystem move's own checks: both URIs
+        confined, and a move onto the same file is a no-op (False: nothing to remove afterwards)."""
+        src = self._fs.path(source_uri)
+        dest = self._fs.path(dest_uri)
+        if os.path.exists(dest) and os.path.samefile(src, dest):
+            return False
+        self._fs.copy(source_uri, dest_uri)
+        if not os.path.isfile(dest):
+            raise RuntimeError(f"Move verification failed: {dest_uri!r} not written")
+        return True
+
     async def remove_managed_artifact(self, uri: str) -> None:
+        self._fs.path(uri)  # the same container/key confinement as every other operation, first
         store, key = self._parse_uri(uri)
         await asyncio.to_thread(nfs_managed_copy.remove_managed_artifact, self._root, store, key, uri)
 
