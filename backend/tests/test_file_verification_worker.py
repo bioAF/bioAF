@@ -28,7 +28,7 @@ from app.models.pipeline_run import PipelineRun
 from app.services import file_verification_worker as worker
 from app.services.event_types import FILE_VERIFICATION_FAILED, INTEGRATION_FILE_READY, INTEGRATION_FILE_REGISTERED
 from app.services.file_service import FileService
-from app.services.file_verification_service import FileVerificationService
+from app.services.file_verification_service import Expectation, FileVerificationService
 from tests.support.event_capture import EventCapture
 
 pytestmark = pytest.mark.asyncio
@@ -588,3 +588,71 @@ async def test_a_stale_nfs_result_leaves_no_artifact_behind(session, admin_user,
     await worker.run_once()
     assert not list((root / "raw" / "verified-files").rglob("payload"))
     assert (await _file_row(file_id)).storage_uri == source
+
+
+# --- recovery of checksum-optional files and terminal discovery failures ----------------------
+
+
+async def test_a_checksum_optional_file_recovers_through_retry(session, admin_user, fake, events):
+    """No checksum was ever required: a retry repeats the readiness read, never checksum discovery."""
+    fake.error = ConnectionError("storage down")
+    f = await _file(session, admin_user.organization_id, "s3://b/up/plain.csv")
+    await FileVerificationService.begin(session, f, Expectation.none("upload"), expected_size=None)
+    await session.commit()
+    file_id = f.id
+    record = await _record(file_id)
+    assert record.status == "failed" and record.error_code == "storage_unavailable"
+
+    fake.error = None  # storage restored
+    async with database_module.async_session_factory() as s:
+        record = await FileVerificationService.retry(s, file_id, admin_user.organization_id)
+        await s.commit()
+    await worker.run_once()
+    await events.settle()
+    record = await _record(file_id)
+    assert record.status == "not_required" and record.error_code is None
+    assert (await _file_row(file_id)).ready_at is not None
+    assert len(events.of(INTEGRATION_FILE_READY)) == 1
+
+
+async def test_reattaching_never_resurrects_a_terminal_discovery_failure(session, admin_user, fake, monkeypatch):
+    async def resolver(s, file, context):
+        return "not-an-md5"  # malformed: discovery fails terminally
+
+    monkeypatch.setitem(worker.DISCOVERY_RESOLVERS, "fetchngs_csv", resolver)
+    f = await _file(session, admin_user.organization_id, "s3://b/y.fastq.gz")
+    await FileVerificationService.await_expectation(session, f, source="fetchngs_csv", context={})
+    await session.commit()
+    file_id = f.id
+    await worker.run_once()
+    record = await _record(file_id)
+    assert record.status == "failed" and record.error_code == "expectation_discovery_failed"
+
+    # The validation driver attaches the same fetched file again on its next tick.
+    async with database_module.async_session_factory() as s:
+        again = await s.get(File, file_id)
+        await FileVerificationService.await_expectation(s, again, source="fetchngs_csv", context={})
+        await s.commit()
+    record = await _record(file_id)
+    assert record.status == "failed" and record.error_code == "expectation_discovery_failed"
+    assert record.next_attempt_at is None
+    assert await worker.run_once() is False
+
+
+async def test_reattaching_keeps_a_scheduled_discovery_backoff(session, admin_user, fake, monkeypatch):
+    async def resolver(s, file, context):
+        raise OSError("samplesheet unreadable")
+
+    monkeypatch.setitem(worker.DISCOVERY_RESOLVERS, "fetchngs_csv", resolver)
+    f = await _file(session, admin_user.organization_id, "s3://b/z.fastq.gz")
+    await FileVerificationService.await_expectation(session, f, source="fetchngs_csv", context={})
+    await session.commit()
+    file_id = f.id
+    await worker.run_once()
+    scheduled = (await _record(file_id)).next_attempt_at
+    async with database_module.async_session_factory() as s:
+        again = await s.get(File, file_id)
+        await FileVerificationService.await_expectation(s, again, source="fetchngs_csv", context={})
+        await s.commit()
+    record = await _record(file_id)
+    assert record.next_attempt_at == scheduled and record.attempt_count == 1

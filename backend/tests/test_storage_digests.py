@@ -13,7 +13,6 @@ import base64
 import gzip
 import hashlib
 import io
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest

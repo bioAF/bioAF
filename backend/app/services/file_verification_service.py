@@ -173,14 +173,18 @@ class FileVerificationService:
 
     @staticmethod
     async def await_expectation(session: AsyncSession, file: File, *, source: str, context: dict) -> FileVerification:
-        """A source that may carry a checksum is not resolved yet; keep the file from optional readiness."""
+        """A source that may carry a checksum is not resolved yet; keep the file from optional readiness.
+
+        Only a file with no verification record starts discovery. Saying the same thing again (a
+        repeated attach) never changes an existing record: discovery already waiting keeps its
+        scheduled backoff and attempt budget, and a terminal outcome (a failed discovery, a
+        mismatch, a proof) stays until an authorized retry or a resolved source replaces it.
+        """
         record = await current_record(session, file.id, lock=True)
-        if record is not None and record.expected_checksum is not None:
+        if record is not None:
             return record
-        if record is None:
-            record = FileVerification(organization_id=file.organization_id, file_id=file.id, status=WAITING_EXPECTATION)
-            session.add(record)
-        record.status = WAITING_EXPECTATION
+        record = FileVerification(organization_id=file.organization_id, file_id=file.id, status=WAITING_EXPECTATION)
+        session.add(record)
         record.expectation_source = source
         record.discovery_context = context
         record.next_attempt_at = _now()
@@ -268,6 +272,10 @@ class FileVerificationService:
             return None
         if record.status not in (FAILED, CHECKSUM_MISMATCH):
             raise StateError("Only a failed or mismatched verification can be retried")
+        if record.expected_checksum is None and record.error_code != "expectation_discovery_failed":
+            # The checksum requirement was already resolved as "none"; only the readiness read
+            # failed. Repeat that read (never checksum discovery, which this source may not have).
+            return await FileVerificationService._retry_readiness(session, record)
         artifact_uuid, artifact_uri = record.artifact_uuid, record.artifact_uri
         _reset_work(record)
         # Keep the previous protected copy recorded so the next attempt removes it first.
@@ -275,6 +283,22 @@ class FileVerificationService:
         record.status = QUEUED if record.expected_checksum is not None else WAITING_EXPECTATION
         record.next_attempt_at = _now()
         await session.flush()
+        return record
+
+    @staticmethod
+    async def _retry_readiness(session: AsyncSession, record: FileVerification) -> FileVerification:
+        from app.exceptions import StateError
+        from app.services.file_service import FileService, ReadinessRefused
+
+        _reset_work(record)
+        record.status = NOT_REQUIRED
+        record.next_attempt_at = None
+        await session.flush()
+        try:
+            await FileService.mark_ready(session, record.file_id, record.organization_id)
+        except ReadinessRefused as exc:
+            raise StateError(f"This file cannot be made ready ({exc})") from exc
+        await session.refresh(record)
         return record
 
     @staticmethod
