@@ -273,13 +273,13 @@ export default function PipelineLauncherPage() {
           title: "Some samples have no input files",
           message: (
             <>
-              <p>These samples have no linked input files and cannot run:</p>
+              <p>These samples have no input files linked, so they can’t be included:</p>
               <p className="font-medium text-gray-900">{names}</p>
-              <p>Drop them and launch with the remaining samples?</p>
+              <p>Continuing will leave these entire samples out of this analysis.</p>
             </>
           ),
-          confirmLabel: "Drop and launch",
-          cancelLabel: "Do not launch",
+          confirmLabel: "Run with remaining samples",
+          cancelLabel: "Cancel",
         });
         if (dropThem) {
           await handleLaunch(true);

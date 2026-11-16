@@ -1685,7 +1685,7 @@ class PipelineRunService:
             raise ValidationError(
                 "This run cannot be reproduced exactly: input files it used are no longer available and are no "
                 f"longer linked to any of its samples (file IDs: {', '.join(map(str, orphaned))}), so bioAF "
-                "cannot tell which samples to drop."
+                "can’t tell which samples to leave out."
             )
         affected = set().union(*(owners[f] for f in missing))
         removed = set().union(*(files_of[s] for s in affected)) | set(missing)

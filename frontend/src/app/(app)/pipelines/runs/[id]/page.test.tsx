@@ -483,11 +483,18 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
 
     // The recovery prompt is a real dialog now. It still names the offending
     // sample, and every assertion after this point is unchanged.
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "Some original files are unavailable" });
     expect(dialog).toHaveTextContent("SAMPLE-102");
+    expect(dialog).toHaveTextContent(
+      "One or more files used in the original analysis are no longer available for these samples:",
+    );
+    expect(dialog).toHaveTextContent(
+      "Continuing will exclude these entire samples from the new analysis. Its results may differ from the original.",
+    );
+    expect(dialog).not.toHaveTextContent(/no linked input files|drop/i);
     expect(nativeConfirm).not.toHaveBeenCalled();
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Drop and reproduce" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Run with remaining samples" }));
     });
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
@@ -513,7 +520,7 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
 
     const dialog = await screen.findByRole("dialog");
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Do not reproduce" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     });
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));

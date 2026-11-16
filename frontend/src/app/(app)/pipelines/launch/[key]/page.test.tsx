@@ -18,7 +18,7 @@
  *     [...]   -> this, for this run, saved or not
  */
 
-import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
+import { render, screen, waitFor, fireEvent, within } from "@/testing/renderWithProviders";
 
 const mockRouter = { push: jest.fn() };
 jest.mock("next/navigation", () => ({
@@ -403,6 +403,38 @@ describe("a selection holding a sample with no input files", () => {
       const body = mockPost.mock.calls.find(([url]) => url === "/api/pipeline-runs")?.[1];
       expect(body.drop_samples_without_files).toBe(true);
     });
+  });
+
+  it("explains a launch refused for samples without files in its own words", async () => {
+    // The preflight passed, then the launch itself found a sample without files (a file was
+    // removed in between). This is a new analysis: there is no original run to compare with.
+    mockPost.mockImplementation((url: string) => {
+      if (url === "/api/pipeline-runs/preflight") return Promise.resolve(preflight());
+      if (url === "/api/pipeline-runs") {
+        const { ApiError } = jest.requireMock("@/lib/api");
+        return Promise.reject(
+          new ApiError(400, "Some selected samples have no linked input files", "samples_missing_files", {
+            samples_without_files: [{ id: 4, external_id: "SLIDE-2" }],
+          }),
+        );
+      }
+      return Promise.resolve({});
+    });
+    await toValuesStep();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Parameters")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const launch = await screen.findByRole("button", { name: /Launch Pipeline/i });
+    await waitFor(() => expect(launch).toBeEnabled());
+    fireEvent.click(launch);
+
+    const dialog = await screen.findByRole("dialog", { name: "Some samples have no input files" });
+    expect(dialog).toHaveTextContent("These samples have no input files linked, so they can’t be included:");
+    expect(dialog).toHaveTextContent("SLIDE-2");
+    expect(dialog).toHaveTextContent("Continuing will leave these entire samples out of this analysis.");
+    expect(dialog).not.toHaveTextContent(/original|drop/i);
+    expect(within(dialog).getByRole("button", { name: "Run with remaining samples" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
   it("asks again when the selection changes, rather than carrying the decision over", async () => {

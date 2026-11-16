@@ -177,16 +177,19 @@ export default function PipelineRunDetailPage() {
             | undefined) ?? [];
         const names = offending.map((s) => s.external_id || `sample ${s.id}`).join(", ");
         const dropThem = await confirm({
-          title: "Some samples have no input files",
+          title: "Some original files are unavailable",
           message: (
             <>
-              <p>These samples have no linked input files and cannot run:</p>
+              <p>One or more files used in the original analysis are no longer available for these samples:</p>
               <p className="font-medium text-gray-900">{names}</p>
-              <p>Drop them and reproduce with the remaining samples?</p>
+              <p>
+                Continuing will exclude these entire samples from the new analysis. Its results may differ from
+                the original.
+              </p>
             </>
           ),
-          confirmLabel: "Drop and reproduce",
-          cancelLabel: "Do not reproduce",
+          confirmLabel: "Run with remaining samples",
+          cancelLabel: "Cancel",
         });
         if (dropThem) {
           await handleReproduce(true);

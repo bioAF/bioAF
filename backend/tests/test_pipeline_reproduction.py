@@ -1388,7 +1388,7 @@ async def test_unavailable_inputs_no_sample_claims_are_refused_without_a_drop_of
         assert response.status_code == 400, response.text
         body = response.json()
         assert body["code"] != "samples_missing_files"
-        assert "cannot tell which samples" in body["detail"] and "confirm dropping" not in body["detail"]
+        assert "can’t tell which samples to leave out" in body["detail"] and "drop" not in body["detail"]
     assert compute.submit_job.await_count == 0
 
 
