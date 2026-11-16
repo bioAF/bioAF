@@ -197,16 +197,13 @@ class PipelineReviewService:
         ):
             experiment = run.experiment
             if experiment.status == "pipeline_complete":
-                old_status = experiment.status
-                experiment.status = "reviewed"
-                await session.flush()
+                from app.services.experiment_service import ExperimentService
 
-                await log_action(
+                await ExperimentService._change_status(
                     session,
-                    user_id=reviewer_user_id,
-                    entity_type="experiment",
-                    entity_id=experiment.id,
-                    action="status_change",
+                    experiment,
+                    "reviewed",
+                    reviewer_user_id,
                     details={
                         "status": "reviewed",
                         "via": "pipeline_review",
@@ -215,7 +212,6 @@ class PipelineReviewService:
                         "verdict": verdict,
                         "notes": notes,
                     },
-                    previous_value={"status": old_status},
                 )
 
         # 6. Emit notification event (fire-and-forget after commit)

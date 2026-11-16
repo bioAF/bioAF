@@ -745,7 +745,7 @@ class GcsStorageProvider(StorageProvider):
         )
 
     def _gcs_object_identity(self, uri: str, creds) -> ObjectIdentity:
-        from app.services.file_verification_service import normalize_md5
+        from app.adapters.storage.digest import normalize_md5
 
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)

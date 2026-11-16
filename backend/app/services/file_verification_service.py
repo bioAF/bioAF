@@ -22,9 +22,6 @@ Statuses (one current record per file, ``app/models/file_verification.py``):
 
 from __future__ import annotations
 
-import base64
-import binascii
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -32,6 +29,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.storage.digest import normalize_md5  # noqa: F401 - re-exported
 from app.exceptions import ValidationError
 from app.models.file import File
 from app.models.file_verification import FileVerification
@@ -47,28 +45,6 @@ FAILED = "failed"
 UNVERIFIED_LEGACY = "unverified_legacy"
 
 REQUIRED_STATES = frozenset({QUEUED, PREPARING, VERIFYING, VERIFIED, CHECKSUM_MISMATCH})
-
-_HEX_MD5 = re.compile(r"^[0-9a-f]{32}$")
-
-
-def normalize_md5(value: Any, *, allow_base64: bool = False) -> str:
-    """Lowercase 32-character hex MD5, or ValidationError.
-
-    ``allow_base64`` accepts the base64 form GCS reports (``md5Hash``); an explicit expectation from a
-    caller or CSV must already be hex.
-    """
-    if isinstance(value, str):
-        candidate = value.strip().lower()
-        if _HEX_MD5.match(candidate):
-            return candidate
-        if allow_base64:
-            try:
-                raw = base64.b64decode(value.strip(), validate=True)
-            except (binascii.Error, ValueError):
-                raw = b""
-            if len(raw) == 16:
-                return raw.hex()
-    raise ValidationError("MD5 checksum must be 32 hexadecimal characters")
 
 
 def agreed_upload_md5(expected: str | None, actual: str | None) -> str | None:
