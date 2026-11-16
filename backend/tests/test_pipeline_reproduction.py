@@ -1257,3 +1257,106 @@ async def test_recorded_no_inputs_is_distinct_from_unknown(session, admin_user):
     run.input_files_json = None
     with pytest.raises(Exception, match="input files"):
         await PipelineRunService._recorded_input_file_ids(session, run)
+
+
+async def _two_sample_lane_original(session, admin_user):
+    """S1 sequenced on lanes 1 and 2, S2 on lane 1; launched for real so every record is kept."""
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    seed = await _launchable_run(session, org_id, user_id, stored_key="nf-core/scrnaseq", samples=2)
+    exp_id = seed.experiment_id
+    s1 = (
+        await session.execute(select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == "S1"))
+    ).scalar_one()
+    for f in (await session.execute(select(File).where(File.experiment_id == exp_id))).scalars():
+        f.lane = 1
+        f.read_type = "R1" if "_R1_" in f.filename else "R2"
+    lane2 = []
+    for read in ("R1", "R2"):
+        f = File(
+            organization_id=org_id,
+            experiment_id=exp_id,
+            gcs_uri=f"gs://bucket/{org_id}/S1_L002_{read}_001.fastq.gz",
+            filename=f"S1_L002_{read}_001.fastq.gz",
+            file_type="fastq",
+            source_type="upload",
+            lane=2,
+            read_type=read,
+        )
+        session.add(f)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=s1.id, file_id=f.id))
+        lane2.append(f.id)
+    await session.commit()
+    session.expire_all()
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        original = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key="nf-core/scrnaseq", experiment_id=exp_id, parameters={"aligner": "cellranger"}
+            ),
+        )
+    original.status = "completed"
+    await session.commit()
+    assert set(lane2) <= set(original.input_files_json)
+    return original, lane2
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_drop_removes_a_sample_that_lost_one_lane_entirely(session, admin_user, compute):
+    """Never a sample with part of its original reads: S1 lost lane 2, so S1 is dropped whole."""
+    from datetime import datetime, timezone
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original, lane2 = await _two_sample_lane_original(session, admin_user)
+    original_id, original_sheet = original.id, original.samplesheet_csv
+    for file_id in lane2:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        reproduced = await PipelineRunService.reproduce_run(
+            session, original_id, org_id, user_id, drop_samples_without_files=True
+        )
+    rows = reproduced.samplesheet_csv.splitlines()[1:]
+    assert rows and all("S2" in row and "S1" not in row for row in rows)
+    assert set(rows) < set(original_sheet.splitlines()[1:])
+    s1_files = {f.id for f in (await session.execute(select(File).where(File.filename.like("S1_%")))).scalars()}
+    assert not (set(reproduced.input_files_json) & s1_files)
+
+
+def test_a_dropped_row_must_take_its_whole_sample_with_it():
+    """The sheet check's own guard: on a confirmed drop, a kept sample keeps every original row."""
+    expected_snapshot = "sample,fastq_1,uid\nS1,l1,u1\nS1,l2,u1\nS2,a,u2\n"
+    whole = "sample,fastq_1,uid\nS2,a,u2\n"
+    partial = "sample,fastq_1,uid\nS1,l1,u1\nS2,a,u2\n"
+    assert PipelineRunService._only_whole_samples_dropped(expected_snapshot, whole) is True
+    assert PipelineRunService._only_whole_samples_dropped(expected_snapshot, partial) is False
+    assert PipelineRunService._only_whole_samples_dropped(None, whole) is False  # cannot confirm
+    unattributed = "sample,fastq_1,uid\nS1,l1,\nS2,a,u2\n"
+    assert PipelineRunService._only_whole_samples_dropped(unattributed, whole) is False
+
+
+@pytest.mark.asyncio
+async def test_a_drop_that_would_leave_no_samples_is_refused(session, admin_user, compute):
+    """Dropping every sample must not turn into "no selection", which means every sample today."""
+    from datetime import datetime, timezone
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original = await _launchable_run(session, org_id, user_id, stored_key="nf-core/scrnaseq")
+    original_id = original.id
+    for file_id in original.input_files_json:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    with (
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+        pytest.raises(Exception, match="no sample"),
+    ):
+        await PipelineRunService.reproduce_run(session, original_id, org_id, user_id, drop_samples_without_files=True)
+    assert await _count(session, PipelineRun) == runs_before
