@@ -80,6 +80,23 @@ installation-specific NAT64 or routing translation; deployments that use such tr
 network egress rules that block metadata and unauthorized internal destinations. See
 [Webhooks](api/webhooks.md#allowed-destinations).
 
+## File Verification Settings
+
+bioAF checks an expected MD5 (from an upload or a fetchngs samplesheet) against the stored bytes in a
+background worker (see [Files](api/files.md#checksum-verification)). Defaults suit most installs.
+
+| Backend setting | Default | Meaning |
+| --- | --- | --- |
+| `BIOAF_FILE_VERIFICATION_LEASE_SECONDS` | `300` | How long a claimed verification may go without progress before another worker may take it over |
+| `BIOAF_FILE_VERIFICATION_CHUNK_BYTES` | `8388608` (8 MiB) | Size of each ordered read while hashing |
+| `BIOAF_FILE_VERIFICATION_JOB_DEADLINE_SECONDS` | `21600` (6 h) | A single attempt longer than this is abandoned and retried |
+| `BIOAF_NFS_PRODUCER_UIDS` | Unset | Comma-separated UIDs that pipelines, notebooks and uploads write NFS as. Required for checksum verification on NFS; must not include the backend's UID |
+| `BIOAF_NFS_MANAGED_COPY_RESERVE_BYTES` | `1073741824` (1 GiB) | Free space kept on NFS beyond the extra protected copy |
+
+Production Compose forwards `BIOAF_NFS_PRODUCER_UIDS` from `docker/.env`. One verification runs at a
+time per backend process. Files without an expected checksum need no read
+at all; their size is checked from storage metadata.
+
 ## Export and Restore Settings
 
 These are application defaults; production Compose forwards only the settings listed in its service
