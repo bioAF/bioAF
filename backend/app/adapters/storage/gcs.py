@@ -778,12 +778,14 @@ class GcsStorageProvider(StorageProvider):
                 return b""
             end = min(offset + n, identity.size_bytes) - 1
             try:
-                chunk = blob.download_as_bytes(start=offset, end=end, checksum=None)
+                # raw_download: the stored bytes, never content the SDK decoded (a gzip
+                # Content-Encoding would otherwise be decompressed, hashing the wrong bytes).
+                chunk = blob.download_as_bytes(start=offset, end=end, checksum=None, raw_download=True)
             except (NotFound, PreconditionFailed) as e:
                 raise ObjectChanged(identity.uri) from e
-            offset += len(chunk)
-            if not chunk:
+            if not chunk or len(chunk) > end - offset + 1:
                 raise ObjectChanged(identity.uri)
+            offset += len(chunk)
             return chunk
 
         return read, lambda: None

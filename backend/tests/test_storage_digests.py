@@ -278,6 +278,26 @@ async def test_gcs_stream_reads_ordered_ranges_of_the_generation(gcs):
     assert starts == sorted(starts) and starts[0] == 0
 
 
+async def test_gcs_stream_hashes_stored_bytes_not_decoded_content(gcs):
+    """An object stored with Content-Encoding: gzip is hashed as stored (its MD5 is of those bytes)."""
+    import gzip
+
+    decoded = b"ACGT" * 4000
+    stored = gzip.compress(decoded)
+
+    def download(start, end, **kw):
+        # The SDK decompresses a gzip-encoded object unless asked for the raw bytes.
+        return stored[start : end + 1] if kw.get("raw_download") else decoded
+
+    blob = MagicMock()
+    blob.download_as_bytes.side_effect = download
+    client, _ = _gcs_client(blob)
+    identity = ObjectIdentity(uri="gs://b/k", size_bytes=len(stored), version="generation:7")
+    with patch.object(gcs, "_get_gcs_client", return_value=client):
+        digest = await gcs.stream_md5(identity, chunk_size=16)
+    assert digest.hex == hashlib.md5(stored).hexdigest() and digest.size_bytes == len(stored)
+
+
 async def test_gcs_stream_detects_a_replaced_generation(gcs):
     from google.api_core.exceptions import NotFound
 
