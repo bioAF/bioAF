@@ -46,6 +46,31 @@ class FileProvenance(BaseModel):
     creator: UserSummary | None = None
 
 
+class SampleReference(BaseModel):
+    """A linked sample, with its experiment: sample external IDs are unique only per experiment."""
+
+    sample_id: int
+    external_id: str | None = None
+    experiment_id: int
+    experiment_external_id: str | None = None
+
+
+class FileVerificationOut(BaseModel):
+    """Checksum verification of the file's stored bytes. Expected and observed values are separate:
+    an expected checksum is what a caller or source asserted; an observed one bioAF read itself."""
+
+    status: str
+    algorithm: str | None = None
+    expected_checksum: str | None = None
+    observed_checksum: str | None = None
+    method: str | None = None
+    verified_at: datetime | None = None
+    bytes_processed: int | None = None
+    total_bytes: int | None = None
+    error_code: str | None = None
+    retryable: bool | None = None
+
+
 class FileResponse(BaseModel):
     id: int
     filename: str
@@ -68,6 +93,15 @@ class FileResponse(BaseModel):
     upload_timestamp: datetime
     created_at: datetime
     provenance: FileProvenance | None = None
+    # The caller's identifier for this file, or null when none was assigned (01B.5). Each parent
+    # external ID belongs to the parent ID beside it.
+    external_id: str | None = None
+    project_external_id: str | None = None
+    experiment_external_id: str | None = None
+    samples: list[SampleReference] = []
+    # When the stored bytes were first verified available; null when not (yet) established.
+    ready_at: datetime | None = None
+    verification: FileVerificationOut | None = None
 
     model_config = {"from_attributes": True}
 

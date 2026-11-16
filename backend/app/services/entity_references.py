@@ -139,3 +139,93 @@ async def file_relationships(session: AsyncSession, file: File) -> dict[str, Any
         "sample_ids": sample_ids,
         "samples": [samples[sid] for sid in sample_ids],
     }
+
+
+async def file_identity_map(session: AsyncSession, files: list[File]) -> dict[int, dict[str, Any]]:
+    """Identity fields for file responses, batch-loaded for a page of files.
+
+    Returns ``file_id -> {external_id, project_external_id, experiment_external_id, sample_ids,
+    samples}``. Each parent external ID is paired with the response's existing parent ID (the file's
+    own ``project_id``/``experiment_id``). Links that cross an organization boundary are left out of a
+    response (and logged) rather than failing the read; event snapshots are strict instead.
+    """
+    import logging
+
+    log = logging.getLogger("bioaf.entity_references")
+    if not files:
+        return {}
+    file_ids = [f.id for f in files]
+    links = (
+        await session.execute(
+            text("SELECT file_id, sample_id FROM sample_files WHERE file_id = ANY(:ids)").bindparams(ids=file_ids)
+        )
+    ).all()
+    sample_rows = {}
+    sample_ids = {sid for _, sid in links}
+    if sample_ids:
+        sample_rows = {
+            row[0]: row
+            for row in (
+                await session.execute(
+                    select(
+                        Sample.id,
+                        Sample.external_id,
+                        Sample.experiment_id,
+                        Experiment.external_id,
+                        Experiment.organization_id,
+                    )
+                    .join(Experiment, Experiment.id == Sample.experiment_id)
+                    .where(Sample.id.in_(sample_ids))
+                )
+            ).all()
+        }
+    experiment_ids = {f.experiment_id for f in files if f.experiment_id is not None}
+    experiments = {}
+    if experiment_ids:
+        experiments = {
+            row[0]: row
+            for row in (
+                await session.execute(
+                    select(Experiment.id, Experiment.external_id, Experiment.organization_id).where(
+                        Experiment.id.in_(experiment_ids)
+                    )
+                )
+            ).all()
+        }
+    project_ids = {f.project_id for f in files if f.project_id is not None}
+    projects = {}
+    if project_ids:
+        projects = {
+            row[0]: row
+            for row in (
+                await session.execute(
+                    select(Project.id, Project.external_id, Project.organization_id).where(Project.id.in_(project_ids))
+                )
+            ).all()
+        }
+
+    by_file: dict[int, list[int]] = {fid: [] for fid in file_ids}
+    for fid, sid in links:
+        by_file[fid].append(sid)
+    result: dict[int, dict[str, Any]] = {}
+    for f in files:
+        org = f.organization_id
+        refs = []
+        for sid in sorted(set(by_file[f.id])):
+            row = sample_rows.get(sid)
+            if row is None or row[4] != org:
+                log.warning("File %s links a sample outside its organization; omitted from the response", f.id)
+                continue
+            refs.append(
+                {"sample_id": sid, "external_id": row[1], "experiment_id": row[2], "experiment_external_id": row[3]}
+            )
+        exp = experiments.get(f.experiment_id)
+        proj = projects.get(f.project_id)
+        result[f.id] = {
+            "external_id": f.external_id,
+            "experiment_external_id": exp[1] if exp is not None and exp[2] == org else None,
+            "project_external_id": proj[1] if proj is not None and proj[2] == org else None,
+            "sample_ids": [r["sample_id"] for r in refs],
+            "samples": refs,
+        }
+    return result

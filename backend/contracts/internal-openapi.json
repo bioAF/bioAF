@@ -7969,6 +7969,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "experiment_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment External Id"
+          },
           "experiment_id": {
             "anyOf": [
               {
@@ -7979,6 +7990,17 @@
               }
             ],
             "title": "Experiment Id"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
           },
           "file_type": {
             "title": "File Type",
@@ -8012,6 +8034,17 @@
             ],
             "title": "Md5 Checksum"
           },
+          "project_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project External Id"
+          },
           "project_id": {
             "anyOf": [
               {
@@ -8033,12 +8066,32 @@
               }
             ]
           },
+          "ready_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
           "sample_ids": {
             "default": [],
             "items": {
               "type": "integer"
             },
             "title": "Sample Ids",
+            "type": "array"
+          },
+          "samples": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SampleReference"
+            },
+            "title": "Samples",
             "type": "array"
           },
           "sha256_checksum": {
@@ -8118,6 +8171,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileVerificationOut"
               },
               {
                 "type": "null"
@@ -8255,6 +8318,120 @@
           "storage_uri"
         ],
         "title": "FileUploadInitiateResponse",
+        "type": "object"
+      },
+      "FileVerificationOut": {
+        "description": "Checksum verification of the file's stored bytes. Expected and observed values are separate:\nan expected checksum is what a caller or source asserted; an observed one bioAF read itself.",
+        "properties": {
+          "algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Algorithm"
+          },
+          "bytes_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Processed"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expected_checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Checksum"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "observed_checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Checksum"
+          },
+          "retryable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retryable"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "FileVerificationOut",
         "type": "object"
       },
       "FindingSetRequest": {
@@ -19201,6 +19378,47 @@
           "qc_status"
         ],
         "title": "SampleQCUpdate",
+        "type": "object"
+      },
+      "SampleReference": {
+        "description": "A linked sample, with its experiment: sample external IDs are unique only per experiment.",
+        "properties": {
+          "experiment_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment External Id"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "integer"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sample_id",
+          "experiment_id"
+        ],
+        "title": "SampleReference",
         "type": "object"
       },
       "SampleResponse": {
@@ -33071,6 +33289,49 @@
           }
         },
         "summary": "Artifact Provenance Report"
+      }
+    },
+    "/api/files/{file_id}/verification/retry": {
+      "post": {
+        "description": "Requeue a failed or mismatched checksum verification after its cause was corrected.",
+        "operationId": "retry_file_verification_api_files__file_id__verification_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry File Verification",
+        "tags": [
+          "files"
+        ]
       }
     },
     "/api/gitops/commits": {

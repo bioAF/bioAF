@@ -136,6 +136,13 @@ def _reset_work(record: FileVerification) -> None:
     record.retryable = None
 
 
+async def records_for(session: AsyncSession, file_ids: list[int]) -> dict[int, FileVerification]:
+    if not file_ids:
+        return {}
+    rows = (await session.execute(select(FileVerification).where(FileVerification.file_id.in_(file_ids)))).scalars()
+    return {r.file_id: r for r in rows}
+
+
 class FileVerificationService:
     @staticmethod
     async def record_expectation(

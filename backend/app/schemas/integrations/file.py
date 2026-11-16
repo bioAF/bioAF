@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.file import FileVerificationOut, SampleReference
+
 
 class FileOut(BaseModel):
     """Read-only file metadata. gcs_uri is intentionally excluded; bytes do
@@ -23,6 +25,12 @@ class FileOut(BaseModel):
     sample_ids: list[int] = []
     tags: dict | list | None = None
     created_at: datetime
+    external_id: str | None = None
+    project_external_id: str | None = None
+    experiment_external_id: str | None = None
+    samples: list[SampleReference] = []
+    ready_at: datetime | None = None
+    verification: FileVerificationOut | None = None
 
 
 class FileListOut(BaseModel):

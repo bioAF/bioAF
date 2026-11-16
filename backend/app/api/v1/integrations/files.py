@@ -31,7 +31,21 @@ async def _sample_ids_for(session: AsyncSession, file_ids: list[int]) -> dict[in
     return out
 
 
-def _file_out(file: File, sample_ids: list[int]) -> FileOut:
+async def _file_outs(session: AsyncSession, files: list[File]) -> list[FileOut]:
+    """Read-only metadata with identity and verification, batch-loaded. Never starts hashing."""
+    from app.services import entity_references
+    from app.services.file_verification_service import FileVerificationService, records_for
+
+    identity = await entity_references.file_identity_map(session, files)
+    records = await records_for(session, [f.id for f in files])
+    return [
+        _file_out(f, identity[f.id]["sample_ids"], identity[f.id], FileVerificationService.view(f, records.get(f.id)))
+        for f in files
+    ]
+
+
+def _file_out(file: File, sample_ids: list[int], identity: dict | None = None, verification=None) -> FileOut:
+    identity = identity or {}
     return FileOut(
         id=file.id,
         filename=file.filename,
@@ -45,6 +59,12 @@ def _file_out(file: File, sample_ids: list[int]) -> FileOut:
         sample_ids=sample_ids,
         tags=file.tags_json,
         created_at=file.created_at,
+        external_id=file.external_id,
+        project_external_id=identity.get("project_external_id"),
+        experiment_external_id=identity.get("experiment_external_id"),
+        samples=identity.get("samples", []),
+        ready_at=file.ready_at,
+        verification=verification,
     )
 
 
@@ -81,8 +101,7 @@ async def list_files(
     if len(rows) > limit:
         next_cursor = str(rows[limit - 1].id)
         rows = rows[:limit]
-    sids = await _sample_ids_for(session, [r.id for r in rows])
-    return FileListOut(items=[_file_out(r, sids.get(r.id, [])) for r in rows], next_cursor=next_cursor)
+    return FileListOut(items=await _file_outs(session, rows), next_cursor=next_cursor)
 
 
 @router.get(
@@ -100,5 +119,4 @@ async def get_file(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "file_not_found")
-    sids = await _sample_ids_for(session, [row.id])
-    return _file_out(row, sids.get(row.id, []))
+    return (await _file_outs(session, [row]))[0]
