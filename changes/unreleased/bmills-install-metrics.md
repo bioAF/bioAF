@@ -7,7 +7,7 @@
   reporting date and release versions, for setup completion, first observation and successful upgrades. They go to PostHog (US Cloud)
   with IP addresses discarded and location lookup disabled. See
   [Installation Metrics](docs/installation-metrics.md) for the full field list, the 12-month retention, and
-  how to request deletion through privacy@bioaf.co.
+  how to request deletion through [privacy@bioaf.co](mailto:privacy@bioaf.co).
 - Add **Settings > System Settings** to view, change or withdraw the choice and see the installation ID.
   Withdrawing cancels every report still waiting to be sent.
 - `./bioaf update` records each update as an operation (ID, original start and source version, completion)
