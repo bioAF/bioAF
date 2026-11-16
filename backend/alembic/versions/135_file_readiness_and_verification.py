@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column("expectation_revision", sa.Integer, nullable=False, server_default="1"),
         sa.Column("expected_algorithm", sa.String(16), nullable=True),
         sa.Column("expected_checksum", sa.String(64), nullable=True),
+        sa.Column("expectation_resolved", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("discovery_context", JSONB, nullable=True),
         sa.Column("observed_checksum", sa.String(64), nullable=True),
         sa.Column("observed_method", sa.String(16), nullable=True),

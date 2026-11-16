@@ -30,6 +30,10 @@ class FileVerification(Base):
     expectation_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     expected_algorithm: Mapped[str | None] = mapped_column(String(16), nullable=True)
     expected_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Whether the checksum requirement is known: an MD5 was recorded, or the source was resolved as
+    # carrying none. False while discovery is unresolved, including after discovery itself failed or
+    # timed out, so a retry rediscovers instead of treating an unknown expectation as "none".
+    expectation_resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # Enough source context (run, CSV location) to retry expectation discovery after a restart.
     discovery_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     observed_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)

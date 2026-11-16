@@ -703,3 +703,54 @@ async def test_configured_concurrency_runs_that_many_jobs_at_once(session, admin
     await asyncio.wait_for(loop, timeout=10)
     assert peak == 2
     assert [(await _record(i)).status for i in ids] == ["verified", "verified"]
+
+
+async def test_retrying_unresolved_discovery_never_waives_the_checksum(session, admin_user, fake, monkeypatch):
+    """Discovery that timed out never learned the expectation: a retry rediscovers, it does not skip."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "file_verification_job_deadline_seconds", 0.05)
+    calls = []
+
+    async def slow(s, file, context):
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.sleep(10)
+        return GOOD
+
+    monkeypatch.setitem(worker.DISCOVERY_RESOLVERS, "fetchngs_csv", slow)
+    f = await _file(session, admin_user.organization_id, "s3://b/t.fastq.gz")
+    record = await FileVerificationService.await_expectation(session, f, source="fetchngs_csv", context={})
+    record.attempt_count = worker.MAX_ATTEMPTS - 1
+    await session.commit()
+    file_id = f.id
+    await worker.run_once()
+    record = await _record(file_id)
+    assert (record.status, record.error_code) == ("failed", "verification_timeout")
+    assert record.expectation_resolved is False
+
+    async with database_module.async_session_factory() as s:
+        retried = await FileVerificationService.retry(s, file_id, admin_user.organization_id)
+        assert retried.status == "waiting_expectation"
+        await s.commit()
+    assert (await _file_row(file_id)).ready_at is None
+    await worker.run_once()  # rediscovers the MD5
+    record = await _record(file_id)
+    assert record.expected_checksum == GOOD and record.expectation_resolved is True
+    await worker.run_once()  # verifies it
+    assert (await _record(file_id)).status == "verified"
+
+
+async def test_resolution_is_recorded_for_every_outcome(session, admin_user, fake):
+    pending = await _file(session, admin_user.organization_id, "s3://b/p.fastq.gz")
+    none = await _file(session, admin_user.organization_id, "s3://b/n.csv")
+    md5 = await _file(session, admin_user.organization_id, "s3://b/m.fastq.gz")
+    assert (
+        await FileVerificationService.await_expectation(session, pending, source="fetchngs_csv", context={})
+    ).expectation_resolved is False
+    assert (
+        await FileVerificationService.record_not_required(session, none, source="upload")
+    ).expectation_resolved is True
+    assert (
+        await FileVerificationService.record_expectation(session, md5, source="upload_assertion", md5=GOOD)
+    ).expectation_resolved is True

@@ -149,6 +149,7 @@ class FileVerificationService:
         record.expectation_source = source
         record.expected_algorithm = "md5"
         record.expected_checksum = expected
+        record.expectation_resolved = True
         if context is not None:
             record.discovery_context = context
         record.next_attempt_at = _now()
@@ -167,6 +168,7 @@ class FileVerificationService:
         _reset_work(record)
         record.status = NOT_REQUIRED
         record.expectation_source = source
+        record.expectation_resolved = True
         record.next_attempt_at = None
         await session.flush()
         return record
@@ -183,7 +185,12 @@ class FileVerificationService:
         record = await current_record(session, file.id, lock=True)
         if record is not None:
             return record
-        record = FileVerification(organization_id=file.organization_id, file_id=file.id, status=WAITING_EXPECTATION)
+        record = FileVerification(
+            organization_id=file.organization_id,
+            file_id=file.id,
+            status=WAITING_EXPECTATION,
+            expectation_resolved=False,
+        )
         session.add(record)
         record.expectation_source = source
         record.discovery_context = context
@@ -272,9 +279,9 @@ class FileVerificationService:
             return None
         if record.status not in (FAILED, CHECKSUM_MISMATCH):
             raise StateError("Only a failed or mismatched verification can be retried")
-        if record.expected_checksum is None and record.error_code != "expectation_discovery_failed":
-            # The checksum requirement was already resolved as "none"; only the readiness read
-            # failed. Repeat that read (never checksum discovery, which this source may not have).
+        if record.expectation_resolved and record.expected_checksum is None:
+            # The checksum requirement was resolved as "none"; only the readiness read failed.
+            # Repeat that read (never checksum discovery, which this source may not have).
             return await FileVerificationService._retry_readiness(session, record)
         artifact_uuid, artifact_uri = record.artifact_uuid, record.artifact_uri
         _reset_work(record)

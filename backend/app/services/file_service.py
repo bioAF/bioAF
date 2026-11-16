@@ -206,7 +206,10 @@ class FileService:
         async def _fail(code: str, retryable: bool) -> str:
             nonlocal record
             if record is None:
-                record = FileVerification(organization_id=file.organization_id, file_id=file.id, status="failed")
+                # No record means no checksum source applies (mark_ready is only reached without one).
+                record = FileVerification(
+                    organization_id=file.organization_id, file_id=file.id, status="failed", expectation_resolved=True
+                )
                 session.add(record)
             record.status = "failed"
             record.error_code = code
