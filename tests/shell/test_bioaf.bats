@@ -1842,3 +1842,24 @@ PY
     run bash "$BIOAF_SCRIPT" help
     [[ "$output" == *"reset-install-metrics-identity"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# register-outputs: the command's exit status reaches the caller
+# ---------------------------------------------------------------------------
+
+@test "register-outputs propagates a failing command's exit status" {
+    tmp="$BATS_TEST_TMPDIR"
+    printf '#!/bin/sh\necho "args: $*"\nexit 3\n' > "$tmp/fake-dc"
+    chmod +x "$tmp/fake-dc"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; cmd_register_outputs --run-id 7"
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"exec -T backend python -m app.cli.register_outputs --run-id 7"* ]]
+}
+
+@test "register-outputs succeeds when the command does" {
+    tmp="$BATS_TEST_TMPDIR"
+    printf '#!/bin/sh\nexit 0\n' > "$tmp/fake-dc"
+    chmod +x "$tmp/fake-dc"
+    run bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; cmd_register_outputs"
+    [ "$status" -eq 0 ]
+}
