@@ -29,9 +29,28 @@ test("shows the external ID, or the shared not-set dash", () => {
   expect(screen.getByLabelText("External ID not set")).toBeInTheDocument();
 });
 
-test("a file that is not ready says so in words", () => {
-  render(<FileVerificationDetails {...base} verification={v({ status: "queued", expected_checksum: HEX })} />);
-  expect(screen.getByTestId("ready-at")).toHaveTextContent("Not ready yet");
+test.each(["waiting_expectation", "queued", "preparing", "verifying"])(
+  "a file still being checked (%s) is not ready yet",
+  (status) => {
+    render(<FileVerificationDetails {...base} verification={v({ status, expected_checksum: HEX })} />);
+    expect(screen.getByTestId("ready-at")).toHaveTextContent("Not ready yet");
+  },
+);
+
+test("an older usable file with no recorded ready date does not claim to be pending", () => {
+  // Migration 135 leaves ready_at empty for files that existed before readiness was recorded, and
+  // schedules nothing for them: they stay usable and are never "not ready yet".
+  const { rerender } = render(<FileVerificationDetails {...base} verification={null} />);
+  expect(screen.getByTestId("ready-at")).toHaveTextContent("Ready date not recorded");
+  rerender(
+    <FileVerificationDetails {...base} recordedChecksum={HEX} verification={v({ status: "unverified_legacy" })} />,
+  );
+  expect(screen.getByTestId("ready-at")).toHaveTextContent("Ready date not recorded");
+});
+
+test.each(["checksum_mismatch", "failed"])("a file whose check did not pass (%s) is not ready", (status) => {
+  render(<FileVerificationDetails {...base} verification={v({ status, expected_checksum: HEX })} />);
+  expect(screen.getByTestId("ready-at")).toHaveTextContent("Not ready: the check did not pass");
 });
 
 test("explains what a checksum is", () => {

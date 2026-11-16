@@ -60,6 +60,17 @@ function when(value: string | null): string | null {
 
 const term = "text-xs font-medium text-gray-500 uppercase";
 
+/**
+ * What to say when a file has no ready date. Files that existed before readiness was recorded keep
+ * an empty date and nothing is scheduled for them (migration 135): they are usable, so they are
+ * never described as pending. Only a file whose check is underway is "not ready yet".
+ */
+function readinessWithoutDate(v: FileVerification | null): string {
+  if (v == null || v.status === "unverified_legacy") return "Ready date not recorded";
+  if (RETRYABLE_STATES.has(v.status)) return "Not ready: the check did not pass";
+  return "Not ready yet";
+}
+
 function Checksum({
   label,
   copyName,
@@ -155,7 +166,7 @@ export function FileVerificationDetails({
         <div>
           <dt className={term}>Ready at</dt>
           <dd className="mt-0.5 text-sm text-gray-900" data-testid="ready-at">
-            {when(readyAt ?? null) ?? "Not ready yet"}
+            {when(readyAt ?? null) ?? readinessWithoutDate(v)}
           </dd>
         </div>
         <div className="col-span-2">
