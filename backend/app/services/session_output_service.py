@@ -57,8 +57,9 @@ class SessionOutputService:
 
         Returns the number of files registered.
         """
-        from app.models.file import File
         from app.models.notebook_session_file import NotebookSessionFile
+        from app.services.file_service import FileService
+        from app.services.file_verification_service import Expectation, FileVerificationService
 
         registered = 0
         for f in gcs_files:
@@ -73,27 +74,32 @@ class SessionOutputService:
             if any(filename.startswith(p.rstrip("/")) for p in _EXCLUDED_PREFIXES):
                 continue
 
-            file_record = File(
-                organization_id=organization_id,
-                storage_uri=f["gcs_uri"],
+            file_record = await FileService.create_file_record(
+                session,
+                org_id=organization_id,
+                user_id=user_id,
                 filename=filename,
+                storage_uri=f["gcs_uri"],
                 size_bytes=f.get("size_bytes"),
+                md5_checksum=None,
                 file_type=_file_type_from_extension(filename),
-                experiment_id=experiment_id,
                 project_id=project_id,
+                experiment_id=experiment_id,
                 source_type=source_type,
                 source_notebook_session_id=session_id,
-                uploader_user_id=user_id,
+                external_id=f.get("external_id"),
             )
-            session.add(file_record)
-            await session.flush()
-
             session.add(
                 NotebookSessionFile(
                     session_id=session_id,
                     file_id=file_record.id,
                     access_type="output",
                 )
+            )
+            await session.flush()
+            await FileService.finalize_registration(session, file_record)
+            await FileVerificationService.begin(
+                session, file_record, Expectation.none(source_type), expected_size=f.get("size_bytes") or None
             )
             registered += 1
 

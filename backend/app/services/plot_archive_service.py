@@ -206,79 +206,102 @@ class PlotArchiveService:
                 logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
                 return 0
 
+            from app.models.experiment import Experiment
+            from app.models.pipeline_run import PipelineRun
+            from app.services.file_verification_service import Expectation, FileVerificationService
+
+            async def owner_of(experiment_id: int | None, pipeline_run_id: int | None) -> int | None:
+                """The one organization owning the object's experiment/run, or None (unscoped/conflict)."""
+                owners = set()
+                if experiment_id is not None:
+                    org = await session.scalar(select(Experiment.organization_id).where(Experiment.id == experiment_id))
+                    if org is None:
+                        return None
+                    owners.add(org)
+                if pipeline_run_id is not None:
+                    org = await session.scalar(
+                        select(PipelineRun.organization_id).where(PipelineRun.id == pipeline_run_id)
+                    )
+                    if org is None:
+                        return None
+                    owners.add(org)
+                return owners.pop() if len(owners) == 1 else None
+
+            skipped = 0
+            try:
+                objs = await adapter.list_objects(adapter.build_uri(results_bucket, ""))
+                for obj in objs:
+                    gcs_uri = obj.storage_uri
+                    name = adapter.parse_uri(gcs_uri)[1]
+
+                    # Skip generated thumbnails
+                    if name.startswith(THUMBNAIL_PREFIX):
+                        continue
+
+                    # Filter image files
+                    if not name.lower().endswith((".png", ".svg", ".pdf")):
+                        continue
+
+                    # An image file is not automatically a plot. Skip the
+                    # furniture of any HTML report published alongside it.
+                    if is_report_asset(name):
+                        continue
+
+                    # Check not already in archive
+                    existing = await session.execute(select(File.id).where(File.storage_uri == gcs_uri))
+                    if existing.scalar_one_or_none():
+                        continue
+
+                    # Ownership comes from the experiment/run the path names, never from the scan
+                    # order: an object no organization provably owns is left alone.
+                    experiment_id, pipeline_run_id = PlotArchiveService._parse_ids_from_path(gcs_uri)
+                    org_id = await owner_of(experiment_id, pipeline_run_id)
+                    if org_id is None:
+                        skipped += 1
+                        continue
+
+                    ext = name.rsplit(".", 1)[-1].lower()
+                    file_type = ext if ext in ("png", "svg", "pdf") else "other"
+
+                    file = await FileService.create_file_record(
+                        session,
+                        org_id=org_id,
+                        user_id=None,
+                        filename=name.split("/")[-1],
+                        storage_uri=gcs_uri,
+                        size_bytes=obj.size_bytes,
+                        md5_checksum=None,
+                        file_type=file_type,
+                        experiment_id=experiment_id,
+                        source_type="plot_archive",
+                        source_pipeline_run_id=pipeline_run_id,
+                    )
+
+                    entry = await PlotArchiveService.index_plot(
+                        session,
+                        org_id=org_id,
+                        file_id=file.id,
+                        experiment_id=experiment_id,
+                        pipeline_run_id=pipeline_run_id,
+                        title=name.split("/")[-1],
+                    )
+                    await FileService.finalize_registration(session, file)
+                    await FileVerificationService.begin(session, file, Expectation.none("plot_archive"))
+
+                    if ext == "pdf":
+                        thumb_uri = await ThumbnailService.generate_and_upload(session, gcs_uri, entry.id)
+                        if thumb_uri:
+                            entry.thumbnail_gcs_uri = thumb_uri
+
+                    indexed += 1
+            except Exception as e:
+                logger.warning("Failed to scan the results store for plots: %s", e)
+            if skipped:
+                logger.info("Plot scan left %d image(s) with no single owning organization unindexed", skipped)
+
+            now = datetime.now(timezone.utc)
             for org in orgs:
-                org_id = org.id
-                bucket_name = results_bucket
-
-                try:
-                    objs = await adapter.list_objects(adapter.build_uri(bucket_name, ""))
-
-                    for obj in objs:
-                        gcs_uri = obj.storage_uri
-                        name = adapter.parse_uri(gcs_uri)[1]
-
-                        # Skip generated thumbnails
-                        if name.startswith(THUMBNAIL_PREFIX):
-                            continue
-
-                        # Filter image files
-                        if not name.lower().endswith((".png", ".svg", ".pdf")):
-                            continue
-
-                        # An image file is not automatically a plot. Skip the
-                        # furniture of any HTML report published alongside it.
-                        if is_report_asset(name):
-                            continue
-
-                        # Check not already in archive
-                        existing = await session.execute(select(File.id).where(File.storage_uri == gcs_uri))
-                        if existing.scalar_one_or_none():
-                            continue
-
-                        # Determine file type
-                        ext = name.rsplit(".", 1)[-1].lower()
-                        file_type = ext if ext in ("png", "svg", "pdf") else "other"
-
-                        # Extract context from path
-                        experiment_id, pipeline_run_id = PlotArchiveService._parse_ids_from_path(gcs_uri)
-
-                        # Create file record
-                        file = await FileService.create_file_record(
-                            session,
-                            org_id=org_id,
-                            user_id=None,
-                            filename=name.split("/")[-1],
-                            storage_uri=gcs_uri,
-                            size_bytes=obj.size_bytes,
-                            md5_checksum=None,
-                            file_type=file_type,
-                            experiment_id=experiment_id,
-                            source_type="plot_archive",
-                            source_pipeline_run_id=pipeline_run_id,
-                        )
-
-                        # Create archive entry
-                        entry = await PlotArchiveService.index_plot(
-                            session,
-                            org_id=org_id,
-                            file_id=file.id,
-                            experiment_id=experiment_id,
-                            pipeline_run_id=pipeline_run_id,
-                            title=name.split("/")[-1],
-                        )
-
-                        # Generate PDF thumbnail
-                        if ext == "pdf":
-                            thumb_uri = await ThumbnailService.generate_and_upload(session, gcs_uri, entry.id)
-                            if thumb_uri:
-                                entry.thumbnail_gcs_uri = thumb_uri
-
-                        indexed += 1
-
-                except Exception as e:
-                    logger.warning("Failed to scan bucket for org %d: %s", org_id, e)
-
-                _last_scan[org_id] = datetime.now(timezone.utc)
+                _last_scan[org.id] = now
 
             if indexed > 0:
                 await session.commit()

@@ -27,6 +27,8 @@ from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.schemas.sample import SampleCreate
+from app.adapters.storage.digest import normalize_md5
+from app.exceptions import ValidationError
 from app.services.file_service import FileService
 from app.services.sample_service import SampleService
 
@@ -266,19 +268,26 @@ class FetchngsIngestService:
         # sample link and no sequencing identity). We must REUSE and LINK those, not skip them: skipping left
         # every sample with no linked FASTQ, so the driver's per-sample gate saw "no runnable samples"
         # and the study wrongly early-exited to missing_data even though the fetch succeeded.
-        existing_by_uri: dict[str, File] = {
-            f.storage_uri: f
-            for f in (
-                await session.execute(
-                    select(File).where(
-                        File.experiment_id == run.experiment_id,
-                        File.source_pipeline_run_id == run.id,
-                    )
-                )
-            ).scalars()
-            if f.storage_uri is not None
-        }
+        from app.services.file_verification_service import Expectation, FileVerificationService
 
+        # Every File this run already has, by original source and by current canonical URI, in the
+        # run's organization: a row the monitor registered for the downloaded FASTQ (reused and
+        # linked, never skipped), one a prior attach created, or one whose bytes were relocated to a
+        # protected verification copy (still the same File).
+        existing_by_uri: dict[str, File] = {}
+        for f in (
+            await session.execute(
+                select(File).where(
+                    File.organization_id == run.organization_id,
+                    File.source_pipeline_run_id == run.id,
+                )
+            )
+        ).scalars():
+            for uri in (f.source_storage_uri, f.storage_uri):
+                if uri is not None:
+                    existing_by_uri.setdefault(uri, f)
+
+        samplesheet = {"samplesheet_uri": uri, "pipeline_run_id": run.id}
         created: list[File] = []
         linked = 0
         try:
@@ -303,23 +312,26 @@ class FetchngsIngestService:
                             logger.warning("fetchngs run %d: unusable FASTQ path %r skipped", run.id, value)
                             continue
                         f = existing_by_uri.get(storage_uri)
-                        if f is None:
-                            f = File(
-                                organization_id=run.organization_id,
-                                storage_uri=storage_uri,
+                        is_new = f is None
+                        if is_new:
+                            f = await FileService.create_file_record(
+                                session,
+                                org_id=run.organization_id,
+                                user_id=run.submitted_by_user_id,
                                 filename=storage_uri.rsplit("/", 1)[-1],
+                                storage_uri=storage_uri,
+                                size_bytes=None,
+                                # The CSV value is an expectation, verified below; never an observation.
+                                md5_checksum=None,
                                 file_type="fastq",
+                                tags=[f"read:{read}"],
+                                experiment_id=run.experiment_id,
                                 source_type="pipeline_output",
                                 source_pipeline_run_id=run.id,
-                                experiment_id=run.experiment_id,
-                                uploader_user_id=run.submitted_by_user_id,
-                                ingest_source="fetchngs",
-                                tags_json=[f"read:{read}"],
-                                read_type=read,
-                                source_run_accession=run_key,
-                                md5_checksum=_row_md5(row, read[-1]),
                             )
-                            session.add(f)
+                            f.ingest_source = "fetchngs"
+                            f.read_type = read
+                            f.source_run_accession = run_key
                             await session.flush()
                             existing_by_uri[storage_uri] = f
                             created.append(f)
@@ -333,10 +345,24 @@ class FetchngsIngestService:
                         # Idempotent (ON CONFLICT DO NOTHING); safe for reused rows and re-run ticks.
                         await FileService.link_file_to_sample(session, f.id, sample.id)
                         linked += 1
+                        if is_new:
+                            await FileService.finalize_registration(session, f)
+                        # This row of the samplesheet is the file's resolved checksum source.
+                        md5 = _row_md5(row, read[-1])
+                        try:
+                            expectation = (
+                                Expectation.md5("fetchngs_csv", normalize_md5(md5))
+                                if md5
+                                else Expectation.none("fetchngs_csv")
+                            )
+                        except ValidationError:
+                            # A malformed value: the verifier's discovery reports it rather than it
+                            # being treated as "no checksum".
+                            expectation = Expectation.pending("fetchngs_csv", samplesheet)
+                        await FileVerificationService.begin(session, f, expectation)
         except Exception as exc:
             logger.warning("fetchngs run %d: FASTQ attach failed: %s", run.id, exc)
             return []
-
         logger.info(
             "fetchngs run %d: attached FASTQ to samples (%d new file rows, %d sample-file links)",
             run.id,

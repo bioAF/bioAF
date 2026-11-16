@@ -6,6 +6,8 @@ under /api/v1/notebooks/sessions and /api/v1/settings/.
 
 from typing import Literal
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +26,8 @@ from app.schemas.notebook_session import (
 from app.services.notebook_service import NotebookService
 from app.adapters.models import ServiceState
 from app.adapters.registry import get_notebook_adapter
+
+logger = logging.getLogger("bioaf.api.notebook_sessions")
 
 router = APIRouter(prefix="/api/v1/notebooks", tags=["notebook-sessions"])
 settings_router = APIRouter(prefix="/api/v1/settings", tags=["notebook-settings"])
@@ -468,56 +472,70 @@ async def register_outputs(
     current_user: dict = require_permission("notebooks", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
+    """Register a session's output files.
+
+    Only the caller's own organization's session, and only objects inside that session's storage
+    namespace (``sessions/<id>/`` in the working or results store): a client-supplied URI must never
+    make bioAF read or announce an arbitrary object. Each output may carry its own ``external_id``.
+    """
+    from app.adapters.models import StorageStore
+    from app.adapters.registry import get_storage_adapter
+    from app.exceptions import ValidationError as DomainValidationError
+    from app.services.session_output_service import SessionOutputService
+
     notebook_session = await NotebookService.get_session(session, session_id)
-    if not notebook_session:
+    if not notebook_session or notebook_session.organization_id != int(current_user["org_id"]):
         raise HTTPException(404, "Session not found")
 
-    from app.models.file import File
-    from app.models.notebook_session_file import NotebookSessionFile
+    adapter = get_storage_adapter()
+    namespaces: list[str] = []
+    for store in (StorageStore.WORKING, StorageStore.RESULTS):
+        try:
+            namespaces.append(await adapter.resolve_uri(store, f"sessions/{session_id}/"))
+        except DomainValidationError:
+            continue
 
-    registered = 0
+    accepted: list[dict] = []
+    refused = 0
     for output in body.outputs:
         filename = output.get("filename", "")
-        size_bytes = output.get("size_bytes", 0)
-        gcs_uri = output.get("gcs_uri", "")
-
-        # Exclude system files
+        # Exclude system files, and /data/ inputs (this endpoint's own exclusions).
         if filename in _EXCLUDED_FILENAMES or filename.startswith("."):
             if filename in _EXCLUDED_FILENAMES:
                 continue
-            # Allow dotfiles that aren't in the exclusion set only if they have a useful extension
             base = filename.lstrip(".")
             if not base or "." not in base:
                 continue
-
-        # Exclude /data/ directory files (inputs)
         if any(filename.startswith(prefix) for prefix in _EXCLUDED_PREFIXES):
             continue
-
-        file_record = File(
-            organization_id=notebook_session.organization_id,
-            storage_uri=gcs_uri,
-            filename=filename,
-            size_bytes=size_bytes,
-            file_type=_file_type_from_extension(filename),
-            experiment_id=notebook_session.experiment_id,
-            project_id=notebook_session.project_id,
-            source_type="notebook_output",
-            source_notebook_session_id=session_id,
-            uploader_user_id=notebook_session.user_id,
+        uri = str(output.get("gcs_uri") or "")
+        inside = any(uri.startswith(prefix) for prefix in namespaces) and "/../" not in uri and not uri.endswith("/..")
+        if not inside:
+            refused += 1
+            continue
+        accepted.append(
+            {
+                "filename": filename,
+                "gcs_uri": uri,
+                "size_bytes": output.get("size_bytes"),
+                "external_id": output.get("external_id"),
+            }
         )
-        session.add(file_record)
-        await session.flush()
-
-        session.add(
-            NotebookSessionFile(
-                session_id=session_id,
-                file_id=file_record.id,
-                access_type="output",
-            )
+    if refused:
+        logger.warning(
+            "Session %s: %d output(s) outside the session's storage were not registered", session_id, refused
         )
-        registered += 1
 
+    registered = await SessionOutputService.register_outputs(
+        session,
+        session_id,
+        notebook_session.organization_id,
+        notebook_session.project_id,
+        notebook_session.experiment_id,
+        notebook_session.user_id,
+        accepted,
+        source_type="notebook_output",
+    )
     await session.commit()
     return {"status": "ok", "registered_count": registered}
 

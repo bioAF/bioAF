@@ -79,6 +79,7 @@ class FileService:
         is_global: bool = False,
         external_id: str | None = None,
         source_storage_uri: str | None = None,
+        source_notebook_session_id: int | None = None,
     ) -> File:
         """Create one File row on the caller's session (the caller commits).
 
@@ -108,6 +109,7 @@ class FileService:
             is_global=is_global,
             external_id=external_id,
             source_storage_uri=source_storage_uri,
+            source_notebook_session_id=source_notebook_session_id,
         )
         try:
             async with session.begin_nested():

@@ -224,6 +224,10 @@ class QCDashboardService:
                     source_type="qc_dashboard",
                     source_pipeline_run_id=run.id,
                 )
+                from app.services.file_verification_service import Expectation, FileVerificationService
+
+                await FileService.finalize_registration(session, file)
+                await FileVerificationService.begin(session, file, Expectation.none("qc_dashboard"))
                 plots_meta.append({"plot_type": plot_type, "title": title, "file_id": file.id})
 
             logger.info("Collected %d plots from storage for run %d", len(plots_meta), run.id)
