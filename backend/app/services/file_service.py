@@ -46,6 +46,19 @@ def _conflict_for(exc: IntegrityError) -> ConflictError | None:
     return None
 
 
+class ReadinessRefused(ValidationError):
+    """The file cannot become ready: it is deleted, its bytes are gone, or it is not this organization's."""
+
+    code = "readiness_refused"
+
+
+_REGISTERED_KEY = "bioaf_registered_file_ids"
+
+# Verification states that let readiness proceed. Anything else (waiting for an expectation,
+# queued/preparing/verifying, mismatch, failure) keeps the file unready.
+_READY_STATES = frozenset({"not_required", "verified"})
+
+
 class FileService:
     @staticmethod
     async def create_file_record(
@@ -115,6 +128,113 @@ class FileService:
             details={"filename": filename, "file_type": file_type, "size_bytes": size_bytes},
         )
         return file
+
+    @staticmethod
+    async def finalize_registration(session: AsyncSession, file: File) -> None:
+        """Announce a newly created File once its initial context is established.
+
+        Call after the registration workflow has set the file's external ID, experiment/project
+        context, sample links, and any required move, on the session that created it. The
+        ``file.registered`` snapshot is taken now and deferred until that transaction commits; a
+        second call for the same file in the same transaction does nothing. Retries and adoption of
+        an existing File must not call this.
+        """
+        from app.services import entity_references, webhook_events
+        from app.services.event_types import INTEGRATION_FILE_REGISTERED
+        from app.services.post_commit_events import defer_event
+
+        announced: set[int] = session.sync_session.info.setdefault(_REGISTERED_KEY, set())
+        if file.id in announced:
+            return
+        await session.flush()
+        relations = await entity_references.file_relationships(session, file)
+        defer_event(session, INTEGRATION_FILE_REGISTERED, webhook_events.file_registered(file, relations))
+        announced.add(file.id)
+
+    @staticmethod
+    async def mark_ready(
+        session: AsyncSession,
+        file_id: int,
+        org_id: int,
+        *,
+        expected_size: int | None = None,
+    ) -> str:
+        """Set ``ready_at`` once the final stored bytes are verified available; the single owner.
+
+        Returns ``ready`` (this call made the transition and deferred ``file.ready``),
+        ``already_ready``, ``pending`` (a required checksum or expectation is not yet verified for
+        the current object), or ``failed`` (the object is missing, unreadable, or the wrong size;
+        recorded on the file's verification record so users and API consumers can see it).
+
+        The file row is locked for the decision, so concurrent callers produce one transition. The
+        only I/O is one metadata read of the file's own registered URI; hashing never happens here
+        (FileVerificationService owns that, outside requests and long transactions). Runs on the
+        caller's transaction and never commits.
+        """
+        from app.adapters.models import StorageObjectNotFound
+        from app.adapters.registry import get_storage_adapter
+        from app.models.file_verification import FileVerification
+        from app.services import entity_references, webhook_events
+        from app.services.event_types import INTEGRATION_FILE_READY
+        from app.services.post_commit_events import defer_event
+
+        file = (
+            await session.execute(
+                select(File).where(File.id == file_id, File.organization_id == org_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if file is None:
+            raise ReadinessRefused("file_not_found")
+        if file.deleted_at is not None or file.storage_deleted:
+            raise ReadinessRefused("file_deleted")
+        await session.refresh(file)
+        if file.ready_at is not None:
+            return "already_ready"
+
+        record = (
+            await session.execute(select(FileVerification).where(FileVerification.file_id == file.id).with_for_update())
+        ).scalar_one_or_none()
+        uri = file.storage_uri or file.gcs_uri
+        if record is not None and record.status not in _READY_STATES:
+            return "pending"
+        if record is not None and record.status == "verified" and record.observed_uri != uri:
+            # A proof for another object (the file moved since) proves nothing about this one.
+            return "pending"
+
+        async def _fail(code: str, retryable: bool) -> str:
+            nonlocal record
+            if record is None:
+                record = FileVerification(organization_id=file.organization_id, file_id=file.id, status="failed")
+                session.add(record)
+            record.status = "failed"
+            record.error_code = code
+            record.retryable = retryable
+            await session.flush()
+            logger.warning("File %s could not be made ready: %s", file.id, code)
+            return "failed"
+
+        try:
+            observed = await get_storage_adapter().get_object_metadata(uri)
+        except StorageObjectNotFound:
+            return await _fail("object_missing", True)
+        except Exception:
+            return await _fail("storage_unavailable", True)
+        size = observed.size_bytes
+        if size is None or size < 0:
+            return await _fail("size_unavailable", True)
+        if expected_size is not None and size != expected_size:
+            return await _fail("size_mismatch", False)
+        if record is not None and record.status == "verified" and record.observed_bytes not in (None, size):
+            return await _fail("size_mismatch", False)
+
+        file.size_bytes = size
+        if record is not None and record.status == "verified":
+            file.md5_checksum = record.observed_checksum
+        file.ready_at = datetime.now(timezone.utc)
+        await session.flush()
+        relations = await entity_references.file_relationships(session, file)
+        defer_event(session, INTEGRATION_FILE_READY, webhook_events.file_ready(file, relations))
+        return "ready"
 
     @staticmethod
     async def find_registered_outputs(
