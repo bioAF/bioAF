@@ -206,7 +206,10 @@ def subscribe_all(
     global _server_binding
     scoped = session_factory is not None or collect_receipts
     if not scoped and _server_binding is not None and not _server_binding.closed:
-        return _server_binding
+        live = all(cb in event_bus._subscribers.get(event, []) for event, cb in _server_binding.callbacks)
+        if live:
+            return _server_binding
+        _server_binding.close()  # its callbacks were cleared from the bus; bind afresh
     binding = DispatcherBinding(session_factory=session_factory, collect_receipts=collect_receipts)
     for internal_event in _INTERNAL_TO_PUBLIC:
         callback = _make_callback(internal_event, binding)

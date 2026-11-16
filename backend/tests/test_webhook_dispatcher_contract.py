@@ -181,3 +181,17 @@ async def test_a_scoped_binding_uses_its_own_factory_and_collects_receipts(sessi
     assert used
     [receipt] = binding.receipts
     assert receipt.outcome == "persisted" and receipt.subject == ("experiment", 7)
+
+
+async def test_a_binding_whose_callbacks_were_cleared_is_replaced():
+    original = dict(event_bus._subscribers)
+    try:
+        event_bus._subscribers.clear()
+        stale = webhook_dispatcher.subscribe_all()
+        event_bus._subscribers.clear()
+        fresh = webhook_dispatcher.subscribe_all()
+        assert fresh is not stale
+        assert all(len(event_bus._subscribers[e]) == 1 for e in webhook_dispatcher.INTERNAL_EVENTS)
+        fresh.close()
+    finally:
+        event_bus._subscribers = original
