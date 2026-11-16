@@ -212,3 +212,66 @@ async def test_a_file_missing_from_the_samplesheet_is_a_discovery_failure(sessio
     f = await _fetchngs_file(session, admin_user.organization_id, "SRR9_1.fastq.gz")
     with pytest.raises(LookupError):
         await resolve_fetchngs_expectation(session, f, {"samplesheet_uri": f"{OUT}/samplesheet/samplesheet.csv"})
+
+
+async def test_a_failure_notifies_the_responsible_non_admin_user(session, admin_user, viewer_user, monkeypatch, events):
+    """The uploader is the recipient, not only the admins the default rules reach."""
+    import app.database as _database
+    from sqlalchemy import select
+
+    from app.models.notification import Notification
+    from app.services.notification_router import NotificationRouter
+
+    monkeypatch.setattr("app.adapters.registry.get_storage_adapter", lambda: _Native("0" * 32))
+    f = await _file(session, admin_user.organization_id)
+    f.uploader_user_id = viewer_user.id
+    await session.flush()
+    await FileVerificationService.begin(session, f, Expectation.md5("upload_assertion", GOOD))
+    await session.commit()
+    await events.settle()
+    [payload] = events.of(FILE_VERIFICATION_FAILED)
+    assert payload["target_user_id"] == viewer_user.id
+
+    await NotificationRouter(_database.async_session_factory)._handle_event(payload)
+    recipients = {
+        n.user_id
+        for n in (
+            await session.execute(select(Notification).where(Notification.event_type == FILE_VERIFICATION_FAILED))
+        ).scalars()
+    }
+    assert viewer_user.id in recipients
+
+
+async def test_a_target_user_from_another_organization_is_never_notified(session, admin_user):
+    import app.database as _database
+    from sqlalchemy import select
+
+    from app.models.notification import Notification
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.notification_router import NotificationRouter
+
+    other_org = Organization(name="Other")
+    session.add(other_org)
+    await session.flush()
+    outsider = User(
+        organization_id=other_org.id,
+        email="outsider@example.com",
+        password_hash="x",
+        role_id=admin_user._test_role_map["admin"],
+        status="active",
+    )
+    session.add(outsider)
+    await session.commit()
+
+    await NotificationRouter(_database.async_session_factory)._handle_event(
+        {
+            "event_type": FILE_VERIFICATION_FAILED,
+            "org_id": admin_user.organization_id,
+            "target_user_id": outsider.id,
+            "title": "File verification failed",
+            "message": "x.fastq.gz: The file's checksum does not match the expected value.",
+        }
+    )
+    rows = (await session.execute(select(Notification).where(Notification.user_id == outsider.id))).scalars().all()
+    assert rows == []

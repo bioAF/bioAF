@@ -368,6 +368,8 @@ async def notify_failure(session: AsyncSession, file: File, code: str) -> None:
             "event_type": FILE_VERIFICATION_FAILED,
             "org_id": file.organization_id,
             "user_id": user_id,
+            # The router delivers to this user in addition to its rule-selected roles.
+            "target_user_id": user_id,
             "title": "File verification failed",
             "message": f"{file.filename}: {FAILURE_MESSAGES.get(code, 'The file could not be verified.')}",
             "summary": f"File verification failed: {file.filename}",

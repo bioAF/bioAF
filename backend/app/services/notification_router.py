@@ -213,7 +213,14 @@ class NotificationRouter:
         if target_user_id:
             existing_ids = {u.id for u in recipients}
             if target_user_id not in existing_ids:
-                user_result = await session.execute(select(User).where(User.id == target_user_id))
+                # Only a user of the event's own organization, whatever the payload names.
+                user_result = await session.execute(
+                    select(User).where(
+                        User.id == target_user_id,
+                        User.organization_id == org_id,
+                        User.status == "active",
+                    )
+                )
                 target_user = user_result.scalar_one_or_none()
                 if target_user:
                     recipients.append(target_user)
