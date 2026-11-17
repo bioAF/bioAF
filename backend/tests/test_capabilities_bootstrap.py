@@ -21,9 +21,10 @@ async def test_capabilities_exposed_at_bootstrap_when_authenticated(client: Asyn
     assert "capabilities" in data
     caps = data["capabilities"]
     # The test stack is kubernetes/GCS/GCE, so the K8s/GCS/GCE capabilities are
-    # declared true and the reserved Phase-9 flags are false.
+    # declared true and the reserved Phase-9 flags are false. It runs in simulated
+    # compute mode, which has no workload to open a terminal in.
     assert caps["cost_estimation"] is True
-    assert caps["ssh_exec"] is True
+    assert caps["ssh_exec"] is False
     assert caps["signed_url_upload"] is True
     assert caps["cellxgene"] is True
     assert caps["work_nodes"] is True

@@ -261,11 +261,14 @@ class KubernetesComputeProvider(ComputeProvider):
 
     def capabilities(self) -> ProviderCapabilities:
         """Kubernetes compute supports cost estimation, autoscaling, exec,
-        spot/preemption retry, and job reports."""
+        spot/preemption retry, and job reports.
+
+        Simulated mode has no workload to open a shell in, so it offers no terminal access.
+        """
         return ProviderCapabilities(
             cost_estimation=True,
             autoscaling=True,
-            ssh_exec=True,
+            ssh_exec=not self.is_local,
             spot_retry=True,
             job_report=True,
             quota_introspection=True,

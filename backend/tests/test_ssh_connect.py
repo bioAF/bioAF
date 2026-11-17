@@ -44,6 +44,8 @@ def live_cluster(monkeypatch):
     monkeypatch.setattr(exec_access, "backend_for_cluster_auth", lambda: "gke")
     monkeypatch.setattr(ssh_connect, "get_compute_adapter", lambda: compute)
     monkeypatch.setattr(ssh_connect, "get_notebook_adapter", lambda: notebooks)
+    # The registry's adapters are simulated in tests; the live compute adapter declares ssh_exec.
+    monkeypatch.setattr(adapter_registry, "get_active_capabilities", compute.capabilities)
     return SimpleNamespace(fake=fake, compute=compute, notebooks=notebooks)
 
 
@@ -494,13 +496,17 @@ async def test_other_organizations_records_are_not_found(client, admin_token, se
 async def test_simulated_mode_returns_no_kubernetes_command(
     client, admin_token, running_notebook_session, session, monkeypatch
 ):
+    # Simulated compute declares no ssh_exec, so the public path refuses before any adapter call.
+    # (The adapters also refuse simulated mode themselves: test_exec_access_resolution.)
     monkeypatch.setattr(ssh_connect, "get_notebook_adapter", lambda: KubernetesNotebookProvider(mode=ComputeMode.LOCAL))
+    monkeypatch.setattr(
+        adapter_registry, "get_active_capabilities", KubernetesComputeProvider(mode=ComputeMode.LOCAL).capabilities
+    )
 
     resp = await client.post(f"/api/sessions/{running_notebook_session.id}/connect", headers=_auth(admin_token))
 
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "connection_target_invalid"
-    assert resp.json()["details"] == {"reason": "simulated_mode"}
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "capability_not_supported"
     assert await _audits(session, running_notebook_session.id) == []
 
 
