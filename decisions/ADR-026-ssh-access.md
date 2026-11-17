@@ -18,7 +18,7 @@ A full web-based IDE (code-server / VS Code in browser) would address this more 
 
 ## Decision
 
-Expose connection commands (kubectl exec for Kubernetes, SSH for SLURM) in the bioAF UI for running containers and compute nodes. Log all session initiations in the audit trail. Do not attempt to monitor or restrict what happens inside the session: that responsibility belongs to the user.
+Expose connection commands (kubectl exec for Kubernetes, SSH for SLURM) in the bioAF UI for running containers and compute nodes. Record in the audit trail each time terminal instructions are generated (bioAF cannot observe whether anyone then connects). Do not attempt to monitor or restrict what happens inside the session: that responsibility belongs to the user. See the 2026-11-16 amendment below for the shipped behavior.
 
 ### Implementation
 
@@ -46,8 +46,7 @@ ssh <username>@<compute-node-ip>
 
 ### Access Control
 
-- Connection commands are available to users with `comp_bio` or `admin` roles only
-- Bench scientists and viewers do not see the "Connect" button
+- Connection commands are available to users whose role grants `notebooks:launch` (amended 2026-11-16: eligibility follows effective permissions, including custom roles, not built-in role names; built-in role defaults are unchanged)
 - The connection command inherits the user's platform permissions: the user authenticates with their own credentials or kubeconfig
 - For Kubernetes: the user must have `kubectl` installed locally and their kubeconfig configured to access the GKE cluster. The UI provides a one-time setup guide with the `gcloud` command to configure kubeconfig:
 
@@ -67,7 +66,7 @@ Every time a user clicks "Connect" and the command is revealed, the following is
 | `action` | `connection_command_generated` |
 | `details_json` | Target pod/node, namespace, associated pipeline run or notebook session, timestamp |
 
-The system does not log what the user does after connecting. Once inside the container, the user has full access to the container's filesystem and processes. This is by design: the audit trail records who connected and when, which is sufficient for accountability.
+The system does not log what the user does after connecting, and it cannot tell whether the user connected at all: the entry records who was given instructions for which workload, and when. Once inside the container, the user has full access to the container's filesystem and processes. This is by design.
 
 ### Notebook Provider Integration (ADR-020)
 
@@ -121,6 +120,23 @@ This is deferred to a future phase. The SSH/exec approach provides the critical 
 
 - This feature does not replace the existing pipeline import-from-GitHub workflow: both coexist
 - The audit log entry for session initiation is consistent with the existing audit log schema (ADR-009)
+
+---
+
+## Amendment (2026-11-16): what shipped
+
+The original implementation passed an already-prefixed notebook ID to the adapter (producing a nonexistent `bioaf-notebook-notebook-{id}`), reported the `bioaf-interactive` namespace although notebook pods run in `bioaf-notebooks`, guessed pipeline Job names, and the Connect control had no page consumers. The repair:
+
+- **UI:** a **Terminal instructions** section with **Show instructions** on the pipeline run details page (catalog and custom runs, while running) and in Jupyter/RStudio session details (running or idle). It explains that no terminal is opened, shows the command, target workload and namespace, warning, and setup guide, and is discarded when the target changes or stops.
+- **Eligibility:** `notebooks:launch` (effective permission; API-key scopes cannot carry it), the `ssh_exec` capability, an Organization-scoped record, a supported type and state. Work Node (`ssh`) and headless sessions are excluded.
+- **Target identity:** taken from the record (`compute_job_ref`, then legacy fields), never from the request or a guess, and verified live with bounded metadata reads: the pipeline Job's run label and its owner-UID head pod, or the notebook pod's session/user/type labels, with the main container (`pipeline` or `notebook`) running. Conflicting or missing identity is refused.
+- **Command:** `kubectl exec -it --context <context> -n <namespace> <pod> --container <container> -- /bin/sh`. The setup guide is selected by provider (GKE `get-credentials` with the real cluster and location; EKS `update-kubeconfig` with an explicit alias) and agrees with the context in the command.
+- **Audit:** `connection_command_generated` names the record, Job/Pod, namespace, container, and context, and is committed before instructions are returned. It records that instructions were generated, not a session initiation.
+- **Races:** the record is re-read before auditing; a stop or reference change refuses the request. A command remains a snapshot: if the workload ends later, the user refreshes and requests new instructions.
+- **Administrator inventory:** `GET /api/infrastructure/compute/pods` lists only the Organization's eligible records from the database, each with a `record_id` for the per-record endpoint. The infrastructure UI described under UI Placement (item 3) is deferred, and no installation-wide authority is granted.
+- **Deferred:** the administrator inventory page, headless execution access, Nextflow task-pod access, SLURM, and a browser terminal.
+
+The user guide is [SSH and Exec Access](../docs/guides/ssh-access.md).
 
 ---
 
