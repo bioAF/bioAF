@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Literal
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -447,3 +448,37 @@ class QuotaMetric(BaseModel):
     metric: str
     usage: float
     limit: float
+
+
+# --- Terminal instructions (ssh_exec) ----------------------------------------
+
+
+class ConnectionTarget(BaseModel):
+    """The workload an authorized database record names, under the shared identity rules.
+
+    Built only from the organization-scoped record (never from request input). ``provider_ref``
+    is the recorded Job (pipeline) or Pod (notebook) name; it is None only for a notebook with no
+    recorded pod, where the adapter applies its own launch naming rule to ``record_id``.
+    ``namespace`` None means the adapter's launch default.
+    """
+
+    model_config = {"frozen": True}
+
+    kind: Literal["pipeline_job", "notebook_session"]
+    record_id: int
+    provider_ref: str | None = None
+    namespace: str | None = None
+    user_id: int | None = None
+    session_type: str | None = None
+
+
+class ConnectionDescription(BaseModel):
+    """Verified terminal instructions: what the response and audit entry both report."""
+
+    command: str
+    provider_ref: str
+    pod_name: str
+    namespace: str
+    container: str
+    context: str
+    setup_guide: str
