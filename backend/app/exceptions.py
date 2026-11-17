@@ -192,3 +192,45 @@ class ExportTimeoutError(DomainError):
 
     status_code = 504
     code = "export_timed_out"
+
+
+class _ConnectionError(DomainError):
+    """Base for terminal-instruction refusals. ``details["reason"]`` is a stable, safe code."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message, details={"reason": reason})
+
+    @property
+    def reason(self) -> str:
+        return self.details["reason"]
+
+
+class ConnectionTargetInvalidError(_ConnectionError):
+    """The record cannot name a terminal target: unsupported type, simulated mode, missing or
+    conflicting recorded identity, or cluster setup bioAF does not have."""
+
+    status_code = 409
+    code = "connection_target_invalid"
+
+
+class ConnectionUnavailableError(_ConnectionError):
+    """The target exists in principle but is not reachable now: gone, ending, its main container
+    not running, ambiguous, or its record changed while instructions were being prepared."""
+
+    status_code = 409
+    code = "connection_unavailable"
+
+
+class ConnectionProviderUnavailableError(_ConnectionError):
+    """The cluster refused bioAF's own metadata read (``provider_denied``) or could not be
+    reached (``provider_unavailable``). Not a statement about the caller's bioAF permission."""
+
+    status_code = 502
+    code = "connection_provider_unavailable"
+
+
+class ConnectionProviderTimeoutError(_ConnectionError):
+    """Checking the target took longer than the resolution deadline."""
+
+    status_code = 504
+    code = "connection_provider_timeout"
