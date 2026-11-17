@@ -24,6 +24,9 @@ from app.models.sequencing_batch import SequencingBatch
 SAMPLE_KEYS = {
     "id",
     "external_id",
+    # Additive identity references (01 webhooks plan: entity identity).
+    "experiment_id",
+    "experiment_external_id",
     "relabeled_from",
     "organism",
     "tissue_type",

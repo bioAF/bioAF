@@ -77,7 +77,7 @@ async def test_dispatcher_creates_one_delivery_per_active_subscription(session, 
         INTEGRATION_EXPERIMENT_CREATED,
         {
             "organization_id": admin_user.organization_id,
-            "data": {"experiment_id": 42, "external_id": "EXP-1"},
+            "data": {"experiment_id": 42, "external_id": "EXP-1", "project_id": None, "project_external_id": None},
         },
     )
 
@@ -115,7 +115,7 @@ async def test_dispatcher_isolates_orgs(session, admin_user):
         INTEGRATION_EXPERIMENT_CREATED,
         {
             "organization_id": admin_user.organization_id,
-            "data": {"experiment_id": 1},
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
         },
     )
 
@@ -145,7 +145,10 @@ async def test_worker_marks_2xx_as_delivered(session, admin_user, respx_mock):
     await session.commit()
     await webhook_dispatcher.dispatch_event(
         INTEGRATION_EXPERIMENT_CREATED,
-        {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
+        {
+            "organization_id": admin_user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
 
     respx_mock.post("https://hooks.example/path").mock(return_value=httpx.Response(200, json={"ok": True}))
@@ -172,7 +175,10 @@ async def test_worker_retries_on_5xx(session, admin_user, respx_mock):
     await session.commit()
     await webhook_dispatcher.dispatch_event(
         INTEGRATION_EXPERIMENT_CREATED,
-        {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
+        {
+            "organization_id": admin_user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
     respx_mock.post("https://hooks.example/fail").mock(return_value=httpx.Response(500, text="bad"))
     await webhook_worker._drain_once()
@@ -199,7 +205,10 @@ async def test_worker_dead_letters_after_max_attempts(session, admin_user, respx
     await session.commit()
     await webhook_dispatcher.dispatch_event(
         INTEGRATION_EXPERIMENT_CREATED,
-        {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
+        {
+            "organization_id": admin_user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
     respx_mock.post("https://hooks.example/dead").mock(return_value=httpx.Response(500, text="bad"))
 
@@ -236,7 +245,10 @@ async def test_replay_clones_into_pending(session, admin_user):
     await session.commit()
     await webhook_dispatcher.dispatch_event(
         INTEGRATION_EXPERIMENT_CREATED,
-        {"organization_id": admin_user.organization_id, "data": {"experiment_id": 1}},
+        {
+            "organization_id": admin_user.organization_id,
+            "data": {"experiment_id": 1, "external_id": None, "project_id": None, "project_external_id": None},
+        },
     )
     original = (
         await session.execute(select(WebhookDelivery).where(WebhookDelivery.subscription_id == sub.id))
@@ -293,7 +305,7 @@ async def test_dispatcher_subscribes_via_event_bus(session, admin_user):
             INTEGRATION_EXPERIMENT_CREATED,
             {
                 "organization_id": admin_user.organization_id,
-                "data": {"experiment_id": 7},
+                "data": {"experiment_id": 7, "external_id": None, "project_id": None, "project_external_id": None},
             },
         )
 

@@ -7,12 +7,56 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import StorageUnavailableError
+from sqlalchemy.exc import IntegrityError
+
+from app.exceptions import ConflictError, StorageUnavailableError, ValidationError
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.services.audit_service import log_action
 
 logger = logging.getLogger("bioaf.file_service")
+
+EXTERNAL_ID_MAX_LENGTH = 255
+
+
+class SourceIdentityAmbiguous(ConflictError):
+    """More than one legacy File claims one pipeline output; nothing is registered until reconciled."""
+
+    code = "source_identity_ambiguous"
+
+    def __init__(self) -> None:
+        super().__init__("source_identity_ambiguous", plain_body=True)
+
+
+def validate_external_id(value: str | None) -> str | None:
+    """An opaque caller identifier: 1-255 characters, kept exactly as supplied, or None."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= EXTERNAL_ID_MAX_LENGTH:
+        raise ValidationError(f"external_id must be 1-{EXTERNAL_ID_MAX_LENGTH} characters")
+    return value
+
+
+def _conflict_for(exc: IntegrityError) -> ConflictError | None:
+    message = str(exc.orig)
+    if "uq_files_org_external_id" in message:
+        return ConflictError("external_id_already_exists", plain_body=True)
+    if "uq_files_pipeline_source_identity" in message:
+        return ConflictError("source_identity_conflict", plain_body=True)
+    return None
+
+
+class ReadinessRefused(ValidationError):
+    """The file cannot become ready: it is deleted, its bytes are gone, or it is not this organization's."""
+
+    code = "readiness_refused"
+
+
+_REGISTERED_KEY = "bioaf_registered_file_ids"
+
+# Verification states that let readiness proceed. Anything else (waiting for an expectation,
+# queued/preparing/verifying, mismatch, failure) keeps the file unready.
+_READY_STATES = frozenset({"not_required", "verified"})
 
 
 class FileService:
@@ -33,7 +77,21 @@ class FileService:
         source_pipeline_run_id: int | None = None,
         artifact_type: str | None = None,
         is_global: bool = False,
+        external_id: str | None = None,
+        source_storage_uri: str | None = None,
+        source_notebook_session_id: int | None = None,
     ) -> File:
+        """Create one File row on the caller's session (the caller commits).
+
+        ``external_id`` is the caller's own identifier, or None. A pipeline output records where it
+        was found as its durable source identity (``source_storage_uri``, by default the URI it is
+        registered at). A duplicate external ID or source identity raises ConflictError and leaves
+        the caller's transaction usable: the insert runs in a savepoint, so the unique indexes decide
+        races without poisoning the session.
+        """
+        external_id = validate_external_id(external_id)
+        if source_type == "pipeline_output" and source_pipeline_run_id is not None and source_storage_uri is None:
+            source_storage_uri = storage_uri
         file = File(
             organization_id=org_id,
             storage_uri=storage_uri,
@@ -49,9 +107,19 @@ class FileService:
             source_pipeline_run_id=source_pipeline_run_id,
             artifact_type=artifact_type,
             is_global=is_global,
+            external_id=external_id,
+            source_storage_uri=source_storage_uri,
+            source_notebook_session_id=source_notebook_session_id,
         )
-        session.add(file)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(file)
+                await session.flush()
+        except IntegrityError as exc:
+            conflict = _conflict_for(exc)
+            if conflict is None:
+                raise
+            raise conflict from None
 
         await log_action(
             session,
@@ -62,6 +130,165 @@ class FileService:
             details={"filename": filename, "file_type": file_type, "size_bytes": size_bytes},
         )
         return file
+
+    @staticmethod
+    async def finalize_registration(session: AsyncSession, file: File) -> None:
+        """Announce a newly created File once its initial context is established.
+
+        Call after the registration workflow has set the file's external ID, experiment/project
+        context, sample links, and any required move, on the session that created it. The
+        ``file.registered`` snapshot is taken now and deferred until that transaction commits; a
+        second call for the same file in the same transaction does nothing. Retries and adoption of
+        an existing File must not call this.
+        """
+        from app.services import entity_references, webhook_events
+        from app.services.event_types import INTEGRATION_FILE_REGISTERED
+        from app.services.post_commit_events import defer_event
+
+        announced: set[int] = session.sync_session.info.setdefault(_REGISTERED_KEY, set())
+        if file.id in announced:
+            return
+        await session.flush()
+        relations = await entity_references.file_relationships(session, file)
+        defer_event(session, INTEGRATION_FILE_REGISTERED, webhook_events.file_registered(file, relations))
+        announced.add(file.id)
+
+    @staticmethod
+    async def mark_ready(
+        session: AsyncSession,
+        file_id: int,
+        org_id: int,
+        *,
+        expected_size: int | None = None,
+    ) -> str:
+        """Set ``ready_at`` once the final stored bytes are verified available; the single owner.
+
+        Returns ``ready`` (this call made the transition and deferred ``file.ready``),
+        ``already_ready``, ``pending`` (a required checksum or expectation is not yet verified for
+        the current object), or ``failed`` (the object is missing, unreadable, or the wrong size;
+        recorded on the file's verification record so users and API consumers can see it).
+
+        The file row is locked for the decision, so concurrent callers produce one transition. The
+        only I/O is one metadata read of the file's own registered URI; hashing never happens here
+        (FileVerificationService owns that, outside requests and long transactions). Runs on the
+        caller's transaction and never commits.
+        """
+        from app.adapters.models import StorageObjectNotFound
+        from app.adapters.registry import get_storage_adapter
+        from app.models.file_verification import FileVerification
+        from app.services import entity_references, webhook_events
+        from app.services.event_types import INTEGRATION_FILE_READY
+        from app.services.post_commit_events import defer_event
+
+        file = (
+            await session.execute(
+                select(File).where(File.id == file_id, File.organization_id == org_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if file is None:
+            raise ReadinessRefused("file_not_found")
+        if file.deleted_at is not None or file.storage_deleted:
+            raise ReadinessRefused("file_deleted")
+        await session.refresh(file)
+        if file.ready_at is not None:
+            return "already_ready"
+
+        record = (
+            await session.execute(select(FileVerification).where(FileVerification.file_id == file.id).with_for_update())
+        ).scalar_one_or_none()
+        uri = file.storage_uri or file.gcs_uri
+        if record is not None and record.status not in _READY_STATES:
+            return "pending"
+        if record is not None and record.status == "verified" and record.observed_uri != uri:
+            # A proof for another object (the file moved since) proves nothing about this one.
+            return "pending"
+
+        async def _fail(code: str, retryable: bool) -> str:
+            nonlocal record
+            if record is None:
+                # No record means no checksum source applies (mark_ready is only reached without one).
+                record = FileVerification(
+                    organization_id=file.organization_id, file_id=file.id, status="failed", expectation_resolved=True
+                )
+                session.add(record)
+            record.status = "failed"
+            record.error_code = code
+            record.retryable = retryable
+            await session.flush()
+            logger.warning("File %s could not be made ready: %s", file.id, code)
+            return "failed"
+
+        try:
+            observed = await get_storage_adapter().object_identity(uri)
+        except StorageObjectNotFound:
+            return await _fail("object_missing", True)
+        except Exception:
+            return await _fail("storage_unavailable", True)
+        size = observed.size_bytes
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            return await _fail("size_unavailable", True)
+        if expected_size is not None and size != expected_size:
+            return await _fail("size_mismatch", False)
+        if record is not None and record.status == "verified":
+            stale = record.observed_bytes not in (None, size) or (
+                record.observed_object_version is not None and observed.version != record.observed_object_version
+            )
+            if stale:
+                # The object changed after it was proved: the old evidence cannot carry over.
+                record.status = "queued"
+                record.observed_checksum = None
+                record.verified_at = None
+                record.next_attempt_at = datetime.now(timezone.utc)
+                await session.flush()
+                return "pending"
+
+        file.size_bytes = size
+        if record is not None and record.status == "verified":
+            file.md5_checksum = record.observed_checksum
+        file.ready_at = datetime.now(timezone.utc)
+        await session.flush()
+        relations = await entity_references.file_relationships(session, file)
+        defer_event(session, INTEGRATION_FILE_READY, webhook_events.file_ready(file, relations))
+        return "ready"
+
+    @staticmethod
+    async def find_registered_outputs(
+        session: AsyncSession, org_id: int, run_id: int, uris: Sequence[str], *, ambiguous: set[str] | None = None
+    ) -> dict[str, File]:
+        """Files already registered for these pipeline-output URIs, in (organization, run) scope.
+
+        A URI matches a File's durable source identity or its current canonical URI, so an original
+        output still present after its bytes were relocated is the same File. Deleted Files count:
+        a rescan must not resurrect a deleted registration. Raises SourceIdentityAmbiguous when a URI
+        matches more than one File (unreconciled legacy duplicates).
+        """
+        wanted = [u for u in dict.fromkeys(uris) if u]
+        if not wanted:
+            return {}
+        rows = (
+            (
+                await session.execute(
+                    select(File).where(
+                        File.organization_id == org_id,
+                        File.source_pipeline_run_id == run_id,
+                        or_(File.source_storage_uri.in_(wanted), File.storage_uri.in_(wanted)),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        found: dict[str, File] = {}
+        for uri in wanted:
+            matches = {f.id: f for f in rows if uri in (f.source_storage_uri, f.storage_uri)}
+            if len(matches) > 1:
+                if ambiguous is None:
+                    raise SourceIdentityAmbiguous()
+                ambiguous.add(uri)
+                continue
+            if matches:
+                found[uri] = next(iter(matches.values()))
+        return found
 
     @staticmethod
     async def get_file(

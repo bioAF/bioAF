@@ -36,7 +36,14 @@ def _scope_ok(user: dict, resource: str, action: str) -> bool:
     return f"{resource}:{action}" in (user.get("scopes") or [])
 
 
-def _file_response(f, sample_ids: list[int] | None = None, provenance: dict | None = None) -> FileResponse:
+def _file_response(
+    f,
+    sample_ids: list[int] | None = None,
+    provenance: dict | None = None,
+    identity: dict | None = None,
+    verification: dict | None = None,
+) -> FileResponse:
+    identity = identity or {}
     return FileResponse(
         id=f.id,
         filename=f.filename,
@@ -49,7 +56,7 @@ def _file_response(f, sample_ids: list[int] | None = None, provenance: dict | No
         uploader=UserSummary(id=f.uploader.id, name=f.uploader.name, email=f.uploader.email) if f.uploader else None,
         project_id=f.project_id,
         experiment_id=f.experiment_id,
-        sample_ids=sample_ids or [],
+        sample_ids=identity.get("sample_ids", sample_ids or []),
         source_type=f.source_type,
         source_pipeline_run_id=f.source_pipeline_run_id,
         source_notebook_session_id=f.source_notebook_session_id,
@@ -58,7 +65,35 @@ def _file_response(f, sample_ids: list[int] | None = None, provenance: dict | No
         upload_timestamp=f.upload_timestamp,
         created_at=f.created_at,
         provenance=FileProvenance.model_validate(provenance) if provenance else None,
+        external_id=f.external_id,
+        project_external_id=identity.get("project_external_id"),
+        experiment_external_id=identity.get("experiment_external_id"),
+        samples=identity.get("samples", []),
+        ready_at=f.ready_at,
+        verification=verification,
     )
+
+
+async def _file_responses(session: AsyncSession, files: list, *, provenance: bool = True) -> list[FileResponse]:
+    """Responses for a page of files with batch-loaded identity, provenance and verification.
+
+    Reads persisted state only: it never starts hashing or touches storage."""
+    from app.services import entity_references
+    from app.services.file_verification_service import FileVerificationService, records_for
+
+    file_ids = [f.id for f in files]
+    identity_map = await entity_references.file_identity_map(session, files)
+    provenance_map = await FileService.get_provenance_for_files(session, files) if provenance else {}
+    records = await records_for(session, file_ids)
+    return [
+        _file_response(
+            f,
+            provenance=provenance_map.get(f.id),
+            identity=identity_map.get(f.id),
+            verification=FileVerificationService.view(f, records.get(f.id)),
+        )
+        for f in files
+    ]
 
 
 @router.post("/upload/initiate", response_model=FileUploadInitiateResponse)
@@ -84,6 +119,7 @@ async def initiate_upload(
         experiment_id=body.experiment_id,
         sample_ids=body.sample_ids,
         is_global=body.is_global,
+        external_id=body.external_id,
     )
     return FileUploadInitiateResponse(**result)
 
@@ -98,7 +134,7 @@ async def complete_upload(
     file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
     await session.commit()
     file = await FileService.get_file(session, file.id, org_id)
-    return _file_response(file)
+    return (await _file_responses(session, [file], provenance=False))[0]
 
 
 @router.post("/upload/simple", response_model=FileResponse)
@@ -108,6 +144,7 @@ async def simple_upload(
     project_id: int | None = Query(None),
     sample_ids: list[int] | None = Query(None),
     is_global: bool = Query(False),
+    external_id: str | None = Query(None, min_length=1, max_length=255),
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -126,6 +163,7 @@ async def simple_upload(
             experiment_id=experiment_id,
             sample_ids=sample_ids,
             is_global=is_global,
+            external_id=external_id,
         )
     except DomainError:
         raise
@@ -133,7 +171,7 @@ async def simple_upload(
         raise HTTPException(500, f"Upload failed: {e}")
     await session.commit()
     result = await FileService.get_file(session, result.id, org_id)
-    return _file_response(result)
+    return (await _file_responses(session, [result], provenance=False))[0]
 
 
 @router.post("/reconcile")
@@ -288,11 +326,8 @@ async def list_files(
     files, total = await FileService.list_files(
         session, org_id, file_type, experiment_id, project_id, source_type, sample_id, search, page, page_size
     )
-    file_ids = [f.id for f in files]
-    sample_ids_map = await FileService.get_sample_ids_for_files(session, file_ids)
-    provenance_map = await FileService.get_provenance_for_files(session, files)
     return FileListResponse(
-        files=[_file_response(f, sample_ids_map.get(f.id, []), provenance_map.get(f.id)) for f in files],
+        files=await _file_responses(session, files),
         total=total,
         page=page,
         page_size=page_size,
@@ -351,9 +386,28 @@ async def get_file(
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
-    sample_ids_map = await FileService.get_sample_ids_for_files(session, [file_id])
-    provenance_map = await FileService.get_provenance_for_files(session, [file])
-    return _file_response(file, sample_ids_map.get(file_id, []), provenance_map.get(file_id))
+    return (await _file_responses(session, [file]))[0]
+
+
+@router.post("/{file_id}/verification/retry", response_model=FileResponse)
+async def retry_file_verification(
+    file_id: int,
+    current_user: dict = require_permission("files", "edit"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Requeue a failed or mismatched checksum verification after its cause was corrected."""
+    from app.services.file_verification_service import FileVerificationService
+
+    org_id = int(current_user["org_id"])
+    file = await FileService.get_file(session, file_id, org_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+    record = await FileVerificationService.retry(session, file_id, org_id)
+    if record is None:
+        raise HTTPException(404, "This file has no verification to retry")
+    await session.commit()
+    file = await FileService.get_file(session, file_id, org_id)
+    return (await _file_responses(session, [file]))[0]
 
 
 @router.get("/{file_id}/download")

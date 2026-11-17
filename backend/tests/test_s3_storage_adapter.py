@@ -415,7 +415,8 @@ class TestS3ModeListCopyMove:
         assert [o.filename for o in objs] == ["b.txt", "c.txt"]
         assert objs[0].storage_uri == "s3://bk/a/b.txt"
         assert objs[0].size_bytes == 3
-        assert objs[0].md5_hash == "abc123"
+        # A listing does not say how objects are encrypted, so no ETag in it proves an MD5 (01B.2).
+        assert objs[0].md5_hash is None
         assert objs[1].md5_hash is None  # multipart ETag is not an MD5
         client.get_paginator.assert_called_with("list_objects_v2")
 
@@ -466,14 +467,16 @@ class TestS3ModeListCopyMove:
         adapter, client = s3_adapter
         client.head_object.return_value = {
             "ContentLength": 7,
-            "ETag": '"deadbeef"',
+            # The ETag is an MD5 only for a single-part SSE-S3 object (01B.2).
+            "ETag": '"0123456789abcdef0123456789abcdef"',
+            "ServerSideEncryption": "AES256",
             "ContentType": "text/plain",
             "StorageClass": "STANDARD",
             "LastModified": datetime.datetime(2026, 1, 1),
         }
         md = await adapter.get_object_metadata("s3://bk/k")
         assert md.size_bytes == 7
-        assert md.md5_hash == "deadbeef"
+        assert md.md5_hash == "0123456789abcdef0123456789abcdef"
         assert md.content_type == "text/plain"
 
     @pytest.mark.asyncio

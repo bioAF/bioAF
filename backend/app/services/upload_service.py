@@ -1,6 +1,7 @@
 import logging
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
@@ -87,8 +88,23 @@ class UploadService:
         sample_ids: list[int] | None = None,
         project_id: int | None = None,
         is_global: bool = False,
+        external_id: str | None = None,
     ) -> dict:
-        """Initiate an upload, returning upload_id and signed URL."""
+        """Initiate an upload, returning upload_id and signed URL.
+
+        ``external_id`` (optional) is stored with the pending upload and used at completion; completion
+        cannot substitute another. An identifier already used by a file of this organization is refused
+        now (and again by the unique index at completion, for a race)."""
+        from app.exceptions import ConflictError
+        from app.services.file_service import validate_external_id
+
+        external_id = validate_external_id(external_id)
+        if external_id is not None:
+            taken = await session.scalar(
+                select(File.id).where(File.organization_id == org_id, File.external_id == external_id)
+            )
+            if taken is not None:
+                raise ConflictError("external_id_already_exists", plain_body=True)
         upload_id = str(uuid.uuid4())
         bucket_name = await UploadService._get_ingest_bucket(session)
         gcs_path = f"uploads/{upload_id}/{filename}"
@@ -113,6 +129,7 @@ class UploadService:
             "experiment_id": experiment_id,
             "sample_ids": sample_ids or [],
             "is_global": is_global,
+            "external_id": external_id,
         }
 
         return {
@@ -158,13 +175,15 @@ class UploadService:
         actual_md5: str,
     ) -> File:
         """Complete an upload: verify MD5, create file record, link to experiment/samples."""
+        from app.services.file_verification_service import Expectation, FileVerificationService, agreed_upload_md5
+
         pending = _pending_uploads.pop(upload_id, None)
         if not pending or pending["org_id"] != org_id:
             raise ValidationError("Invalid or expired upload_id")
 
-        # Verify MD5 if expected
-        if pending["expected_md5"] and pending["expected_md5"] != actual_md5:
-            raise ValidationError(f"MD5 mismatch: expected {pending['expected_md5']}, got {actual_md5}")
+        # Both MD5s are client assertions: they must agree, and the agreed value is then verified
+        # independently against the stored bytes. Neither is recorded as an observed checksum.
+        asserted_md5 = agreed_upload_md5(pending.get("expected_md5"), actual_md5)
 
         # Determine file type from extension
         filename = pending["filename"]
@@ -186,12 +205,13 @@ class UploadService:
             filename=filename,
             storage_uri=pending["gcs_uri"],
             size_bytes=pending["expected_size"],
-            md5_checksum=actual_md5,
+            md5_checksum=None,
             file_type=file_type,
             tags=tags,
             project_id=pending.get("project_id"),
             experiment_id=pending["experiment_id"],
             is_global=pending.get("is_global", False),
+            external_id=pending.get("external_id"),
         )
 
         # Sequencing identity as typed columns. The tags above are kept for one
@@ -227,6 +247,19 @@ class UploadService:
 
             await FileOrganizationService.assign_file_to_experiment(session, file.id, experiment_id, pending["user_id"])
 
+        # Announce the registration with its final context and links, then start readiness: an
+        # asserted MD5 is verified against the stored bytes; without one, existence and size suffice.
+        # Flush pending attribute changes, then reload what file organization rewrote with SQL.
+        await session.flush()
+        await session.refresh(file)
+        await FileService.finalize_registration(session, file)
+        await FileVerificationService.begin(
+            session,
+            file,
+            Expectation.md5("upload_assertion", asserted_md5) if asserted_md5 else Expectation.none("upload"),
+            expected_size=pending.get("expected_size"),
+        )
+
         # Auto-update experiment status if FASTQs uploaded
         if experiment_id and file_type == "fastq":
             await UploadService._auto_update_experiment_status(session, experiment_id, org_id, pending["user_id"])
@@ -261,6 +294,7 @@ class UploadService:
         experiment_id: int | None = None,
         sample_ids: list[int] | None = None,
         is_global: bool = False,
+        external_id: str | None = None,
     ) -> File:
         """Stream a file directly to storage without buffering the full content.
 
@@ -294,6 +328,7 @@ class UploadService:
             project_id=project_id,
             experiment_id=experiment_id,
             is_global=is_global,
+            external_id=external_id,
         )
 
         if sample_ids:
@@ -305,6 +340,14 @@ class UploadService:
             from app.services.file_organization import FileOrganizationService
 
             await FileOrganizationService.assign_file_to_experiment(session, file.id, experiment_id, user_id)
+
+        from app.services.file_verification_service import Expectation, FileVerificationService
+
+        # Flush pending attribute changes, then reload what file organization rewrote with SQL.
+        await session.flush()
+        await session.refresh(file)
+        await FileService.finalize_registration(session, file)
+        await FileVerificationService.begin(session, file, Expectation.none("upload"), expected_size=size_bytes)
 
         if experiment_id and file_type == "fastq":
             await UploadService._auto_update_experiment_status(session, experiment_id, org_id, user_id)

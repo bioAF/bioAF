@@ -2266,6 +2266,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/{file_id}/verification/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry File Verification
+         * @description Requeue a failed or mismatched checksum verification after its cause was corrected.
+         */
+        post: operations["retry_file_verification_api_files__file_id__verification_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/gitops/commits": {
         parameters: {
             query?: never;
@@ -7674,7 +7694,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Register Outputs */
+        /**
+         * Register Outputs
+         * @description Register a session's output files.
+         *
+         *     Only the caller's own organization's session, and only objects inside that session's storage
+         *     namespace (``sessions/<id>/`` in the working or results store): a client-supplied URI must never
+         *     make bioAF read or announce an arbitrary object. Each output may carry its own ``external_id``.
+         */
         post: operations["register_outputs_api_v1_notebooks_sessions__session_id__register_outputs_post"];
         delete?: never;
         options?: never;
@@ -10925,6 +10952,10 @@ export interface components {
             naming_profile_id?: number | null;
             owner?: components["schemas"]["UserSummary"] | null;
             project?: components["schemas"]["ProjectSummary"] | null;
+            /** Project External Id */
+            project_external_id?: string | null;
+            /** Project Id */
+            project_id?: number | null;
             /** Protocol Version */
             protocol_version?: string | null;
             /**
@@ -11014,6 +11045,10 @@ export interface components {
             naming_profile_id?: number | null;
             owner?: components["schemas"]["UserSummary"] | null;
             project?: components["schemas"]["ProjectSummary"] | null;
+            /** Project External Id */
+            project_external_id?: string | null;
+            /** Project Id */
+            project_id?: number | null;
             /** Protocol Version */
             protocol_version?: string | null;
             /**
@@ -11186,8 +11221,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Experiment External Id */
+            experiment_external_id?: string | null;
             /** Experiment Id */
             experiment_id?: number | null;
+            /** External Id */
+            external_id?: string | null;
             /** File Type */
             file_type: string;
             /** Filename */
@@ -11203,14 +11242,23 @@ export interface components {
             is_global: boolean;
             /** Md5 Checksum */
             md5_checksum: string | null;
+            /** Project External Id */
+            project_external_id?: string | null;
             /** Project Id */
             project_id?: number | null;
             provenance?: components["schemas"]["FileProvenance"] | null;
+            /** Ready At */
+            ready_at?: string | null;
             /**
              * Sample Ids
              * @default []
              */
             sample_ids: number[];
+            /**
+             * Samples
+             * @default []
+             */
+            samples: components["schemas"]["SampleReference"][];
             /** Sha256 Checksum */
             sha256_checksum?: string | null;
             /** Size Bytes */
@@ -11247,6 +11295,7 @@ export interface components {
              */
             upload_timestamp: string;
             uploader?: components["schemas"]["UserSummary"] | null;
+            verification?: components["schemas"]["FileVerificationOut"] | null;
         };
         /** FileUploadComplete */
         FileUploadComplete: {
@@ -11266,6 +11315,8 @@ export interface components {
             expected_size_bytes?: number | null;
             /** Experiment Id */
             experiment_id?: number | null;
+            /** External Id */
+            external_id?: string | null;
             /** Filename */
             filename: string;
             /**
@@ -11294,6 +11345,33 @@ export interface components {
             readonly storage_uri: string;
             /** Upload Id */
             upload_id: string;
+        };
+        /**
+         * FileVerificationOut
+         * @description Checksum verification of the file's stored bytes. Expected and observed values are separate:
+         *     an expected checksum is what a caller or source asserted; an observed one bioAF read itself.
+         */
+        FileVerificationOut: {
+            /** Algorithm */
+            algorithm?: string | null;
+            /** Bytes Processed */
+            bytes_processed?: number | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Expected Checksum */
+            expected_checksum?: string | null;
+            /** Method */
+            method?: string | null;
+            /** Observed Checksum */
+            observed_checksum?: string | null;
+            /** Retryable */
+            retryable?: boolean | null;
+            /** Status */
+            status: string;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Verified At */
+            verified_at?: string | null;
         };
         /**
          * FindingSetRequest
@@ -14718,6 +14796,20 @@ export interface components {
             /** Qc Status */
             qc_status: string;
         };
+        /**
+         * SampleReference
+         * @description A linked sample, with its experiment: sample external IDs are unique only per experiment.
+         */
+        SampleReference: {
+            /** Experiment External Id */
+            experiment_external_id?: string | null;
+            /** Experiment Id */
+            experiment_id: number;
+            /** External Id */
+            external_id?: string | null;
+            /** Sample Id */
+            sample_id: number;
+        };
         /** SampleResponse */
         SampleResponse: {
             /** Assay */
@@ -14742,6 +14834,10 @@ export interface components {
             custom_fields: components["schemas"]["SampleCustomFieldResponse"][];
             /** Donor Source */
             donor_source: string | null;
+            /** Experiment External Id */
+            experiment_external_id?: string | null;
+            /** Experiment Id */
+            experiment_id?: number | null;
             /** External Id */
             external_id: string | null;
             /**
@@ -21100,6 +21196,7 @@ export interface operations {
                 project_id?: number | null;
                 sample_ids?: number[] | null;
                 is_global?: boolean;
+                external_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -21310,6 +21407,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_file_verification_api_files__file_id__verification_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileResponse"];
                 };
             };
             /** @description Validation Error */

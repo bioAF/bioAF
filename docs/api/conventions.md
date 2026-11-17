@@ -18,6 +18,11 @@ Duplicate scope is:
 | Project | `(organization_id, external_id)` |
 | Experiment | `(organization_id, external_id)` |
 | Sample | `(experiment_id, external_id)` |
+| File | `(organization_id, external_id)`, deleted files included |
+
+A file's `external_id` is optional (set at upload or output registration; files cannot be created
+through this API). Different resource types, organizations, or experiments (for samples) may reuse a
+value. A `null` `external_id` never collides.
 
 This avoids accidental double-creates from retries or noisy LIMS sync
 loops. To make a retry safe even before the first call lands, send an
@@ -116,3 +121,23 @@ The public identity fields differ by resource:
 
 External integrators should treat `external_id` as the join key. `code`
 is for humans (lab labels, notebooks). `id` is stable but bioAF-internal.
+
+`external_id` is an opaque string of 1-255 characters, kept exactly as supplied (case, spaces and
+leading zeros included). `null` means none was assigned: records created inside bioAF (in the UI, by a
+pipeline, by an import) can have no external ID, and bioAF never fills one in from its own ID, a code,
+a filename, a path, or a checksum. You may deliberately send bioAF's `id` as your `external_id`.
+
+Responses and webhook events name related records with explicit pairs, each external ID belonging to
+the ID beside it:
+
+| Resource | Relationship fields |
+| --- | --- |
+| Experiment | `project_id`, `project_external_id` |
+| Sample | `experiment_id`, `experiment_external_id` |
+| File | `project_id`/`project_external_id`, `experiment_id`/`experiment_external_id`, `sample_ids`, and `samples` (each `{sample_id, external_id, experiment_id, experiment_external_id}`, sorted by `sample_id`) |
+
+A missing relationship has both fields `null`; a related record with no external ID has its `id` and a
+`null` external ID. A sample's `external_id` is unique only within its experiment, so identify a sample
+by the pair. On file responses, `project_id` is the file's own project (null for a file filed under an
+experiment); webhook file events report the experiment's project. Webhook payloads are snapshots taken
+when the event happened: later relabeling or relinking does not change a delivered or replayed body.

@@ -15,6 +15,7 @@ import { RevealSecretModal } from "./RevealSecretModal";
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { NotSet } from "@/components/shared/NotSet";
 
 const VALID_EVENTS = [
   "experiment.created",
@@ -27,6 +28,72 @@ const VALID_EVENTS = [
   "file.ready",
 ];
 
+// What a person reads for each event; the identifier stays visible beside it (and as a tooltip),
+// because that is what the receiving system's code matches on.
+const EVENT_LABELS: Record<string, string> = {
+  "experiment.created": "Experiment created",
+  "experiment.updated": "Experiment updated",
+  "experiment.status_changed": "Experiment status changed",
+  "sample.created": "Sample created",
+  "sample.updated": "Sample updated",
+  "sample.qc_changed": "Sample QC changed",
+  "file.registered": "File registered",
+  "file.ready": "File ready",
+  "webhook.test": "Test event",
+};
+
+const eventLabel = (event: string) => EVENT_LABELS[event] ?? event;
+
+const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  pending: "Waiting to send",
+  delivered: "Delivered",
+  failed: "Not delivered",
+  dead_letter: "Delivery stopped after repeated failures",
+};
+
+function deliveryStatusLabel(d: WebhookDelivery): string {
+  if (d.status === "pending" && d.attempt_count > 0) return "Retrying after a failed attempt";
+  return DELIVERY_STATUS_LABELS[d.status] ?? d.status;
+}
+
+/** A refused webhook address, explained by the server in plain words for its kind of refusal. */
+function addressRefusal(e: unknown): string | null {
+  return e instanceof ApiError && e.code === "webhook_destination_refused" ? e.message : null;
+}
+
+function EventChoice({
+  event,
+  checked,
+  onChange,
+}: {
+  event: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start gap-2 text-sm">
+      <input
+        type="checkbox"
+        className="mt-1"
+        checked={checked}
+        onChange={(ev) => onChange(ev.target.checked)}
+      />
+      <span>
+        {eventLabel(event)}
+        <span className="block font-mono text-xs text-gray-500">{event}</span>
+      </span>
+    </label>
+  );
+}
+
+function AddressError({ id, message }: { id: string; message: string }) {
+  return (
+    <p id={id} role="alert" className="text-sm text-red-700 -mt-2 mb-3">
+      {message}
+    </p>
+  );
+}
+
 export function WebhooksTab() {
   const [subs, setSubs] = useState<WebhookSubscription[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,11 +104,14 @@ export function WebhooksTab() {
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [newEvents, setNewEvents] = useState<Set<string>>(new Set());
+  const [createUrlError, setCreateUrlError] = useState("");
+  const [createError, setCreateError] = useState("");
 
   // Detail
   const [selectedSub, setSelectedSub] = useState<WebhookSubscription | null>(null);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [detailError, setDetailError] = useState("");
 
   // Edit
   const [editingSub, setEditingSub] = useState<WebhookSubscription | null>(null);
@@ -49,6 +119,8 @@ export function WebhooksTab() {
   const [editUrl, setEditUrl] = useState("");
   const [editEvents, setEditEvents] = useState<Set<string>>(new Set());
   const [editActive, setEditActive] = useState(true);
+  const [editUrlError, setEditUrlError] = useState("");
+  const [editError, setEditError] = useState("");
 
   // Disable confirm
   const [pendingDisable, setPendingDisable] = useState<WebhookSubscription | null>(null);
@@ -103,7 +175,9 @@ export function WebhooksTab() {
       setNewEvents(new Set());
       load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to create webhook");
+      const refusal = addressRefusal(e);
+      if (refusal) setCreateUrlError(refusal);
+      else setCreateError(e instanceof ApiError ? e.message : "Failed to create webhook");
     }
   };
 
@@ -113,6 +187,8 @@ export function WebhooksTab() {
     setEditUrl(s.url);
     setEditEvents(new Set(s.events));
     setEditActive(s.is_active);
+    setEditUrlError("");
+    setEditError("");
   };
 
   const handleEditSave = async () => {
@@ -128,25 +204,29 @@ export function WebhooksTab() {
       await load();
       if (selectedSub?.id === editingSub.id) setSelectedSub(updated);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to update webhook");
+      const refusal = addressRefusal(e);
+      if (refusal) setEditUrlError(refusal);
+      else setEditError(e instanceof ApiError ? e.message : "Failed to update webhook");
     }
   };
 
   const handleTest = async (subId: number) => {
+    setDetailError("");
     try {
       await integrationsApi.fireTestWebhook(subId);
       if (selectedSub) refreshDeliveries(selectedSub.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to send test event");
+      setDetailError(e instanceof ApiError ? e.message : "The test event could not be sent.");
     }
   };
 
   const handleReplay = async (deliveryId: number) => {
+    setDetailError("");
     try {
       await integrationsApi.replayWebhookDelivery(deliveryId);
       if (selectedSub) refreshDeliveries(selectedSub.id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to replay");
+      setDetailError(e instanceof ApiError ? e.message : "The delivery could not be sent again.");
     }
   };
 
@@ -179,7 +259,11 @@ export function WebhooksTab() {
           Webhook subscriptions notify external systems when bioAF entities change.
         </p>
         <Button size="sm"
-          onClick={() => setShowCreate(true)}>
+          onClick={() => {
+            setCreateUrlError("");
+            setCreateError("");
+            setShowCreate(true);
+          }}>
           Create Webhook
         </Button>
       </div>
@@ -259,28 +343,37 @@ export function WebhooksTab() {
         <label htmlFor="url" className="block text-sm font-medium mb-1">URL</label>
         <input id="url"
           value={newUrl}
-          onChange={(e) => setNewUrl(e.target.value)}
+          onChange={(e) => {
+            setNewUrl(e.target.value);
+            setCreateUrlError("");
+          }}
+          aria-invalid={createUrlError ? true : undefined}
+          aria-describedby={createUrlError ? "url-error" : undefined}
           className="w-full border rounded px-3 py-2 text-sm mb-3"
           placeholder="https://lims.example.com/hooks/bioaf"
         />
+        {createUrlError && <AddressError id="url-error" message={createUrlError} />}
         <label className="block text-sm font-medium mb-2">Events</label>
         <div className="grid grid-cols-2 gap-2 mb-4">
           {VALID_EVENTS.map((e) => (
-            <label key={e} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={newEvents.has(e)}
-                onChange={(ev) => {
-                  const next = new Set(newEvents);
-                  if (ev.target.checked) next.add(e);
-                  else next.delete(e);
-                  setNewEvents(next);
-                }}
-              />
-              <span>{e}</span>
-            </label>
+            <EventChoice
+              key={e}
+              event={e}
+              checked={newEvents.has(e)}
+              onChange={(checked) => {
+                const next = new Set(newEvents);
+                if (checked) next.add(e);
+                else next.delete(e);
+                setNewEvents(next);
+              }}
+            />
           ))}
         </div>
+        {createError && (
+          <p role="alert" className="text-sm text-red-700">
+            {createError}
+          </p>
+        )}
       </Modal>
 
       {/* Detail modal */}
@@ -334,6 +427,11 @@ export function WebhooksTab() {
             </button>
           </div>
   
+          {detailError && (
+            <p role="alert" className="mb-3 text-sm text-red-700">
+              {detailError}
+            </p>
+          )}
           <div className="mb-3 flex items-center gap-2">
             <label htmlFor="status-filter" className="text-xs text-gray-500">Status filter:</label>
             <select id="status-filter"
@@ -342,10 +440,10 @@ export function WebhooksTab() {
               className="text-xs border rounded px-2 py-1"
             >
               <option value="">All</option>
-              <option value="pending">pending</option>
-              <option value="delivered">delivered</option>
-              <option value="failed">failed</option>
-              <option value="dead_letter">dead_letter</option>
+              <option value="pending">{DELIVERY_STATUS_LABELS.pending}</option>
+              <option value="delivered">{DELIVERY_STATUS_LABELS.delivered}</option>
+              <option value="failed">{DELIVERY_STATUS_LABELS.failed}</option>
+              <option value="dead_letter">{DELIVERY_STATUS_LABELS.dead_letter}</option>
             </select>
           </div>
   
@@ -369,16 +467,20 @@ export function WebhooksTab() {
               ) : (
                 deliveries.map((d) => (
                   <tr key={d.id}>
-                    <td className="px-2 py-2 text-xs">{d.event_type}</td>
-                    <td className="px-2 py-2 text-xs">{d.status}</td>
+                    <td className="px-2 py-2 text-xs">
+                      <span title={d.event_type}>{eventLabel(d.event_type)}</span>
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      <span title={d.status}>{deliveryStatusLabel(d)}</span>
+                    </td>
                     <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
-                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? "-"}</td>
+                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? <NotSet label="Response" />}</td>
                     <td className="px-2 py-2 text-xs">
                       <button
                         onClick={() => handleReplay(d.id)}
                         className="text-xs text-bioaf-600 hover:underline"
                       >
-                        Replay
+                        Send again
                       </button>
                     </td>
                   </tr>
@@ -427,27 +529,35 @@ export function WebhooksTab() {
               <input id="url-2"
                 type="text"
                 value={editUrl}
-                onChange={(e) => setEditUrl(e.target.value)}
+                onChange={(e) => {
+                  setEditUrl(e.target.value);
+                  setEditUrlError("");
+                }}
+                aria-invalid={editUrlError ? true : undefined}
+                aria-describedby={editUrlError ? "url-2-error" : undefined}
                 className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
               />
+              {editUrlError && (
+                <p id="url-2-error" role="alert" className="mt-1 text-sm text-red-700">
+                  {editUrlError}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Events</label>
               <div className="grid grid-cols-2 gap-2">
                 {VALID_EVENTS.map((e) => (
-                  <label key={e} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={editEvents.has(e)}
-                      onChange={(ev) => {
-                        const next = new Set(editEvents);
-                        if (ev.target.checked) next.add(e);
-                        else next.delete(e);
-                        setEditEvents(next);
-                      }}
-                    />
-                    <span>{e}</span>
-                  </label>
+                  <EventChoice
+                    key={e}
+                    event={e}
+                    checked={editEvents.has(e)}
+                    onChange={(checked) => {
+                      const next = new Set(editEvents);
+                      if (checked) next.add(e);
+                      else next.delete(e);
+                      setEditEvents(next);
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -459,6 +569,11 @@ export function WebhooksTab() {
               />
               <span>Active (deliveries will be queued for this subscription)</span>
             </label>
+            {editError && (
+              <p role="alert" className="text-sm text-red-700">
+                {editError}
+              </p>
+            )}
           </div>
         </Modal>
       )}

@@ -41,7 +41,27 @@ Response:
       "experiment_id": 7,
       "sample_ids": [901, 902],
       "tags": {"chemistry": "v3.1"},
-      "created_at": "2026-05-14T15:00:00Z"
+      "created_at": "2026-05-14T15:00:00Z",
+      "external_id": "LIMS-FILE-9001",
+      "project_external_id": "LIMS-PRJ-1",
+      "experiment_external_id": "LIMS-EXP-042",
+      "samples": [
+        {"sample_id": 901, "external_id": "LIMS-SMP-1001", "experiment_id": 7, "experiment_external_id": "LIMS-EXP-042"},
+        {"sample_id": 902, "external_id": null, "experiment_id": 7, "experiment_external_id": "LIMS-EXP-042"}
+      ],
+      "ready_at": "2026-05-14T15:02:11Z",
+      "verification": {
+        "status": "verified",
+        "algorithm": "md5",
+        "expected_checksum": "0123456789abcdef0123456789abcdef",
+        "observed_checksum": "0123456789abcdef0123456789abcdef",
+        "method": "streamed",
+        "verified_at": "2026-05-14T15:02:11Z",
+        "bytes_processed": 123456789,
+        "total_bytes": 123456789,
+        "error_code": null,
+        "retryable": null
+      }
     }
   ],
   "next_cursor": null
@@ -50,6 +70,37 @@ Response:
 
 `gcs_uri` and similar storage-backend pointers are intentionally not
 included in the public response.
+
+`external_id` is the file's own identifier (or `null`); see [Conventions](conventions.md) for the
+relationship fields. Reading file metadata never starts any checksum work.
+
+## Readiness
+
+`ready_at` is when bioAF first verified the file's stored bytes were available: the final object
+exists with the expected size and, when an expected checksum was supplied, its MD5 matched. `null`
+means readiness has not been established (yet, or ever, for files registered before this existed);
+it does not by itself mean an older file is unusable. It records availability only, not scientific
+QC or completeness, and is not reset when a file is later deleted.
+
+## Checksum verification
+
+`verification` is `null` when bioAF has no checksum information for the file. Otherwise:
+
+| `status` | Meaning |
+| --- | --- |
+| `waiting_expectation` | A source that may list a checksum (a fetchngs samplesheet) has not been read yet |
+| `not_required` | The source has no checksum; existence and size were enough |
+| `queued` / `preparing` / `verifying` | Verification is waiting, making a protected NFS copy, or reading; `bytes_processed`/`total_bytes` show progress |
+| `verified` | The stored bytes' MD5 matches the expected one |
+| `checksum_mismatch` | They differ; both values are shown and the file stays unready |
+| `failed` | Verification could not complete; `error_code` says why and `retryable` whether retrying may help without a fix |
+| `unverified_legacy` | A checksum recorded before verification existed; it was never checked |
+
+`expected_checksum` is what an uploader or source asserted; `observed_checksum` is what bioAF read
+itself, from a trusted provider digest of that exact object (`method: provider`) or by reading the
+bytes (`method: streamed`). A transient failure is retried automatically (60 s, 5 min, 30 min, 2 h)
+before it becomes `failed`. Users with file edit permission can retry a failed or mismatched
+verification from the file's details in bioAF after fixing the cause.
 
 ## GET /files/{id}
 
@@ -60,5 +111,5 @@ to a different org).
 
 Poll `GET /files` and deduplicate by file ID. Start from the first page to discover newly created rows;
 a cursor moves toward older records, not toward records added after the previous poll.
-For change notifications, subscribe to `file.registered` and `file.ready`, then retrieve the relevant
-metadata through this API. See [Webhooks](webhooks.md) for event types and receiver setup.
+For change notifications, subscribe to `file.registered` and `file.ready`: their payloads already carry
+the file's identity and links, so a follow-up request is only needed for other metadata. See [Webhooks](webhooks.md) for event types and receiver setup.

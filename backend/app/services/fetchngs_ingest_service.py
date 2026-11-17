@@ -27,6 +27,8 @@ from app.models.pipeline_run import PipelineRun
 from app.models.sample import Sample
 from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.schemas.sample import SampleCreate
+from app.adapters.storage.digest import normalize_md5
+from app.exceptions import ValidationError
 from app.services.file_service import FileService
 from app.services.sample_service import SampleService
 
@@ -222,8 +224,13 @@ class FetchngsIngestService:
         *,
         outdir: str,
         storage_adapter=None,
+        ambiguous: set[str] | None = None,
     ) -> list[File]:
         """Register a completed fetchngs run's downloaded FASTQ as File rows linked to its samples.
+
+        A FASTQ URI that matches more than one unreconciled legacy File is refused
+        (``source_identity_ambiguous``): no File is chosen, linked, or verified, and the URI is added
+        to ``ambiguous`` when the caller passes a set.
 
         The ingest (``ingest_for_run``) creates the Sample rows but no files; a downstream
         nf-core/rnaseq|scrnaseq run cannot launch without each sample's input files (the launch path's
@@ -266,19 +273,33 @@ class FetchngsIngestService:
         # sample link and no sequencing identity). We must REUSE and LINK those, not skip them: skipping left
         # every sample with no linked FASTQ, so the driver's per-sample gate saw "no runnable samples"
         # and the study wrongly early-exited to missing_data even though the fetch succeeded.
-        existing_by_uri: dict[str, File] = {
-            f.storage_uri: f
-            for f in (
-                await session.execute(
-                    select(File).where(
-                        File.experiment_id == run.experiment_id,
-                        File.source_pipeline_run_id == run.id,
-                    )
-                )
-            ).scalars()
-            if f.storage_uri is not None
-        }
+        from app.services.file_verification_service import Expectation, FileVerificationService
 
+        # Every File this run already has at these FASTQ URIs, matched by original source or current
+        # canonical URI in the run's organization (the shared lookup every output path uses): a row
+        # the monitor registered for the downloaded FASTQ (reused and linked, never skipped), one a
+        # prior attach created, or one whose bytes were relocated to a protected verification copy.
+        wanted: list[str] = []
+        for raw_row in csv.DictReader(io.StringIO(csv_text)):
+            row = {(k or "").strip().lower(): v for k, v in raw_row.items()}
+            for column, _read in _FASTQ_COLUMNS:
+                value = (row.get(column) or "").strip()
+                candidate = _fastq_storage_uri(outdir, value) if value else None
+                if candidate is not None:
+                    wanted.append(candidate)
+        refused: set[str] = set() if ambiguous is None else ambiguous
+        existing_by_uri = await FileService.find_registered_outputs(
+            session, run.organization_id, run.id, wanted, ambiguous=refused
+        )
+        if refused:
+            logger.warning(
+                "fetchngs run %d: %d FASTQ match more than one legacy file and were not attached "
+                "(source_identity_ambiguous); reconcile the duplicates first",
+                run.id,
+                len(refused),
+            )
+
+        samplesheet = {"samplesheet_uri": uri, "pipeline_run_id": run.id}
         created: list[File] = []
         linked = 0
         try:
@@ -302,24 +323,29 @@ class FetchngsIngestService:
                         if storage_uri is None:
                             logger.warning("fetchngs run %d: unusable FASTQ path %r skipped", run.id, value)
                             continue
+                        if storage_uri in refused:
+                            continue
                         f = existing_by_uri.get(storage_uri)
-                        if f is None:
-                            f = File(
-                                organization_id=run.organization_id,
-                                storage_uri=storage_uri,
+                        is_new = f is None
+                        if is_new:
+                            f = await FileService.create_file_record(
+                                session,
+                                org_id=run.organization_id,
+                                user_id=run.submitted_by_user_id,
                                 filename=storage_uri.rsplit("/", 1)[-1],
+                                storage_uri=storage_uri,
+                                size_bytes=None,
+                                # The CSV value is an expectation, verified below; never an observation.
+                                md5_checksum=None,
                                 file_type="fastq",
+                                tags=[f"read:{read}"],
+                                experiment_id=run.experiment_id,
                                 source_type="pipeline_output",
                                 source_pipeline_run_id=run.id,
-                                experiment_id=run.experiment_id,
-                                uploader_user_id=run.submitted_by_user_id,
-                                ingest_source="fetchngs",
-                                tags_json=[f"read:{read}"],
-                                read_type=read,
-                                source_run_accession=run_key,
-                                md5_checksum=_row_md5(row, read[-1]),
                             )
-                            session.add(f)
+                            f.ingest_source = "fetchngs"
+                            f.read_type = read
+                            f.source_run_accession = run_key
                             await session.flush()
                             existing_by_uri[storage_uri] = f
                             created.append(f)
@@ -333,10 +359,24 @@ class FetchngsIngestService:
                         # Idempotent (ON CONFLICT DO NOTHING); safe for reused rows and re-run ticks.
                         await FileService.link_file_to_sample(session, f.id, sample.id)
                         linked += 1
+                        if is_new:
+                            await FileService.finalize_registration(session, f)
+                        # This row of the samplesheet is the file's resolved checksum source.
+                        md5 = _row_md5(row, read[-1])
+                        try:
+                            expectation = (
+                                Expectation.md5("fetchngs_csv", normalize_md5(md5))
+                                if md5
+                                else Expectation.none("fetchngs_csv")
+                            )
+                        except ValidationError:
+                            # A malformed value: the verifier's discovery reports it rather than it
+                            # being treated as "no checksum".
+                            expectation = Expectation.pending("fetchngs_csv", samplesheet)
+                        await FileVerificationService.begin(session, f, expectation)
         except Exception as exc:
             logger.warning("fetchngs run %d: FASTQ attach failed: %s", run.id, exc)
             return []
-
         logger.info(
             "fetchngs run %d: attached FASTQ to samples (%d new file rows, %d sample-file links)",
             run.id,
@@ -344,3 +384,29 @@ class FetchngsIngestService:
             linked,
         )
         return created
+
+
+async def resolve_fetchngs_expectation(session: AsyncSession, file: File, context: dict) -> str | None:
+    """The expected MD5 a fetchngs samplesheet gives for ``file``, or None when its row has none.
+
+    The CSV value is an expectation (fetchngs's own download check is not proof of the final stored
+    object). A file whose samplesheet cannot be read, or whose row cannot be found, raises: that is a
+    discovery failure to retry, never evidence that no checksum was supplied. A malformed value raises
+    ValidationError.
+    """
+    from app.adapters import registry
+    from app.services.file_verification_service import normalize_md5
+
+    uri = context.get("samplesheet_uri")
+    if not uri:
+        raise LookupError("no samplesheet recorded for this file")
+    csv_text = await registry.get_storage_adapter().read_text(uri)
+    basename = (file.source_storage_uri or file.storage_uri or file.gcs_uri).rsplit("/", 1)[-1]
+    for raw_row in csv.DictReader(io.StringIO(csv_text)):
+        row = {(k or "").strip().lower(): v for k, v in raw_row.items()}
+        for column, read in _FASTQ_COLUMNS:
+            value = (row.get(column) or "").strip()
+            if value and value.rsplit("/", 1)[-1] == basename:
+                md5 = _row_md5(row, read[-1])
+                return normalize_md5(md5) if md5 else None
+    raise LookupError("the file is not listed in its samplesheet")

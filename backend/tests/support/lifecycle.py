@@ -53,6 +53,10 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.backup_service", "_backup_state"),
     ("app.services.networking_applier", "_mock_singleton"),
     ("app.services.pubsub_listener", "_manager"),
+    # The server's webhook dispatcher binding: its callbacks live on event_bus._subscribers, reset below.
+    ("app.services.webhook_dispatcher", "_server_binding"),
+    # Expectation discovery resolvers registered lazily by the verification worker.
+    ("app.services.file_verification_worker", "DISCOVERY_RESOLVERS"),
     ("app.platform.cloud_provider", "_resolved_backends"),
     ("app.adapters.work_nodes.ec2", "_local_vms"),
     ("app.adapters.work_nodes.gce", "_local_vms"),
@@ -82,6 +86,7 @@ NOT_RESET: dict[tuple[str, str], str] = {
     ("app.adapters.registry", "_initialized"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_active_compute_stack"): "reset by the _init_adapter_registry fixture",
     ("app.services.post_commit_events", "_in_flight"): "drained by settle_owner; tasks remove themselves",
+    ("app.cli.register_outputs", "_MAPPED"): "built once at import from the dispatcher's event map",
     ("app.adapters.validation.gcp", "RECOMMENDED_ROLES"): "built once at import from a static map",
     ("app.adapters.validation.gcp", "_APP_PERMS"): "built once at import from a static probe file",
     ("app.adapters.validation.gcp", "_BOOTSTRAP_PERMS"): "built once at import from a static probe file",

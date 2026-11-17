@@ -140,7 +140,10 @@ jobs:
 
   backend-test:
     name: Backend Tests
-    runs-on: ubuntu-latest
+    # Pinned: the schema-upgrade and historical-upgrade tests need the PostgreSQL 16 client
+    # (pg_dump, pg_restore under /usr/lib/postgresql/16/bin), which the ubuntu-24.04 image ships and
+    # the ubuntu-26.04 image that ubuntu-latest moved to in November 2026 does not.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16

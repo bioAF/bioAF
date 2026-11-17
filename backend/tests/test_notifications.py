@@ -1044,3 +1044,80 @@ async def test_filter_notifications(client: AsyncClient, admin_token: str, admin
     assert response.status_code == 200
     for n in response.json()["notifications"]:
         assert n["severity"] == "critical"
+
+
+# --- every signed-in user reads and manages their own notifications --------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["viewer", "bench", "comp_bio"])
+async def test_any_role_reads_and_manages_its_own_notifications(client, session, admin_user, role):
+    """A notification addressed to someone is readable by them, whatever their role."""
+    from app.models.notification import Notification
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+
+    role_id = admin_user._test_role_map[role]
+    user = User(
+        email=f"{role}-self@test.com",
+        password_hash="x",
+        role_id=role_id,
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    note = Notification(
+        user_id=user.id,
+        organization_id=admin_user.organization_id,
+        event_type="file_verification_failed",
+        title="File verification failed",
+        message="a.fastq.gz: The file's checksum does not match the expected value.",
+        severity="warning",
+    )
+    session.add(note)
+    await session.commit()
+    headers = {
+        "Authorization": "Bearer "
+        + AuthService.create_token(user.id, user.email, role_id, user.organization_id, role_name=role)
+    }
+
+    listed = await client.get("/api/notifications", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert [n["id"] for n in listed.json()["notifications"]] == [note.id]
+    assert (await client.get("/api/notifications/unread-count", headers=headers)).json()["count"] == 1
+    assert (await client.patch(f"/api/notifications/{note.id}/read", headers=headers)).status_code == 200
+    assert (await client.post("/api/notifications/mark-all-read", headers=headers)).status_code == 200
+    assert (await client.get("/api/notifications/preferences", headers=headers)).status_code == 200
+    put = await client.put(
+        "/api/notifications/preferences",
+        headers=headers,
+        json={"preferences": [{"event_type": "file_verification_failed", "channel": "in_app", "enabled": True}]},
+    )
+    assert put.status_code == 200, put.text
+    assert (await client.delete(f"/api/notifications/{note.id}", headers=headers)).status_code == 200
+    # Organization-wide notification settings stay with administrators.
+    assert (await client.get("/api/notifications/rules", headers=headers)).status_code == 403
+    assert (await client.get("/api/notifications/slack-webhooks", headers=headers)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_user_cannot_read_or_change_someone_elses_notification(
+    client, session, admin_user, viewer_user, viewer_token
+):
+    from app.models.notification import Notification
+
+    note = Notification(
+        user_id=admin_user.id,
+        organization_id=admin_user.organization_id,
+        event_type="file_verification_failed",
+        title="t",
+        message="m",
+        severity="warning",
+    )
+    session.add(note)
+    await session.commit()
+    headers = {"Authorization": f"Bearer {viewer_token}"}
+    assert (await client.get("/api/notifications", headers=headers)).json()["notifications"] == []
+    assert (await client.patch(f"/api/notifications/{note.id}/read", headers=headers)).status_code == 404
+    assert (await client.delete(f"/api/notifications/{note.id}", headers=headers)).status_code == 404

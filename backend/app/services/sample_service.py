@@ -14,6 +14,12 @@ from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.models.sequencing_batch import SequencingBatch
 from app.schemas.sample import SampleCreate, SampleUpdate
 from app.services.audit_service import log_action
+from app.services.event_types import (
+    INTEGRATION_SAMPLE_CREATED,
+    INTEGRATION_SAMPLE_QC_CHANGED,
+    INTEGRATION_SAMPLE_UPDATED,
+)
+from app.services.post_commit_events import defer_event
 from app.services.snapshot_utils import serialize_entity
 from app.services.vocabulary_validator import VocabularyValidator
 
@@ -45,7 +51,173 @@ def duplicate_external_id_text(external_id: str | None) -> str:
     return f"Sample ID \u201c{external_id}\u201d already exists in this experiment."
 
 
+def _custom_state(rows) -> list[tuple]:
+    return sorted((r.field_name, r.field_value) for r in rows)
+
+
+async def _snapshot(session: AsyncSession, sample: Sample) -> tuple[int, dict]:
+    """(organization, reference) for a sample, from its experiment: the trusted organization source."""
+    org_id, exp_ext = (
+        await session.execute(
+            select(Experiment.organization_id, Experiment.external_id).where(Experiment.id == sample.experiment_id)
+        )
+    ).one()
+    return org_id, {
+        "sample_id": sample.id,
+        "external_id": sample.external_id,
+        "experiment_id": sample.experiment_id,
+        "experiment_external_id": exp_ext,
+    }
+
+
 class SampleService:
+    # -- webhook-producing primitives: deferred on the mutating session, published after commit --
+
+    @staticmethod
+    async def _announce_created(session: AsyncSession, sample: Sample) -> None:
+        from app.services import webhook_events
+
+        org_id, ref = await _snapshot(session, sample)
+        defer_event(session, INTEGRATION_SAMPLE_CREATED, webhook_events.sample_created(org_id, ref))
+
+    @staticmethod
+    async def _announce_updated(session: AsyncSession, sample: Sample, changed: set[str]) -> None:
+        """``sample.updated`` for fields that actually changed; nothing when none did."""
+        if not changed:
+            return
+        from app.services import webhook_events
+
+        org_id, ref = await _snapshot(session, sample)
+        defer_event(session, INTEGRATION_SAMPLE_UPDATED, webhook_events.sample_updated(org_id, ref, changed))
+
+    @staticmethod
+    async def _announce_qc(session: AsyncSession, sample: Sample, old_qc: str | None, old_notes: str | None) -> None:
+        """A QC status transition is ``sample.qc_changed``; a notes-only edit is ``sample.updated``
+        naming ``qc_notes`` (never the note's contents); no change is nothing."""
+        from app.services import webhook_events
+
+        if sample.qc_status != old_qc:
+            org_id, ref = await _snapshot(session, sample)
+            defer_event(
+                session,
+                INTEGRATION_SAMPLE_QC_CHANGED,
+                webhook_events.sample_qc_changed(org_id, ref, old_qc, sample.qc_status),
+            )
+        elif sample.qc_notes != old_notes:
+            await SampleService._announce_updated(session, sample, {"qc_notes"})
+
+    @staticmethod
+    async def apply_field_updates(session: AsyncSession, samples: dict[int, Sample], updates: dict[int, dict]) -> None:
+        """Write sample-sheet values back to their samples and announce what actually changed."""
+        for sample_id, fields in updates.items():
+            sample = samples[sample_id]
+            changed = {field for field, value in fields.items() if getattr(sample, field) != value}
+            for field, value in fields.items():
+                setattr(sample, field, value)
+            if changed:
+                await session.flush()
+                await SampleService._announce_updated(session, sample, changed)
+
+    @staticmethod
+    async def _merge_custom_fields(session: AsyncSession, sample_id: int, existing_rows, fields_in) -> bool:
+        """The Integration API's merge semantics; returns whether anything actually changed."""
+        if fields_in is None:
+            return False
+        existing = {cf.field_name: cf for cf in (existing_rows or [])}
+        changed = False
+        for field in fields_in:
+            name = field["field_name"]
+            value = field.get("field_value")
+            if value is None:
+                if name in existing:
+                    await session.delete(existing[name])
+                    changed = True
+            elif name in existing:
+                if existing[name].field_value != value:
+                    existing[name].field_value = value
+                    changed = True
+            else:
+                session.add(SampleCustomField(sample_id=sample_id, field_name=name, field_value=value))
+                changed = True
+        await session.flush()
+        return changed
+
+    @staticmethod
+    async def create_from_integration(
+        session: AsyncSession, *, user_id: int, api_key_id: int, fields: dict, custom_fields: list[dict] | None
+    ) -> Sample:
+        """An Integration API create (always ``registered``, no QC): audited with the key, announced once."""
+        sample = Sample(**fields, status="registered")
+        session.add(sample)
+        await session.flush()
+        await SampleService._merge_custom_fields(session, sample.id, None, custom_fields)
+        await log_action(
+            session,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            entity_type="sample",
+            entity_id=sample.id,
+            action="created",
+            details={"external_id": fields.get("external_id")},
+        )
+        await SampleService._announce_created(session, sample)
+        return sample
+
+    @staticmethod
+    async def patch_from_integration(
+        session: AsyncSession, sample: Sample, *, user_id: int, api_key_id: int, fields: dict, custom_fields
+    ) -> None:
+        updates: dict = {}
+        changed: set[str] = set()
+        for field, new_val in fields.items():
+            if new_val is None:
+                continue
+            if getattr(sample, field) != new_val:
+                changed.add(field)
+            setattr(sample, field, new_val)
+            updates[field] = new_val
+        await session.flush()
+        if await SampleService._merge_custom_fields(
+            session, sample.id, list(sample.custom_fields or []), custom_fields
+        ):
+            changed.add("custom_fields")
+        await log_action(
+            session,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            entity_type="sample",
+            entity_id=sample.id,
+            action="updated",
+            details=updates,
+        )
+        await SampleService._announce_updated(session, sample, changed)
+
+    @staticmethod
+    async def claim(session: AsyncSession, sample_id: int, org_id: int, user_id: int, *, name: str | None) -> Sample:
+        """Claim an existing unclaimed sample of this organization; announce what changed."""
+        sample = (
+            await session.execute(
+                select(Sample)
+                .join(Experiment, Experiment.id == Sample.experiment_id)
+                .where(Sample.id == sample_id, Experiment.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if sample is None:
+            raise NotFoundError("Sample not found", plain_body=True)
+        if not sample.is_unclaimed:
+            raise ValidationError("Sample is not unclaimed", plain_body=True)
+        if name and name != sample.external_id:
+            await SampleService.refuse_ambiguous_label(session, sample.experiment_id, name)
+        changed = {"is_unclaimed"}
+        sample.is_unclaimed = False
+        if name and name != sample.external_id:
+            sample.external_id = name
+            changed.add("external_id")
+        await session.flush()
+        await log_action(session, user_id=user_id, entity_type="sample", entity_id=sample.id, action="claim")
+        await SampleService._announce_updated(session, sample, changed)
+        return sample
+
     @staticmethod
     async def _get_field_defaults(session: AsyncSession, experiment_id: int) -> dict[str, str]:
         """Load experiment-level field defaults as a {field_name: default_value} dict."""
@@ -289,6 +461,7 @@ class SampleService:
             details=create_details,
             snapshot=serialize_entity(sample),
         )
+        await SampleService._announce_created(session, sample)
         return sample
 
     @staticmethod
@@ -407,6 +580,7 @@ class SampleService:
                 },
                 snapshot=serialize_entity(sample),
             )
+            await SampleService._announce_created(session, sample)
             created.append(sample)
         return created
 
@@ -441,6 +615,8 @@ class SampleService:
         # Resolve batch codes
         previous = {}
         updates = {}
+        before_batch = (sample.sample_batch_id, sample.sequencing_batch_id, sample.sequencing_batch_position)
+        changed: set[str] = set()
         if data.sample_batch_code is not None:
             previous["sample_batch_id"] = str(sample.sample_batch_id) if sample.sample_batch_id else None
             sample.sample_batch_id = await SampleService._resolve_sample_batch(
@@ -500,11 +676,23 @@ class SampleService:
                 previous[field] = str(old_val) if old_val is not None else None
                 setattr(sample, field, new_val)
                 updates[field] = str(new_val) if new_val is not None else None
+                if old_val != new_val:
+                    changed.add(field)
+        for name, before, after in zip(
+            ("sample_batch_id", "sequencing_batch_id", "sequencing_batch_position"),
+            before_batch,
+            (sample.sample_batch_id, sample.sequencing_batch_id, sample.sequencing_batch_position),
+        ):
+            if before != after:
+                changed.add(name)
 
         # Handle custom fields (delete-and-replace)
         if data.custom_fields is not None:
             existing = await session.execute(select(SampleCustomField).where(SampleCustomField.sample_id == sample_id))
-            for row in existing.scalars().all():
+            existing_rows = existing.scalars().all()
+            if _custom_state(existing_rows) != sorted((cf.field_name, cf.field_value) for cf in data.custom_fields):
+                changed.add("custom_fields")
+            for row in existing_rows:
                 await session.delete(row)
             await session.flush()
             for cf in data.custom_fields:
@@ -533,6 +721,7 @@ class SampleService:
                 previous_value=previous,
                 snapshot=snap,
             )
+        await SampleService._announce_updated(session, sample, changed)
         return sample
 
     @staticmethod
@@ -560,6 +749,7 @@ class SampleService:
             previous_value=previous,
             snapshot=snap,
         )
+        await SampleService._announce_qc(session, sample, previous["qc_status"], previous["qc_notes"])
         return sample
 
     @staticmethod
@@ -592,6 +782,8 @@ class SampleService:
             previous_value={"status": old_status},
             snapshot=snap,
         )
+        # There is no public sample-status event: lifecycle status is a metadata update.
+        await SampleService._announce_updated(session, sample, {"status"})
         return sample
 
     @staticmethod
@@ -609,6 +801,7 @@ class SampleService:
                 selectinload(Sample.sequencing_batch),
                 selectinload(Sample.custom_fields),
                 selectinload(Sample.files),
+                selectinload(Sample.experiment),
             )
             .where(Sample.experiment_id == experiment_id)
         )
@@ -658,6 +851,7 @@ class SampleService:
                 selectinload(Sample.sample_batch),
                 selectinload(Sample.sequencing_batch),
                 selectinload(Sample.custom_fields),
+                selectinload(Sample.experiment),
             )
             .where(Sample.id == sample_id)
         )

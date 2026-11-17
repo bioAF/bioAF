@@ -5,11 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.ingest_event import IngestEvent
 from app.models.project import Project
-from app.models.sample import Sample
 from app.services.sample_service import SampleService
 from app.schemas.ingest import (
     BulkReassignRequest,
@@ -205,23 +203,16 @@ async def claim_experiment(
     current_user: dict = require_permission("experiments", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
-    user_id = int(current_user["sub"])
-    result = await session.execute(select(Experiment).where(Experiment.id == experiment_id))
-    experiment = result.scalar_one_or_none()
-    if not experiment:
-        raise HTTPException(404, "Experiment not found")
-    if not experiment.is_unclaimed:
-        raise HTTPException(400, "Experiment is not unclaimed")
+    from app.services.experiment_service import ExperimentService
 
-    experiment.is_unclaimed = False
-    experiment.owner_user_id = user_id
-    if body.name:
-        experiment.name = body.name
-    if body.description:
-        experiment.description = body.description
-    await session.flush()
-
-    await log_action(session, user_id=user_id, entity_type="experiment", entity_id=experiment.id, action="claim")
+    experiment = await ExperimentService.claim(
+        session,
+        experiment_id,
+        int(current_user["org_id"]),
+        int(current_user["sub"]),
+        name=body.name,
+        description=body.description,
+    )
     await session.commit()
     return {"id": experiment.id, "name": experiment.name, "is_unclaimed": False}
 
@@ -233,21 +224,8 @@ async def claim_sample(
     current_user: dict = require_permission("samples", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
-    user_id = int(current_user["sub"])
-    result = await session.execute(select(Sample).where(Sample.id == sample_id))
-    sample = result.scalar_one_or_none()
-    if not sample:
-        raise HTTPException(404, "Sample not found")
-    if not sample.is_unclaimed:
-        raise HTTPException(400, "Sample is not unclaimed")
-
-    if body.name and body.name != sample.external_id:
-        await SampleService.refuse_ambiguous_label(session, sample.experiment_id, body.name)
-    sample.is_unclaimed = False
-    if body.name:
-        sample.external_id = body.name
-    await session.flush()
-
-    await log_action(session, user_id=user_id, entity_type="sample", entity_id=sample.id, action="claim")
+    sample = await SampleService.claim(
+        session, sample_id, int(current_user["org_id"]), int(current_user["sub"]), name=body.name
+    )
     await session.commit()
     return {"id": sample.id, "external_id": sample.external_id, "is_unclaimed": False}

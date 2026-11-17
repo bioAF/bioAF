@@ -16,7 +16,6 @@ from app.api.v1.integrations.dependencies import require_api_key_permission
 from app.database import get_session
 from app.models.experiment import Experiment
 from app.models.sample import Sample
-from app.models.sample_custom_field import SampleCustomField
 from app.models.sample_external_id_transition import SampleExternalIdTransition
 from app.schemas.integrations.common import CustomFieldOut
 from app.schemas.integrations.sample import (
@@ -26,22 +25,28 @@ from app.schemas.integrations.sample import (
     SampleUpdate,
 )
 from app.services import idempotency_service
-from app.services.audit_service import log_action
 from app.services.sample_service import SampleService
-from app.services.event_bus import event_bus
-from app.services.event_types import (
-    INTEGRATION_SAMPLE_CREATED,
-    INTEGRATION_SAMPLE_UPDATED,
-)
 
 router = APIRouter(prefix="/samples", tags=["Samples"])
 
 
-def _sample_out(sample: Sample) -> SampleOut:
+async def _sample_outs(session: AsyncSession, rows: list[Sample]) -> list[SampleOut]:
+    """Responses with each sample's experiment external ID, batch-loaded for the page."""
+    ids = {s.experiment_id for s in rows}
+    ext = {}
+    if ids:
+        ext = dict(
+            (await session.execute(select(Experiment.id, Experiment.external_id).where(Experiment.id.in_(ids)))).all()
+        )
+    return [_sample_out(s, ext.get(s.experiment_id)) for s in rows]
+
+
+def _sample_out(sample: Sample, experiment_external_id: str | None = None) -> SampleOut:
     return SampleOut(
         id=sample.id,
         external_id=sample.external_id,
         experiment_id=sample.experiment_id,
+        experiment_external_id=experiment_external_id,
         organism=sample.organism,
         tissue_type=sample.tissue_type,
         donor_source=sample.donor_source,
@@ -60,27 +65,6 @@ def _sample_out(sample: Sample) -> SampleOut:
             CustomFieldOut(field_name=cf.field_name, field_value=cf.field_value) for cf in (sample.custom_fields or [])
         ],
     )
-
-
-async def _apply_custom_fields(
-    session: AsyncSession,
-    sample_id: int,
-    existing_fields: list[SampleCustomField] | None,
-    fields_in: list[dict] | None,
-) -> None:
-    if fields_in is None:
-        return
-    existing = {cf.field_name: cf for cf in (existing_fields or [])}
-    for field in fields_in:
-        name = field["field_name"]
-        value = field.get("field_value")
-        if value is None and name in existing:
-            await session.delete(existing[name])
-        elif name in existing:
-            existing[name].field_value = value
-        else:
-            session.add(SampleCustomField(sample_id=sample_id, field_name=name, field_value=value))
-    await session.flush()
 
 
 def _reject_qc_status_in_payload(body: dict) -> None:
@@ -151,54 +135,31 @@ async def create_sample(
         raise HTTPException(409, "external_id_already_exists")
     await SampleService.refuse_ambiguous_label(session, body.experiment_id, body.external_id)
 
-    sample = Sample(
-        experiment_id=body.experiment_id,
-        external_id=body.external_id,
-        organism=body.organism,
-        tissue_type=body.tissue_type,
-        donor_source=body.donor_source,
-        treatment_condition=body.treatment_condition,
-        chemistry_version=body.chemistry_version,
-        cell_count=body.cell_count,
-        prep_notes=body.prep_notes,
-        molecule_type=body.molecule_type,
-        library_prep_method=body.library_prep_method,
-        assay=body.assay,
-        status="registered",
-    )
-    session.add(sample)
-    await session.flush()
-    await _apply_custom_fields(
-        session,
-        sample.id,
-        None,
-        [cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
-    )
-    await log_action(
+    sample = await SampleService.create_from_integration(
         session,
         user_id=int(user["sub"]),
         api_key_id=api_key_id,
-        entity_type="sample",
-        entity_id=sample.id,
-        action="created",
-        details={"external_id": body.external_id},
+        fields={
+            "experiment_id": body.experiment_id,
+            "external_id": body.external_id,
+            "organism": body.organism,
+            "tissue_type": body.tissue_type,
+            "donor_source": body.donor_source,
+            "treatment_condition": body.treatment_condition,
+            "chemistry_version": body.chemistry_version,
+            "cell_count": body.cell_count,
+            "prep_notes": body.prep_notes,
+            "molecule_type": body.molecule_type,
+            "library_prep_method": body.library_prep_method,
+            "assay": body.assay,
+        },
+        custom_fields=[cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
     )
     result = await session.execute(
         select(Sample).options(selectinload(Sample.custom_fields)).where(Sample.id == sample.id)
     )
     sample = result.scalar_one()
-    out = _sample_out(sample)
-    await event_bus.emit(
-        INTEGRATION_SAMPLE_CREATED,
-        {
-            "organization_id": org_id,
-            "data": {
-                "sample_id": sample.id,
-                "external_id": sample.external_id,
-                "experiment_id": sample.experiment_id,
-            },
-        },
-    )
+    out = (await _sample_outs(session, [sample]))[0]
     if idempotency_key is not None:
         await idempotency_service.record(
             session,
@@ -253,7 +214,7 @@ async def list_samples(
     if len(rows) > limit:
         next_cursor = str(rows[limit - 1].id)
         rows = rows[:limit]
-    return SampleListOut(items=[_sample_out(s) for s in rows], next_cursor=next_cursor)
+    return SampleListOut(items=await _sample_outs(session, rows), next_cursor=next_cursor)
 
 
 @router.get(
@@ -275,7 +236,7 @@ async def get_sample(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "sample_not_found")
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]
 
 
 @router.get(
@@ -307,7 +268,7 @@ async def get_sample_by_external(
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "sample_not_found")
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]
 
 
 @router.patch(
@@ -342,50 +303,28 @@ async def patch_sample(
     if row is None:
         raise HTTPException(404, "sample_not_found")
 
-    updates: dict = {}
-    for field in (
-        "organism",
-        "tissue_type",
-        "donor_source",
-        "treatment_condition",
-        "chemistry_version",
-        "cell_count",
-        "prep_notes",
-        "molecule_type",
-        "library_prep_method",
-        "assay",
-    ):
-        new_val = getattr(body, field, None)
-        if new_val is not None:
-            setattr(row, field, new_val)
-            updates[field] = new_val
-    await session.flush()
-    await _apply_custom_fields(
+    await SampleService.patch_from_integration(
         session,
-        row.id,
-        list(row.custom_fields or []),
-        [cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
-    )
-    await log_action(
-        session,
+        row,
         user_id=int(user["sub"]),
         api_key_id=int(user["api_key_id"]),
-        entity_type="sample",
-        entity_id=row.id,
-        action="updated",
-        details=updates,
-    )
-    await event_bus.emit(
-        INTEGRATION_SAMPLE_UPDATED,
-        {
-            "organization_id": org_id,
-            "data": {
-                "sample_id": row.id,
-                "external_id": row.external_id,
-                "changed_fields": list(updates.keys()),
-            },
+        fields={
+            f: getattr(body, f, None)
+            for f in (
+                "organism",
+                "tissue_type",
+                "donor_source",
+                "treatment_condition",
+                "chemistry_version",
+                "cell_count",
+                "prep_notes",
+                "molecule_type",
+                "library_prep_method",
+                "assay",
+            )
         },
+        custom_fields=[cf.model_dump() for cf in body.custom_fields] if body.custom_fields else None,
     )
     await session.commit()
     await session.refresh(row, attribute_names=["custom_fields"])
-    return _sample_out(row)
+    return (await _sample_outs(session, [row]))[0]

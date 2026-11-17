@@ -49,6 +49,7 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { type: "ingest.files_cataloged", label: "Files cataloged", description: "Uploaded files were cataloged and linked" },
       { type: "ingest.batch_complete", label: "Ingestion complete", description: "A file ingestion batch finished" },
       { type: "ingest.failure", label: "Ingestion failed", description: "A file ingestion batch failed" },
+      { type: "file_verification_failed", label: "File verification failed", description: "A file's checksum did not match, or it could not be verified" },
       { type: "ingest.unclaimed_entity", label: "Unclaimed entity", description: "An ingested entity could not be matched to a project" },
       { type: "ingest.unmatched_file", label: "Unmatched file", description: "An uploaded file could not be matched to a sample" },
       { type: "ingest.duplicate_file", label: "Duplicate file detected", description: "A duplicate file was found during ingestion" },

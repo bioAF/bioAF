@@ -2,6 +2,7 @@ import logging
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings
@@ -115,6 +116,9 @@ def _read_pyproject_version() -> str:
     return data["project"]["version"]
 
 
+MAX_FILE_VERIFICATION_CONCURRENCY = 8
+
+
 class Settings(BaseSettings):
     # Application
     app_name: str = "bioAF"
@@ -225,6 +229,26 @@ class Settings(BaseSettings):
     posthog_project_token: str = ""
     posthog_host: str = ""
 
+    # Internal webhook receivers (app/services/webhook_transport.py). Operator-only, set through the
+    # BIOAF_WEBHOOK_INTERNAL_DESTINATIONS environment variable as a JSON list of
+    # {"organization_id", "origin", "cidrs"} entries; changing it needs a restart. Empty by default:
+    # webhooks then reach public HTTPS receivers only. An invalid value refuses startup.
+    webhook_internal_destinations: Any = ()
+
+    # Checksum verification worker (app/services/file_verification_worker.py). One active digest job per
+    # process by default (BIOAF_FILE_VERIFICATION_CONCURRENCY, 1-8); reads in bounded chunks; a lease is
+    # renewed while work progresses and reclaimed after a crash. A job past its deadline is abandoned and
+    # retried. Raise concurrency only after measuring the deployment's storage throughput and memory.
+    file_verification_concurrency: int = 1
+    file_verification_lease_seconds: int = 300
+    file_verification_chunk_bytes: int = 8 * 1024 * 1024
+    file_verification_job_deadline_seconds: int = 6 * 3600
+    # NFS protected copies (app/adapters/storage/nfs_managed_copy.py): the UIDs pipelines, notebooks and
+    # uploads write NFS as (comma-separated), which must differ from the backend's, and the free space kept
+    # in reserve beyond one extra copy. Without producer UIDs, checksum-required NFS files are refused.
+    nfs_producer_uids: str = ""
+    nfs_managed_copy_reserve_bytes: int = 1024 * 1024 * 1024
+
     # Data-at-rest encryption (comma-separated Fernet keys; first key is the
     # primary writer, all keys are accepted readers).
     encryption_keys: str = ""
@@ -236,6 +260,20 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_compute_mode(cls, value: object) -> ComputeMode:
         return parse_compute_mode(value)
+
+    @field_validator("webhook_internal_destinations", mode="before")
+    @classmethod
+    def _parse_webhook_internal_destinations(cls, value: object) -> tuple:
+        from app.services.webhook_transport import parse_internal_destinations
+
+        return parse_internal_destinations(value)
+
+    @field_validator("file_verification_concurrency")
+    @classmethod
+    def _bound_file_verification_concurrency(cls, value: int) -> int:
+        if not 1 <= value <= MAX_FILE_VERIFICATION_CONCURRENCY:
+            raise ValueError(f"file_verification_concurrency must be between 1 and {MAX_FILE_VERIFICATION_CONCURRENCY}")
+        return value
 
     @field_validator("log_delivery", mode="before")
     @classmethod

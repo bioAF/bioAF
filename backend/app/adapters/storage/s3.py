@@ -20,6 +20,7 @@ incomplete S3 provider is unreachable on a GCP install (POLICY never resolves
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import BinaryIO
 
@@ -29,11 +30,16 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage import s3_signing
+from app.adapters.storage.digest import ordered_md5
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
+    DIGEST_CHUNK_BYTES,
+    ObjectChanged,
+    ObjectDigest,
+    ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
     ObjectMetadata,
@@ -70,10 +76,26 @@ def _is_not_found(error) -> bool:
     return code in {"NoSuchKey", "NotFound", "404"} or status == 404
 
 
+_HEX_MD5 = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _trusted_md5(head: dict) -> str | None:
+    """The object's MD5 from a HEAD response, only when the ETag provably is one.
+
+    An ETag is the MD5 of the whole object only for a single-part upload stored with SSE-S3
+    (``AES256``). A multipart ETag (``<hash>-<parts>``), SSE-KMS/DSSE or SSE-C encryption, or a
+    response that does not say how the object is encrypted proves nothing; neither does
+    uploader-controlled user metadata. Copies of 8 MiB or more are multipart (the managed-transfer
+    default), so large copied objects normally have no native MD5 and must be streamed.
+    """
+    if head.get("ServerSideEncryption") != "AES256" or head.get("SSECustomerAlgorithm"):
+        return None
+    etag = (head.get("ETag") or "").strip('"').lower()
+    return etag if _HEX_MD5.match(etag) else None
+
+
 def _etag_to_md5(etag: str | None) -> str | None:
-    """An S3 ETag is the object's MD5 only for a single-part upload; a multipart
-    ETag is ``<hash>-<partcount>`` and is not a usable checksum. Return the hex MD5
-    when single-part, else None (the raw ETag is kept in provider_details)."""
+    """Kept for callers that only need the multipart test; it does NOT prove an MD5 (see _trusted_md5)."""
     if not etag:
         return None
     etag = etag.strip('"')
@@ -503,6 +525,32 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_object_metadata, uri, creds)
 
+    async def object_identity(self, uri: str) -> ObjectIdentity:
+        if self.is_local:
+            size, version = await asyncio.to_thread(self._local_fs().identity, uri)
+            return ObjectIdentity(uri=uri, size_bytes=size, version=version)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_object_identity, uri, creds)
+
+    async def stream_md5(
+        self, identity: ObjectIdentity, *, chunk_size: int = DIGEST_CHUNK_BYTES, on_progress=None
+    ) -> ObjectDigest:
+        if self.is_local:
+            read, close = await asyncio.to_thread(self._local_fs().open_version, identity.uri, identity.version)
+        else:
+            creds = await self._get_credentials()
+            body = await asyncio.to_thread(self._s3_open_version, identity, creds)
+            read, close = body.read, body.close
+        return await ordered_md5(
+            read,
+            close,
+            uri=identity.uri,
+            version=identity.version,
+            expected_size=identity.size_bytes,
+            chunk_size=chunk_size,
+            on_progress=on_progress,
+        )
+
     async def get_bucket_info(self, uri: str) -> dict:
         if self.is_local:
             # The local filesystem store has no object versioning.
@@ -759,7 +807,8 @@ class S3StorageProvider(StorageProvider):
             filename=key.split("/")[-1],
             storage_uri=f"s3://{bucket}/{key}",
             size_bytes=obj.get("Size"),
-            md5_hash=_etag_to_md5(obj.get("ETag")),
+            # A listing does not say how an object is encrypted, so its ETag cannot prove an MD5.
+            md5_hash=None,
             provider_details=details,
             uploaded_at=obj.get("LastModified"),
         )
@@ -785,7 +834,10 @@ class S3StorageProvider(StorageProvider):
     def _s3_copy(self, source_uri: str, dest_uri: str, creds) -> None:
         src_bucket, src_key = self._parse_uri(source_uri)
         dst_bucket, dst_key = self._parse_uri(dest_uri)
-        # client.copy() (managed) auto-uses multipart for objects >5 GiB (genomics-scale).
+        # client.copy() is a managed transfer: with the installed s3transfer default it switches to a
+        # multipart copy at 8 MiB (TransferConfig.multipart_threshold), not at the 5 GiB single-copy
+        # limit. A multipart copy's ETag is not the object's MD5, so a large copied object has no native
+        # MD5 and checksum verification streams it. The threshold is deliberately left alone.
         self._get_s3_client(creds).copy({"Bucket": src_bucket, "Key": src_key}, dst_bucket, dst_key)
 
     def _s3_move(self, source_uri: str, dest_uri: str, creds) -> None:
@@ -817,12 +869,44 @@ class S3StorageProvider(StorageProvider):
         return ObjectMetadata(
             uri=uri,
             size_bytes=resp.get("ContentLength"),
-            md5_hash=_etag_to_md5(resp.get("ETag")),
+            md5_hash=_trusted_md5(resp),
             content_type=resp.get("ContentType"),
             storage_class=resp.get("StorageClass", "STANDARD"),
             updated=str(resp["LastModified"]) if resp.get("LastModified") else None,
             metadata=dict(resp.get("Metadata") or {}),
         )
+
+    def _s3_object_identity(self, uri: str, creds) -> ObjectIdentity:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            resp = self._get_s3_client(creds).head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        version_id = resp.get("VersionId")
+        version = f"versionid:{version_id}" if version_id and version_id != "null" else f"etag:{resp.get('ETag')}"
+        return ObjectIdentity(
+            uri=uri, size_bytes=resp.get("ContentLength") or 0, version=version, native_md5=_trusted_md5(resp)
+        )
+
+    def _s3_open_version(self, identity: ObjectIdentity, creds):
+        """One ordered GET of exactly the identified version: by VersionId, else conditional on the ETag."""
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(identity.uri)
+        kind, _, value = identity.version.partition(":")
+        kwargs = {"VersionId": value} if kind == "versionid" else {"IfMatch": value}
+        try:
+            resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key, **kwargs)
+        except ClientError as e:
+            code = str(e.response.get("Error", {}).get("Code", ""))
+            if code in {"PreconditionFailed", "412", "NoSuchVersion", "NoSuchKey", "404", "InvalidArgument"}:
+                raise ObjectChanged(identity.uri) from e
+            raise
+        return resp["Body"]
 
     def _s3_get_bucket_info(self, uri: str, creds) -> dict:
         bucket_name, _ = self._parse_uri(uri)

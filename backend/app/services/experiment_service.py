@@ -16,10 +16,13 @@ from app.models.sample import Sample
 from app.schemas.experiment import CustomFieldValue, ExperimentCreate, ExperimentUpdate, FieldDefaultValue
 from app.services.audit_service import log_action
 from app.services.code_service import CodeService
-from app.services.event_bus import event_bus
-from app.services.event_types import EXPERIMENT_STATUS_CHANGED
+from app.services.event_types import (
+    EXPERIMENT_STATUS_CHANGED,
+    INTEGRATION_EXPERIMENT_CREATED,
+    INTEGRATION_EXPERIMENT_UPDATED,
+)
+from app.services.post_commit_events import defer_event
 from app.services.vocabulary_validator import VocabularyValidator
-from app.runtime import spawn_event
 
 
 def _escape_like(text: str) -> str:
@@ -27,7 +30,90 @@ def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _custom_field_state(rows) -> list[tuple]:
+    return sorted((r.field_name, r.field_value, r.field_type, bool(r.is_required)) for r in rows)
+
+
+def _field_default_state(rows) -> list[tuple]:
+    return sorted((r.field_name, r.default_value, bool(r.is_required)) for r in rows)
+
+
 class ExperimentService:
+    # -- webhook-producing primitives: mutation, audit and the deferred event live together ----
+
+    @staticmethod
+    async def _announce_created(session: AsyncSession, experiment: Experiment) -> None:
+        from app.services import entity_references, webhook_events
+
+        ref = await entity_references.experiment_reference(session, experiment)
+        defer_event(
+            session, INTEGRATION_EXPERIMENT_CREATED, webhook_events.experiment_created(experiment.organization_id, ref)
+        )
+
+    @staticmethod
+    async def _announce_updated(session: AsyncSession, experiment: Experiment, changed: set[str]) -> None:
+        """``experiment.updated`` for the fields that actually changed; nothing when none did."""
+        if not changed:
+            return
+        from app.services import entity_references, webhook_events
+
+        ref = await entity_references.experiment_reference(session, experiment)
+        defer_event(
+            session,
+            INTEGRATION_EXPERIMENT_UPDATED,
+            webhook_events.experiment_updated(experiment.organization_id, ref, changed),
+        )
+
+    @staticmethod
+    async def _change_status(
+        session: AsyncSession,
+        experiment: Experiment,
+        new_status: str,
+        user_id: int | None,
+        *,
+        action: str = "status_change",
+        details: dict | None = None,
+    ) -> None:
+        """The one status writer: set, audit, and defer ``experiment.status_changed``.
+
+        The deferred payload keeps the notification fields its other subscribers read (``org_id``,
+        title, message, metadata) and carries the public snapshot in ``data``. Callers validate the
+        transition and own the transaction.
+        """
+        from app.services import entity_references, webhook_events
+
+        old_status = experiment.status
+        experiment.status = new_status
+        snap = serialize_entity(experiment)
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="experiment",
+            entity_id=experiment.id,
+            action=action,
+            details=details if details is not None else {"status": new_status},
+            previous_value={"status": old_status},
+            snapshot=snap,
+        )
+        ref = await entity_references.experiment_reference(session, experiment)
+        defer_event(
+            session,
+            EXPERIMENT_STATUS_CHANGED,
+            {
+                "event_type": EXPERIMENT_STATUS_CHANGED,
+                "org_id": experiment.organization_id,
+                "user_id": user_id,
+                "entity_type": "experiment",
+                "entity_id": experiment.id,
+                "title": f"Experiment '{experiment.name}' status changed to {new_status}",
+                "message": f"Status changed from {old_status} to {new_status}",
+                "summary": f"Experiment '{experiment.name}' is now {new_status}",
+                "metadata": {"old_status": old_status, "new_status": new_status},
+                "data": webhook_events.experiment_status_data(ref, old_status, new_status),
+            },
+        )
+
     @staticmethod
     async def create_experiment(
         session: AsyncSession, org_id: int, user_id: int, data: ExperimentCreate, *, via_assistant: bool = False
@@ -92,6 +178,153 @@ class ExperimentService:
             details=create_details,
             snapshot=serialize_entity(experiment),
         )
+        await ExperimentService._announce_created(session, experiment)
+        return experiment
+
+    @staticmethod
+    async def _merge_custom_fields(
+        session: AsyncSession, experiment_id: int, existing_rows, fields_in: list[dict] | None
+    ) -> bool:
+        """The Integration API's merge semantics: a null value removes a field, others upsert.
+        Returns whether anything actually changed."""
+        if fields_in is None:
+            return False
+        existing = {cf.field_name: cf for cf in (existing_rows or [])}
+        changed = False
+        for field in fields_in:
+            name = field["field_name"]
+            value = field.get("field_value")
+            if value is None:
+                if name in existing:
+                    await session.delete(existing[name])
+                    changed = True
+            elif name in existing:
+                if existing[name].field_value != value:
+                    existing[name].field_value = value
+                    changed = True
+            else:
+                session.add(
+                    ExperimentCustomField(
+                        experiment_id=experiment_id, field_name=name, field_value=value, field_type="text"
+                    )
+                )
+                changed = True
+        await session.flush()
+        return changed
+
+    @staticmethod
+    async def create_from_integration(
+        session: AsyncSession,
+        *,
+        org_id: int,
+        user_id: int,
+        api_key_id: int,
+        project_id: int | None,
+        external_id: str,
+        name: str,
+        hypothesis: str | None,
+        description: str | None,
+        expected_sample_count: int | None,
+        variables_json: dict | None,
+        custom_fields: list[dict] | None,
+    ) -> Experiment:
+        """An Integration API create: always ``registered``, audited with the API key, announced once.
+        The caller has authorized the project and checked the external ID, and owns the transaction."""
+        code = await CodeService.next_experiment_code(session, org_id, project_id)
+        experiment = Experiment(
+            organization_id=org_id,
+            project_id=project_id,
+            external_id=external_id,
+            name=name,
+            code=code,
+            hypothesis=hypothesis,
+            description=description,
+            expected_sample_count=expected_sample_count,
+            variables_json=variables_json,
+            owner_user_id=user_id,
+            status="registered",
+        )
+        session.add(experiment)
+        await session.flush()
+        await ExperimentService._merge_custom_fields(session, experiment.id, None, custom_fields)
+        await log_action(
+            session,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            entity_type="experiment",
+            entity_id=experiment.id,
+            action="created",
+            details={"external_id": external_id, "name": name},
+        )
+        await ExperimentService._announce_created(session, experiment)
+        return experiment
+
+    @staticmethod
+    async def patch_from_integration(
+        session: AsyncSession,
+        experiment: Experiment,
+        *,
+        user_id: int,
+        api_key_id: int,
+        fields: dict,
+        custom_fields: list[dict] | None,
+    ) -> None:
+        """An Integration API PATCH (never status): set supplied fields, merge custom fields, audit, and
+        announce the fields that actually changed."""
+        updates: dict = {}
+        changed: set[str] = set()
+        for field, new_val in fields.items():
+            if new_val is None:
+                continue
+            if getattr(experiment, field) != new_val:
+                changed.add(field)
+            setattr(experiment, field, new_val)
+            updates[field] = new_val
+        await session.flush()
+        if await ExperimentService._merge_custom_fields(
+            session, experiment.id, list(experiment.custom_fields or []), custom_fields
+        ):
+            changed.add("custom_fields")
+        await log_action(
+            session,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            entity_type="experiment",
+            entity_id=experiment.id,
+            action="updated",
+            details=updates,
+        )
+        await ExperimentService._announce_updated(session, experiment, changed)
+
+    @staticmethod
+    async def claim(
+        session: AsyncSession,
+        experiment_id: int,
+        org_id: int,
+        user_id: int,
+        *,
+        name: str | None,
+        description: str | None,
+    ) -> Experiment:
+        """Claim an existing unclaimed experiment of this organization; announce what changed."""
+        experiment = (
+            await session.execute(
+                select(Experiment).where(Experiment.id == experiment_id, Experiment.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if experiment is None:
+            raise NotFoundError("Experiment not found", plain_body=True)
+        if not experiment.is_unclaimed:
+            raise ValidationError("Experiment is not unclaimed", plain_body=True)
+        changed = {"is_unclaimed"}
+        experiment.is_unclaimed = False
+        for field, value in (("owner_user_id", user_id), ("name", name), ("description", description)):
+            if value and getattr(experiment, field) != value:
+                setattr(experiment, field, value)
+                changed.add(field)
+        await session.flush()
+        await log_action(session, user_id=user_id, entity_type="experiment", entity_id=experiment.id, action="claim")
+        await ExperimentService._announce_updated(session, experiment, changed)
         return experiment
 
     @staticmethod
@@ -171,6 +404,7 @@ class ExperimentService:
 
         previous = {}
         updates = {}
+        changed: set[str] = set()
         for field in [
             "name",
             "hypothesis",
@@ -189,13 +423,17 @@ class ExperimentService:
                 previous[field] = str(old_val) if old_val is not None else None
                 setattr(experiment, field, new_val)
                 updates[field] = str(new_val) if new_val is not None else None
+                if old_val != new_val:
+                    changed.add(field)
 
         if data.field_defaults is not None:
             # Delete existing field defaults and replace
             existing = await session.execute(
                 select(ExperimentFieldDefault).where(ExperimentFieldDefault.experiment_id == experiment_id)
             )
-            for row in existing.scalars().all():
+            existing_rows = existing.scalars().all()
+            before = _field_default_state(existing_rows)
+            for row in existing_rows:
                 await session.delete(row)
             await session.flush()
 
@@ -211,13 +449,20 @@ class ExperimentService:
                 {"field_name": fd.field_name, "default_value": fd.default_value, "is_required": fd.is_required}
                 for fd in data.field_defaults
             ]
+            after: list[tuple] = sorted(
+                (fd.field_name, fd.default_value, bool(fd.is_required)) for fd in data.field_defaults
+            )
+            if before != after:
+                changed.add("field_defaults")
 
         if data.custom_fields is not None:
             # Delete existing custom fields and replace
             existing_cf = await session.execute(
                 select(ExperimentCustomField).where(ExperimentCustomField.experiment_id == experiment_id)
             )
-            for row in existing_cf.scalars().all():
+            existing_rows = existing_cf.scalars().all()
+            before = _custom_field_state(existing_rows)
+            for row in existing_rows:
                 await session.delete(row)
             await session.flush()
 
@@ -234,6 +479,11 @@ class ExperimentService:
                 {"field_name": cf.field_name, "field_value": cf.field_value, "is_required": cf.is_required}
                 for cf in data.custom_fields
             ]
+            after = sorted(
+                (cf.field_name, cf.field_value, cf.field_type, bool(cf.is_required)) for cf in data.custom_fields
+            )
+            if before != after:
+                changed.add("custom_fields")
 
         if updates:
             snap = serialize_entity(experiment)
@@ -248,6 +498,7 @@ class ExperimentService:
                 previous_value=previous,
                 snapshot=snap,
             )
+        await ExperimentService._announce_updated(session, experiment, changed)
         return experiment
 
     @staticmethod
@@ -272,40 +523,7 @@ class ExperimentService:
                 plain_body=True,
             )
 
-        old_status = experiment.status
-        experiment.status = new_status
-        snap = serialize_entity(experiment)
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="experiment",
-            entity_id=experiment.id,
-            action="status_change",
-            details={"status": new_status},
-            previous_value={"status": old_status},
-            snapshot=snap,
-        )
-
-        spawn_event(
-            event_bus.emit(
-                EXPERIMENT_STATUS_CHANGED,
-                {
-                    "event_type": EXPERIMENT_STATUS_CHANGED,
-                    "org_id": org_id,
-                    "user_id": user_id,
-                    "entity_type": "experiment",
-                    "entity_id": experiment.id,
-                    "title": f"Experiment '{experiment.name}' status changed to {new_status}",
-                    "message": f"Status changed from {old_status} to {new_status}",
-                    "summary": f"Experiment '{experiment.name}' is now {new_status}",
-                    "metadata": {"old_status": old_status, "new_status": new_status},
-                },
-            ),
-            event_type=EXPERIMENT_STATUS_CHANGED,
-        )
-
+        await ExperimentService._change_status(session, experiment, new_status, user_id)
         return experiment
 
     @staticmethod
@@ -397,20 +615,9 @@ class ExperimentService:
         if not experiment:
             return None
 
-        old_status = experiment.status
-        experiment.status = "deleted"
-        snap = serialize_entity(experiment)
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="experiment",
-            entity_id=experiment.id,
-            action="delete",
-            details={"status": "deleted"},
-            previous_value={"status": old_status},
-            snapshot=snap,
+        # Soft deletion is a status change: it is audited as a delete and announced as one.
+        await ExperimentService._change_status(
+            session, experiment, "deleted", user_id, action="delete", details={"status": "deleted"}
         )
         return experiment
 

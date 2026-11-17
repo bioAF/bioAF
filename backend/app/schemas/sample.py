@@ -154,6 +154,10 @@ class SampleStatusUpdate(BaseModel):
 class SampleResponse(BaseModel):
     id: int
     external_id: str | None
+    # The sample's experiment, by bioAF ID and external ID: sample external IDs are unique only per
+    # experiment, so the pair is what identifies the sample to an outside system.
+    experiment_id: int | None = None
+    experiment_external_id: str | None = None
     # The source label migration 080 replaced with external_id (the experiment held it more than
     # once); null for every other sample.
     relabeled_from: str | None = None

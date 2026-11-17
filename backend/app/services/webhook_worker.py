@@ -1,8 +1,10 @@
 """Background worker for delivering pending webhook rows (ADR-051).
 
 Polls webhook_deliveries.status='pending' with FOR UPDATE SKIP LOCKED, posts
-to the subscriber URL with HMAC-signed body, and applies exponential backoff
-on failure. Dead-letters after MAX_ATTEMPTS.
+the HMAC-signed body through the enforcing transport (webhook_transport), and
+applies exponential backoff on failure. Dead-letters after MAX_ATTEMPTS. A
+destination the policy refuses fails at once, with no request made. Deliveries
+record safe codes (webhook_transport), never receiver bodies or raw errors.
 """
 
 from __future__ import annotations
@@ -13,27 +15,24 @@ import logging
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from sqlalchemy import select
 
 from app.models.webhook import WebhookDelivery, WebhookSubscription
 from app import runtime
-from app.services import webhook_service
+from app.services import webhook_service, webhook_transport
 from app.tasks.periodic import wait_or_stop
 
 logger = logging.getLogger("bioaf.webhook_worker")
 
 POLL_INTERVAL_SECONDS = 5
 BATCH_SIZE = 50
-REQUEST_TIMEOUT_SECONDS = 10
-MAX_RESPONSE_BODY_BYTES = 4096
 
 
 async def _send_one(
-    client: httpx.AsyncClient,
     delivery: WebhookDelivery,
     subscription: WebhookSubscription,
-) -> tuple[bool, int | None, str | None]:
+) -> webhook_transport.DeliveryOutcome:
+    """One authorized POST attempt through the enforcing transport (the only outbound path)."""
     body_bytes = json.dumps(delivery.payload_json, sort_keys=True).encode()
     signature = webhook_service.sign_payload(subscription.secret, body_bytes)
     headers = {
@@ -42,13 +41,16 @@ async def _send_one(
         "X-bioAF-Delivery": str(delivery.id),
         "X-bioAF-Signature": signature,
     }
-    try:
-        resp = await client.post(subscription.url, content=body_bytes, headers=headers)
-        body_truncated = resp.text[:MAX_RESPONSE_BODY_BYTES]
-        return (200 <= resp.status_code < 300, resp.status_code, body_truncated)
-    except Exception as exc:
-        logger.warning("webhook POST failed: %s", exc)
-        return (False, None, str(exc)[:MAX_RESPONSE_BODY_BYTES])
+    outcome = await webhook_transport.post_webhook(subscription.url, subscription.organization_id, body_bytes, headers)
+    if not outcome.delivered:
+        # IDs and a safe code only: never the URL, the receiver's body, or raw upstream errors.
+        logger.warning(
+            "webhook delivery %s (subscription %s) attempt failed: %s",
+            delivery.id,
+            subscription.id,
+            outcome.code,
+        )
+    return outcome
 
 
 async def _drain_once() -> int:
@@ -81,38 +83,42 @@ async def _drain_once() -> int:
         )
         subs_by_id = {s.id: s for s in subs}
 
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-            for delivery in deliveries:
-                sub = subs_by_id.get(delivery.subscription_id)
-                if sub is None or not sub.is_active:
-                    # Subscription gone or disabled: mark delivered to avoid
-                    # spinning. Operators can review the audit log.
-                    delivery.status = "failed"
-                    delivery.last_attempted_at = datetime.now(timezone.utc)
-                    delivery.last_response_status = None
-                    delivery.last_response_body = "subscription_inactive_or_missing"
-                    continue
-                ok, status_code, body = await _send_one(client, delivery, sub)
+        for delivery in deliveries:
+            sub = subs_by_id.get(delivery.subscription_id)
+            if sub is None or not sub.is_active:
+                # Subscription gone or disabled: mark delivered to avoid
+                # spinning. Operators can review the audit log.
+                delivery.status = "failed"
                 delivery.last_attempted_at = datetime.now(timezone.utc)
-                delivery.last_response_status = status_code
-                delivery.last_response_body = body
-                delivery.attempt_count = (delivery.attempt_count or 0) + 1
-                if ok:
-                    delivery.status = "delivered"
-                    delivery.delivered_at = datetime.now(timezone.utc)
-                    delivery.next_attempt_at = None
-                elif delivery.attempt_count >= webhook_service.MAX_ATTEMPTS:
-                    delivery.status = "dead_letter"
-                    delivery.next_attempt_at = None
-                else:
-                    backoff_index = min(
-                        delivery.attempt_count - 1,
-                        len(webhook_service.BACKOFF_SECONDS) - 1,
-                    )
-                    delivery.next_attempt_at = datetime.now(timezone.utc) + timedelta(
-                        seconds=webhook_service.BACKOFF_SECONDS[backoff_index]
-                    )
-                processed += 1
+                delivery.last_response_status = None
+                delivery.last_response_body = "subscription_inactive_or_missing"
+                continue
+            outcome = await _send_one(delivery, sub)
+            delivery.last_attempted_at = datetime.now(timezone.utc)
+            delivery.last_response_status = outcome.status_code
+            delivery.last_response_body = outcome.code
+            delivery.attempt_count = (delivery.attempt_count or 0) + 1
+            if outcome.delivered:
+                delivery.status = "delivered"
+                delivery.delivered_at = datetime.now(timezone.utc)
+                delivery.next_attempt_at = None
+            elif outcome.terminal:
+                # A malformed or denied destination: no request was made, and no retry can
+                # change that until an administrator corrects the subscription and replays.
+                delivery.status = "failed"
+                delivery.next_attempt_at = None
+            elif delivery.attempt_count >= webhook_service.MAX_ATTEMPTS:
+                delivery.status = "dead_letter"
+                delivery.next_attempt_at = None
+            else:
+                backoff_index = min(
+                    delivery.attempt_count - 1,
+                    len(webhook_service.BACKOFF_SECONDS) - 1,
+                )
+                delivery.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=webhook_service.BACKOFF_SECONDS[backoff_index]
+                )
+            processed += 1
         await session.commit()
     return processed
 

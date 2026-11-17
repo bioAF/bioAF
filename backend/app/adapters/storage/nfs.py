@@ -22,11 +22,16 @@ from typing import BinaryIO
 from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
+from app.adapters.storage import nfs_managed_copy
+from app.adapters.storage.digest import ordered_md5
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.adapters.storage.uri import split_storage_uri
 from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
+    DIGEST_CHUNK_BYTES,
+    ObjectDigest,
+    ObjectIdentity,
     BucketMetrics,
     ObjectMetadata,
     validate_object_metadata,
@@ -92,11 +97,14 @@ class NfsStorageProvider(StorageProvider):
         """Every object under the run's output directory URI, with its canonical, readable URI.
 
         Discovery only: nothing is copied. The directory is listed with a trailing separator, so
-        run 1 never collects runs 10 or 100; directory placeholder objects are skipped.
+        run 1 never collects runs 10 or 100; directory placeholder objects are skipped, and so are
+        protected verification copies (``verified-files/``), which are never outputs to register.
         """
         self._parse_uri(output_uri)
         objects = await self.list_objects(directory_prefix(output_uri))
-        return [o for o in objects if o.filename]
+        return [
+            o for o in objects if o.filename and not nfs_managed_copy.is_managed_key(self._parse_uri(o.storage_uri)[1])
+        ]
 
     async def get_storage_metrics(self) -> StorageMetrics:
         return await asyncio.to_thread(self._storage_metrics)
@@ -251,8 +259,15 @@ class NfsStorageProvider(StorageProvider):
         await asyncio.to_thread(self._fs.download_to_filename, uri, local_path)
 
     async def delete(self, uri: str, *, generation: int | None = None) -> None:
-        # A filesystem has no object generations; ignore ``generation``.
+        # A filesystem has no object generations; ignore ``generation``. A protected managed copy is
+        # published read-only, so it is removed by the managed-artifact procedure, never a bare unlink.
+        if self._is_managed(uri):
+            await self.remove_managed_artifact(uri)
+            return
         await asyncio.to_thread(self._fs.delete, uri)
+
+    def _is_managed(self, uri: str) -> bool:
+        return nfs_managed_copy.is_managed_key(self._parse_uri(uri)[1])
 
     async def exists(self, uri: str) -> bool:
         return await asyncio.to_thread(self._fs.exists, uri)
@@ -273,12 +288,84 @@ class NfsStorageProvider(StorageProvider):
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         # Copy-verify-delete: leave the source intact if the copy fails.
+        if self._is_managed(source_uri):
+            if await asyncio.to_thread(self._copy_managed_for_move, source_uri, dest_uri):
+                await self.remove_managed_artifact(source_uri)
+            return dest_uri
         await asyncio.to_thread(self._fs.move, source_uri, dest_uri)
         return dest_uri
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
         size = await asyncio.to_thread(self._fs.size, uri)
         return ObjectMetadata(uri=uri, size_bytes=size, metadata=await asyncio.to_thread(self._fs.read_metadata, uri))
+
+    async def object_identity(self, uri: str) -> ObjectIdentity:
+        # A filesystem has no provider digest: an expectation always streams (from the protected
+        # managed copy once 01B.3's finalization applies).
+        size, version = await asyncio.to_thread(self._fs.identity, uri)
+        return ObjectIdentity(uri=uri, size_bytes=size, version=version)
+
+    async def stream_md5(
+        self, identity: ObjectIdentity, *, chunk_size: int = DIGEST_CHUNK_BYTES, on_progress=None
+    ) -> ObjectDigest:
+        read, close = await asyncio.to_thread(self._fs.open_version, identity.uri, identity.version)
+        return await ordered_md5(
+            read,
+            close,
+            uri=identity.uri,
+            version=identity.version,
+            expected_size=identity.size_bytes,
+            chunk_size=chunk_size,
+            on_progress=on_progress,
+        )
+
+    # -- protected managed copies (01B.3, app/adapters/storage/nfs_managed_copy.py) -----------
+
+    async def prepare_managed_copy(
+        self,
+        source_uri: str,
+        *,
+        dest_store: str,
+        file_uuid,
+        artifact_uuid,
+        chunk_size: int = DIGEST_CHUNK_BYTES,
+        reserve_bytes: int = nfs_managed_copy.DEFAULT_RESERVE_BYTES,
+        on_progress=None,
+    ) -> nfs_managed_copy.ManagedCopy:
+        """Copy a completed output into a new read-only service-owned artifact (see the module)."""
+        self._fs.path(source_uri)  # confinement and URI shape, before any open
+        store, key = self._parse_uri(source_uri)
+        return await nfs_managed_copy.copy_to_managed(
+            self._root,
+            source=(store, key, source_uri),
+            dest_store=dest_store,
+            file_uuid=file_uuid,
+            artifact_uuid=artifact_uuid,
+            build_uri=self.build_uri,
+            chunk_size=chunk_size,
+            reserve_bytes=reserve_bytes,
+            on_progress=on_progress,
+        )
+
+    def _copy_managed_for_move(self, source_uri: str, dest_uri: str) -> bool:
+        """The copy half of moving a protected copy, with the filesystem move's own checks: both URIs
+        confined, and a move onto the same file is a no-op (False: nothing to remove afterwards)."""
+        src = self._fs.path(source_uri)
+        dest = self._fs.path(dest_uri)
+        if os.path.exists(dest) and os.path.samefile(src, dest):
+            return False
+        self._fs.copy(source_uri, dest_uri)
+        if not os.path.isfile(dest):
+            raise RuntimeError(f"Move verification failed: {dest_uri!r} not written")
+        return True
+
+    async def remove_managed_artifact(self, uri: str) -> None:
+        self._fs.path(uri)  # the same container/key confinement as every other operation, first
+        store, key = self._parse_uri(uri)
+        await asyncio.to_thread(nfs_managed_copy.remove_managed_artifact, self._root, store, key, uri)
+
+    def managed_preflight(self, store: str, producer_uids) -> None:
+        nfs_managed_copy.preflight(self._root, store, producer_uids=producer_uids)
 
     async def get_bucket_info(self, uri: str) -> dict:
         # A filesystem store has no object versioning.

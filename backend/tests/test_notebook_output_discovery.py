@@ -5,6 +5,14 @@ import pytest_asyncio
 from sqlalchemy import text
 
 
+async def _ns(cs_id: int, name: str) -> str:
+    """A URI inside the session's own storage namespace, the only place outputs may be registered from."""
+    from app.adapters.models import StorageStore
+    from app.adapters.registry import get_storage_adapter
+
+    return await get_storage_adapter().resolve_uri(StorageStore.WORKING, f"sessions/{cs_id}/{name}")
+
+
 @pytest_asyncio.fixture
 async def session_with_experiment(session, admin_user):
     """Create a compute session linked to an experiment."""
@@ -47,9 +55,13 @@ class TestOutputRegistration:
                     {
                         "filename": "analysis.h5ad",
                         "size_bytes": 500_000_000,
-                        "gcs_uri": "gs://bucket/outputs/analysis.h5ad",
+                        "gcs_uri": await _ns(cs.id, "outputs/analysis.h5ad"),
                     },
-                    {"filename": "figure.png", "size_bytes": 2_000_000, "gcs_uri": "gs://bucket/outputs/figure.png"},
+                    {
+                        "filename": "figure.png",
+                        "size_bytes": 2_000_000,
+                        "gcs_uri": await _ns(cs.id, "outputs/figure.png"),
+                    },
                 ],
             },
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -82,7 +94,7 @@ class TestOutputRegistration:
             f"/api/v1/notebooks/sessions/{cs.id}/register-outputs",
             json={
                 "outputs": [
-                    {"filename": "result.csv", "size_bytes": 1_000, "gcs_uri": "gs://bucket/result.csv"},
+                    {"filename": "result.csv", "size_bytes": 1_000, "gcs_uri": await _ns(cs.id, "result.csv")},
                 ],
             },
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -106,9 +118,9 @@ class TestOutputRegistration:
             f"/api/v1/notebooks/sessions/{cs.id}/register-outputs",
             json={
                 "outputs": [
-                    {"filename": ".bash_history", "size_bytes": 500, "gcs_uri": "gs://bucket/.bash_history"},
-                    {"filename": ".Rhistory", "size_bytes": 300, "gcs_uri": "gs://bucket/.Rhistory"},
-                    {"filename": "real_output.csv", "size_bytes": 1000, "gcs_uri": "gs://bucket/real_output.csv"},
+                    {"filename": ".bash_history", "size_bytes": 500, "gcs_uri": await _ns(cs.id, ".bash_history")},
+                    {"filename": ".Rhistory", "size_bytes": 300, "gcs_uri": await _ns(cs.id, ".Rhistory")},
+                    {"filename": "real_output.csv", "size_bytes": 1000, "gcs_uri": await _ns(cs.id, "real_output.csv")},
                 ],
             },
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -130,9 +142,13 @@ class TestOutputRegistration:
                     {
                         "filename": "data/input_file.h5ad",
                         "size_bytes": 500_000,
-                        "gcs_uri": "gs://bucket/data/input.h5ad",
+                        "gcs_uri": await _ns(cs.id, "data/input.h5ad"),
                     },
-                    {"filename": "notebook_output.ipynb", "size_bytes": 10_000, "gcs_uri": "gs://bucket/output.ipynb"},
+                    {
+                        "filename": "notebook_output.ipynb",
+                        "size_bytes": 10_000,
+                        "gcs_uri": await _ns(cs.id, "output.ipynb"),
+                    },
                 ],
             },
             headers={"Authorization": f"Bearer {admin_token}"},

@@ -50,6 +50,14 @@ services:
       BIOAF_INSTALL_METRICS_DISABLED: ${BIOAF_INSTALL_METRICS_DISABLED:-false}
       BIOAF_POSTHOG_PROJECT_TOKEN: ${BIOAF_POSTHOG_PROJECT_TOKEN:-}
       BIOAF_POSTHOG_HOST: ${BIOAF_POSTHOG_HOST:-}
+      # Internal webhook receivers (docs/configuration.md#webhook-destination-settings). Empty: public
+      # HTTPS receivers only. A JSON list set by the operator in the host env file; restart to apply.
+      BIOAF_WEBHOOK_INTERNAL_DESTINATIONS: ${BIOAF_WEBHOOK_INTERNAL_DESTINATIONS:-}
+      # NFS checksum verification (docs/deployment-guide.md#provisioning-nfs-for-verification): the UIDs
+      # producers write NFS as. Unset: checksum-required NFS files stay unready with a visible error.
+      BIOAF_NFS_PRODUCER_UIDS: ${BIOAF_NFS_PRODUCER_UIDS:-}
+      # Checksum verifications run at once per backend (1-8; docs/configuration.md#file-verification-settings).
+      BIOAF_FILE_VERIFICATION_CONCURRENCY: ${BIOAF_FILE_VERIFICATION_CONCURRENCY:-1}
       BIOAF_DEBUG: "false"
       BIOAF_USE_SECRET_MANAGER: "false"
       # A restore checks the database volume has room for the restored copy and its WAL before creating it.

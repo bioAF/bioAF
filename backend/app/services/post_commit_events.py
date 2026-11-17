@@ -57,6 +57,16 @@ def defer_event(session: AsyncSession | Session, event_type: str, payload: dict[
     sync_session.info.setdefault(_PENDING_KEY, []).append(_Pending(owner, event_type, payload))
 
 
+def pending_event_types(session: AsyncSession | Session) -> list[str]:
+    """The event types deferred on ``session`` and not yet published (in deferral order).
+
+    A command that owns its transaction reads this just before committing to know which events the
+    commit should publish, so it can check each one was handled.
+    """
+    sync_session = session.sync_session if isinstance(session, AsyncSession) else session
+    return [item.event_type for item in sync_session.info.get(_PENDING_KEY) or []]
+
+
 async def wait_for_deferred_events() -> None:
     """Wait for every emission scheduled on this event loop so far to finish, the bound owner's too.
 

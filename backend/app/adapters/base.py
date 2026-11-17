@@ -20,6 +20,9 @@ from app.adapters.models import (
     JobStatus,
     BucketAdminMetrics,
     JobSubmitResult,
+    DIGEST_CHUNK_BYTES,
+    ObjectDigest,
+    ObjectIdentity,
     ObjectMetadata,
     SessionInfo,
     SessionStatus,
@@ -465,6 +468,29 @@ class StorageProvider(ABC):
         """Return size/checksum/content-type for an object without downloading it.
 
         Raises StorageObjectNotFound if the object is absent.
+        """
+        raise NotImplementedError
+
+    async def object_identity(self, uri: str) -> ObjectIdentity:
+        """The object's size, version identity, and native MD5 when trustworthy (see ObjectIdentity).
+
+        Raises StorageObjectNotFound if the object is absent.
+        """
+        raise NotImplementedError
+
+    async def stream_md5(
+        self,
+        identity: ObjectIdentity,
+        *,
+        chunk_size: int = DIGEST_CHUNK_BYTES,
+        on_progress=None,
+    ) -> ObjectDigest:
+        """MD5 of exactly the object version ``identity`` names, read in order in bounded chunks.
+
+        Blocking reads and hashing run off the event loop; nothing is staged on the host and the bytes
+        are hashed as stored (a gzip is not decompressed). ``on_progress(bytes_done)`` is awaited after
+        each chunk. Raises ObjectChanged if the object was replaced or its size differs. Cancellation
+        closes the stream.
         """
         raise NotImplementedError
 

@@ -245,6 +245,43 @@ class LocalObjectFilesystem:
         except FileNotFoundError as e:
             raise StorageObjectNotFound(uri) from e
 
+    @staticmethod
+    def _version(st: os.stat_result) -> str:
+        return f"local:{st.st_dev}:{st.st_ino}:{st.st_mtime_ns}:{st.st_size}"
+
+    def identity(self, uri: str) -> tuple[int, str]:
+        """(size, version) of the object now: the version names this inode at this mtime and size."""
+        path = self._file(uri)
+        try:
+            st = os.stat(path)
+        except FileNotFoundError as e:
+            raise StorageObjectNotFound(uri) from e
+        return st.st_size, self._version(st)
+
+    def open_version(self, uri: str, version: str) -> tuple[Callable[[int], bytes], Callable[[], None]]:
+        """A reader over exactly ``version`` of the object, or ObjectChanged.
+
+        The open file is checked against the version before the first read and again at end of file,
+        so a replaced inode, an in-place rewrite, or a size change is detected rather than hashed.
+        """
+        from app.adapters.models import ObjectChanged
+
+        try:
+            f = self._open(uri)
+        except StorageObjectNotFound as e:
+            raise ObjectChanged(uri) from e
+        if self._version(os.fstat(f.fileno())) != version:
+            f.close()
+            raise ObjectChanged(uri)
+
+        def read(n: int) -> bytes:
+            chunk = f.read(n)
+            if not chunk and self._version(os.fstat(f.fileno())) != version:
+                raise ObjectChanged(uri)
+            return chunk
+
+        return read, f.close
+
     def exists(self, uri: str) -> bool:
         return os.path.isfile(self.path(uri))
 

@@ -639,6 +639,38 @@ If you prefer to set up the GCP infrastructure manually instead of using
 
 5. Access at `https://<VM_EXTERNAL_IP>`.
 
+## Checksum Verification Storage Costs
+
+When a file arrives with an expected MD5 (an upload that supplied one, or a fetchngs samplesheet that
+lists one), bioAF compares it with the stored bytes before the file is ready:
+
+- **GCS:** objects uploaded whole carry an MD5 that bioAF trusts. Composite objects do not, and are read
+  in full.
+- **S3:** only a single-part object stored with SSE-S3 has an ETag that is its MD5. Uploads and copies of
+  8 MiB or more are multipart, and SSE-KMS/SSE-C objects never qualify, so plan for a **full read of
+  every large checksummed file** on AWS (one GET of the object, streamed in 8 MiB chunks).
+- **NFS:** a file a producer can still write cannot be proved, so bioAF first copies it into a
+  read-only, backend-owned area and hashes the copy. The copy becomes the file's canonical location;
+  the original stays where the pipeline wrote it.
+
+### Provisioning NFS for verification
+
+For each store that holds checksummed files (normally `raw` and `results`), before enabling uploads or
+fetches with checksums on NFS:
+
+1. Run the backend under its own UID. Pipelines, notebooks and work nodes must write NFS as different
+   UIDs; list them in `BIOAF_NFS_PRODUCER_UIDS`.
+2. Create `<store>/verified-files`, owned by the backend UID, mode `0755` (no group/other write).
+3. The store directory itself must not let producers rename `verified-files` away: either producers
+   cannot write it, or it has the sticky bit (`chmod +t`) with `verified-files` owned by the backend.
+   Producers may mount `verified-files` read-only.
+4. Size the export for one extra copy of every checksummed NFS file plus
+   `BIOAF_NFS_MANAGED_COPY_RESERVE_BYTES`, and for one write plus two reads of each such file.
+
+If these conditions are not met, checksum-required NFS files stay unready with the visible error
+"Protected storage for verification is not configured" (`nfs_separation_unavailable`). This protects
+against producers, not against an administrator or root deliberately changing storage.
+
 ## Post-Deploy Configuration
 
 ### SMTP

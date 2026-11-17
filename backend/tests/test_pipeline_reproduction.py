@@ -1076,3 +1076,350 @@ async def test_a_custom_reproduction_refused_for_its_version_says_why_plainly(
     assert plain in detail
     for technical in ("expected", "status '"):
         assert technical not in detail
+
+
+@pytest.mark.asyncio
+async def test_reproducing_a_restricted_launch_reuses_its_recorded_inputs(session, admin_user, compute):
+    """A launch narrowed to exact input files (a validation study's verified inputs) reproduces with
+    those same files, even after older FASTQs of the same sample are linked."""
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    seed = await _launchable_run(
+        session,
+        org_id,
+        user_id,
+        stored_key="nf-core/scrnaseq",
+        file_source_type="pipeline_output",
+        launch_fields={"include_derived_inputs": True},
+    )
+    exp_id = seed.experiment_id
+    sample = (await session.execute(select(Sample).where(Sample.experiment_id == exp_id))).scalar_one()
+    current = (await session.execute(select(File).where(File.experiment_id == exp_id))).scalars().all()
+    allowed = [f.id for f in current]
+    for f in current:
+        f.lane = 1
+        f.read_type = "R1" if "_R1_" in f.filename else "R2"
+        f.source_run_accession = "SRR_NEW"
+    for read in ("R1", "R2"):
+        old = File(
+            organization_id=org_id,
+            experiment_id=exp_id,
+            filename=f"S1_L002_{read}_001.fastq.gz",
+            storage_uri=f"gs://bucket/old/S1_L002_{read}_001.fastq.gz",
+            file_type="fastq",
+            source_type="pipeline_output",
+            lane=2,
+            read_type=read,
+            source_run_accession="SRR_OLD",
+        )
+        session.add(old)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=old.id))
+    await session.commit()
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        scoped = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key="nf-core/scrnaseq",
+                experiment_id=exp_id,
+                parameters={"aligner": "cellranger"},
+                include_derived_inputs=True,
+            ),
+            input_file_ids=allowed,
+        )
+    assert sorted(scoped.input_files_json) == sorted(allowed)
+    scoped.status = "completed"
+    await session.commit()
+    scoped_id, sheet = scoped.id, scoped.samplesheet_csv
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        reproduced = await PipelineRunService.reproduce_run(session, scoped_id, org_id, user_id)
+    assert reproduced.samplesheet_csv == sheet
+    assert sorted(reproduced.input_files_json) == sorted(allowed)
+
+
+# --- the recorded input selection is the only one a reproduction uses ---------------------------
+
+
+async def _input_ids(session, run_id):
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    return sorted(
+        (
+            await session.execute(
+                select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+@pytest.mark.parametrize("loss", ["deleted", "storage_deleted"])
+@pytest.mark.asyncio
+async def test_an_unavailable_recorded_input_is_refused_by_file_id(
+    client, session, admin_user, admin_token, compute, loss
+):
+    """Never silently replaced or dropped: the refusal names the missing input."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    [first, *_] = await _input_ids(session, original.id)
+    f = await session.get(File, first)
+    if loss == "deleted":
+        f.deleted_at = datetime.now(timezone.utc)
+    else:
+        f.storage_deleted = True
+    # A replacement linked to the same sample since must not stand in for it.
+    sample = (await session.execute(select(Sample).where(Sample.experiment_id == original.experiment_id))).scalar_one()
+    newer = File(
+        organization_id=admin_user.organization_id,
+        experiment_id=original.experiment_id,
+        gcs_uri=f"gs://bucket/{admin_user.organization_id}/newer/{f.filename}",
+        filename=f.filename,
+        file_type="fastq",
+        source_type="upload",
+    )
+    session.add(newer)
+    await session.flush()
+    await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=newer.id))
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert str(first) in body["detail"] and "no longer available" in body["detail"]
+    # The code the run page answers with its "Drop and reproduce" offer, naming the affected sample.
+    assert body["code"] == "samples_missing_files"
+    assert [s["id"] for s in body["details"]["samples_without_files"]] == [sample.id]
+    assert body["details"]["unavailable_file_ids"] == [first]
+    assert await _count(session, PipelineRun) == runs_before
+    assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.parametrize("record", ["unknown", "malformed", "disagree"])
+@pytest.mark.asyncio
+async def test_a_run_whose_input_selection_cannot_be_established_is_refused(
+    client, session, admin_user, admin_token, compute, record
+):
+    """Unknown is not "none": today's files are never selected in its place."""
+    from sqlalchemy import delete
+
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    run = await session.get(PipelineRun, original.id)
+    if record == "unknown":
+        await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id))
+        run.input_files_json = None
+    elif record == "malformed":
+        await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id))
+        run.input_files_json = {"ids": [1]}
+    else:
+        run.input_files_json = [*run.input_files_json, 999999]
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+
+    assert response.status_code == 400, response.text
+    assert "input files" in response.text
+    assert await _count(session, PipelineRun) == runs_before
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_run_recorded_only_in_its_input_list_reproduces_from_it(
+    client, session, admin_user, admin_token, compute
+):
+    """A run from before input links were kept still states its inputs in input_files_json."""
+    from sqlalchemy import delete
+
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    await session.execute(delete(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == original.id))
+    await session.commit()
+
+    response = await _reproduce_catalog(client, original.id, admin_token)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_recorded_no_inputs_is_distinct_from_unknown(session, admin_user):
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="p", status="completed")
+    session.add(run)
+    await session.flush()
+    run.input_files_json = []
+    assert await PipelineRunService._recorded_input_file_ids(session, run) == []
+    run.input_files_json = None
+    with pytest.raises(Exception, match="input files"):
+        await PipelineRunService._recorded_input_file_ids(session, run)
+
+
+async def _two_sample_lane_original(session, admin_user):
+    """S1 sequenced on lanes 1 and 2, S2 on lane 1; launched for real so every record is kept."""
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    seed = await _launchable_run(session, org_id, user_id, stored_key="nf-core/scrnaseq", samples=2)
+    exp_id = seed.experiment_id
+    s1 = (
+        await session.execute(select(Sample).where(Sample.experiment_id == exp_id, Sample.external_id == "S1"))
+    ).scalar_one()
+    for f in (await session.execute(select(File).where(File.experiment_id == exp_id))).scalars():
+        f.lane = 1
+        f.read_type = "R1" if "_R1_" in f.filename else "R2"
+    lane2 = []
+    for read in ("R1", "R2"):
+        f = File(
+            organization_id=org_id,
+            experiment_id=exp_id,
+            gcs_uri=f"gs://bucket/{org_id}/S1_L002_{read}_001.fastq.gz",
+            filename=f"S1_L002_{read}_001.fastq.gz",
+            file_type="fastq",
+            source_type="upload",
+            lane=2,
+            read_type=read,
+        )
+        session.add(f)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=s1.id, file_id=f.id))
+        lane2.append(f.id)
+    await session.commit()
+    session.expire_all()
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        original = await PipelineRunService.launch_run(
+            session,
+            org_id,
+            user_id,
+            PipelineRunLaunchRequest(
+                pipeline_key="nf-core/scrnaseq", experiment_id=exp_id, parameters={"aligner": "cellranger"}
+            ),
+        )
+    original.status = "completed"
+    await session.commit()
+    assert set(lane2) <= set(original.input_files_json)
+    return original, lane2
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_drop_removes_a_sample_that_lost_one_lane_entirely(session, admin_user, compute):
+    """Never a sample with part of its original reads: S1 lost lane 2, so S1 is dropped whole."""
+    from datetime import datetime, timezone
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original, lane2 = await _two_sample_lane_original(session, admin_user)
+    original_id, original_sheet = original.id, original.samplesheet_csv
+    for file_id in lane2:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+    session.expire_all()
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        reproduced = await PipelineRunService.reproduce_run(
+            session, original_id, org_id, user_id, drop_samples_without_files=True
+        )
+    rows = reproduced.samplesheet_csv.splitlines()[1:]
+    assert rows and all("S2" in row and "S1" not in row for row in rows)
+    assert set(rows) < set(original_sheet.splitlines()[1:])
+    s1_files = {f.id for f in (await session.execute(select(File).where(File.filename.like("S1_%")))).scalars()}
+    assert not (set(reproduced.input_files_json) & s1_files)
+
+
+def test_a_dropped_row_must_take_its_whole_sample_with_it():
+    """The sheet check's own guard: on a confirmed drop, a kept sample keeps every original row."""
+    expected_snapshot = "sample,fastq_1,uid\nS1,l1,u1\nS1,l2,u1\nS2,a,u2\n"
+    whole = "sample,fastq_1,uid\nS2,a,u2\n"
+    partial = "sample,fastq_1,uid\nS1,l1,u1\nS2,a,u2\n"
+    assert PipelineRunService._only_whole_samples_dropped(expected_snapshot, whole) is True
+    assert PipelineRunService._only_whole_samples_dropped(expected_snapshot, partial) is False
+    assert PipelineRunService._only_whole_samples_dropped(None, whole) is False  # cannot confirm
+    unattributed = "sample,fastq_1,uid\nS1,l1,\nS2,a,u2\n"
+    assert PipelineRunService._only_whole_samples_dropped(unattributed, whole) is False
+
+
+@pytest.mark.asyncio
+async def test_a_drop_that_would_leave_no_samples_is_refused(session, admin_user, compute):
+    """Dropping every sample must not turn into "no selection", which means every sample today."""
+    from datetime import datetime, timezone
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    original = await _launchable_run(session, org_id, user_id, stored_key="nf-core/scrnaseq")
+    original_id = original.id
+    for file_id in original.input_files_json:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.commit()
+    runs_before = await _count(session, PipelineRun)
+
+    with (
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+        pytest.raises(Exception, match="no sample"),
+    ):
+        await PipelineRunService.reproduce_run(session, original_id, org_id, user_id, drop_samples_without_files=True)
+    assert await _count(session, PipelineRun) == runs_before
+
+
+@pytest.mark.asyncio
+async def test_unavailable_inputs_no_sample_claims_are_refused_without_a_drop_offer(
+    client, session, admin_user, admin_token, compute
+):
+    """Deleted and unlinked: nothing says which sample to drop, so no drop is offered or accepted."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq")
+    ids = await _input_ids(session, original.id)
+    for file_id in ids:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(ids)))
+    # A run from before the per-row sample record was kept: nothing else says whose files they were.
+    (await session.get(PipelineRun, original.id)).samplesheet_snapshot_csv = None
+    await session.commit()
+
+    for drop in (False, True):
+        response = await _reproduce_catalog(client, original.id, admin_token, drop_samples_without_files=drop)
+        assert response.status_code == 400, response.text
+        body = response.json()
+        assert body["code"] != "samples_missing_files"
+        assert "can’t tell which samples to leave out" in body["detail"] and "drop" not in body["detail"]
+    assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_input_is_traced_to_its_sample_through_the_runs_own_record(
+    client, session, admin_user, admin_token, compute
+):
+    """Deleting a file removes its sample links; the original run's per-row record still says whose it was."""
+    from datetime import datetime, timezone
+
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", samples=2
+    )
+    s2 = (await session.execute(select(Sample).where(Sample.external_id == "S2"))).scalar_one()
+    s2_files = [
+        f.id
+        for f in (await session.execute(select(File).where(File.filename.like("S2_%")))).scalars()
+        if f.id in await _input_ids(session, original.id)
+    ]
+    # What deleting a file in the app does: soft delete, and its sample links go.
+    for file_id in s2_files[:1]:
+        (await session.get(File, file_id)).deleted_at = datetime.now(timezone.utc)
+    await session.execute(sample_files.delete().where(sample_files.c.file_id.in_(s2_files[:1])))
+    await session.commit()
+
+    refused = await _reproduce_catalog(client, original.id, admin_token)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "samples_missing_files"
+    assert [s["id"] for s in refused.json()["details"]["samples_without_files"]] == [s2.id]
+
+    response = await _reproduce_catalog(client, original.id, admin_token, drop_samples_without_files=True)
+    assert response.status_code == 200, response.text
+    rows = compute.submit_job.call_args.args[0].sample_sheet.splitlines()[1:]
+    assert rows and all(row.startswith("S1,") for row in rows)

@@ -110,6 +110,9 @@ class ExperimentResponse(BaseModel):
     code: str | None = None
     external_id: str | None = None
     project: ProjectSummary | None = None
+    # The project's bioAF ID and its external ID (null when the project has none, or no project).
+    project_id: int | None = None
+    project_external_id: str | None = None
     template_id: int | None = None
     template_name: str | None = None
     hypothesis: str | None

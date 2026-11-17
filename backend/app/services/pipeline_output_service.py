@@ -11,12 +11,39 @@ from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample
 from app.services import asset_identity
 from app.services.file_service import FileService
+from app.services.file_verification_service import Expectation, FileVerificationService
 from app.services.file_type_utils import classify_artifact_type, detect_file_type
 
 logger = logging.getLogger("bioaf.pipeline_output_service")
 
 
+def _output_expectation(run: PipelineRun, uri: str) -> Expectation:
+    """What an output's checksum source is. A fetchngs FASTQ may have an MD5 in the run's samplesheet,
+    so it waits for that to be read before it can be ready; other outputs carry none."""
+    if "fetchngs" in (run.pipeline_name or "").lower():
+        parent, _, _ = uri.rpartition("/")
+        outdir, _, folder = parent.rpartition("/")
+        if folder == "fastq" and outdir:
+            return Expectation.pending(
+                "fetchngs_csv",
+                {"samplesheet_uri": f"{outdir}/samplesheet/samplesheet.csv", "pipeline_run_id": run.id},
+            )
+    return Expectation.none("pipeline_output")
+
+
 class PipelineOutputService:
+    @staticmethod
+    async def _resume_readiness(session: AsyncSession, run: PipelineRun, file: File) -> bool:
+        """Start an existing, never-ready output on its way to readiness; whether it was started."""
+        from app.services.file_verification_service import current_record
+
+        if file.ready_at is not None or file.deleted_at is not None or file.storage_deleted:
+            return False
+        if await current_record(session, file.id) is not None:
+            return False  # verification already owns this file
+        await FileVerificationService.begin(session, file, _output_expectation(run, file.storage_uri or file.gcs_uri))
+        return True
+
     @staticmethod
     def _match_samples(
         filename: str,
@@ -125,8 +152,16 @@ class PipelineOutputService:
         session: AsyncSession,
         run: PipelineRun,
         collected_files: list[dict],
+        *,
+        ambiguous: set[str] | None = None,
+        resumed: list[File] | None = None,
     ) -> list[File]:
         """Create File records for pipeline outputs and link to the run's samples.
+
+        ``ambiguous``, when given, receives every collected URI refused as
+        ``source_identity_ambiguous`` (it matches more than one unreconciled legacy File), so a
+        caller can report the refusal rather than only the log carrying it. ``resumed``, when given,
+        receives each already-registered output this call started on its way to readiness.
 
         Args:
             session: DB session (caller commits).
@@ -183,18 +218,50 @@ class PipelineOutputService:
             in_this_run = set(sample_ids)
             emitted = [entry for entry in emitted if entry.get("sample_id") in in_this_run]
 
-        # Collect existing gcs_uris to skip duplicates
+        # Outputs already registered for this run, matched by durable source or current canonical URI
+        # (a relocated verification copy is still the same File). Ambiguous legacy duplicates are
+        # refused until reconciled: no third File, no work, no event.
         uris = [f["gcs_uri"] for f in collected_files]
-        existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
-        existing_uris: set[str | None] = {row[0] for row in existing.all()}
+        if ambiguous is None:
+            ambiguous = set()
+        existing = await FileService.find_registered_outputs(
+            session, run.organization_id, run.id, uris, ambiguous=ambiguous
+        )
+        if ambiguous:
+            logger.warning(
+                "Pipeline run %d: %d output(s) match more than one legacy file and were not registered "
+                "(source_identity_ambiguous); reconcile the duplicates first",
+                run.id,
+                len(ambiguous),
+            )
+        # Any other file of this organization already at that object (an upload, another workflow)
+        # keeps it: the existing duplicate exclusion, now limited to the run's own organization.
+        others = [u for u in uris if u not in existing and u not in ambiguous]
+        catalogued: set[str] = set()
+        if others:
+            catalogued = set(
+                (
+                    await session.execute(
+                        select(File.storage_uri).where(
+                            File.organization_id == run.organization_id, File.storage_uri.in_(others)
+                        )
+                    )
+                ).scalars()
+            )
 
         created: list[File] = []
         unattributed: list[str] = []
 
         for file_dict in collected_files:
             gcs_uri = file_dict["gcs_uri"]
-            if gcs_uri in existing_uris:
-                logger.debug("Skipping duplicate gcs_uri: %s", gcs_uri)
+            if gcs_uri in ambiguous or gcs_uri in catalogued:
+                continue
+            if gcs_uri in existing:
+                # Already registered: never announced again, but a file still unready with no
+                # verification started (registered before readiness existed) is brought forward.
+                if await PipelineOutputService._resume_readiness(session, run, existing[gcs_uri]):
+                    if resumed is not None:
+                        resumed.append(existing[gcs_uri])
                 continue
 
             filename = file_dict["filename"]
@@ -208,7 +275,8 @@ class PipelineOutputService:
                 filename=filename,
                 storage_uri=gcs_uri,
                 size_bytes=file_dict.get("size_bytes"),
-                md5_checksum=file_dict.get("md5_hash"),
+                # A listing's checksum is a provider hint, not an independent observation.
+                md5_checksum=None,
                 file_type=file_type,
                 project_id=run.project_id if is_project_scoped else None,
                 experiment_id=run.experiment_id,
@@ -232,6 +300,8 @@ class PipelineOutputService:
             for sample_id in matched:
                 await FileService.link_file_to_sample(session, file_record.id, sample_id)
 
+            await FileService.finalize_registration(session, file_record)
+            await FileVerificationService.begin(session, file_record, _output_expectation(run, gcs_uri))
             created.append(file_record)
 
         if unattributed:
@@ -296,10 +366,13 @@ class PipelineOutputService:
             },
         ]
 
-        # Check which URIs already exist in DB
+        # Already registered for this run (by source or canonical URI); ambiguous legacy rows are left alone.
         uris = [f["gcs_uri"] for f in metadata_files]
-        existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
-        existing_uris: set[str | None] = {row[0] for row in existing.all()}
+        ambiguous: set[str] = set()
+        existing_by_uri = await FileService.find_registered_outputs(
+            session, run.organization_id, run.id, uris, ambiguous=ambiguous
+        )
+        existing_uris = set(existing_by_uri) | ambiguous
 
         # Check which blobs exist in GCS
         existing_blobs = await _check_gcs_blobs(metadata_files)
@@ -328,6 +401,8 @@ class PipelineOutputService:
                 source_pipeline_run_id=run.id,
                 artifact_type=meta["artifact_type"],
             )
+            await FileService.finalize_registration(session, file_record)
+            await FileVerificationService.begin(session, file_record, Expectation.none("pipeline_output"))
             created.append(file_record)
 
         if created:

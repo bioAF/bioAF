@@ -1,6 +1,7 @@
 import copy
 import logging
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -241,6 +242,9 @@ class RecordedLaunch:
     samplesheet: str
     parameters: dict
     reference_genome: str | None
+    # The sheet with its per-row sample identity column, which shows which rows were one sample's.
+    # A confirmed drop may remove only whole samples, and this is how that is checked.
+    samplesheet_snapshot: str | None = None
 
 
 class PipelineRunService:
@@ -800,10 +804,23 @@ class PipelineRunService:
         return PipelineRunService._in_requested_order(samples, sample_ids)
 
     @staticmethod
-    def _sheet_inputs(samples: list, include_derived: bool, org_id: int) -> list[SheetSampleInput]:
-        """Typed snapshots of authorized, loaded samples, each with its eligible files decided here."""
+    def _sheet_inputs(
+        samples: list, include_derived: bool, org_id: int, only: Collection[int] | None = None
+    ) -> list[SheetSampleInput]:
+        """Typed snapshots of authorized, loaded samples, each with its eligible files decided here.
+
+        ``only`` narrows the eligible files to that set of file IDs; it never widens them.
+        """
+        allowed = None if only is None else set(only)
         return [
-            SheetSampleInput.from_sample(s, PipelineRunService._launchable_files(s.files, include_derived, org_id))
+            SheetSampleInput.from_sample(
+                s,
+                [
+                    f
+                    for f in PipelineRunService._launchable_files(s.files, include_derived, org_id)
+                    if allowed is None or f.id in allowed
+                ],
+            )
             for s in samples
         ]
 
@@ -926,8 +943,13 @@ class PipelineRunService:
         *,
         via_assistant: bool = False,
         recorded: RecordedLaunch | None = None,
+        input_file_ids: Collection[int] | None = None,
     ) -> PipelineRun:
         """Launch a pipeline run: the core orchestration method.
+
+        ``input_file_ids`` (internal callers only, never the API body) narrows each selected sample's
+        input files to that set, for a caller that has already decided exactly which files the run may
+        consume (a validation study's verified inputs).
 
         ``recorded`` (reproduction) is what the original run recorded. Its parameters and reference
         label are used as recorded, and the launch is refused, before anything is created or
@@ -953,7 +975,7 @@ class PipelineRunService:
         # (which compounded the dataset every run); include_derived_inputs opts in.
         # The sheet, the missing-file decision and the input provenance below all
         # read these typed snapshots, never the ORM samples' linked files.
-        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id)
+        samples = PipelineRunService._sheet_inputs(selected, data.include_derived_inputs, org_id, input_file_ids)
         orm_samples = {s.id: s for s in selected}
 
         # 3b. The samplesheet contract, which decides both whether this pipeline
@@ -1029,6 +1051,18 @@ class PipelineRunService:
                 "This run cannot be reproduced exactly: the samplesheet it would be given now differs from the "
                 "one the original run used, because its samples, their files, or the declared columns have changed."
             )
+        if (
+            recorded is not None
+            and sample_sheet_csv != recorded.samplesheet
+            and not PipelineRunService._only_whole_samples_dropped(
+                recorded.samplesheet_snapshot, sheet.identity_snapshot()["csv"]
+            )
+        ):
+            raise ValidationError(
+                "This run cannot be reproduced exactly: a sample would run with only part of its original "
+                "input files (for example, one of its lanes is missing). Dropping samples removes whole "
+                "samples only; restore the missing files or start a new analysis."
+            )
 
         # 7. Create pipeline_runs record
         run = PipelineRun(
@@ -1068,10 +1102,10 @@ class PipelineRunService:
                 if f.id not in seen_file_ids:
                     session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
                     seen_file_ids.add(f.id)
-        if seen_file_ids:
-            # Also populate input_files_json for backward compat
-            run.input_files_json = sorted(seen_file_ids)
-            await session.flush()
+        # The launcher's copy of the same list, written even when empty: "recorded no inputs" must
+        # stay distinguishable from a run whose inputs are unknown (reproduction refuses those).
+        run.input_files_json = sorted(seen_file_ids)
+        await session.flush()
 
         # 8b. Keep what this run was actually given. Re-deriving the sheet later
         # reads today's samples, today's files and today's mapping, none of which
@@ -1100,9 +1134,9 @@ class PipelineRunService:
         # Decided on the snapshots, applied to the loaded records by sample id:
         # the sheet computation never changes a sample.
         field_updates = sheet.sample_field_updates()
-        for sample_id, updates in field_updates.items():
-            for field, value in updates.items():
-                setattr(orm_samples[sample_id], field, value)
+        from app.services.sample_service import SampleService
+
+        await SampleService.apply_field_updates(session, orm_samples, field_updates)
 
         # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
         # having refused the job; see launch_outcome for the case where it had in fact accepted it.
@@ -1549,6 +1583,38 @@ class PipelineRunService:
             )
         sample_ids = PipelineRunService._recorded_sample_order(original)
 
+        # The original analysis's inputs, and only them: files linked since are not used, and a recorded
+        # input that is gone is refused by ID rather than replaced. With the explicit, confirmed drop of
+        # samples without files, every sample that lost any recorded input is dropped whole (a sample
+        # never runs on part of its original reads, such as one lane of two); the launcher's sheet
+        # check then confirms only whole samples are missing.
+        from app.services.recorded_inputs import unavailable_inputs
+
+        input_file_ids = await PipelineRunService._recorded_input_file_ids(session, original)
+        missing = await unavailable_inputs(session, org_id, input_file_ids)
+        if missing:
+            affected, removed = await PipelineRunService._samples_losing_inputs(
+                session, original, sample_ids, input_file_ids, missing
+            )
+            if not drop_samples_without_files:
+                # The run page answers this code by offering to drop exactly these samples.
+                raise SamplesMissingFilesError(
+                    "This run cannot be reproduced exactly: input files these samples used are no longer "
+                    f"available (file IDs: {', '.join(map(str, missing))}). bioAF does not substitute other files.",
+                    details={
+                        "samples_without_files": await PipelineRunService._sample_refs(session, affected),
+                        "unavailable_file_ids": missing,
+                    },
+                )
+            if affected >= set(sample_ids or []):
+                # An empty selection would mean "every sample" to the launcher; refuse instead.
+                raise ValidationError(
+                    "This run cannot be reproduced: no sample has all of its original input files available "
+                    f"(missing file IDs: {', '.join(map(str, missing))})."
+                )
+            sample_ids = [s for s in sample_ids or [] if s not in affected]
+            input_file_ids = [f for f in input_file_ids if f not in removed]
+
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
             experiment_id=original.experiment_id,
@@ -1571,10 +1637,109 @@ class PipelineRunService:
                 samplesheet=original.samplesheet_csv,
                 parameters=original.parameters_json,
                 reference_genome=original.reference_genome,
+                samplesheet_snapshot=original.samplesheet_snapshot_csv,
             ),
+            input_file_ids=input_file_ids,
         )
         await PipelineRunService._audit_reproduction(session, new_run, original_run_id, user_id)
         return new_run
+
+    @staticmethod
+    async def _samples_losing_inputs(
+        session: AsyncSession,
+        original: PipelineRun,
+        sample_ids: list[int] | None,
+        input_file_ids: list[int],
+        missing: list[int],
+    ) -> tuple[set[int], set[int]]:
+        """The run's samples that lost any recorded input, and every recorded input of those samples.
+
+        Which sample a recorded input fed comes first from the original run's own record: its
+        identity snapshot names each sheet row's sample, and the row holds the file's URI. Deleting a
+        file removes its sample links, so current links are only a fallback (a run recorded before
+        the snapshot was kept). An input attributable to none of the run's samples is refused: bioAF
+        cannot tell which sample to drop, and must not keep a sample that may have lost reads.
+        """
+        from app.models.sample import sample_files
+
+        run_samples = list(sample_ids or [])
+        links = (
+            (
+                await session.execute(
+                    select(sample_files.c.sample_id, sample_files.c.file_id).where(
+                        sample_files.c.file_id.in_(input_file_ids), sample_files.c.sample_id.in_(run_samples)
+                    )
+                )
+            ).all()
+            if run_samples
+            else []
+        )
+        owners: dict[int, set[int]] = {}
+        files_of: dict[int, set[int]] = {}
+        recorded = await PipelineRunService._recorded_row_owners(session, original, run_samples, input_file_ids)
+        for sample_id, file_id in [*links, *recorded]:
+            owners.setdefault(file_id, set()).add(sample_id)
+            files_of.setdefault(sample_id, set()).add(file_id)
+        orphaned = [f for f in missing if not owners.get(f)]
+        if orphaned:
+            raise ValidationError(
+                "This run cannot be reproduced exactly: input files it used are no longer available and are no "
+                f"longer linked to any of its samples (file IDs: {', '.join(map(str, orphaned))}), so bioAF "
+                "can’t tell which samples to leave out."
+            )
+        affected = set().union(*(owners[f] for f in missing))
+        removed = set().union(*(files_of[s] for s in affected)) | set(missing)
+        return affected, removed
+
+    @staticmethod
+    async def _recorded_row_owners(
+        session: AsyncSession, original: PipelineRun, run_samples: list[int], input_file_ids: list[int]
+    ) -> list[tuple[int, int]]:
+        """(sample_id, file_id) pairs read from the original run's identity snapshot.
+
+        Each snapshot row ends with the uuid of the sample it was emitted for; a recorded input
+        belongs to a row when one of its URIs (current, original source, legacy) is a cell of it.
+        """
+        import csv
+        import io
+
+        from app.models.file import File
+
+        if not original.samplesheet_snapshot_csv or not run_samples or not input_file_ids:
+            return []
+        uuid_to_sample = {
+            str(u): i
+            for i, u in (await session.execute(select(Sample.id, Sample.uuid).where(Sample.id.in_(run_samples)))).all()
+            if u is not None
+        }
+        uris_of: dict[str, set[int]] = {}
+        for file_id, *uris in (
+            await session.execute(
+                select(File.id, File.storage_uri, File.gcs_uri, File.source_storage_uri).where(
+                    File.id.in_(input_file_ids)
+                )
+            )
+        ).all():
+            for uri in uris:
+                if uri:
+                    uris_of.setdefault(uri, set()).add(file_id)
+        pairs: list[tuple[int, int]] = []
+        rows = list(csv.reader(io.StringIO(original.samplesheet_snapshot_csv)))
+        for row in rows[1:]:
+            if not row:
+                continue
+            sample_id = uuid_to_sample.get(row[-1])
+            if sample_id is None:
+                continue
+            for cell in row[:-1]:
+                for file_id in uris_of.get(cell, ()):
+                    pairs.append((sample_id, file_id))
+        return pairs
+
+    @staticmethod
+    async def _sample_refs(session: AsyncSession, sample_ids: set[int]) -> list[dict]:
+        rows = (await session.execute(select(Sample.id, Sample.external_id).where(Sample.id.in_(sample_ids)))).all()
+        return [{"id": i, "external_id": e} for i, e in sorted(rows)]
 
     @staticmethod
     def _recorded_sample_order(original: PipelineRun) -> list[int] | None:
@@ -1610,6 +1775,14 @@ class PipelineRunService:
         return values
 
     @staticmethod
+    async def _recorded_input_file_ids(session: AsyncSession, run: PipelineRun) -> list[int]:
+        """The input files a catalog run recorded consuming ([] when it recorded none); refuses when
+        the selection cannot be established (see app/services/recorded_inputs.py)."""
+        from app.services.recorded_inputs import recorded_input_ids
+
+        return await recorded_input_ids(session, run, links_required=False)
+
+    @staticmethod
     async def _used_derived_inputs(session: AsyncSession, run_id: int) -> bool:
         """Whether a run's recorded inputs include derived files, which a launch only uses on request."""
         from app.models.file import File
@@ -1624,6 +1797,38 @@ class PipelineRunService:
             )
         )
         return bool(derived.scalar())
+
+    @staticmethod
+    def _only_whole_samples_dropped(expected_snapshot: str | None, actual_snapshot: str) -> bool:
+        """Whether every sample left in ``actual_snapshot`` keeps all of its rows from the original.
+
+        Both are identity snapshots: the sheet plus a last column naming each row's sample. A row the
+        original could not attribute to a sample, or a run that kept no snapshot, cannot show that a
+        drop removed whole samples, so it is refused.
+        """
+        import csv
+        import io
+
+        def by_sample(text: str) -> dict[str, Counter] | None:
+            rows = list(csv.reader(io.StringIO(text)))
+            if not rows:
+                return None
+            grouped: dict[str, Counter] = {}
+            for row in rows[1:]:
+                if not row:
+                    continue
+                uid = row[-1]
+                if not uid:
+                    return None
+                grouped.setdefault(uid, Counter())[tuple(row[:-1])] += 1
+            return grouped
+
+        if not expected_snapshot:
+            return False
+        expected, actual = by_sample(expected_snapshot), by_sample(actual_snapshot)
+        if expected is None or actual is None:
+            return False
+        return all(uid in expected and rows == expected[uid] for uid, rows in actual.items())
 
     @staticmethod
     def _sheet_matches(expected: str, actual: str, *, allow_dropped_rows: bool) -> bool:

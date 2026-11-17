@@ -62,6 +62,7 @@ class SampleOut(BaseModel):
     id: int
     external_id: str | None
     experiment_id: int
+    experiment_external_id: str | None = None
     organism: str | None
     tissue_type: str | None
     donor_source: str | None

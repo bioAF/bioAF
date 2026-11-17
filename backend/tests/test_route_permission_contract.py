@@ -52,6 +52,15 @@ SELF_SERVICE_ROUTES = {
     ("GET", "/api/beta-features"),
     ("GET", "/api/dashboard/layout"),
     ("PUT", "/api/dashboard/layout"),
+    # A user's own notifications and preferences: every role receives notifications, so every role
+    # must be able to read them. Organization-wide rules and channels keep notifications:configure.
+    ("GET", "/api/notifications"),
+    ("GET", "/api/notifications/unread-count"),
+    ("PATCH", "/api/notifications/{notification_id}/read"),
+    ("POST", "/api/notifications/mark-all-read"),
+    ("DELETE", "/api/notifications/{notification_id}"),
+    ("GET", "/api/notifications/preferences"),
+    ("PUT", "/api/notifications/preferences"),
 }
 
 # Signed in, deliberately without a single gate. The search routes filter each

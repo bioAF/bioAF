@@ -882,23 +882,20 @@ class CustomPipelineService:
         active, environment ready, experiment/project/files in this Organization) run before it
         creates anything, too.
         """
-        input_ids = await CustomPipelineService._recorded_input_ids(session, original)
+        from app.services.recorded_inputs import recorded_input_ids, unavailable_inputs
+
+        input_ids = await recorded_input_ids(session, original, links_required=True)
 
         variables = original.parameters_json
         if not isinstance(variables, dict) or not all(isinstance(v, str) for v in variables.values()):
             raise ValidationError("This run cannot be reproduced: its recorded variable values are unreadable.")
 
-        if input_ids:
-            files = (
-                (await session.execute(select(File).where(File.id.in_(input_ids), File.organization_id == org_id)))
-                .scalars()
-                .all()
+        missing = await unavailable_inputs(session, org_id, input_ids)
+        if missing:
+            raise ValidationError(
+                "This run cannot be reproduced: input files it used are no longer available (file IDs: "
+                f"{', '.join(map(str, missing))}). bioAF does not substitute other files."
             )
-            available = {f.id for f in files if f.deleted_at is None and not f.storage_deleted}
-            if available != set(input_ids):
-                raise ValidationError(
-                    "This run cannot be reproduced: one or more of its input files are no longer available."
-                )
 
         # The launcher checks the version too, but in launch words; checked here first so the refusal
         # says it is the reproduction that cannot go ahead.
@@ -935,35 +932,6 @@ class CustomPipelineService:
                 ],
             ),
         )
-
-    @staticmethod
-    async def _recorded_input_ids(session: AsyncSession, original: PipelineRun) -> list[int]:
-        """The run's inputs, when its two records of them agree; a refusal otherwise.
-
-        The input links are authoritative and ``input_files_json`` is the launcher's copy of the
-        same list. Both are written by every custom launch, so a run where they disagree, or where
-        the list is missing or malformed, has an input set nobody can vouch for. That is refused,
-        never read as "no inputs": an empty set is valid only when both records say so.
-        """
-        linked = list(
-            (
-                await session.execute(
-                    select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == original.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        recorded = original.input_files_json
-        if not isinstance(recorded, list) or not all(isinstance(i, int) for i in recorded):
-            raise ValidationError(
-                "This run cannot be reproduced: its input files were not recorded in a readable form."
-            )
-        if len(recorded) != len(set(recorded)) or set(recorded) != set(linked):
-            raise ValidationError(
-                "This run cannot be reproduced: its records disagree about which input files it used."
-            )
-        return recorded
 
     # --- Launch helpers ---
 

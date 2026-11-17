@@ -143,7 +143,7 @@ async def _complete_upload(session, admin_user, filename: str):
         "sample_ids": [],
         "is_global": False,
     }
-    return await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "md5")
+    return await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "")
 
 
 @pytest.mark.asyncio

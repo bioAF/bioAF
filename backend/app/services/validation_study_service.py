@@ -195,7 +195,14 @@ class ValidationStudyService:
                 f"Only a study in 'error' can be retried; this one is in '{study.state}'.", plain_body=True
             )
 
+        # Fetched FASTQ only count when the same eligibility check the driver uses passes: a File row
+        # whose checksum mismatched or could not be verified is not usable input.
+        from app.services.validation_driver_service import input_eligibility
+
         resumable = await _has_runnable_samples(session, study.experiment_id)
+        if resumable:
+            outcome, _ = await input_eligibility(session, study)
+            resumable = outcome == "ok"
         target = "setup" if resumable else "plan_ready"
 
         study.analysis_run_id = None
