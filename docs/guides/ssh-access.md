@@ -18,7 +18,8 @@ Where to find them:
 
 Select **Show instructions** to prepare them. bioAF first checks, against the cluster, that the workload
 recorded for this run or session still exists, carries this record's identity, and has its main container
-running. Then it shows the command, the workload and namespace it targets, and the setup guide.
+running. Then it shows the command, the workload, pod, container, namespace, and cluster context it
+targets, and the setup guide.
 
 Who sees them: users whose role grants `notebooks:launch` (custom roles included; the built-in role name
 does not matter), on an installation whose compute backend supports exec (`ssh_exec`). API keys cannot
@@ -45,8 +46,10 @@ You need, on your own computer:
   Kubernetes RBAC, and bioAF never shares its own cluster credentials.
 
 The setup guide names this installation's actual cluster and location, so there is nothing to fill in. On
-GKE it runs `gcloud container clusters get-credentials` with the cluster's region (or zone). On EKS it runs
-`aws eks update-kubeconfig` with an explicit `--alias`. The command always passes that `--context`, an
+GKE it runs `gcloud container clusters get-credentials` with the region (or zone) the cluster was deployed
+in, which can differ from the installation's default region. On EKS it runs `aws eks update-kubeconfig`
+with an explicit `--alias` that includes the AWS account, region, and cluster name, so a copied command
+never selects a same-named cluster in another account. The command always passes that `--context`, an
 explicit namespace, and an explicit `--container`, so it does not depend on your current kubectl context.
 A command has this form:
 
@@ -61,7 +64,10 @@ kubectl exec -it --context <context> -n <namespace> <pod> --container <container
 - **bioAF could not check it with the cluster right now:** try again in a moment.
 - **The cluster refused bioAF's check,** or **terminal access is not set up for this installation:** ask
   an administrator. These are about bioAF's own cluster access and configuration, not your permissions.
-- Installations running in simulated compute mode have no cluster and never return a command.
+  On a GKE installation whose cluster was deployed before bioAF recorded the cluster's location, an
+  administrator re-applies the compute stack, after which the location is recorded.
+- Installations running in simulated compute mode have no cluster, do not offer terminal instructions,
+  and never return a command.
 
 Instructions describe the workload when they were prepared. If it ends later, the copied command fails;
 refresh the details and request new instructions.
