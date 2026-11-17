@@ -145,6 +145,7 @@ async def test_k8s_adapter_cluster_lifecycle_management(mode_adapter_factory):
     probe_cluster.status = 2  # RUNNING
     probe_cluster.endpoint = "10.0.0.1"
     probe_cluster.master_auth.cluster_ca_certificate = "fake-ca"
+    probe_cluster.location = "us-central1-a"
 
     mock_client = MagicMock()
     mock_client.list_clusters.return_value.clusters = [c1, c2]
@@ -162,6 +163,7 @@ async def test_k8s_adapter_cluster_lifecycle_management(mode_adapter_factory):
     mock_client.list_clusters.assert_called_once_with(parent="projects/proj/locations/us-central1-a")
     assert probe.state == "RUNNING"
     assert probe.endpoint == "10.0.0.1"
+    assert probe.location == "us-central1-a"
     assert probe.ca_cert == "fake-ca"
     mock_client.delete_cluster.assert_called_once_with(name="projects/proj/locations/us-central1-a/clusters/bioaf-a")
 
