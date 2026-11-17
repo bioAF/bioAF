@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types";
 import { formatRecordedTime } from "@/lib/recordedTime";
 import { formatElapsed } from "@/lib/duration";
+import { ConnectButton } from "@/components/shared/ConnectButton";
 
 type Tab = "logs" | "report" | "parameters" | "provenance" | "results" | "review" | "agent_review";
 
@@ -360,6 +361,15 @@ export default function PipelineRunDetailPage() {
             <button onClick={() => handleReproduce()} className="ml-auto bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700">Reproduce</button>
           )}
         </div>
+
+        <ConnectButton
+          targetType="pipeline_run"
+          targetId={run.id}
+          eligible={run.status === "running"}
+          onStateRefused={() => void loadRun()}
+          card
+          className="mb-6"
+        />
 
         {/* Timing metadata */}
         <div className="bg-white rounded-lg shadow p-4 mb-6 flex gap-6">

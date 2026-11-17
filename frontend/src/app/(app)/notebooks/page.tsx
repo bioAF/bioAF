@@ -11,6 +11,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
 import { useResource } from "@/hooks/useResource";
+import { ConnectButton } from "@/components/shared/ConnectButton";
 import type {
   NotebookSession,
   SessionListResponse,
@@ -625,6 +626,19 @@ export default function NotebooksPage() {
               </div>
             ))}
   
+            {(viewingSession.session_type === "jupyter" || viewingSession.session_type === "rstudio") && (
+              <ConnectButton
+                targetType="session"
+                targetId={viewingSession.id}
+                // The list's latest answer, not the snapshot taken when the details opened.
+                eligible={["running", "idle"].includes(
+                  sessions.find((s) => s.id === viewingSession.id)?.status ?? "",
+                )}
+                onStateRefused={() => void loadSessions()}
+                className="mt-4 pt-4 border-t"
+              />
+            )}
+
             {/* Provenance section for stopped sessions */}
             {viewingSession.status === "stopped" && (
               <div className="mt-4 pt-4 border-t">

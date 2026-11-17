@@ -1,112 +1,283 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ConnectButton } from "@/components/shared/ConnectButton";
-
-const mockGetCurrentUser = jest.fn();
-jest.mock("@/lib/auth", () => ({
-  getCurrentUser: () => mockGetCurrentUser(),
-}));
+import { ApiError } from "@/lib/api";
 
 const mockApiPost = jest.fn();
-jest.mock("@/lib/api", () => ({
-  api: { post: (...args: unknown[]) => mockApiPost(...args) },
-}));
+jest.mock("@/lib/api", () => {
+  const actual = jest.requireActual("@/lib/api");
+  return { ...actual, api: { post: (...args: unknown[]) => mockApiPost(...args) } };
+});
 
-const mockHas = jest.fn();
-jest.mock("@/hooks/useCapabilities", () => ({
-  useCapabilities: () => ({
-    has: (flag: string) => mockHas(flag),
-    capabilities: {},
-    loading: false,
+const perms = { canAccess: jest.fn(), loading: false, failed: false };
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: (...args: unknown[]) => perms.canAccess(...args),
+    loading: perms.loading,
+    failed: perms.failed,
+    roleName: "custom-role",
+    permissions: new Set(),
   }),
 }));
 
-const mockConnection = {
-  command: "kubectl exec -it -n bioaf-pipelines job/pipeline-run-1 -- /bin/bash",
-  setup_guide: "1. Install gcloud CLI\n2. Authenticate\n3. Get credentials",
-  warning: "Actions performed inside this container are NOT tracked",
+const caps = { has: jest.fn(), loading: false };
+jest.mock("@/hooks/useCapabilities", () => ({
+  useCapabilities: () => ({ has: (flag: string) => caps.has(flag), capabilities: {}, loading: caps.loading }),
+}));
+
+const connection = {
+  command:
+    "kubectl exec -it --context gke_p_us-west1_c -n bioaf-pipelines bioaf-pipeline-1-17-x --container pipeline -- /bin/sh",
+  setup_guide: "First-time setup for terminal access (Google Kubernetes Engine):\n\n1. Install kubectl",
+  warning: "Commands you run and changes you make in this terminal are not tracked by bioAF.",
   target_type: "pipeline_job",
-  target_id: "pipeline-run-1",
+  target_id: "bioaf-pipeline-1-17",
   namespace: "bioaf-pipelines",
 };
 
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const refusal = (code: string, reason: string, status = 409) =>
+  new ApiError(status, "server detail that must not be shown", code, { reason });
+
 describe("ConnectButton", () => {
   beforeEach(() => {
-    mockGetCurrentUser.mockReturnValue({ email: "test@bioaf.org", role_name: "comp_bio", sub: "1" });
     mockApiPost.mockReset();
-    mockApiPost.mockResolvedValue(mockConnection);
-    mockHas.mockReset();
-    mockHas.mockReturnValue(true);
+    mockApiPost.mockResolvedValue(connection);
+    perms.canAccess.mockReset();
+    perms.canAccess.mockImplementation((r: string, a: string) => r === "notebooks" && a === "launch");
+    perms.loading = false;
+    perms.failed = false;
+    caps.has.mockReset();
+    caps.has.mockReturnValue(true);
+    caps.loading = false;
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    (console.error as jest.Mock).mockRestore();
+  });
+
+  it("follows the effective notebooks:launch permission, not the role name", () => {
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    expect(screen.getByRole("heading", { name: "Terminal instructions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show instructions" })).toBeEnabled();
+    expect(perms.canAccess).toHaveBeenCalledWith("notebooks", "launch");
+  });
+
+  it("is hidden without the permission", () => {
+    perms.canAccess.mockReturnValue(false);
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    expect(screen.queryByText("Terminal instructions")).not.toBeInTheDocument();
   });
 
   it("is hidden when the backend lacks the ssh_exec capability", () => {
-    mockHas.mockImplementation((flag: string) => flag !== "ssh_exec");
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    expect(screen.queryByTestId("connect-button")).not.toBeInTheDocument();
+    caps.has.mockImplementation((flag: string) => flag !== "ssh_exec");
+    render(<ConnectButton targetType="session" targetId={1} eligible />);
+    expect(screen.queryByText("Terminal instructions")).not.toBeInTheDocument();
   });
 
-  it("renders when user has comp_bio role", () => {
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    expect(screen.getByTestId("connect-button")).toBeInTheDocument();
+  it("is hidden when the record is not eligible", () => {
+    render(<ConnectButton targetType="session" targetId={1} eligible={false} />);
+    expect(screen.queryByText("Terminal instructions")).not.toBeInTheDocument();
   });
 
-  it("is hidden when user has bench role", () => {
-    mockGetCurrentUser.mockReturnValue({ email: "bench@bioaf.org", role_name: "bench", sub: "2" });
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    expect(screen.queryByTestId("connect-button")).not.toBeInTheDocument();
+  it.each([
+    ["permissions", () => (perms.loading = true)],
+    ["capabilities", () => (caps.loading = true)],
+  ])("stays inactive while %s are loading", (_what, setLoading) => {
+    setLoading();
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    expect(screen.getByRole("button", { name: "Show instructions" })).toBeDisabled();
   });
 
-  it("calls API and expands to show command on click", async () => {
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    fireEvent.click(screen.getByTestId("connect-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("connect-expanded")).toBeInTheDocument();
-      expect(screen.getByTestId("connect-command")).toHaveTextContent("kubectl exec");
-    });
-    expect(mockApiPost).toHaveBeenCalledWith("/api/pipeline-runs/1/connect");
+  it("does not claim the user lacks permission when permissions failed to load", () => {
+    perms.failed = true;
+    perms.canAccess.mockReturnValue(false);
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    expect(screen.queryByText(/not allowed|permission/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Terminal instructions")).not.toBeInTheDocument();
   });
 
-  it("copy button copies command to clipboard", async () => {
+  it("requests instructions for the record and shows command, target, warning, and guidance", async () => {
+    const pending = deferred<typeof connection>();
+    mockApiPost.mockReturnValueOnce(pending.promise);
+    render(<ConnectButton targetType="pipeline_run" targetId={7} eligible />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    expect(screen.getByRole("button", { name: "Preparing instructions..." })).toBeDisabled();
+    await act(async () => pending.resolve(connection));
+
+    expect(mockApiPost).toHaveBeenCalledWith("/api/pipeline-runs/7/connect", undefined, expect.anything());
+    expect(screen.getByTestId("connect-command")).toHaveTextContent(connection.command);
+    expect(screen.getByTestId("connect-warning")).toHaveTextContent("not tracked by bioAF");
+    expect(screen.getByTestId("connect-target")).toHaveTextContent("bioaf-pipeline-1-17");
+    expect(screen.getByTestId("connect-target")).toHaveTextContent("bioaf-pipelines");
+    expect(screen.getByTestId("connect-guidance")).toHaveTextContent(/does not open a terminal/);
+    expect(screen.getByTestId("connect-guidance")).toHaveTextContent(/refresh .* details and request new instructions/i);
+  });
+
+  it("uses the session endpoint for notebook sessions", async () => {
+    render(<ConnectButton targetType="session" targetId={3} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+    expect(mockApiPost).toHaveBeenCalledWith("/api/sessions/3/connect", undefined, expect.anything());
+  });
+
+  it("discloses the setup guide on request", async () => {
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+    expect(screen.queryByTestId("setup-guide-content")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("setup-guide-toggle"));
+    expect(screen.getByTestId("setup-guide-content")).toHaveTextContent("Install kubectl");
+    fireEvent.click(screen.getByTestId("setup-guide-toggle"));
+    expect(screen.queryByTestId("setup-guide-content")).not.toBeInTheDocument();
+  });
+
+  it("copies the command and confirms it without another request", async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
 
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    fireEvent.click(screen.getByTestId("connect-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("copy-button")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("copy-button"));
-    expect(writeText).toHaveBeenCalledWith(mockConnection.command);
+    await act(async () => fireEvent.click(screen.getByTestId("copy-button")));
+
+    expect(writeText).toHaveBeenCalledWith(connection.command);
+    expect(screen.getByTestId("copy-button")).toHaveTextContent("Copied");
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
   });
 
-  it("setup guide is collapsible", async () => {
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    fireEvent.click(screen.getByTestId("connect-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("setup-guide-toggle")).toBeInTheDocument();
-    });
-    // Initially hidden
-    expect(screen.queryByTestId("setup-guide-content")).not.toBeInTheDocument();
-    // Click to show
-    fireEvent.click(screen.getByTestId("setup-guide-toggle"));
-    expect(screen.getByTestId("setup-guide-content")).toBeInTheDocument();
-    // Click to hide
-    fireEvent.click(screen.getByTestId("setup-guide-toggle"));
-    expect(screen.queryByTestId("setup-guide-content")).not.toBeInTheDocument();
+  it("says so when copying fails and keeps the command selectable", async () => {
+    const writeText = jest.fn().mockRejectedValue(new Error("NotAllowedError"));
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+
+    await act(async () => fireEvent.click(screen.getByTestId("copy-button")));
+
+    expect(screen.getByTestId("copy-error")).toHaveTextContent(
+      "We couldn't copy the command. Select it and copy it manually.",
+    );
+    expect(screen.getByTestId("connect-command")).toHaveClass("select-all");
+
+    writeText.mockResolvedValueOnce(undefined);
+    await act(async () => fireEvent.click(screen.getByTestId("copy-button")));
+    expect(screen.queryByTestId("copy-error")).not.toBeInTheDocument();
   });
 
-  it("shows tooltip when disabled", () => {
-    render(<ConnectButton targetType="pipeline_run" targetId={1} disabled />);
-    const btn = screen.getByTestId("connect-button");
-    expect(btn).toBeDisabled();
-    expect(btn.getAttribute("title")).toBe("Target is not running");
+  it("refreshes the page record and explains a state refusal", async () => {
+    const onStateRefused = jest.fn();
+    mockApiPost.mockRejectedValueOnce(refusal("connection_unavailable", "not_running"));
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible onStateRefused={onStateRefused} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+
+    expect(await screen.findByTestId("connect-error")).toHaveTextContent(
+      "This analysis is no longer running. Refresh its details before requesting new instructions.",
+    );
+    expect(onStateRefused).toHaveBeenCalled();
+    expect(screen.queryByText(/server detail/)).not.toBeInTheDocument();
   });
 
-  it("shows error on API failure", async () => {
-    mockApiPost.mockRejectedValueOnce(new Error("Connection failed"));
-    render(<ConnectButton targetType="pipeline_run" targetId={1} />);
-    fireEvent.click(screen.getByTestId("connect-button"));
-    await waitFor(() => {
-      expect(screen.getByTestId("connect-error")).toHaveTextContent("Connection failed");
-    });
+  it.each([
+    ["connection_provider_unavailable", "provider_unavailable", 502, /could not check this analysis with the cluster right now/],
+    ["connection_provider_timeout", "deadline_exceeded", 504, /could not check this analysis with the cluster right now/],
+    ["connection_provider_unavailable", "provider_denied", 502, /Ask an administrator to review bioAF's cluster access/],
+    ["connection_target_invalid", "cluster_setup_incomplete", 409, /Ask an administrator to finish cluster setup/],
+  ])("distinguishes %s/%s from a stopped analysis", async (code, reason, status, message) => {
+    const onStateRefused = jest.fn();
+    mockApiPost.mockRejectedValueOnce(refusal(code, reason, status));
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible onStateRefused={onStateRefused} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+
+    const error = await screen.findByTestId("connect-error");
+    expect(error).toHaveTextContent(message);
+    expect(error).not.toHaveTextContent(/no longer running/);
+    expect(error).not.toHaveTextContent(/server detail/);
+    expect(onStateRefused).not.toHaveBeenCalled();
+  });
+
+  it("clears a stale error when retrying", async () => {
+    mockApiPost.mockRejectedValueOnce(refusal("connection_provider_timeout", "deadline_exceeded", 504));
+    render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-error");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    expect(screen.queryByTestId("connect-error")).not.toBeInTheDocument();
+    await screen.findByTestId("connect-command");
+  });
+
+  it("clears expanded instructions when the target changes", async () => {
+    const { rerender } = render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+
+    rerender(<ConnectButton targetType="pipeline_run" targetId={2} eligible />);
+
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show instructions" })).toBeEnabled();
+  });
+
+  it("clears expanded instructions when the target becomes ineligible", async () => {
+    const { rerender } = render(<ConnectButton targetType="session" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+
+    rerender(<ConnectButton targetType="session" targetId={1} eligible={false} />);
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+
+    rerender(<ConnectButton targetType="session" targetId={1} eligible />);
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+  });
+
+  it("clears expanded instructions when the permission is lost", async () => {
+    const { rerender } = render(<ConnectButton targetType="session" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    await screen.findByTestId("connect-command");
+
+    perms.canAccess.mockReturnValue(false);
+    rerender(<ConnectButton targetType="session" targetId={1} eligible />);
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+
+    perms.canAccess.mockImplementation((r: string, a: string) => r === "notebooks" && a === "launch");
+    rerender(<ConnectButton targetType="session" targetId={1} eligible />);
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+  });
+
+  it("never shows a late response for an earlier target under a new one", async () => {
+    const first = deferred<typeof connection>();
+    mockApiPost.mockReturnValueOnce(first.promise);
+    const { rerender } = render(<ConnectButton targetType="pipeline_run" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+
+    rerender(<ConnectButton targetType="pipeline_run" targetId={2} eligible />);
+    await act(async () => first.resolve(connection));
+
+    expect(screen.queryByTestId("connect-command")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show instructions" })).toBeEnabled();
+    const signal = mockApiPost.mock.calls[0][2].signal as AbortSignal;
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("never shows a late failure for an earlier target under a new one", async () => {
+    const first = deferred<typeof connection>();
+    mockApiPost.mockReturnValueOnce(first.promise);
+    const { rerender } = render(<ConnectButton targetType="session" targetId={1} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+
+    rerender(<ConnectButton targetType="session" targetId={2} eligible />);
+    await act(async () => first.reject(refusal("connection_unavailable", "not_running")));
+
+    await waitFor(() => expect(screen.queryByTestId("connect-error")).not.toBeInTheDocument());
   });
 });
