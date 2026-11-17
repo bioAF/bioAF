@@ -210,8 +210,13 @@ class KubernetesNotebookProvider(NotebookProvider):
         )
 
     def _connection_clients(self):
-        core = self._gke.core_v1()
-        return core, None
+        # Runs in the bounded worker thread under the provider error mapping. The fingerprint check
+        # rebuilds the cached client when the freshly loaded config names another cluster, so the
+        # live check reads the cluster the command names.
+        api_client = self._gke.client_for_loaded_config() if self._session_factory is not None else None
+        if api_client is None:
+            return self._gke.core_v1(), None
+        return client.CoreV1Api(api_client=api_client), None
 
     def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
         # A legacy record with no recorded pod gets the launch naming rule applied to its id.
@@ -232,10 +237,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         target = self.connection_reference(target)
 
         async def load() -> dict:
-            # The fingerprint-aware refresh reloads the config and rebuilds the cached client when
-            # the cluster changed, so the live check reads the cluster the command names.
+            # Database read only; the client is refreshed for this config in _connection_clients.
             if self._session_factory is not None:
-                await self._gke.get_api_client_async()
+                await self._gke.load_cluster_config(force=True)
             return self._cluster_config or {}
 
         return await exec_access.resolve_connection(

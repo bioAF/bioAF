@@ -235,6 +235,14 @@ class GkeConnection:
         # Re-read platform_config every call so a cluster teardown + redeploy
         # (which rewrites endpoint and ca_cert) invalidates the cached client.
         await self.load_cluster_config(force=True)
+        return self.client_for_loaded_config()
+
+    def client_for_loaded_config(self) -> client.ApiClient:
+        """The cached client, rebuilt when the loaded config names another cluster or the token aged.
+
+        Synchronous (building a client can mint a token), so callers that must stay bounded run it
+        off the event loop after an async ``load_cluster_config(force=True)``.
+        """
         current_fp = self._cluster_fingerprint()
 
         cluster_changed = self._api_client is not None and self._cached_cluster_fingerprint != current_fp

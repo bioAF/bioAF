@@ -366,7 +366,7 @@ async def test_the_check_reads_the_same_cluster_the_command_names_after_a_config
 
     seen = []
 
-    async def capture(target, *, default_namespace, backend, load_config, clients, deadline=10.0):
+    async def capture(target, *, default_namespace, backend, load_config, clients, deadline=None):
         cfg = await load_config()
         core, _batch = clients()
         seen.append((cfg["gke_cluster_endpoint"], core.api_client.endpoint))
@@ -382,3 +382,51 @@ async def test_the_check_reads_the_same_cluster_the_command_names_after_a_config
     await adapter.describe_connection(target)
 
     assert seen == [("10.0.0.1", "10.0.0.1"), ("10.0.0.2", "10.0.0.2")]
+
+
+def _notebook_with_cluster_client(monkeypatch, build):
+    """A live notebook adapter whose cluster refresh calls ``build`` to make the client."""
+    from app.adapters.kubernetes import connection as k8s_connection
+
+    adapter = KubernetesNotebookProvider(session_factory=object(), mode=ComputeMode.KUBERNETES)
+    gke = adapter._gke
+
+    async def load_cluster_config(force=False):
+        gke._cluster_config = {**GKE, "gke_cluster_endpoint": "10.0.0.9", "gke_cluster_ca_cert": "Y2E="}
+        return gke._cluster_config
+
+    def not_in_cluster():
+        raise k8s_connection.config.ConfigException("not in cluster")
+
+    monkeypatch.setattr(gke, "load_cluster_config", load_cluster_config)
+    monkeypatch.setattr(gke, "build_out_of_cluster_client", build)
+    monkeypatch.setattr(k8s_connection.config, "load_incluster_config", not_in_cluster)
+    monkeypatch.setattr(exec_access, "backend_for_cluster_auth", lambda: "gke")
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_a_notebook_credential_failure_is_a_structured_provider_error(monkeypatch):
+    def build():
+        raise RuntimeError("token mint failed: secret detail")
+
+    adapter = _notebook_with_cluster_client(monkeypatch, build)
+    with pytest.raises(ConnectionProviderUnavailableError) as exc:
+        await adapter.describe_connection(NB)
+    assert "secret detail" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_a_slow_notebook_credential_refresh_stays_within_the_deadline(monkeypatch):
+    import time
+
+    def build():
+        time.sleep(1.0)
+        raise AssertionError("unreachable within the deadline")
+
+    adapter = _notebook_with_cluster_client(monkeypatch, build)
+    monkeypatch.setattr(exec_access, "RESOLUTION_DEADLINE_SECONDS", 0.2)
+    started = time.monotonic()
+    with pytest.raises(ConnectionProviderTimeoutError):
+        await adapter.describe_connection(NB)
+    assert time.monotonic() - started < 0.8

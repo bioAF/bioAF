@@ -329,7 +329,7 @@ async def resolve_connection(
     backend: str,
     load_config: Callable[[], Awaitable[dict]],
     clients: Callable[[], tuple],
-    deadline: float = RESOLUTION_DEADLINE_SECONDS,
+    deadline: float | None = None,
 ) -> ConnectionDescription:
     """Prove ``target`` is live and describe how to open a shell in it, within ``deadline`` seconds.
 
@@ -345,7 +345,7 @@ async def resolve_connection(
         raise _invalid_identity("workload")
     if not is_namespace(namespace):
         raise _invalid_identity("namespace")
-    clock = _Deadline(deadline)
+    clock = _Deadline(RESOLUTION_DEADLINE_SECONDS if deadline is None else deadline)
 
     try:
         cfg = await asyncio.wait_for(load_config(), timeout=clock.remaining())
