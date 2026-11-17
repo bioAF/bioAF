@@ -60,6 +60,7 @@ _GCP_PROJECT = re.compile(r"^[a-z0-9][a-z0-9.:-]{0,127}$")
 _GCP_REGION = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 _GCP_ZONE = re.compile(r"^[a-z]+-[a-z]+[0-9]+-[a-z]$")
 _AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-[0-9]+$")
+_AWS_ACCOUNT = re.compile(r"^[0-9]{12}$")
 
 _SETUP_INCOMPLETE = (
     "Terminal instructions are not available because bioAF's cluster setup is incomplete. "
@@ -116,11 +117,17 @@ def _required(cfg: dict, key: str, pattern: re.Pattern) -> str:
 
 
 def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
-    """Setup guide + context for the active cluster-auth backend (``gke`` or ``eks``)."""
+    """Setup guide + context for the active cluster-auth backend (``gke`` or ``eks``).
+
+    The context names the whole cluster identity, so a command copied for one cluster can never
+    select another one the user configured later: GKE's own ``gke_{project}_{location}_{cluster}``,
+    and on EKS an alias carrying the account, region, and cluster name.
+    """
     if backend == "eks":
         cluster = _required(cfg, "gke_cluster_name", _CLUSTER_NAME)
         region = _required(cfg, "aws_region", _AWS_REGION)
-        context = f"bioaf-{region}-{cluster}"
+        account = _required(cfg, "aws_account_id", _AWS_ACCOUNT)
+        context = f"bioaf-{account}-{region}-{cluster}"
         steps = [
             "Install kubectl (https://kubernetes.io/docs/tasks/tools/) and the AWS CLI (https://aws.amazon.com/cli/).",
             "Sign in with your own AWS identity (for example, aws sso login with your profile). "
@@ -134,13 +141,17 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
     elif backend == "gke":
         cluster = _required(cfg, "gke_cluster_name", _CLUSTER_NAME)
         project = _required(cfg, "gcp_project_id", _GCP_PROJECT)
-        location = (cfg.get("gcp_region") or "").strip()
+        # The deployed cluster's own location (a compute Terraform output), never gcp_region: a
+        # compute deploy can override the region and then restore the installation default.
+        location = (cfg.get("gke_cluster_location") or "").strip()
         if _GCP_ZONE.match(location):
             location_flag = "--zone"
         elif _GCP_REGION.match(location):
             location_flag = "--region"
         else:
-            logger.warning("Terminal instructions refused: cluster setting gcp_region is missing or malformed")
+            logger.warning(
+                "Terminal instructions refused: cluster setting gke_cluster_location is missing or malformed"
+            )
             raise ConnectionTargetInvalidError(_SETUP_INCOMPLETE, reason="cluster_setup_incomplete")
         # The context name gcloud get-credentials writes.
         context = f"gke_{project}_{location}_{cluster}"

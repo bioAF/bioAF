@@ -22,7 +22,12 @@ from kubernetes.client import (
 )
 from kubernetes.client.exceptions import ApiException
 
-GKE = {"gke_cluster_name": "bioaf-lab-abc123", "gcp_project_id": "lab-proj-1", "gcp_region": "us-west1"}
+GKE = {
+    "gke_cluster_name": "bioaf-lab-abc123",
+    "gcp_project_id": "lab-proj-1",
+    "gke_cluster_location": "us-west1",
+    "gcp_region": "us-west1",
+}
 CONTEXT = "gke_lab-proj-1_us-west1_bioaf-lab-abc123"
 JOB = "bioaf-pipeline-42-1731700000"
 JOB_UID = "11111111-2222-3333-4444-555555555555"

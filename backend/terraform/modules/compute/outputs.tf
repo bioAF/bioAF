@@ -3,6 +3,11 @@ output "cluster_name" {
   description = "Name of the GKE cluster"
 }
 
+output "cluster_location" {
+  value       = google_container_cluster.bioaf.location
+  description = "Region or zone of the GKE cluster (the deployed location, which can differ from the installation default region)"
+}
+
 output "cluster_endpoint" {
   value       = google_container_cluster.bioaf.endpoint
   description = "GKE cluster API endpoint URL"

@@ -260,9 +260,9 @@ async def test_missing_cluster_setup_is_refused_before_any_provider_read():
 
 @pytest.mark.asyncio
 async def test_eks_cluster_produces_aws_setup_and_alias_context():
-    cfg = {"gke_cluster_name": "bioaf-lab-xyz789", "aws_region": "eu-west-2"}
+    cfg = {"gke_cluster_name": "bioaf-lab-xyz789", "aws_region": "eu-west-2", "aws_account_id": "123456789012"}
     d = await _resolve(NB, FakeK8s(pod=notebook_pod()), cfg=cfg, backend="eks")
-    assert d.context == "bioaf-eu-west-2-bioaf-lab-xyz789"
+    assert d.context == "bioaf-123456789012-eu-west-2-bioaf-lab-xyz789"
     assert f"--context {d.context}" in d.command
     assert "gcloud" not in d.setup_guide and "update-kubeconfig" in d.setup_guide
 
@@ -322,3 +322,63 @@ async def test_compute_adapter_refuses_a_pipeline_target_without_apipeline_job()
     with pytest.raises(ConnectionTargetInvalidError) as exc:
         await adapter.describe_connection(PIPE.model_copy(update={"provider_ref": None}))
     assert exc.value.reason == "missing_identity"
+
+
+@pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
+@pytest.mark.asyncio
+async def test_the_check_reads_the_same_cluster_the_command_names_after_a_config_change(adapter_cls, monkeypatch):
+    """A cluster redeploy rewrites platform_config; the cached client must not keep reading the old one.
+
+    The live check (client) and the command/setup (config) come from one refreshed cluster identity.
+    """
+    from types import SimpleNamespace
+
+    from app.adapters.kubernetes import connection as k8s_connection
+
+    stored = {}
+    cluster_a = {**GKE, "gke_cluster_endpoint": "10.0.0.1", "gke_cluster_ca_cert": "Y2EtYQ=="}
+    cluster_b = {
+        **GKE,
+        "gke_cluster_name": "bioaf-lab-new999",
+        "gke_cluster_endpoint": "10.0.0.2",
+        "gke_cluster_ca_cert": "Y2EtYg==",
+    }
+
+    adapter = adapter_cls(session_factory=object(), mode=ComputeMode.KUBERNETES)
+    gke = adapter._gke
+
+    async def load_cluster_config(force=False):
+        gke._cluster_config = dict(stored)
+        if force and gke._invalidate_client_on_force:
+            gke._api_client = None
+        return gke._cluster_config
+
+    def not_in_cluster():
+        raise k8s_connection.config.ConfigException("not in cluster")
+
+    monkeypatch.setattr(gke, "load_cluster_config", load_cluster_config)
+    monkeypatch.setattr(
+        gke,
+        "build_out_of_cluster_client",
+        lambda: SimpleNamespace(endpoint=gke._cluster_config["gke_cluster_endpoint"]),
+    )
+    monkeypatch.setattr(k8s_connection.config, "load_incluster_config", not_in_cluster)
+
+    seen = []
+
+    async def capture(target, *, default_namespace, backend, load_config, clients, deadline=10.0):
+        cfg = await load_config()
+        core, _batch = clients()
+        seen.append((cfg["gke_cluster_endpoint"], core.api_client.endpoint))
+
+    monkeypatch.setattr(exec_access, "resolve_connection", capture)
+    monkeypatch.setattr(exec_access, "backend_for_cluster_auth", lambda: "gke")
+    target = PIPE if adapter_cls is KubernetesComputeProvider else NB
+
+    stored.update(cluster_a)
+    await adapter.describe_connection(target)
+    stored.clear()
+    stored.update(cluster_b)
+    await adapter.describe_connection(target)
+
+    assert seen == [("10.0.0.1", "10.0.0.1"), ("10.0.0.2", "10.0.0.2")]

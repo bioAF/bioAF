@@ -26,6 +26,7 @@ from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
 from app.services.deployment_outputs import (
     COMPUTE_AWS_OUTPUTS,
+    COMPUTE_GCP_OUTPUTS,
     COMPUTE_OUTPUTS,
     COMPUTE_TEARDOWN_CLEARED_KEYS,
     IMAGE_BUILD_OUTPUTS,
@@ -426,6 +427,8 @@ async def _after_compute_apply(
     await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.WRITE_NULL)
     if cloud_provider == "aws":
         await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.WRITE_NULL)
+    else:
+        await persist_outputs(session, outputs, COMPUTE_GCP_OUTPUTS, BlankOutputs.WRITE_NULL)
 
     # Update kubernetes_cluster component state
     await session.execute(
@@ -1105,5 +1108,7 @@ async def sync_compute_config(session: AsyncSession) -> dict[str, str]:
     populated = await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.SKIP)
     if await get_cloud_provider(session) == "aws":
         populated |= await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.SKIP)
+    else:
+        populated |= await persist_outputs(session, outputs, COMPUTE_GCP_OUTPUTS, BlankOutputs.SKIP)
     await session.flush()
     return populated

@@ -180,6 +180,9 @@ class KubernetesComputeProvider(ComputeProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_region",
+        # Terminal setup: the deployed GKE location and, on EKS, the account in the context alias.
+        "gke_cluster_location",
+        "aws_account_id",
         # aws_region lets the EKS ClusterAuth provider mint a region-correct STS
         # token; additive and ignored on GCP (the EKS endpoint/CA reuse the
         # gke_cluster_* keys above). pipeline_runner_role_arn is the AWS IRSA

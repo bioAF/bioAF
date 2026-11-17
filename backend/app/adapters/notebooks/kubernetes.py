@@ -108,6 +108,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         "gcp_zone",
         # Terminal-instruction setup names the cluster's location (GKE) or region (EKS).
         "gcp_region",
+        # Terminal setup: the deployed GKE location and, on EKS, the account in the context alias.
+        "gke_cluster_location",
+        "aws_account_id",
         "aws_region",
     ]
 
@@ -229,8 +232,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         target = self.connection_reference(target)
 
         async def load() -> dict:
+            # The fingerprint-aware refresh reloads the config and rebuilds the cached client when
+            # the cluster changed, so the live check reads the cluster the command names.
             if self._session_factory is not None:
-                await self._gke.load_cluster_config(force=True)
+                await self._gke.get_api_client_async()
             return self._cluster_config or {}
 
         return await exec_access.resolve_connection(

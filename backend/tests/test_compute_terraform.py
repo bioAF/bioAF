@@ -530,3 +530,11 @@ def test_node_pools_are_created_after_nat_exists():
     for block in pool_blocks:
         name = re.search(r'"(\w+)"', block).group(1)
         assert "google_compute_router_nat" in block, f"node pool {name} must depend on NAT"
+
+
+def test_compute_module_outputs_the_cluster_location():
+    """Terminal setup names the cluster by its deployed location, not the installation default region."""
+    outputs_tf = (COMPUTE_MODULE_DIR / "outputs.tf").read_text()
+    block = re.search(r'output "cluster_location" \{(.*?)\n\}', outputs_tf, re.S)
+    assert block, "outputs.tf should define output cluster_location"
+    assert "google_container_cluster.bioaf.location" in block.group(1)

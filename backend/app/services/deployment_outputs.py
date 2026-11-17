@@ -59,6 +59,11 @@ COMPUTE_OUTPUTS: OutputMap = {
     "cellxgene_runner_sa_email": "cellxgene_runner_sa_email",
 }
 
+# GKE only: the cluster's deployed region or zone. gcp_region is the installation default, which
+# a compute deploy can override and then restore, so it does not identify the cluster. Terminal
+# setup (kubectl context and get-credentials) reads this key.
+COMPUTE_GCP_OUTPUTS: OutputMap = {"cluster_location": "gke_cluster_location"}
+
 # AWS (EKS) outputs the same cluster_* keys, plus the IRSA role ARNs + OIDC issuer
 # the AWS pod-identity / cluster-auth seams need, the Cluster Autoscaler's IRSA
 # role, and the networking + instance profile EC2 work nodes launch into. The EKS
