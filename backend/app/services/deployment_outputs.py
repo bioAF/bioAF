@@ -86,6 +86,8 @@ COMPUTE_TEARDOWN_CLEARED_KEYS: tuple[str, ...] = (
     "gke_cluster_name",
     "gke_cluster_endpoint",
     "gke_cluster_ca_cert",
+    # The location goes with the cluster: terminal setup must refuse, not name a torn-down cluster's region.
+    "gke_cluster_location",
 )
 
 # Set to "null" by storage destroy, so the next deploy generates fresh names.

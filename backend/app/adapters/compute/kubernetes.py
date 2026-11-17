@@ -365,6 +365,7 @@ class KubernetesComputeProvider(ComputeProvider):
             state=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
             endpoint=endpoint,
             ca_cert=ca_cert,
+            location=getattr(cluster, "location", "") or None,
         )
 
     async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:

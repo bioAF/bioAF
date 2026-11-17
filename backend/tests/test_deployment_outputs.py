@@ -79,7 +79,13 @@ def test_storage_destroy_clears_every_supported_name():
 
 
 def test_compute_teardown_clearing_contract_is_only_cluster_identity():
-    assert set(COMPUTE_TEARDOWN_CLEARED_KEYS) == {"gke_cluster_name", "gke_cluster_endpoint", "gke_cluster_ca_cert"}
+    # The location goes with the cluster, so terminal setup can never name a torn-down cluster's region.
+    assert set(COMPUTE_TEARDOWN_CLEARED_KEYS) == {
+        "gke_cluster_name",
+        "gke_cluster_endpoint",
+        "gke_cluster_ca_cert",
+        "gke_cluster_location",
+    }
 
 
 def test_provider_specific_keys_stay_provider_specific():

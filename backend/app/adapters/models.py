@@ -187,6 +187,8 @@ class ClusterProbe(BaseModel):
     state: str
     endpoint: str | None = None
     ca_cert: str | None = None
+    # The cluster's own region or zone, as the provider reports it.
+    location: str | None = None
 
 
 class NodePoolMetrics(BaseModel):

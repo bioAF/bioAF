@@ -401,6 +401,8 @@ class OrphanedResourceService:
         if probe:
             await _set_config(session, "gke_cluster_endpoint", probe.endpoint or "null")
             await _set_config(session, "gke_cluster_ca_cert", probe.ca_cert or "null")
+        # Replace the previous cluster's location; unknown is null, which refuses terminal setup.
+        await _set_config(session, "gke_cluster_location", (probe.location if probe else None) or "null")
 
         # Update kubernetes_cluster component state
         await session.execute(
