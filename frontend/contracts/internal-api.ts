@@ -9912,8 +9912,14 @@ export interface components {
         ConnectionCommandResponse: {
             /** Command */
             command: string;
+            /** Container */
+            container: string;
+            /** Context */
+            context: string;
             /** Namespace */
             namespace?: string | null;
+            /** Pod Name */
+            pod_name: string;
             /** Setup Guide */
             setup_guide: string;
             /** Target Id */

@@ -28,6 +28,9 @@ interface ConnectionResponse {
   target_type: string;
   target_id: string;
   namespace: string | null;
+  pod_name: string;
+  container: string;
+  context: string;
 }
 
 const STATE_REFUSAL =
@@ -204,12 +207,18 @@ export function ConnectButton({
           <dl className="text-sm grid grid-cols-[auto_1fr] gap-x-3 gap-y-1" data-testid="connect-target">
             <dt className="text-gray-500">Workload</dt>
             <dd className="font-mono break-all">{connection.target_id}</dd>
+            <dt className="text-gray-500">Pod</dt>
+            <dd className="font-mono break-all">{connection.pod_name}</dd>
+            <dt className="text-gray-500">Container</dt>
+            <dd className="font-mono break-all">{connection.container}</dd>
             {connection.namespace && (
               <>
                 <dt className="text-gray-500">Namespace</dt>
                 <dd className="font-mono break-all">{connection.namespace}</dd>
               </>
             )}
+            <dt className="text-gray-500">Cluster context</dt>
+            <dd className="font-mono break-all">{connection.context}</dd>
           </dl>
 
           <div className="flex items-start gap-2">

@@ -111,6 +111,9 @@ async def _connect(
         target_type=target.kind,
         target_id=description.provider_ref,
         namespace=description.namespace,
+        pod_name=description.pod_name,
+        container=description.container,
+        context=description.context,
     )
 
 

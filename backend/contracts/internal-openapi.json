@@ -3982,6 +3982,14 @@
             "title": "Command",
             "type": "string"
           },
+          "container": {
+            "title": "Container",
+            "type": "string"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
           "namespace": {
             "anyOf": [
               {
@@ -3992,6 +4000,10 @@
               }
             ],
             "title": "Namespace"
+          },
+          "pod_name": {
+            "title": "Pod Name",
+            "type": "string"
           },
           "setup_guide": {
             "title": "Setup Guide",
@@ -4019,7 +4031,10 @@
           "setup_guide",
           "warning",
           "target_type",
-          "target_id"
+          "target_id",
+          "pod_name",
+          "container",
+          "context"
         ],
         "title": "ConnectionCommandResponse",
         "type": "object"

@@ -409,6 +409,9 @@ async def test_pipeline_instructions_name_the_timestamped_job_head_pod_and_recor
         "context": "gke_lab-proj-1_us-west1_bioaf-lab-abc123",
         "pipeline_name": "custom: my-tool",
     }
+    # The response names the same verified target the audit records.
+    for field in ("pod_name", "namespace", "container", "context"):
+        assert data[field] == audit.details_json[field], field
 
 
 @pytest.mark.parametrize("session_type", ["jupyter", "rstudio"])
@@ -431,6 +434,11 @@ async def test_notebook_instructions_use_a_single_prefix_and_the_notebook_contai
     assert audit.details_json["pod_name"] == f"bioaf-notebook-{nb_id}"
     assert audit.details_json["namespace"] == "bioaf-notebooks"
     assert audit.details_json["session_type"] == session_type
+    assert (data["pod_name"], data["container"], data["context"]) == (
+        f"bioaf-notebook-{nb_id}",
+        "notebook",
+        "gke_lab-proj-1_us-west1_bioaf-lab-abc123",
+    )
 
 
 @pytest.mark.asyncio

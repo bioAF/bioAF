@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConnectButton } from "@/components/shared/ConnectButton";
 import { ApiError } from "@/lib/api";
 
@@ -32,6 +32,9 @@ const connection = {
   target_type: "pipeline_job",
   target_id: "bioaf-pipeline-1-17",
   namespace: "bioaf-pipelines",
+  pod_name: "bioaf-pipeline-1-17-x",
+  container: "pipeline",
+  context: "gke_p_us-west1_c",
 };
 
 function deferred<T>() {
@@ -122,6 +125,19 @@ describe("ConnectButton", () => {
     expect(screen.getByTestId("connect-target")).toHaveTextContent("bioaf-pipelines");
     expect(screen.getByTestId("connect-guidance")).toHaveTextContent(/does not open a terminal/);
     expect(screen.getByTestId("connect-guidance")).toHaveTextContent(/refresh .* details and request new instructions/i);
+  });
+
+  it("names the verified pod, container, and cluster context alongside the workload", async () => {
+    render(<ConnectButton targetType="pipeline_run" targetId={7} eligible />);
+    fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
+    const target = await screen.findByTestId("connect-target");
+
+    const value = (label: string) => within(target).getByText(label).nextElementSibling?.textContent;
+    expect(value("Workload")).toBe("bioaf-pipeline-1-17");
+    expect(value("Pod")).toBe("bioaf-pipeline-1-17-x");
+    expect(value("Container")).toBe("pipeline");
+    expect(value("Namespace")).toBe("bioaf-pipelines");
+    expect(value("Cluster context")).toBe("gke_p_us-west1_c");
   });
 
   it("uses the session endpoint for notebook sessions", async () => {
