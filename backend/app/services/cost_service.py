@@ -371,6 +371,12 @@ class CostService:
         today = period.today
         compute_adapter = get_compute_adapter()
         cluster_metrics = await compute_adapter.get_cluster_metrics()
+        # An unreadable cluster is unknown, not zero: keep today's existing node/compute estimates.
+        cluster_known = cluster_metrics.unavailable is None
+        if not cluster_known:
+            logger.warning(
+                "Cluster metrics unavailable (%s); node and compute estimates not updated", cluster_metrics.unavailable
+            )
         node_cost_daily = Decimal("0")
         compute_cost_daily = Decimal("0")
 
@@ -386,11 +392,9 @@ class CostService:
         storage_cost_monthly = Decimal(str(storage_metrics.total_cost_monthly_usd))
         storage_cost_daily = storage_cost_monthly / period.days_in_month
 
-        components = {
-            "node": node_cost_daily,
-            "storage": storage_cost_daily,
-            "compute": compute_cost_daily,
-        }
+        components = {"storage": storage_cost_daily}
+        if cluster_known:
+            components |= {"node": node_cost_daily, "compute": compute_cost_daily}
 
         for component, amount in components.items():
             existing_rec = await session.execute(

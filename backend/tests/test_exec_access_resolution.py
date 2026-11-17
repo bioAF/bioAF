@@ -430,3 +430,49 @@ async def test_a_slow_notebook_credential_refresh_stays_within_the_deadline(monk
     with pytest.raises(ConnectionProviderTimeoutError):
         await adapter.describe_connection(NB)
     assert time.monotonic() - started < 0.8
+
+
+@pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
+@pytest.mark.asyncio
+async def test_an_install_without_a_recorded_location_discovers_it_for_terminal_setup(adapter_cls, monkeypatch):
+    from types import SimpleNamespace
+
+    is_compute = adapter_cls is KubernetesComputeProvider
+    fake = FakeK8s(job=pipeline_job(), pods=[head_pod()]) if is_compute else FakeK8s(pod=notebook_pod())
+    adapter = _live(adapter_cls(mode=ComputeMode.KUBERNETES), fake, monkeypatch)
+    adapter._cluster_config = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
+    parents = []
+
+    def list_clusters(parent):
+        parents.append(parent)
+        return [SimpleNamespace(name=GKE["gke_cluster_name"], location="europe-west1-b")]
+
+    monkeypatch.setattr(adapter, "_gke_list_clusters", list_clusters)
+
+    d = await adapter.describe_connection(PIPE if is_compute else NB)
+
+    assert parents == ["projects/lab-proj-1/locations/-"]
+    assert d.context == "gke_lab-proj-1_europe-west1-b_bioaf-lab-abc123"
+    assert "--zone europe-west1-b" in d.setup_guide
+
+
+@pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
+@pytest.mark.parametrize(
+    "listing,expected",
+    [
+        (lambda parent: [], ConnectionTargetInvalidError),
+        (lambda parent: (_ for _ in ()).throw(RuntimeError("403 secret")), ConnectionProviderUnavailableError),
+    ],
+)
+@pytest.mark.asyncio
+async def test_terminal_setup_refuses_when_the_location_cannot_be_discovered(
+    adapter_cls, listing, expected, monkeypatch
+):
+    adapter = _live(adapter_cls(mode=ComputeMode.KUBERNETES), FakeK8s(), monkeypatch)
+    adapter._cluster_config = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
+    monkeypatch.setattr(adapter, "_gke_list_clusters", listing)
+
+    target = PIPE if adapter_cls is KubernetesComputeProvider else NB
+    with pytest.raises(expected) as exc:
+        await adapter.describe_connection(target)
+    assert "secret" not in str(exc.value)

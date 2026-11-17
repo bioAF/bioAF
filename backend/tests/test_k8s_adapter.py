@@ -23,6 +23,7 @@ async def test_k8s_adapter_get_cluster_status_with_mock(mode_adapter_factory):
         "gke_cluster_name": "bioaf-test",
         "gcp_project_id": "test-project",
         "gcp_region": "us-central1",
+        "gke_cluster_location": "us-central1",
     }
 
     # Mock GKE cluster response
@@ -89,6 +90,7 @@ async def test_k8s_adapter_get_cluster_detail_with_mock(mode_adapter_factory):
         "gke_cluster_name": "bioaf-test",
         "gcp_project_id": "test-project",
         "gcp_region": "us-central1",
+        "gke_cluster_location": "us-central1",
     }
 
     mock_cluster = MagicMock()

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from kubernetes.client.exceptions import ApiException
 
+from app.adapters.kubernetes.cluster_location import is_gke_location, is_gke_zone
 from app.adapters.models import ConnectionDescription, ConnectionTarget
 from app.exceptions import (
     ConnectionProviderTimeoutError,
@@ -57,8 +58,6 @@ _LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 
 _CLUSTER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
 _GCP_PROJECT = re.compile(r"^[a-z0-9][a-z0-9.:-]{0,127}$")
-_GCP_REGION = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
-_GCP_ZONE = re.compile(r"^[a-z]+-[a-z]+[0-9]+-[a-z]$")
 _AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-[0-9]+$")
 _AWS_ACCOUNT = re.compile(r"^[0-9]{12}$")
 
@@ -144,10 +143,8 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
         # The deployed cluster's own location (a compute Terraform output), never gcp_region: a
         # compute deploy can override the region and then restore the installation default.
         location = (cfg.get("gke_cluster_location") or "").strip()
-        if _GCP_ZONE.match(location):
-            location_flag = "--zone"
-        elif _GCP_REGION.match(location):
-            location_flag = "--region"
+        if is_gke_location(location):
+            location_flag = "--zone" if is_gke_zone(location) else "--region"
         else:
             logger.warning(
                 "Terminal instructions refused: cluster setting gke_cluster_location is missing or malformed"
@@ -186,6 +183,26 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
         f"{i}. {step}" for i, step in enumerate(steps, start=1)
     )
     return ClusterAccess(context=context, setup_guide=guide)
+
+
+async def discover_gke_location(cfg: dict, *, list_clusters: Callable[[str], object], session_factory) -> None:
+    """Fill a missing ``gke_cluster_location`` in ``cfg`` by cluster name (recorded for next time).
+
+    Not found leaves it missing, so ``cluster_access`` refuses as setup incomplete. A provider
+    failure is a safe provider error; its text goes nowhere but the error class to the log.
+    """
+    from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown, resolve_gke_cluster_location
+
+    try:
+        await resolve_gke_cluster_location(cfg, list_clusters=list_clusters, session_factory=session_factory)
+    except ClusterLocationUnknown:
+        return
+    except Exception as exc:
+        logger.warning("Locating the GKE cluster for terminal setup failed (error_type=%s)", type(exc).__name__)
+        raise ConnectionProviderUnavailableError(
+            "bioAF could not reach the cluster to check this workload. Try again in a moment.",
+            reason="provider_unavailable",
+        ) from None
 
 
 # -- Live resolution ---------------------------------------------------------------------------

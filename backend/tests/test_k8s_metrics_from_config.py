@@ -24,6 +24,7 @@ def adapter(mode_adapter_factory):
         "gke_cluster_name": "bioaf-cluster-1",
         "gcp_project_id": "my-project",
         "gcp_region": "us-central1",
+        "gke_cluster_location": "us-central1",
         "gcp_service_account_key": '{"type": "service_account", "project_id": "test"}',
     }
     return provider

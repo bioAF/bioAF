@@ -204,6 +204,9 @@ class ClusterMetrics(BaseModel):
     cost_burn_rate_hourly: float | None = None
     node_pools: list[NodePoolMetrics] = Field(default_factory=list)
     provider_details: dict = Field(default_factory=dict)
+    # Set when the cluster could not be read (e.g. "cluster_location_unknown",
+    # "provider_unavailable"): the values are a fallback, not observed zero activity.
+    unavailable: str | None = None
 
 
 # --- Storage -----------------------------------------------------------------

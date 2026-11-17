@@ -6,6 +6,7 @@ cluster, _get_gke_client must use credentials returned by credential_injector
 not default/ambient VM credentials.
 """
 
+from types import SimpleNamespace
 import base64
 from unittest.mock import MagicMock, patch
 
@@ -75,6 +76,10 @@ class TestGkeClientAuth:
         mock_cluster.node_pools = [pool]
 
         mock_gke = MagicMock()
+        # Identity from env only: the deployed location is discovered by cluster name.
+        mock_gke.list_clusters.return_value = SimpleNamespace(
+            clusters=[SimpleNamespace(name="test-cluster", location="us-central1")]
+        )
         mock_gke.get_cluster.return_value = mock_cluster
 
         with patch.object(adapter, "_get_gke_client", return_value=mock_gke):
