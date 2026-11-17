@@ -111,8 +111,10 @@ export default function NotebooksPage() {
     loadResourceProfiles();
   }, [bucket]);
 
-  // Sessions, keyed by bucket: re-read every 10 s while one is starting, each read
-  // after the previous one settles. A bucket's late answer cannot replace another's.
+  // Sessions, keyed by bucket: re-read every 10 s while one is starting, or while the
+  // details of an active session are open (so a stop clears its terminal instructions),
+  // each read after the previous one settles. A bucket's late answer cannot replace another's.
+  const viewingId = viewingSession?.id ?? null;
   const sessionsPath = `/api/v1/notebooks/sessions?bucket=${bucket}`;
   const sessionList = useResource(
     sessionsPath,
@@ -121,7 +123,12 @@ export default function NotebooksPage() {
       [sessionsPath],
     ),
     {
-      poll: ({ data }) => (data?.sessions.some((s) => s.status === "starting") ? 10000 : false),
+      poll: ({ data }) =>
+        data?.sessions.some(
+          (s) => s.status === "starting" || (s.id === viewingId && ["running", "idle"].includes(s.status)),
+        )
+          ? 10000
+          : false,
       onError: (e) => {
         // These sessions bill while they run, so "you have none" must never stand
         // in for "we could not ask". The comment was right and the render was not: the

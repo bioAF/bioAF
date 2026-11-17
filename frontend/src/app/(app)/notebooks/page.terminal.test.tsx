@@ -151,18 +151,34 @@ test("a stopped-session refusal re-reads the list, and the stopped session loses
 
 test("expanded instructions disappear when polling finds the session stopped", async () => {
   jest.useFakeTimers();
-  // A starting session keeps the page polling every 10 s.
-  sessions = [session(5, "jupyter", "running"), session(6, "jupyter", "starting")];
+  // No session is starting: the open details alone keep the record fresh.
+  sessions = [session(5, "jupyter", "running")];
   const dialog = await openDetails(5);
   fireEvent.click(within(dialog).getByRole("button", { name: "Show instructions" }));
   await within(dialog).findByTestId("connect-command");
 
-  sessions = [session(5, "jupyter", "stopped"), session(6, "jupyter", "starting")];
+  sessions = [session(5, "jupyter", "stopped")];
   await act(async () => {
     jest.advanceTimersByTime(10_000);
   });
 
   await waitFor(() => expect(within(dialog).queryByTestId("connect-command")).not.toBeInTheDocument());
   expect(within(dialog).queryByText("Terminal instructions")).not.toBeInTheDocument();
+  jest.useRealTimers();
+});
+
+test("closing the details stops the extra polling", async () => {
+  jest.useFakeTimers();
+  sessions = [session(5, "jupyter", "running")];
+  const dialog = await openDetails(5);
+  fireEvent.click(within(dialog).getByRole("button", { name: /close/i }));
+  const reads = () => mockGet.mock.calls.filter(([u]) => String(u).includes("/notebooks/sessions")).length;
+  const before = reads();
+
+  await act(async () => {
+    jest.advanceTimersByTime(30_000);
+  });
+
+  expect(reads()).toBe(before);
   jest.useRealTimers();
 });
