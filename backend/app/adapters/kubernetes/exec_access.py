@@ -16,13 +16,22 @@ routes never see raw Kubernetes exceptions. Raw diagnostics go to the server log
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
 
+import urllib3
+from kubernetes.client.exceptions import ApiException
+
+from app.adapters.models import ConnectionDescription, ConnectionTarget
 from app.exceptions import (
+    ConnectionProviderTimeoutError,
+    ConnectionProviderUnavailableError,
     ConnectionTargetInvalidError,
+    ConnectionUnavailableError,
 )
 from app.platform.shell_args import shell_join
 
@@ -32,8 +41,15 @@ SHELL = "/bin/sh"
 PIPELINE_CONTAINER = "pipeline"
 NOTEBOOK_CONTAINER = "notebook"
 RESOLUTION_DEADLINE_SECONDS = 10.0
+PIPELINE_RUN_LABEL = "bioaf.io/pipeline-run"
 
-TargetKind = Literal["pipeline_job", "notebook_session"]
+
+def backend_for_cluster_auth() -> str:
+    """The active cluster-auth backend (``gke``/``eks``), from the existing cloud selection."""
+    from app.platform.cloud_provider import backend_for
+
+    return backend_for("cluster_auth")
+
 
 # DNS-1123 subdomain (Job/Pod names) and label (namespaces, containers). A leading letter or digit
 # also keeps a value from ever being read as a kubectl option.
@@ -66,18 +82,21 @@ def _invalid_identity(what: str) -> ConnectionTargetInvalidError:
     )
 
 
-def render_exec_command(*, pod: str, namespace: str, container: str, context: str | None) -> str:
-    """The copyable command: explicit context, namespace, container, and the fixed shell."""
+def render_exec_command(*, pod: str, namespace: str, container: str, context: str | None, kind: str = "pod") -> str:
+    """The copyable command: explicit context, namespace, container, and the fixed shell.
+
+    ``kind="job"`` renders ``job/<name>`` for the legacy unverified string API only.
+    """
     if not is_resource_name(pod):
         raise _invalid_identity("pod")
     if not is_namespace(namespace):
         raise _invalid_identity("namespace")
     if not is_namespace(container):
         raise _invalid_identity("container")
-    words = ["kubectl"]
+    words = ["kubectl", "exec", "-it"]
     if context:
         words += ["--context", context]
-    words += ["-n", namespace, "exec", "-it", pod, "--container", container, "--", SHELL]
+    words += ["-n", namespace, f"job/{pod}" if kind == "job" else pod, "--container", container, "--", SHELL]
     return shell_join(words)
 
 
@@ -157,3 +176,187 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
         f"{i}. {step}" for i, step in enumerate(steps, start=1)
     )
     return ClusterAccess(context=context, setup_guide=guide)
+
+
+# -- Live resolution ---------------------------------------------------------------------------
+
+
+def _unavailable(message: str, reason: str) -> ConnectionUnavailableError:
+    return ConnectionUnavailableError(message, reason=reason)
+
+
+def _mismatch() -> ConnectionTargetInvalidError:
+    return ConnectionTargetInvalidError(
+        "The workload in the cluster does not match this analysis's record, so bioAF will not give "
+        "terminal instructions for it.",
+        reason="identity_mismatch",
+    )
+
+
+def _container_running(pod, container: str) -> bool:
+    for status in getattr(pod.status, "container_statuses", None) or []:
+        if status.name == container:
+            return bool(status.state and status.state.running)
+    return False
+
+
+def _owned_by(pod, uid: str) -> bool:
+    return any(ref.kind == "Job" and ref.uid == uid for ref in (pod.metadata.owner_references or []))
+
+
+class _Deadline:
+    def __init__(self, seconds: float) -> None:
+        self._end = time.monotonic() + seconds
+
+    def remaining(self) -> float:
+        left = self._end - time.monotonic()
+        if left <= 0:
+            raise ConnectionProviderTimeoutError(
+                "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"
+            )
+        return left
+
+
+def _resolve_pipeline_head(core, batch, target: ConnectionTarget, namespace: str, deadline: _Deadline) -> str:
+    job = batch.read_namespaced_job(
+        name=target.provider_ref, namespace=namespace, _request_timeout=deadline.remaining()
+    )
+    meta = job.metadata
+    if (meta.labels or {}).get(PIPELINE_RUN_LABEL) != str(target.record_id) or not meta.uid:
+        raise _mismatch()
+    if meta.deletion_timestamp:
+        raise _unavailable("This analysis's compute job is shutting down.", "workload_ending")
+    pods = core.list_namespaced_pod(
+        namespace=namespace, label_selector=f"job-name={target.provider_ref}", _request_timeout=deadline.remaining()
+    ).items
+    eligible = [
+        p
+        for p in pods
+        if _owned_by(p, meta.uid) and not p.metadata.deletion_timestamp and _container_running(p, PIPELINE_CONTAINER)
+    ]
+    if not eligible:
+        raise _unavailable("This analysis's pipeline container is not running.", "container_not_running")
+    if len(eligible) > 1:
+        raise _unavailable(
+            "More than one pod claims to run this analysis, so bioAF cannot pick one.", "ambiguous_target"
+        )
+    return eligible[0].metadata.name
+
+
+def _resolve_notebook_pod(core, target: ConnectionTarget, namespace: str, deadline: _Deadline) -> str:
+    pod = core.read_namespaced_pod(name=target.provider_ref, namespace=namespace, _request_timeout=deadline.remaining())
+    labels = pod.metadata.labels or {}
+    expected = {
+        "bioaf.io/session": str(target.record_id),
+        "bioaf.io/user": str(target.user_id),
+        "bioaf.io/type": target.session_type,
+    }
+    if any(labels.get(k) != v for k, v in expected.items()):
+        raise _mismatch()
+    if pod.metadata.deletion_timestamp:
+        raise _unavailable("This session is shutting down.", "workload_ending")
+    if not _container_running(pod, NOTEBOOK_CONTAINER):
+        raise _unavailable("This session's notebook container is not running.", "container_not_running")
+    return pod.metadata.name
+
+
+def _provider_error(exc: Exception, target: ConnectionTarget) -> Exception:
+    """Map a provider exception to a connection domain error; raw detail goes to the log only."""
+    if isinstance(exc, ApiException):
+        logger.warning(
+            "Terminal target check failed: kind=%s record_id=%s status=%s", target.kind, target.record_id, exc.status
+        )
+        if exc.status == 404:
+            return _unavailable("This analysis's workload no longer exists in the cluster.", "workload_missing")
+        if exc.status in (401, 403):
+            return ConnectionProviderUnavailableError(
+                "The cluster refused bioAF's check of this workload. Ask an administrator to review bioAF's "
+                "cluster access.",
+                reason="provider_denied",
+            )
+    cause = exc.reason if isinstance(exc, urllib3.exceptions.MaxRetryError) else exc
+    # NewConnectionError subclasses ConnectTimeoutError in urllib3 2 but means "refused", not slow.
+    timed_out = isinstance(cause, urllib3.exceptions.TimeoutError) and not isinstance(
+        cause, urllib3.exceptions.NewConnectionError
+    )
+    if timed_out:
+        logger.warning("Terminal target check timed out: kind=%s record_id=%s", target.kind, target.record_id)
+        return ConnectionProviderTimeoutError(
+            "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"
+        )
+    if not isinstance(exc, ApiException):
+        logger.warning(
+            "Terminal target check could not reach the cluster: kind=%s record_id=%s error_type=%s",
+            target.kind,
+            target.record_id,
+            type(exc).__name__,
+        )
+    return ConnectionProviderUnavailableError(
+        "bioAF could not reach the cluster to check this workload. Try again in a moment.",
+        reason="provider_unavailable",
+    )
+
+
+async def resolve_connection(
+    target: ConnectionTarget,
+    *,
+    default_namespace: str,
+    backend: str,
+    load_config: Callable[[], Awaitable[dict]],
+    clients: Callable[[], tuple],
+    deadline: float = RESOLUTION_DEADLINE_SECONDS,
+) -> ConnectionDescription:
+    """Prove ``target`` is live and describe how to open a shell in it, within ``deadline`` seconds.
+
+    ``clients`` returns ``(core_v1, batch_v1)`` and is called off the event loop (building a
+    client can mint a token). Only metadata reads are made; nothing runs inside a pod.
+    """
+    if not target.provider_ref:
+        raise ConnectionTargetInvalidError(
+            "This analysis has no recorded workload, so bioAF cannot tell which one it is.", reason="missing_identity"
+        )
+    namespace = target.namespace or default_namespace
+    if not is_resource_name(target.provider_ref):
+        raise _invalid_identity("workload")
+    if not is_namespace(namespace):
+        raise _invalid_identity("namespace")
+    clock = _Deadline(deadline)
+
+    try:
+        cfg = await asyncio.wait_for(load_config(), timeout=clock.remaining())
+    except asyncio.TimeoutError:
+        raise ConnectionProviderTimeoutError(
+            "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"
+        ) from None
+    access = cluster_access(backend, cfg or {}, namespace)
+
+    def check() -> tuple[str, str]:
+        try:
+            core, batch = clients()
+            if target.kind == "pipeline_job":
+                return _resolve_pipeline_head(core, batch, target, namespace, clock), PIPELINE_CONTAINER
+            return _resolve_notebook_pod(core, target, namespace, clock), NOTEBOOK_CONTAINER
+        except (ConnectionTargetInvalidError, ConnectionUnavailableError, ConnectionProviderTimeoutError):
+            raise
+        except Exception as exc:  # provider boundary: every other failure becomes a safe domain error
+            raise _provider_error(exc, target) from None
+
+    try:
+        pod, container = await asyncio.wait_for(asyncio.to_thread(check), timeout=clock.remaining())
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Terminal target check exceeded its deadline: kind=%s record_id=%s", target.kind, target.record_id
+        )
+        raise ConnectionProviderTimeoutError(
+            "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"
+        ) from None
+
+    return ConnectionDescription(
+        command=render_exec_command(pod=pod, namespace=namespace, container=container, context=access.context),
+        provider_ref=target.provider_ref,
+        pod_name=pod,
+        namespace=namespace,
+        container=container,
+        context=access.context,
+        setup_guide=access.setup_guide,
+    )

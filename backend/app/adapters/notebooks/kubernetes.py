@@ -25,8 +25,10 @@ from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.session_status import update_compute_session
-from app.exceptions import ValidationError
+from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
+    ConnectionDescription,
+    ConnectionTarget,
     SessionInfo,
     SessionStatus,
     StoredObject,
@@ -79,6 +81,13 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
 _local_sessions: dict[str, dict] = {}
 
 DEFAULT_NOTEBOOK_NAMESPACE = "bioaf-notebooks"
+
+
+def notebook_pod_name(session_id) -> str:
+    """The pod name launch gives a session: one ``bioaf-notebook-`` prefix on the bare id."""
+    return f"bioaf-notebook-{session_id}"
+
+
 HOME_DIR = "/home/jovyan"
 
 
@@ -97,6 +106,9 @@ class KubernetesNotebookProvider(NotebookProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_zone",
+        # Terminal-instruction setup names the cluster's location (GKE) or region (EKS).
+        "gcp_region",
+        "aws_region",
     ]
 
     def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
@@ -181,8 +193,46 @@ class KubernetesNotebookProvider(NotebookProvider):
         return [_session_status_from_dict(d) for d in items]
 
     async def get_connection_command(self, session_id: str) -> str:
-        namespace = DEFAULT_NOTEBOOK_NAMESPACE
-        return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
+        """Unverified legacy form for a bare canonical session id (never an already-prefixed name).
+
+        Terminal instructions use ``describe_connection``.
+        """
+        from app.adapters.kubernetes.exec_access import NOTEBOOK_CONTAINER, render_exec_command
+
+        return render_exec_command(
+            pod=notebook_pod_name(session_id),
+            namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+            container=NOTEBOOK_CONTAINER,
+            context=None,
+        )
+
+    def _connection_clients(self):
+        core = self._gke.core_v1()
+        return core, None
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        from app.adapters.kubernetes import exec_access
+
+        if self.is_local:
+            raise ConnectionTargetInvalidError(
+                "Terminal instructions are not available in simulated compute mode.", reason="simulated_mode"
+            )
+        if target.provider_ref is None:
+            # Legacy record with no recorded pod: the launch naming rule applied to the record id.
+            target = target.model_copy(update={"provider_ref": notebook_pod_name(target.record_id)})
+
+        async def load() -> dict:
+            if self._session_factory is not None:
+                await self._gke.load_cluster_config(force=True)
+            return self._cluster_config or {}
+
+        return await exec_access.resolve_connection(
+            target,
+            default_namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+            backend=exec_access.backend_for_cluster_auth(),
+            load_config=load,
+            clients=self._connection_clients,
+        )
 
     def connection_setup_guide(self) -> str:
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
@@ -391,7 +441,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         user_id = session_spec.get("user_id", 0)
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
 
-        pod_name = f"bioaf-notebook-{session_id}"
+        pod_name = notebook_pod_name(session_id)
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
         # Stage data through the cloud-selected storage adapter so the staged URIs
         # and copy commands match the backend (gs:// + gcloud on GCS; s3:// + aws on
@@ -789,7 +839,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         # manifest dict. Reading off the dict would propagate CodeQL taint from
         # the chpasswd command embedded in pod_manifest into pod_name, which
         # then trips py/clear-text-logging at every subsequent log call.
-        pod_name = f"bioaf-notebook-{session_id}"
+        pod_name = notebook_pod_name(session_id)
         service_name = f"bioaf-notebook-svc-{session_id}"
 
         session_type = session_spec.get("session_type", "jupyter")

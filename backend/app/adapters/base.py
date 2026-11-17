@@ -7,9 +7,11 @@ All service-layer code depends on these abstractions, never concrete implementat
 from abc import ABC, abstractmethod
 from typing import BinaryIO
 
-from app.adapters.capabilities import ProviderCapabilities
+from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.adapters.job_specs import JobSpec
 from app.adapters.models import (
+    ConnectionDescription,
+    ConnectionTarget,
     CellxgeneInstance,
     ClusterDetail,
     ClusterMetrics,
@@ -166,6 +168,14 @@ class ComputeProvider(ABC):
         the Kubernetes backends override with the cluster-access steps.
         """
         return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        """Verified terminal instructions for ``target``, checked against the live provider.
+
+        Backends without a live resolver report ``ssh_exec`` unsupported; a formatted command
+        string alone is not evidence that the workload exists or is reachable.
+        """
+        raise CapabilityNotSupported("ssh_exec")
 
     async def persist_job_logs(self, job_id: str) -> bool:
         """Persist job logs to durable storage before the pod is cleaned up.
@@ -645,6 +655,14 @@ class NotebookProvider(ABC):
         Kubernetes notebook backend overrides with the cluster-access steps.
         """
         return "For SLURM-based clusters, ensure SSH access is configured with your system administrator."
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        """Verified terminal instructions for ``target``, checked against the live provider.
+
+        Backends without a live resolver report ``ssh_exec`` unsupported; a formatted command
+        string alone is not evidence that the workload exists or is reachable.
+        """
+        raise CapabilityNotSupported("ssh_exec")
 
     async def sync_session_storage(self, session_id: str, **kwargs) -> None:
         """Best-effort push of a running session's working files to durable storage.

@@ -25,7 +25,7 @@ from app.adapters.base import ComputeProvider
 from app.adapters.compute.k8s_manifest import ManifestInputs, NextflowLaunch, build_job_manifest, builds_nextflow
 from app.adapters.job_specs import CustomCommandJobSpec, JobSpec, NextflowJobSpec, job_spec_from_dict
 from app.adapters.capabilities import ProviderCapabilities
-from app.exceptions import ValidationError
+from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.platform.nextflow_params import INTERNAL_PARAMS, parameter_argument, refuse_malformed_parameter_names
 from app.platform.run_output_layout import directory_prefix, results_bucket_from_config, run_output_key
 from app.platform.work_dir_layout import work_dir_key
@@ -33,6 +33,8 @@ from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_man
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.models import (
+    ConnectionDescription,
+    ConnectionTarget,
     ClusterDetail,
     ClusterMetrics,
     ClusterProbe,
@@ -51,6 +53,8 @@ from app.adapters.models import (
 from app.pipeline import nextflow_trace
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
+
+DEFAULT_PIPELINE_NAMESPACE = "bioaf-pipelines"
 
 _JOB_STATUS_KEYS = {
     "job_id",
@@ -402,13 +406,40 @@ class KubernetesComputeProvider(ComputeProvider):
         return _job_progress_from_dict(d)
 
     async def get_connection_command(self, job_id: str) -> str:
-        namespace = "bioaf-pipelines"
-        return f"kubectl exec -it -n {namespace} job/{job_id} -- /bin/bash"
+        """Unverified legacy form; terminal instructions use ``describe_connection``."""
+        from app.adapters.kubernetes.exec_access import PIPELINE_CONTAINER, render_exec_command
+
+        return render_exec_command(
+            pod=job_id, namespace=DEFAULT_PIPELINE_NAMESPACE, container=PIPELINE_CONTAINER, context=None, kind="job"
+        )
 
     def connection_setup_guide(self) -> str:
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
 
         return KUBECTL_SETUP_GUIDE
+
+    def _connection_clients(self):
+        return self._get_k8s_core_client(), self._get_k8s_batch_client()
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        from app.adapters.kubernetes import exec_access
+
+        if self.is_local:
+            raise ConnectionTargetInvalidError(
+                "Terminal instructions are not available in simulated compute mode.", reason="simulated_mode"
+            )
+
+        async def load() -> dict:
+            await self._ensure_cluster_config_fresh()
+            return self._cluster_config or {}
+
+        return await exec_access.resolve_connection(
+            target,
+            default_namespace=DEFAULT_PIPELINE_NAMESPACE,
+            backend=exec_access.backend_for_cluster_auth(),
+            load_config=load,
+            clients=self._connection_clients,
+        )
 
     # -- Local mode implementations --
 

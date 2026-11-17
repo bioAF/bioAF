@@ -113,12 +113,12 @@ def test_command_names_context_namespace_container_and_fixed_shell():
     )
     assert _argv(command) == [
         "kubectl",
+        "exec",
+        "-it",
         "--context",
         "gke_p_us-west1_c",
         "-n",
         "team-pipelines",
-        "exec",
-        "-it",
         "bioaf-pipeline-42-1700000000-abcde",
         "--container",
         "pipeline",
