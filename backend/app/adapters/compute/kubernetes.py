@@ -859,8 +859,16 @@ class KubernetesComputeProvider(ComputeProvider):
         6: "DEGRADED",
     }
 
+    async def deployed_cluster_location(self) -> str:
+        """The deployed GKE cluster's region or zone (recorded, or discovered and recorded)."""
+        _project, location, _name = await self._gke_cluster_identity()
+        return location
+
     async def _gke_cluster_path(self) -> str:
-        """The deployed cluster's GKE resource path: recorded name, project, and deployed location.
+        return gke_cluster_path(*await self._gke_cluster_identity())
+
+    async def _gke_cluster_identity(self) -> tuple[str, str, str]:
+        """(project, deployed location, cluster name) of the deployed GKE cluster.
 
         The location is ``gke_cluster_location`` (discovered by cluster name and recorded when an
         older install lacks it), never the installation default ``gcp_region``. Raises
@@ -881,7 +889,7 @@ class KubernetesComputeProvider(ComputeProvider):
             session_factory=self._session_factory,
         )
         cfg[LOCATION_KEY] = location
-        return gke_cluster_path(project_id, location, cluster_name)
+        return project_id, location, cluster_name
 
     def _gke_list_clusters(self, parent: str) -> list:
         """Blocking GKE list of clusters under ``parent`` (``locations/-`` lists every location)."""
