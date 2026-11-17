@@ -210,6 +210,15 @@ class KubernetesNotebookProvider(NotebookProvider):
         core = self._gke.core_v1()
         return core, None
 
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        # A legacy record with no recorded pod gets the launch naming rule applied to its id.
+        return target.model_copy(
+            update={
+                "provider_ref": target.provider_ref or notebook_pod_name(target.record_id),
+                "namespace": target.namespace or DEFAULT_NOTEBOOK_NAMESPACE,
+            }
+        )
+
     async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
         from app.adapters.kubernetes import exec_access
 
@@ -217,9 +226,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             raise ConnectionTargetInvalidError(
                 "Terminal instructions are not available in simulated compute mode.", reason="simulated_mode"
             )
-        if target.provider_ref is None:
-            # Legacy record with no recorded pod: the launch naming rule applied to the record id.
-            target = target.model_copy(update={"provider_ref": notebook_pod_name(target.record_id)})
+        target = self.connection_reference(target)
 
         async def load() -> dict:
             if self._session_factory is not None:
@@ -235,9 +242,18 @@ class KubernetesNotebookProvider(NotebookProvider):
         )
 
     def connection_setup_guide(self) -> str:
+        """The provider-selected guide for the loaded cluster settings, else the neutral fallback."""
+        from app.adapters.kubernetes import exec_access
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+        from app.exceptions import ConnectionTargetInvalidError
 
-        return KUBECTL_SETUP_GUIDE
+        try:
+            backend = exec_access.backend_for_cluster_auth()
+            return exec_access.cluster_access(
+                backend, self._cluster_config or {}, DEFAULT_NOTEBOOK_NAMESPACE
+            ).setup_guide
+        except ConnectionTargetInvalidError:
+            return KUBECTL_SETUP_GUIDE
 
     async def sync_session_storage(  # type: ignore[override]
         self,

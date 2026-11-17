@@ -23,7 +23,6 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-import urllib3
 from kubernetes.client.exceptions import ApiException
 
 from app.adapters.models import ConnectionDescription, ConnectionTarget
@@ -260,6 +259,25 @@ def _resolve_notebook_pod(core, target: ConnectionTarget, namespace: str, deadli
     return pod.metadata.name
 
 
+def _urllib3_classes(exc: BaseException) -> set[str]:
+    return {c.__name__ for c in type(exc).__mro__ if c.__module__.startswith("urllib3")}
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """A transport timeout from the Kubernetes client's HTTP layer (urllib3), or the builtin one.
+
+    Classified by class name so bioAF does not import urllib3 directly (it is the kubernetes
+    client's dependency, not ours). ``NewConnectionError`` subclasses ``ConnectTimeoutError`` in
+    urllib3 2 but means the connection was refused, not slow.
+    """
+    names = _urllib3_classes(exc)
+    if "MaxRetryError" in names and getattr(exc, "reason", None) is not None:
+        return _is_timeout(exc.reason)
+    if names:
+        return "TimeoutError" in names and "NewConnectionError" not in names
+    return isinstance(exc, TimeoutError)
+
+
 def _provider_error(exc: Exception, target: ConnectionTarget) -> Exception:
     """Map a provider exception to a connection domain error; raw detail goes to the log only."""
     if isinstance(exc, ApiException):
@@ -274,11 +292,7 @@ def _provider_error(exc: Exception, target: ConnectionTarget) -> Exception:
                 "cluster access.",
                 reason="provider_denied",
             )
-    cause = exc.reason if isinstance(exc, urllib3.exceptions.MaxRetryError) else exc
-    # NewConnectionError subclasses ConnectTimeoutError in urllib3 2 but means "refused", not slow.
-    timed_out = isinstance(cause, urllib3.exceptions.TimeoutError) and not isinstance(
-        cause, urllib3.exceptions.NewConnectionError
-    )
+    timed_out = _is_timeout(exc)
     if timed_out:
         logger.warning("Terminal target check timed out: kind=%s record_id=%s", target.kind, target.record_id)
         return ConnectionProviderTimeoutError(

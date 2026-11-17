@@ -156,3 +156,17 @@ def test_context_with_shell_metacharacters_stays_one_literal_argument():
     argv = _argv(command)
     assert argv[argv.index("--context") + 1] == context
     assert "$(id)'" in command  # quoted, not left for the shell to expand
+
+
+def test_legacy_setup_guide_is_provider_selected_once_cluster_settings_are_loaded(monkeypatch):
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+    from app.adapters.kubernetes import exec_access
+    from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+    from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+
+    assert "gcloud" not in KUBECTL_SETUP_GUIDE and "aws" not in KUBECTL_SETUP_GUIDE
+    monkeypatch.setattr(exec_access, "backend_for_cluster_auth", lambda: "eks")
+    for adapter in (KubernetesComputeProvider(), KubernetesNotebookProvider()):
+        adapter._cluster_config = dict(EKS)
+        guide = adapter.connection_setup_guide()
+        assert "update-kubeconfig" in guide and "gcloud" not in guide

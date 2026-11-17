@@ -414,12 +414,26 @@ class KubernetesComputeProvider(ComputeProvider):
         )
 
     def connection_setup_guide(self) -> str:
+        """The provider-selected guide for the loaded cluster settings, else the neutral fallback."""
+        from app.adapters.kubernetes import exec_access
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+        from app.exceptions import ConnectionTargetInvalidError
 
-        return KUBECTL_SETUP_GUIDE
+        try:
+            backend = exec_access.backend_for_cluster_auth()
+            return exec_access.cluster_access(
+                backend, self._cluster_config or {}, DEFAULT_PIPELINE_NAMESPACE
+            ).setup_guide
+        except ConnectionTargetInvalidError:
+            return KUBECTL_SETUP_GUIDE
 
     def _connection_clients(self):
         return self._get_k8s_core_client(), self._get_k8s_batch_client()
+
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        if target.namespace:
+            return target
+        return target.model_copy(update={"namespace": DEFAULT_PIPELINE_NAMESPACE})
 
     async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
         from app.adapters.kubernetes import exec_access

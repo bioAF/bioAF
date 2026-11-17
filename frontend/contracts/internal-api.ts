@@ -2460,7 +2460,10 @@ export interface paths {
         };
         /**
          * List Running Pods
-         * @description List all running pods with connect capability (admin only).
+         * @description This organization's running terminal targets, from the database (no provider listing).
+         *
+         *     A snapshot: each entry's ``record_id`` is what the per-record connect endpoints take, and the
+         *     live check happens there. Records whose identity is conflicting or malformed are left out.
          */
         get: operations["list_running_pods_api_infrastructure_compute_pods_get"];
         put?: never;
@@ -4355,7 +4358,7 @@ export interface paths {
         put?: never;
         /**
          * Connect Pipeline Run
-         * @description Generate connection command for a running pipeline job.
+         * @description Terminal instructions for a running pipeline run's head pod.
          */
         post: operations["connect_pipeline_run_api_pipeline_runs__run_id__connect_post"];
         delete?: never;
@@ -5739,7 +5742,7 @@ export interface paths {
         put?: never;
         /**
          * Connect Notebook Session
-         * @description Generate connection command for an active notebook session.
+         * @description Terminal instructions for a running or idle Jupyter or RStudio session.
          */
         post: operations["connect_notebook_session_api_sessions__session_id__connect_post"];
         delete?: never;

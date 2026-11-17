@@ -19,16 +19,16 @@ from app.logging_config import get_app_logger
 
 logger = get_app_logger(__name__)
 
-# First-time client setup for kubectl access to a GKE cluster. Lives in the K8s
-# adapter package (cloud CLI strings are allowed here); the EKS realization
-# (Stage 6e) returns the `aws eks update-kubeconfig` form behind the same seam.
-KUBECTL_SETUP_GUIDE = """First-time setup for kubectl access:
+# Fallback first-time setup text for the legacy string API when the deployment's cluster settings
+# are not loaded. Terminal instructions use the provider-selected guide from
+# ``exec_access.cluster_access`` (GKE or EKS, with the real cluster name and location).
+KUBECTL_SETUP_GUIDE = """First-time setup for terminal access:
 
-1. Install gcloud CLI: https://cloud.google.com/sdk/docs/install
-2. Authenticate: gcloud auth login
-3. Get cluster credentials:
-   gcloud container clusters get-credentials bioaf-cluster --region <region> --project <project-id>
-4. Verify access: kubectl get pods -n bioaf-pipelines"""
+1. Install kubectl: https://kubernetes.io/docs/tasks/tools/
+2. Sign in to your cloud provider with your own account.
+3. Ask an administrator for the cluster name and location, then add the cluster to your kubectl
+   configuration with your cloud provider's command.
+4. Check access with kubectl get pods in the workload's namespace."""
 
 
 class GkeConnection:

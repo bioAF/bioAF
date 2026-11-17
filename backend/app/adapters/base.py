@@ -177,6 +177,13 @@ class ComputeProvider(ABC):
         """
         raise CapabilityNotSupported("ssh_exec")
 
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        """``target`` with this backend's launch defaults filled in (no provider I/O).
+
+        Used for database-only listings; it is not evidence that the workload is live.
+        """
+        raise CapabilityNotSupported("ssh_exec")
+
     async def persist_job_logs(self, job_id: str) -> bool:
         """Persist job logs to durable storage before the pod is cleaned up.
 
@@ -661,6 +668,13 @@ class NotebookProvider(ABC):
 
         Backends without a live resolver report ``ssh_exec`` unsupported; a formatted command
         string alone is not evidence that the workload exists or is reachable.
+        """
+        raise CapabilityNotSupported("ssh_exec")
+
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        """``target`` with this backend's launch defaults filled in (no provider I/O).
+
+        Used for database-only listings; it is not evidence that the workload is live.
         """
         raise CapabilityNotSupported("ssh_exec")
 
