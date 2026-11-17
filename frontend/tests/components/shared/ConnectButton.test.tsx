@@ -127,17 +127,28 @@ describe("ConnectButton", () => {
     expect(screen.getByTestId("connect-guidance")).toHaveTextContent(/refresh .* details and request new instructions/i);
   });
 
-  it("names the verified pod, container, and cluster context alongside the workload", async () => {
+  it("keeps the exact target in collapsed connection details, each with a plain definition", async () => {
     render(<ConnectButton targetType="pipeline_run" targetId={7} eligible />);
     fireEvent.click(screen.getByRole("button", { name: "Show instructions" }));
     const target = await screen.findByTestId("connect-target");
 
-    const value = (label: string) => within(target).getByText(label).nextElementSibling?.textContent;
-    expect(value("Workload")).toBe("bioaf-pipeline-1-17");
-    expect(value("Pod")).toBe("bioaf-pipeline-1-17-x");
-    expect(value("Container")).toBe("pipeline");
-    expect(value("Namespace")).toBe("bioaf-pipelines");
-    expect(value("Cluster context")).toBe("gke_p_us-west1_c");
+    const details = target.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details!).getByText("Connection details").tagName).toBe("SUMMARY");
+
+    const entry = (label: string) => within(target).getByText(label).nextElementSibling?.textContent ?? "";
+    const rows: [string, string, RegExp][] = [
+      ["Workload", "bioaf-pipeline-1-17", /Job or Pod bioAF started for this analysis/],
+      ["Pod", "bioaf-pipeline-1-17-x", /running copy of that workload the command opens a shell in/],
+      ["Container", "pipeline", /main program inside the pod \(not a helper\)/],
+      ["Namespace", "bioaf-pipelines", /section of the cluster this workload runs in/],
+      ["Cluster context", "gke_p_us-west1_c", /name kubectl uses for this cluster after the first-time setup/],
+    ];
+    for (const [label, value, definition] of rows) {
+      expect(entry(label)).toContain(value);
+      expect(entry(label)).toMatch(definition);
+    }
   });
 
   it("uses the session endpoint for notebook sessions", async () => {

@@ -47,6 +47,22 @@ const UNIDENTIFIED =
 const UNKNOWN_FAILURE =
   "Terminal instructions could not be prepared. Try again in a moment. The technical detail is in the application logs.";
 
+/** The exact target, for diagnosis, with a plain definition of each Kubernetes term. */
+function targetDetails(c: ConnectionResponse): { label: string; value: string; definition: string }[] {
+  const rows = [
+    { label: "Workload", value: c.target_id, definition: "The Kubernetes Job or Pod bioAF started for this analysis." },
+    { label: "Pod", value: c.pod_name, definition: "The running copy of that workload the command opens a shell in." },
+    { label: "Container", value: c.container, definition: "The main program inside the pod (not a helper)." },
+    { label: "Namespace", value: c.namespace ?? "", definition: "The section of the cluster this workload runs in." },
+    {
+      label: "Cluster context",
+      value: c.context,
+      definition: "The name kubectl uses for this cluster after the first-time setup.",
+    },
+  ];
+  return rows.filter((row) => row.value);
+}
+
 /** A plain sentence for a refusal, and whether it means the record's state changed. */
 function describeFailure(err: unknown): { message: string; stateChanged: boolean } {
   if (err instanceof ApiError) {
@@ -204,22 +220,6 @@ export function ConnectButton({
             {connection.warning}
           </div>
 
-          <dl className="text-sm grid grid-cols-[auto_1fr] gap-x-3 gap-y-1" data-testid="connect-target">
-            <dt className="text-gray-500">Workload</dt>
-            <dd className="font-mono break-all">{connection.target_id}</dd>
-            <dt className="text-gray-500">Pod</dt>
-            <dd className="font-mono break-all">{connection.pod_name}</dd>
-            <dt className="text-gray-500">Container</dt>
-            <dd className="font-mono break-all">{connection.container}</dd>
-            {connection.namespace && (
-              <>
-                <dt className="text-gray-500">Namespace</dt>
-                <dd className="font-mono break-all">{connection.namespace}</dd>
-              </>
-            )}
-            <dt className="text-gray-500">Cluster context</dt>
-            <dd className="font-mono break-all">{connection.context}</dd>
-          </dl>
 
           <div className="flex items-start gap-2">
             <code
@@ -267,6 +267,21 @@ export function ConnectButton({
               </pre>
             )}
           </div>
+
+          <details className="text-sm">
+            <summary className="cursor-pointer text-bioaf-600">Connection details</summary>
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2" data-testid="connect-target">
+              {targetDetails(connection).map(({ label, value, definition }) => (
+                <div key={label} className="contents">
+                  <dt className="text-gray-500">{label}</dt>
+                  <dd>
+                    <div className="font-mono break-all">{value}</div>
+                    <p className="text-xs text-gray-500">{definition}</p>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </details>
 
           <button
             type="button"

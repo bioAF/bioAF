@@ -18,8 +18,8 @@ Where to find them:
 
 Select **Show instructions** to prepare them. bioAF first checks, against the cluster, that the workload
 recorded for this run or session still exists, carries this record's identity, and has its main container
-running. Then it shows the command, the workload, pod, container, namespace, and cluster context it
-targets, and the setup guide.
+running. Then it shows the command and the setup guide. **Connection details** (collapsed) lists the exact
+workload, pod, container, namespace, and cluster context, each with a short definition, for diagnosis.
 
 Who sees them: users whose role grants `notebooks:launch` (custom roles included; the built-in role name
 does not matter), on an installation whose compute backend supports exec (`ssh_exec`). API keys cannot
