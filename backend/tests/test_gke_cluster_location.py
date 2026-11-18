@@ -196,3 +196,40 @@ async def test_a_location_recorded_meanwhile_for_the_same_cluster_wins(factory):
 
 def test_cluster_path():
     assert gke_cluster_path("p", "europe-west1", "c") == "projects/p/locations/europe-west1/clusters/c"
+
+
+@pytest.mark.asyncio
+async def test_the_project_cannot_change_between_the_identity_check_and_the_save(factory, monkeypatch):
+    """Codex repro: the project row was read unlocked, changed by another transaction, then saved over."""
+    import asyncio
+
+    from sqlalchemy.exc import DBAPIError
+
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await _seed(factory, gke_cluster_name="bioaf-lab-abc123", gcp_project_id="lab-proj-1")
+    checked, resume = asyncio.Event(), asyncio.Event()
+    original = PlatformConfigService.get_many
+
+    async def get_many_then_pause(session, keys):
+        rows = await original(session, keys)
+        checked.set()
+        await resume.wait()
+        return rows
+
+    monkeypatch.setattr(PlatformConfigService, "get_many", staticmethod(get_many_then_pause))
+    lister = Lister([_cluster("bioaf-lab-abc123", "europe-west1")])
+    discovery = asyncio.create_task(
+        resolve_gke_cluster_location({**CFG}, list_clusters=lister, session_factory=factory)
+    )
+    await asyncio.wait_for(checked.wait(), timeout=5)
+
+    async with factory() as other:
+        await other.execute(text("SET LOCAL lock_timeout = '300ms'"))
+        with pytest.raises(DBAPIError):
+            await other.execute(text("UPDATE platform_config SET value = 'lab-proj-2' WHERE key = 'gcp_project_id'"))
+        await other.rollback()
+
+    resume.set()
+    assert await discovery == "europe-west1"
+    assert await _stored(factory, "gcp_project_id") == "lab-proj-1"

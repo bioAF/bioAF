@@ -90,16 +90,17 @@ async def find_gke_cluster_location(
 async def _record(session_factory, name: str, project: str, discovered: str) -> str:
     """Save ``discovered`` only while ``name``/``project`` are still the recorded cluster.
 
-    The cluster-name row is locked first, so a deploy that rewrites the identity either commits
-    before this reads it (and discovery is refused) or waits and then overwrites this result.
-    Returns the location now recorded for that cluster.
+    Both identity rows (project and cluster name) are locked, in key order, before they are
+    compared, so a change to either one either commits before this reads it (and discovery is
+    refused) or waits until this result is saved. Returns the location now recorded for that cluster.
     """
     from app.platform.platform_config_service import PlatformConfigService
 
     async with session_factory() as session:
-        locked = await PlatformConfigService.get_for_update(session, "gke_cluster_name")
-        rows = await PlatformConfigService.get_many(session, ["gcp_project_id", LOCATION_KEY])
-        if _clean(locked) != name or _clean(rows.get("gcp_project_id")) != project:
+        locked_project = await PlatformConfigService.get_for_update(session, "gcp_project_id")
+        locked_name = await PlatformConfigService.get_for_update(session, "gke_cluster_name")
+        rows = await PlatformConfigService.get_many(session, [LOCATION_KEY])
+        if _clean(locked_name) != name or _clean(locked_project) != project:
             await session.rollback()
             logger.warning("Discovered GKE location discarded: the recorded cluster changed during discovery")
             raise ClusterLocationUnknown("the recorded cluster changed while its location was being discovered")
