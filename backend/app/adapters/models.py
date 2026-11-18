@@ -179,7 +179,8 @@ class ClusterProbe(BaseModel):
     """Liveness probe of a (possibly orphaned) cluster looked up by name.
 
     ``state`` is a mapped status string ("RUNNING"/"PROVISIONING"/.../"UNKNOWN")
-    or "NOT_FOUND" when the cluster cannot be fetched. ``endpoint``/``ca_cert``
+    "NOT_FOUND" when the provider reports no such cluster at that location, or
+    "UNVERIFIED" when the probe failed (denied, unavailable). ``endpoint``/``ca_cert``
     let an orphan-adoption flow re-populate connection config without the caller
     touching a backend cluster object.
     """

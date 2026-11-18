@@ -15,6 +15,7 @@ from sqlalchemy import text
 
 from app.adapters.kubernetes.cluster_location import (
     ClusterLocationUnknown,
+    ClusterNotListed,
     classify_provider_failure,
     gke_cluster_path,
     resolve_gke_cluster_location,
@@ -94,6 +95,21 @@ async def test_an_incomplete_listing_is_not_proof_of_a_unique_match():
     with pytest.raises(ClusterLocationUnknown):
         await resolve_gke_cluster_location(cfg, list_clusters=lister)
     assert "gke_cluster_location" not in cfg
+
+
+@pytest.mark.parametrize(
+    "lister,absent",
+    [
+        (Lister([_cluster("other", "us-west1")]), True),
+        (Lister([], missing_zones=["asia-east1-a"]), False),
+        (Lister([_cluster("bioaf-lab-abc123", "us-west1"), _cluster("bioaf-lab-abc123", "europe-west1")]), False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_only_a_complete_listing_without_the_cluster_proves_it_absent(lister, absent):
+    with pytest.raises(ClusterLocationUnknown) as exc:
+        await resolve_gke_cluster_location({**CFG}, list_clusters=lister)
+    assert isinstance(exc.value, ClusterNotListed) is absent
 
 
 @pytest.mark.parametrize("missing", ["gke_cluster_name", "gcp_project_id"])

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.api_core.exceptions import NotFound
 from httpx import AsyncClient
 from sqlalchemy import text
 
@@ -156,7 +157,7 @@ async def test_recovery_check_dead_cluster(session, admin_user):
     await session.flush()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
@@ -392,7 +393,7 @@ async def test_cleanup_dead_orphans(session, admin_user):
     await session.flush()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
@@ -639,7 +640,7 @@ async def test_cleanup_all_endpoint(client: AsyncClient, admin_token: str, sessi
     await session.commit()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),

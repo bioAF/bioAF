@@ -359,8 +359,13 @@ class KubernetesComputeProvider(ComputeProvider):
         try:
             cluster = client.get_cluster(name=cluster_path)
         except Exception as exc:
-            logger.info("GKE cluster %s not reachable: %s", cluster_name, exc)
-            return ClusterProbe(state="NOT_FOUND")
+            from google.api_core import exceptions as gexc
+
+            if isinstance(exc, gexc.NotFound):
+                return ClusterProbe(state="NOT_FOUND")
+            # Denied, unavailable, or anything else: the cluster's existence was not checked.
+            logger.warning("GKE cluster %s could not be probed (error_type=%s)", cluster_name, type(exc).__name__)
+            return ClusterProbe(state="UNVERIFIED")
         endpoint = getattr(cluster, "endpoint", "") or None
         ca_cert = None
         master_auth = getattr(cluster, "master_auth", None)

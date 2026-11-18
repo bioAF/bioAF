@@ -36,6 +36,10 @@ class ClusterLocationUnknown(RuntimeError):
     """bioAF cannot tell where the deployed GKE cluster is."""
 
 
+class ClusterNotListed(ClusterLocationUnknown):
+    """A complete listing of the project's clusters does not include it: verified absent."""
+
+
 def is_gke_location(value: object) -> bool:
     return isinstance(value, str) and bool(_GCP_REGION.match(value) or _GCP_ZONE.match(value))
 
@@ -78,6 +82,9 @@ async def find_gke_cluster_location(
     locations = {
         getattr(c, "location", "") for c in getattr(response, "clusters", None) or [] if c.name == cluster_name
     }
+    if not locations:
+        logger.warning("GKE cluster location not discovered: no cluster of that name in a complete listing")
+        raise ClusterNotListed("the GKE cluster is not in the project's complete cluster listing")
     if len(locations) != 1:
         logger.warning("GKE cluster location not discovered: %d location(s) match the cluster", len(locations))
         raise ClusterLocationUnknown("the GKE cluster was not found in exactly one location")

@@ -140,7 +140,9 @@ class ComputeProvider(ABC):
     async def probe_cluster(self, project_id: str, location: str, cluster_name: str) -> ClusterProbe:
         """Probe one named cluster's liveness + connection info (for adoption).
 
-        Returns ``ClusterProbe(state="NOT_FOUND")`` if it cannot be fetched.
+        Returns ``ClusterProbe(state="NOT_FOUND")`` only when the provider reports the cluster
+        does not exist at ``location``, and ``state="UNVERIFIED"`` when the probe itself failed
+        (denied, unavailable): that is not evidence the cluster is gone.
         """
         raise NotImplementedError
 

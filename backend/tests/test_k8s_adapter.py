@@ -6,6 +6,7 @@ Verifies get_cluster_status and get_cluster_metrics return data using mocked GKE
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.api_core.exceptions import NotFound
 from app.settings_contract import ComputeMode
 
 
@@ -178,7 +179,7 @@ async def test_k8s_adapter_probe_cluster_not_found(mode_adapter_factory):
     provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 not found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with patch(
         "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",
