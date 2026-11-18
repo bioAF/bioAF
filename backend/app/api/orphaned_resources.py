@@ -29,6 +29,8 @@ class RecoveryCheckResponse(BaseModel):
     recoverable: list[RecoveryCheckItem]
     provisioning: list[RecoveryCheckItem]
     dead: list[RecoveryCheckItem]
+    # Clusters whose location is unknown: not established as alive or gone, never cleaned up.
+    unverified: list[RecoveryCheckItem] = []
 
 
 class CleanupAllResponse(BaseModel):
@@ -72,6 +74,7 @@ async def recovery_check(
         recoverable=[RecoveryCheckItem(**item) for item in result["recoverable"]],
         provisioning=[RecoveryCheckItem(**item) for item in result["provisioning"]],
         dead=[RecoveryCheckItem(**item) for item in result["dead"]],
+        unverified=[RecoveryCheckItem(**item) for item in result["unverified"]],
     )
 
 

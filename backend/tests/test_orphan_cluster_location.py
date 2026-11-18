@@ -93,10 +93,95 @@ async def test_a_failed_teardown_without_a_recorded_location_discovers_it(sessio
 
 @pytest.mark.parametrize("failure", [ClusterLocationUnknown("not found"), RuntimeError("403")])
 @pytest.mark.asyncio
-async def test_an_undiscoverable_location_still_records_the_orphan(session, monkeypatch, failure):
-    """The orphan must still be recorded; the installation default is the only remaining hint."""
+async def test_an_undiscoverable_location_is_recorded_as_unknown_not_guessed(session, monkeypatch, failure):
+    """The orphan is still recorded, with no location: a guessed region would read as 'already gone'."""
     from app.adapters import registry
 
     monkeypatch.setattr(registry, "get_compute_adapter", lambda: _adapter_locating(failure))
     await _failed_teardown(session)
-    assert await _orphan_location(session) == "us-central1"
+    assert await _orphan_location(session) is None
+
+
+class FakeGke:
+    """Compute adapter double: where clusters really are, and what was asked of it."""
+
+    def __init__(self, clusters: dict[str, str], *, locate_error: Exception | None = None):
+        self.clusters = clusters  # name -> location
+        self.locate_error = locate_error
+        self.probed: list[tuple[str, str]] = []
+        self.deleted: list[tuple[str, str]] = []
+
+    async def locate_cluster(self, project_id, cluster_name):
+        if self.locate_error:
+            raise self.locate_error
+        if cluster_name not in self.clusters:
+            raise ClusterLocationUnknown("not listed")
+        return self.clusters[cluster_name]
+
+    async def probe_cluster(self, project_id, location, cluster_name):
+        from app.adapters.models import ClusterProbe
+
+        self.probed.append((location, cluster_name))
+        if self.clusters.get(cluster_name) != location:
+            return ClusterProbe(state="NOT_FOUND")
+        return ClusterProbe(state="RUNNING", endpoint="10.0.0.9", ca_cert="ca", location=location)
+
+    async def delete_cluster(self, project_id, location, cluster_name):
+        self.deleted.append((location, cluster_name))
+
+
+async def _unknown_location_orphan(session):
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    resource = await OrphanedResourceService.log_resource(
+        session,
+        resource_type="gke_cluster",
+        resource_name="bioaf-demo-eu0001",
+        gcp_project_id="test-project",
+        stack_uid="eu0001",
+        gcp_zone=None,
+    )
+    await session.flush()
+    return resource
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_without_a_location_is_located_before_it_is_probed(session, monkeypatch):
+    from app.adapters import registry
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    gke = FakeGke({"bioaf-demo-eu0001": "europe-west1"})
+    monkeypatch.setattr(registry, "get_compute_adapter", lambda: gke)
+    resource = await _unknown_location_orphan(session)
+
+    report = await OrphanedResourceService.recovery_check(session)
+
+    assert [e["id"] for e in report["recoverable"]] == [resource.id]
+    assert gke.probed == [("europe-west1", "bioaf-demo-eu0001")]
+    assert resource.gcp_zone == "europe-west1"
+
+
+@pytest.mark.parametrize("locate_error", [None, RuntimeError("403 denied")])
+@pytest.mark.asyncio
+async def test_an_orphan_that_cannot_be_located_is_never_treated_as_gone(session, monkeypatch, locate_error):
+    """Codex repro: cleanup probed a guessed region, got NOT_FOUND, and marked a live cluster cleaned."""
+    from app.adapters import registry
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    gke = FakeGke({}, locate_error=locate_error)
+    monkeypatch.setattr(registry, "get_compute_adapter", lambda: gke)
+    resource = await _unknown_location_orphan(session)
+
+    report = await OrphanedResourceService.recovery_check(session)
+    assert report["dead"] == []
+    assert [e["id"] for e in report["unverified"]] == [resource.id]
+
+    counts = await OrphanedResourceService.cleanup_dead_orphans(session, user_id=1)
+    assert counts["cleaned"] == 0 and counts["skipped"] == 1
+    assert resource.status == "detected"
+    assert gke.probed == [] and gke.deleted == []
+
+    result = await OrphanedResourceService.cleanup_resource(session, resource.id, user_id=1)
+    assert result.status == "failed"
+    assert "location" in (result.error_message or "")
+    assert gke.deleted == []

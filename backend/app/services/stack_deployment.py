@@ -237,11 +237,12 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
         )
 
 
-async def _deployed_cluster_location(session: AsyncSession) -> str:
+async def _deployed_cluster_location(session: AsyncSession) -> str | None:
     """Where the deployed GKE cluster is, for recording it as an orphan.
 
-    The recorded location, else discovered through the compute adapter. When neither works the
-    installation default region is the only remaining hint, so the orphan is still recorded.
+    The recorded location, else discovered through the compute adapter, else None (unknown).
+    Never the installation default: probing a guessed region reports NOT_FOUND, which recovery
+    would read as "already gone" while the cluster keeps running elsewhere.
     """
     recorded = await _read_config(session, "gke_cluster_location")
     if is_gke_location(recorded):
@@ -252,10 +253,10 @@ async def _deployed_cluster_location(session: AsyncSession) -> str:
         return await get_compute_adapter().deployed_cluster_location()
     except Exception as exc:
         logger.warning(
-            "Deployed GKE cluster location unknown (error_type=%s); recording the orphan at the default region",
+            "Deployed GKE cluster location unknown (error_type=%s); recording the orphan without one",
             type(exc).__name__,
         )
-    return await _read_config(session, "gcp_region") or "us-central1"
+    return None
 
 
 async def _read_config(session: AsyncSession, key: str) -> str:

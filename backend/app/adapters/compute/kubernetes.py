@@ -34,6 +34,7 @@ from app.adapters.kubernetes.cluster_location import (
     DISCOVERY_TIMEOUT_SECONDS,
     LOCATION_KEY,
     ClusterLocationUnknown,
+    find_gke_cluster_location,
     gke_cluster_path,
     resolve_gke_cluster_location,
 )
@@ -859,6 +860,10 @@ class KubernetesComputeProvider(ComputeProvider):
         5: "ERROR",
         6: "DEGRADED",
     }
+
+    async def locate_cluster(self, project_id: str, cluster_name: str) -> str:
+        """Where ``cluster_name`` is in ``project_id``, from a complete cross-location listing."""
+        return await find_gke_cluster_location(project_id, cluster_name, list_clusters=self._gke_list_clusters)
 
     async def deployed_cluster_location(self) -> str:
         """The deployed GKE cluster's region or zone (recorded, or discovered and recorded)."""

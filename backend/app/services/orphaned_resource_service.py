@@ -19,6 +19,10 @@ _RECOVERABLE_STATUSES = {"RUNNING", "RECONCILING"}
 # Statuses that indicate the cluster is not yet ready but still starting
 _PROVISIONING_STATUSES = {"PROVISIONING"}
 
+# The orphan's location is unknown and could not be discovered: nothing about the cluster is
+# known, so it is never classified as dead or treated as already gone.
+_LOCATION_UNKNOWN = "LOCATION_UNKNOWN"
+
 # Statuses that indicate the cluster is dead or should be cleaned up
 _DEAD_STATUSES = {"ERROR", "DEGRADED", "STOPPING", "STATUS_UNSPECIFIED"}
 
@@ -148,6 +152,11 @@ class OrphanedResourceService:
         """Delete a GKE cluster via the cloud-selected compute adapter."""
         from app.adapters.registry import get_compute_adapter
 
+        if not await OrphanedResourceService._ensure_location(resource):
+            raise StateError(
+                f"The location of cluster {resource.resource_name} is unknown, so it was not deleted. "
+                "Find it in the cloud console and delete it there, or dismiss this entry."
+            )
         await get_compute_adapter().delete_cluster(
             resource.gcp_project_id,
             resource.gcp_zone,
@@ -196,6 +205,30 @@ class OrphanedResourceService:
         return resource
 
     @staticmethod
+    async def _ensure_location(resource: OrphanedResource) -> bool:
+        """Make sure the orphan has a real location, locating it by name when it has none.
+
+        An orphan recorded without a location (it could not be determined at the time) is looked
+        up across the project's locations. Probing a guessed location would report NOT_FOUND and
+        read as "already gone" while the cluster still runs elsewhere.
+        """
+        from app.adapters.kubernetes.cluster_location import is_gke_location
+        from app.adapters.registry import get_compute_adapter
+
+        if is_gke_location(resource.gcp_zone):
+            return True
+        try:
+            resource.gcp_zone = await get_compute_adapter().locate_cluster(
+                resource.gcp_project_id, resource.resource_name
+            )
+        except Exception as exc:
+            logger.warning(
+                "Orphaned cluster %s has no known location (error_type=%s)", resource.resource_name, type(exc).__name__
+            )
+            return False
+        return True
+
+    @staticmethod
     async def _query_gke_status(
         session: AsyncSession,
         resource: OrphanedResource,
@@ -207,6 +240,8 @@ class OrphanedResourceService:
         """
         from app.adapters.registry import get_compute_adapter
 
+        if not await OrphanedResourceService._ensure_location(resource):
+            return _LOCATION_UNKNOWN, None
         probe = await get_compute_adapter().probe_cluster(
             resource.gcp_project_id,
             resource.gcp_zone,
@@ -337,6 +372,7 @@ class OrphanedResourceService:
         recoverable: list[dict] = []
         provisioning: list[dict] = []
         dead: list[dict] = []
+        unverified: list[dict] = []
 
         for resource in resources:
             gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
@@ -355,6 +391,8 @@ class OrphanedResourceService:
                 recoverable.append(entry)
             elif gke_status in _PROVISIONING_STATUSES:
                 provisioning.append(entry)
+            elif gke_status == _LOCATION_UNKNOWN:
+                unverified.append(entry)
             else:
                 dead.append(entry)
 
@@ -362,6 +400,8 @@ class OrphanedResourceService:
             "recoverable": recoverable,
             "provisioning": provisioning,
             "dead": dead,
+            # Location unknown: neither alive nor gone is established, so never cleaned up.
+            "unverified": unverified,
         }
 
     @staticmethod
@@ -468,7 +508,11 @@ class OrphanedResourceService:
             if resource.resource_type == "gke_cluster":
                 gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
 
-                if gke_status in _RECOVERABLE_STATUSES or gke_status in _PROVISIONING_STATUSES:
+                if (
+                    gke_status in _RECOVERABLE_STATUSES
+                    or gke_status in _PROVISIONING_STATUSES
+                    or gke_status == _LOCATION_UNKNOWN
+                ):
                     skipped += 1
                     continue
 

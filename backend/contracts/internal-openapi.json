@@ -16712,6 +16712,14 @@
             },
             "title": "Recoverable",
             "type": "array"
+          },
+          "unverified": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RecoveryCheckItem"
+            },
+            "title": "Unverified",
+            "type": "array"
           }
         },
         "required": [

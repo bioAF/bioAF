@@ -13966,6 +13966,11 @@ export interface components {
             provisioning: components["schemas"]["RecoveryCheckItem"][];
             /** Recoverable */
             recoverable: components["schemas"]["RecoveryCheckItem"][];
+            /**
+             * Unverified
+             * @default []
+             */
+            unverified: components["schemas"]["RecoveryCheckItem"][];
         };
         /** ReferenceDatasetCreate */
         ReferenceDatasetCreate: {
