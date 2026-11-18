@@ -64,8 +64,12 @@ kubectl exec -it --context <context> -n <namespace> <pod> --container <container
 - **bioAF could not check it with the cluster right now:** try again in a moment.
 - **The cluster refused bioAF's check,** or **terminal access is not set up for this installation:** ask
   an administrator. These are about bioAF's own cluster access and configuration, not your permissions.
-  On a GKE installation whose cluster was deployed before bioAF recorded the cluster's location, an
-  administrator re-applies the compute stack, after which the location is recorded.
+  On a GKE installation whose cluster was deployed before bioAF recorded the cluster's location, bioAF
+  finds it the first time it is needed: it lists the project's clusters across all locations, and if
+  exactly one matches the recorded cluster name (and Google Cloud reports the list as complete) it
+  records that location. This needs bioAF's Google Cloud identity to be allowed to list clusters
+  (`container.clusters.list`). If the cluster cannot be found that way, an administrator re-applies the
+  compute stack, which records the location from the deployment itself.
 - Installations running in simulated compute mode have no cluster, do not offer terminal instructions,
   and never return a command.
 

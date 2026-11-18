@@ -18,6 +18,15 @@ import {
 import { DISK_TYPE_OPTIONS, describeDiskFor } from "./clusterDiskOptions";
 import { applyIsBlocked, describePoolCapacity, describeVerdict, type QuotaVerdict } from "./clusterQuotaVerdict";
 import type { ClusterConfig, StackStatus } from "./infrastructureTypes";
+import { Card } from "@/components/ui/Card";
+
+const CLUSTER_UNAVAILABLE: Record<NonNullable<StackStatus["cluster_unavailable"]>, string> = {
+  cluster_location_unknown:
+    "bioAF cannot find this cluster in Google Cloud, so its status is not shown. Ask an administrator to re-apply the compute stack.",
+  provider_denied:
+    "Google Cloud refused bioAF's request for this cluster's status. Ask an administrator to review bioAF's cloud access.",
+  provider_unavailable: "bioAF could not reach Google Cloud for this cluster's status. Try again in a moment.",
+};
 
 /**
  * The deployed cluster's status and its configuration panel: pending edits, the live quota
@@ -124,6 +133,15 @@ export function ClusterStatusCard({
 
   return (
     <>
+    {/* Deployed, but the live status could not be read: say why rather than hiding the card. */}
+    {stackStatus?.compute_deployed && !stackStatus.cluster && stackStatus.cluster_unavailable && (
+      <Card className="mb-6">
+        <h3 className="font-semibold mb-2">Cluster Status</h3>
+        <p className="text-sm text-gray-600" data-testid="cluster-unavailable">
+          {CLUSTER_UNAVAILABLE[stackStatus.cluster_unavailable]}
+        </p>
+      </Card>
+    )}
     {/* Cluster Status Card */}
     {stackStatus?.cluster && (
       <div className="bg-white rounded-lg shadow p-6 border border-gray-200 mb-6">

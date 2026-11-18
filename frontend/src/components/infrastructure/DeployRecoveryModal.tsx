@@ -26,12 +26,15 @@ interface RecoveryCheckResponse {
   recoverable: RecoveryItem[];
   provisioning: RecoveryItem[];
   dead: RecoveryItem[];
+  /** Earlier clusters whose location is unknown: not known to be running, not known to be gone. */
+  unverified?: RecoveryItem[];
 }
 
 type ModalState =
   | "loading"
   | "recoverable"
   | "provisioning"
+  | "unverified"
   | "none";
 
 interface Props {
@@ -55,6 +58,7 @@ export function DeployRecoveryModal({
   const [state, setState] = useState<ModalState>("loading");
   const [recoverable, setRecoverable] = useState<RecoveryItem[]>([]);
   const [provisioning, setProvisioning] = useState<RecoveryItem[]>([]);
+  const [unverified, setUnverified] = useState<RecoveryItem[]>([]);
   // Held so "Start Fresh" can say how many resources it is about to delete.
   const [dead, setDead] = useState<RecoveryItem[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
@@ -72,6 +76,7 @@ export function DeployRecoveryModal({
       );
       setRecoverable(data.recoverable);
       setProvisioning(data.provisioning);
+      setUnverified(data.unverified ?? []);
 
       // This used to fire `cleanup-all` here, as a side effect of the modal
       // rendering: no user action, no disclosure, and the failure swallowed. A
@@ -84,6 +89,8 @@ export function DeployRecoveryModal({
         setState("recoverable");
       } else if (data.provisioning.length > 0) {
         setState("provisioning");
+      } else if ((data.unverified ?? []).length > 0) {
+        setState("unverified");
       } else {
         // Nothing to recover or wait on -- close and allow normal flow
         setState("none");
@@ -236,6 +243,34 @@ export function DeployRecoveryModal({
               disabled={actionLoading || actionReason !== null}
               title={actionReason ?? undefined}>
               {actionLoading ? "Recovering..." : "Resume Deployment"}
+            </Button>
+          </div>
+        </>
+      )}
+
+      {/* Unverified: an earlier cluster whose location is unknown, so it may still be running */}
+      {state === "unverified" && (
+        <>
+          <div className="p-6 pb-0">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">A previous cluster could not be located</h3>
+            {unverified.map((item) => (
+              <p key={item.id} className="text-sm text-gray-600 mb-2">
+                bioAF recorded a cluster from an earlier deployment ({item.resource_name}) but cannot tell where it
+                is, so it cannot check whether it is still running and billing.
+              </p>
+            ))}
+            <p className="text-sm text-gray-600 mb-4">
+              Check the Kubernetes Engine page in the Google Cloud console and delete it there if it is no longer
+              needed.
+            </p>
+            {error && <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">{error}</p>}
+          </div>
+          <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+            <Button variant="secondary" onClick={runCheck} disabled={actionLoading}>
+              Check Again
+            </Button>
+            <Button variant="primary" onClick={onClose}>
+              Continue
             </Button>
           </div>
         </>

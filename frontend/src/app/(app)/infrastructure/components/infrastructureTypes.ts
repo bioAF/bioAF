@@ -50,6 +50,8 @@ export interface StackStatus {
   pubsub_configured: boolean;
   cluster: ClusterInfo | null;
   has_orphaned_clusters: boolean;
+  /** Compute is deployed but its live status could not be read. */
+  cluster_unavailable?: "cluster_location_unknown" | "provider_denied" | "provider_unavailable" | null;
 }
 
 export interface ComponentDef {
