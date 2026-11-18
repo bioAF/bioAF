@@ -18,8 +18,6 @@ import logging
 import re
 from collections.abc import Callable
 
-from sqlalchemy import text
-
 logger = logging.getLogger("bioaf.adapters.kubernetes.cluster_location")
 
 LOCATION_KEY = "gke_cluster_location"
@@ -96,18 +94,11 @@ async def _record(session_factory, name: str, project: str, discovered: str) -> 
     before this reads it (and discovery is refused) or waits and then overwrites this result.
     Returns the location now recorded for that cluster.
     """
+    from app.platform.platform_config_service import PlatformConfigService
+
     async with session_factory() as session:
-        locked = (
-            await session.execute(text("SELECT value FROM platform_config WHERE key = 'gke_cluster_name' FOR UPDATE"))
-        ).scalar_one_or_none()
-        rows = dict(
-            (
-                await session.execute(
-                    text("SELECT key, value FROM platform_config WHERE key IN ('gcp_project_id', :loc)"),
-                    {"loc": LOCATION_KEY},
-                )
-            ).all()
-        )
+        locked = await PlatformConfigService.get_for_update(session, "gke_cluster_name")
+        rows = await PlatformConfigService.get_many(session, ["gcp_project_id", LOCATION_KEY])
         if _clean(locked) != name or _clean(rows.get("gcp_project_id")) != project:
             await session.rollback()
             logger.warning("Discovered GKE location discarded: the recorded cluster changed during discovery")
@@ -116,8 +107,6 @@ async def _record(session_factory, name: str, project: str, discovered: str) -> 
         if is_gke_location(current):
             await session.rollback()
             return current
-        from app.platform.platform_config_service import PlatformConfigService
-
         await PlatformConfigService.set(session, LOCATION_KEY, discovered)
         await session.commit()
     logger.info("Recorded the deployed GKE cluster location %s (discovered by cluster name)", discovered)

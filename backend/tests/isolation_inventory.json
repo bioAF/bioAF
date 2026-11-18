@@ -585,12 +585,14 @@
    "route": "none"
   },
   "test_cluster_status.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
+    "fixture:client",
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "http requests use their own sessions"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_code_service.py": {
    "category": "real_commit",
