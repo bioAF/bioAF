@@ -26,7 +26,10 @@ interface RecoveryCheckResponse {
   recoverable: RecoveryItem[];
   provisioning: RecoveryItem[];
   dead: RecoveryItem[];
-  /** Earlier clusters whose location is unknown: not known to be running, not known to be gone. */
+  /**
+   * Earlier clusters bioAF could not check (location unknown, or Google Cloud refused or failed the
+   * check): not known to be running, not known to be gone.
+   */
   unverified?: RecoveryItem[];
 }
 
@@ -47,6 +50,36 @@ interface Props {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/** Why one unchecked cluster could not be checked, in the user's terms. */
+function unverifiedReason(item: RecoveryItem): string {
+  if (item.gke_status === "LOCATION_UNKNOWN" || !item.gcp_zone) {
+    return `bioAF recorded a cluster from an earlier deployment (${item.resource_name}) but cannot tell where it is, so it cannot check whether it is still running and billing.`;
+  }
+  return `bioAF recorded a cluster from an earlier deployment (${item.resource_name}) in ${item.gcp_zone} but Google Cloud did not let bioAF check it, so bioAF cannot tell whether it is still running and billing.`;
+}
+
+/**
+ * Earlier clusters that could not be checked. Shown with every other recovery choice too: a cluster
+ * that may still be billing must not disappear behind a resumable deployment.
+ */
+function UnverifiedClusters({ items }: { items: RecoveryItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <h3 className="text-lg font-semibold text-gray-900 mb-3">A previous cluster could not be checked</h3>
+      {items.map((item) => (
+        <p key={item.id} className="text-sm text-gray-600 mb-2">
+          {unverifiedReason(item)}
+        </p>
+      ))}
+      <p className="text-sm text-gray-600">
+        Check the Kubernetes Engine page in the Google Cloud console and delete it there if it is no longer
+        needed.
+      </p>
+    </div>
+  );
+}
 
 export function DeployRecoveryModal({
   open,
@@ -222,6 +255,7 @@ export function DeployRecoveryModal({
               This sometimes happens when Google Cloud is experiencing
               delays in your region.
             </p>
+            <UnverifiedClusters items={unverified} />
             {error && (
               <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
                 {error}
@@ -248,21 +282,11 @@ export function DeployRecoveryModal({
         </>
       )}
 
-      {/* Unverified: an earlier cluster whose location is unknown, so it may still be running */}
+      {/* Unverified: an earlier cluster bioAF could not check, so it may still be running */}
       {state === "unverified" && (
         <>
           <div className="p-6 pb-0">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">A previous cluster could not be located</h3>
-            {unverified.map((item) => (
-              <p key={item.id} className="text-sm text-gray-600 mb-2">
-                bioAF recorded a cluster from an earlier deployment ({item.resource_name}) but cannot tell where it
-                is, so it cannot check whether it is still running and billing.
-              </p>
-            ))}
-            <p className="text-sm text-gray-600 mb-4">
-              Check the Kubernetes Engine page in the Google Cloud console and delete it there if it is no longer
-              needed.
-            </p>
+            <UnverifiedClusters items={unverified} />
             {error && <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">{error}</p>}
           </div>
           <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
@@ -311,6 +335,7 @@ export function DeployRecoveryModal({
               </a>{" "}
               for current service health.
             </p>
+            <UnverifiedClusters items={unverified} />
             {error && (
               <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
                 {error}
