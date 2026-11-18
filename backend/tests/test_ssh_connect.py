@@ -431,9 +431,10 @@ async def test_notebook_instructions_use_a_single_prefix_and_the_notebook_contai
     assert "notebook-notebook" not in data["command"]
     assert f" bioaf-notebook-{nb_id} --container notebook -- /bin/sh" in data["command"]
     [audit] = await _audits(session, nb_id)
-    assert audit.details_json["pod_name"] == f"bioaf-notebook-{nb_id}"
-    assert audit.details_json["namespace"] == "bioaf-notebooks"
-    assert audit.details_json["session_type"] == session_type
+    details = audit.details_json or {}
+    assert details["pod_name"] == f"bioaf-notebook-{nb_id}"
+    assert details["namespace"] == "bioaf-notebooks"
+    assert details["session_type"] == session_type
     assert (data["pod_name"], data["container"], data["context"]) == (
         f"bioaf-notebook-{nb_id}",
         "notebook",
