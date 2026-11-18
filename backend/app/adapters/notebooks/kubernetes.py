@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from the credential injector
 """
 
 import asyncio
+from collections.abc import Callable
 import logging
 import posixpath
 import uuid
@@ -252,7 +253,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         backend = exec_access.backend_for_cluster_auth()
 
-        async def load(budget: float) -> dict:
+        async def load(budget: Callable[[], float]) -> dict:
             # Database reads only (plus GKE location discovery off the event loop); the client is
             # refreshed for this config in _connection_clients.
             if self._session_factory is not None:

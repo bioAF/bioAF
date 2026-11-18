@@ -186,9 +186,12 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
 
 
 async def discover_gke_location(
-    cfg: dict, *, list_clusters: Callable[[str, float], object], session_factory, budget: float
+    cfg: dict, *, list_clusters: Callable[[str, float], object], session_factory, budget: Callable[[], float]
 ) -> None:
     """Fill a missing ``gke_cluster_location`` in ``cfg`` by cluster name (recorded for next time).
+
+    ``budget`` returns the seconds left and is read just before the listing call, so it is never
+    stale; it raises ``ConnectionProviderTimeoutError`` when none are left.
 
     Not found leaves it missing, so ``cluster_access`` refuses as setup incomplete. A provider
     failure is a safe provider error; its text goes nowhere but the error class to the log.
@@ -205,6 +208,8 @@ async def discover_gke_location(
         )
     except ClusterLocationUnknown:
         return
+    except ConnectionProviderTimeoutError:
+        raise
     except Exception as exc:
         kind = classify_provider_failure(exc)
         logger.warning(
@@ -365,7 +370,7 @@ async def resolve_connection(
     *,
     default_namespace: str,
     backend: str,
-    load_config: Callable[[float], Awaitable[dict]],
+    load_config: Callable[[Callable[[], float]], Awaitable[dict]],
     clients: Callable[[], tuple],
     deadline: float | None = None,
 ) -> ConnectionDescription:
@@ -386,8 +391,9 @@ async def resolve_connection(
     clock = _Deadline(RESOLUTION_DEADLINE_SECONDS if deadline is None else deadline)
 
     try:
-        # load_config gets the remaining budget so any cloud call it makes is bounded by it too.
-        cfg = await asyncio.wait_for(load_config(clock.remaining()), timeout=clock.remaining())
+        # load_config gets the clock, read when its cloud call starts, so that call is bounded by
+        # what is left then rather than by what was left before its database reads.
+        cfg = await asyncio.wait_for(load_config(clock.remaining), timeout=clock.remaining())
     except asyncio.TimeoutError:
         raise ConnectionProviderTimeoutError(
             "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"

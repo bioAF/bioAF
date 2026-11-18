@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 """
 
 import asyncio
+from collections.abc import Callable
 import logging
 import os
 import shlex
@@ -462,7 +463,7 @@ class KubernetesComputeProvider(ComputeProvider):
 
         backend = exec_access.backend_for_cluster_auth()
 
-        async def load(budget: float) -> dict:
+        async def load(budget: Callable[[], float]) -> dict:
             await self._ensure_cluster_config_fresh()
             cfg = self._cluster_config if self._cluster_config is not None else {}
             if backend == "gke":

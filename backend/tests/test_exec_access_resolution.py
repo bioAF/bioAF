@@ -527,3 +527,50 @@ async def test_the_listing_call_carries_the_budget_and_no_sdk_retries(adapter_cl
 
     client.list_clusters.assert_called_once_with(parent="projects/p/locations/-", timeout=2.5, retry=None)
     assert response is client.list_clusters.return_value
+
+
+@pytest.mark.asyncio
+async def test_the_listing_timeout_is_what_remains_when_the_cloud_call_starts():
+    """Codex repro: the budget was read before the config refresh, so the SDK got more time than was left."""
+    import time
+
+    started = time.monotonic()
+    seen = []
+
+    def list_clusters(parent, timeout):
+        seen.append((time.monotonic() - started, timeout))
+        return _listing((GKE["gke_cluster_name"], "europe-west1-b"))
+
+    async def load(budget):
+        await asyncio.sleep(0.4)  # the adapter's config refresh (database reads)
+        cfg = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
+        await exec_access.discover_gke_location(cfg, list_clusters=list_clusters, session_factory=None, budget=budget)
+        return cfg
+
+    fake = FakeK8s(pod=notebook_pod())
+    await resolve_connection(
+        NB,
+        default_namespace="bioaf-notebooks",
+        backend="gke",
+        load_config=load,
+        clients=lambda: (fake, fake),
+        deadline=1.0,
+    )
+
+    [(elapsed, timeout)] = seen
+    assert elapsed >= 0.4
+    assert timeout <= 1.0 - elapsed + 0.01
+
+
+@pytest.mark.asyncio
+async def test_a_budget_spent_before_the_cloud_call_is_a_timeout_not_a_call():
+    calls = []
+    with pytest.raises(ConnectionProviderTimeoutError) as exc:
+        await exec_access.discover_gke_location(
+            {"gke_cluster_name": "c", "gcp_project_id": "p"},
+            list_clusters=lambda p, t: calls.append(t),
+            session_factory=None,
+            budget=lambda: exec_access._Deadline(0).remaining(),
+        )
+    assert exc.value.reason == "deadline_exceeded"
+    assert calls == []

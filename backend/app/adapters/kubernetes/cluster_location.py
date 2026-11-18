@@ -17,6 +17,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
+from typing import Union
 
 logger = logging.getLogger("bioaf.adapters.kubernetes.cluster_location")
 
@@ -30,6 +31,10 @@ _GCP_ZONE = re.compile(r"^[a-z]+-[a-z]+[0-9]+-[a-z]$")
 # ``list_clusters(parent, timeout)``: a blocking GKE list returning an object with ``clusters``
 # (each with ``name`` and ``location``) and ``missing_zones``.
 ClusterLister = Callable[[str, float], object]
+# Seconds for the listing call: a fixed number, or a callable read just before the call starts so
+# time spent earlier (database reads) is not handed to the SDK twice. The callable may raise when
+# nothing is left.
+Timeout = Union[float, Callable[[], float]]
 
 
 class ClusterLocationUnknown(RuntimeError):
@@ -69,13 +74,18 @@ def _clean(value: object) -> str:
 
 
 async def find_gke_cluster_location(
-    project_id: str, cluster_name: str, *, list_clusters: ClusterLister, timeout: float = DISCOVERY_TIMEOUT_SECONDS
+    project_id: str, cluster_name: str, *, list_clusters: ClusterLister, timeout: Timeout = DISCOVERY_TIMEOUT_SECONDS
 ) -> str:
     """The one location holding ``cluster_name`` in ``project_id``, from a complete listing.
 
     Provider failures propagate for the caller to map (see ``classify_provider_failure``).
     """
-    response = await asyncio.to_thread(list_clusters, f"projects/{project_id}/locations/-", timeout)
+    parent = f"projects/{project_id}/locations/-"
+
+    def call():
+        return list_clusters(parent, timeout() if callable(timeout) else timeout)
+
+    response = await asyncio.to_thread(call)
     if list(getattr(response, "missing_zones", None) or []):
         logger.warning("GKE cluster location not discovered: the cluster listing was incomplete")
         raise ClusterLocationUnknown("GKE could not list every location, so the cluster's location is not certain")
@@ -126,7 +136,7 @@ async def resolve_gke_cluster_location(
     *,
     list_clusters: ClusterLister,
     session_factory=None,
-    timeout: float = DISCOVERY_TIMEOUT_SECONDS,
+    timeout: Timeout = DISCOVERY_TIMEOUT_SECONDS,
 ) -> str:
     """The deployed cluster's location: recorded, or discovered by name and then recorded.
 
