@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from the credential injector
 """
 
 import asyncio
+from collections.abc import Callable
 import logging
 import posixpath
 import uuid
@@ -25,8 +26,10 @@ from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.session_status import update_compute_session
-from app.exceptions import ValidationError
+from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
+    ConnectionDescription,
+    ConnectionTarget,
     SessionInfo,
     SessionStatus,
     StoredObject,
@@ -79,6 +82,13 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
 _local_sessions: dict[str, dict] = {}
 
 DEFAULT_NOTEBOOK_NAMESPACE = "bioaf-notebooks"
+
+
+def notebook_pod_name(session_id) -> str:
+    """The pod name launch gives a session: one ``bioaf-notebook-`` prefix on the bare id."""
+    return f"bioaf-notebook-{session_id}"
+
+
 HOME_DIR = "/home/jovyan"
 
 
@@ -97,6 +107,12 @@ class KubernetesNotebookProvider(NotebookProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_zone",
+        # Terminal-instruction setup names the cluster's location (GKE) or region (EKS).
+        "gcp_region",
+        # Terminal setup: the deployed GKE location and, on EKS, the account in the context alias.
+        "gke_cluster_location",
+        "aws_account_id",
+        "aws_region",
     ]
 
     def __init__(self, session_factory=None, *, mode: ComputeMode | None = None):
@@ -181,13 +197,95 @@ class KubernetesNotebookProvider(NotebookProvider):
         return [_session_status_from_dict(d) for d in items]
 
     async def get_connection_command(self, session_id: str) -> str:
-        namespace = DEFAULT_NOTEBOOK_NAMESPACE
-        return f"kubectl exec -it -n {namespace} pod/bioaf-notebook-{session_id} -- /bin/bash"
+        """Unverified legacy form for a bare canonical session id (never an already-prefixed name).
+
+        Terminal instructions use ``describe_connection``.
+        """
+        from app.adapters.kubernetes.exec_access import NOTEBOOK_CONTAINER, render_exec_command
+
+        return render_exec_command(
+            pod=notebook_pod_name(session_id),
+            namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+            container=NOTEBOOK_CONTAINER,
+            context=None,
+        )
+
+    def _connection_clients(self):
+        # Runs in the bounded worker thread under the provider error mapping. The fingerprint check
+        # rebuilds the cached client when the freshly loaded config names another cluster, so the
+        # live check reads the cluster the command names.
+        api_client = self._gke.client_for_loaded_config() if self._session_factory is not None else None
+        if api_client is None:
+            return self._gke.core_v1(), None
+        return client.CoreV1Api(api_client=api_client), None
+
+    def _gke_cluster_manager(self):
+        """GKE ClusterManager client with platform_config credentials."""
+        from google.cloud import container_v1
+
+        from app.adapters.credentials import credential_injector
+
+        credentials = credential_injector.load_gcp_credentials(self._cluster_config or {})
+        return container_v1.ClusterManagerClient(credentials=credentials)
+
+    def _gke_list_clusters(self, parent: str, timeout: float):
+        """Blocking GKE list under ``parent``: the whole response (``missing_zones`` included),
+        one attempt within ``timeout``."""
+        return self._gke_cluster_manager().list_clusters(parent=parent, timeout=timeout, retry=None)
+
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        # A legacy record with no recorded pod gets the launch naming rule applied to its id.
+        return target.model_copy(
+            update={
+                "provider_ref": target.provider_ref or notebook_pod_name(target.record_id),
+                "namespace": target.namespace or DEFAULT_NOTEBOOK_NAMESPACE,
+            }
+        )
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        from app.adapters.kubernetes import exec_access
+
+        if self.is_local:
+            raise ConnectionTargetInvalidError(
+                "Terminal instructions are not available in simulated compute mode.", reason="simulated_mode"
+            )
+        target = self.connection_reference(target)
+
+        backend = exec_access.backend_for_cluster_auth()
+
+        async def load(budget: Callable[[], float]) -> dict:
+            # Database reads only (plus GKE location discovery off the event loop); the client is
+            # refreshed for this config in _connection_clients.
+            if self._session_factory is not None:
+                await self._gke.load_cluster_config(force=True)
+            cfg = self._cluster_config if self._cluster_config is not None else {}
+            if backend == "gke":
+                await exec_access.discover_gke_location(
+                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory, budget=budget
+                )
+            return cfg
+
+        return await exec_access.resolve_connection(
+            target,
+            default_namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+            backend=backend,
+            load_config=load,
+            clients=self._connection_clients,
+        )
 
     def connection_setup_guide(self) -> str:
+        """The provider-selected guide for the loaded cluster settings, else the neutral fallback."""
+        from app.adapters.kubernetes import exec_access
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+        from app.exceptions import ConnectionTargetInvalidError
 
-        return KUBECTL_SETUP_GUIDE
+        try:
+            backend = exec_access.backend_for_cluster_auth()
+            return exec_access.cluster_access(
+                backend, self._cluster_config or {}, DEFAULT_NOTEBOOK_NAMESPACE
+            ).setup_guide
+        except ConnectionTargetInvalidError:
+            return KUBECTL_SETUP_GUIDE
 
     async def sync_session_storage(  # type: ignore[override]
         self,
@@ -391,7 +489,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         user_id = session_spec.get("user_id", 0)
         namespace = DEFAULT_NOTEBOOK_NAMESPACE
 
-        pod_name = f"bioaf-notebook-{session_id}"
+        pod_name = notebook_pod_name(session_id)
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
         # Stage data through the cloud-selected storage adapter so the staged URIs
         # and copy commands match the backend (gs:// + gcloud on GCS; s3:// + aws on
@@ -789,7 +887,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         # manifest dict. Reading off the dict would propagate CodeQL taint from
         # the chpasswd command embedded in pod_manifest into pod_name, which
         # then trips py/clear-text-logging at every subsequent log call.
-        pod_name = f"bioaf-notebook-{session_id}"
+        pod_name = notebook_pod_name(session_id)
         service_name = f"bioaf-notebook-svc-{session_id}"
 
         session_type = session_spec.get("session_type", "jupyter")

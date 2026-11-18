@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.api_core.exceptions import NotFound
 from httpx import AsyncClient
 from sqlalchemy import text
 
@@ -50,6 +51,7 @@ def _make_gke_cluster(status_code: int = 2, name: str = "bioaf-demo-abc123"):
     cluster.status = status_code
     cluster.current_node_count = 3
     cluster.endpoint = "10.0.0.1"
+    cluster.location = "us-central1"
     cluster.master_auth.cluster_ca_certificate = "fake-ca-cert"
 
     pool = MagicMock()
@@ -155,7 +157,7 @@ async def test_recovery_check_dead_cluster(session, admin_user):
     await session.flush()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
@@ -289,6 +291,46 @@ async def test_adopt_running_cluster(session, admin_user):
     assert row[0] == "kubernetes"
 
 
+@pytest.mark.parametrize("probed_location,recorded", [("europe-west1", "europe-west1"), ("", "null")])
+@pytest.mark.asyncio
+async def test_adopting_a_cluster_replaces_the_previous_cluster_location(
+    session, admin_user, probed_location, recorded
+):
+    """Terminal setup names the cluster by gke_cluster_location: an adopted cluster must never inherit the
+    previous cluster's location. Unknown is recorded as null, which refuses instructions instead."""
+    from app.services.orphaned_resource_service import OrphanedResourceService
+
+    await _seed_platform_config(session, {"gke_cluster_location": "us-west1"})
+    resource = await OrphanedResourceService.log_resource(
+        session,
+        resource_type="gke_cluster",
+        resource_name="bioaf-demo-eu0001",
+        gcp_project_id="test-project",
+        stack_uid="eu0001",
+        gcp_zone="europe-west1",
+    )
+    await session.flush()
+    cluster = _make_gke_cluster(status_code=2, name="bioaf-demo-eu0001")
+    cluster.location = probed_location
+    mock_client = MagicMock()
+    mock_client.get_cluster.return_value = cluster
+
+    with (
+        patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
+        patch(
+            "app.services.orphaned_resource_service._get_gke_credentials",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+    ):
+        await OrphanedResourceService.adopt_resource(session, resource.id, admin_user.id)
+
+    row = (
+        await session.execute(text("SELECT value FROM platform_config WHERE key = 'gke_cluster_location'"))
+    ).fetchone()
+    assert row[0] == recorded
+
+
 @pytest.mark.asyncio
 async def test_adopt_provisioning_cluster_rejected(session, admin_user):
     """Cannot adopt a cluster that is still provisioning."""
@@ -351,7 +393,7 @@ async def test_cleanup_dead_orphans(session, admin_user):
     await session.flush()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),
@@ -598,7 +640,7 @@ async def test_cleanup_all_endpoint(client: AsyncClient, admin_token: str, sessi
     await session.commit()
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 Not Found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with (
         patch("app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client", return_value=mock_client),

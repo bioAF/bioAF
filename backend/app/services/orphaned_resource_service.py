@@ -19,6 +19,14 @@ _RECOVERABLE_STATUSES = {"RUNNING", "RECONCILING"}
 # Statuses that indicate the cluster is not yet ready but still starting
 _PROVISIONING_STATUSES = {"PROVISIONING"}
 
+# The orphan's location is unknown and could not be discovered: nothing about the cluster is
+# known, so it is never classified as dead or treated as already gone.
+_LOCATION_UNKNOWN = "LOCATION_UNKNOWN"
+# The probe failed (denied, unavailable), or NOT_FOUND at the recorded location could not be
+# confirmed by a complete listing: neither alive nor gone is established.
+_UNVERIFIED = "UNVERIFIED"
+_UNVERIFIED_STATUSES = {_LOCATION_UNKNOWN, _UNVERIFIED}
+
 # Statuses that indicate the cluster is dead or should be cleaned up
 _DEAD_STATUSES = {"ERROR", "DEGRADED", "STOPPING", "STATUS_UNSPECIFIED"}
 
@@ -148,6 +156,11 @@ class OrphanedResourceService:
         """Delete a GKE cluster via the cloud-selected compute adapter."""
         from app.adapters.registry import get_compute_adapter
 
+        if not await OrphanedResourceService._ensure_location(resource):
+            raise StateError(
+                f"The location of cluster {resource.resource_name} is unknown, so it was not deleted. "
+                "Find it in the cloud console and delete it there, or dismiss this entry."
+            )
         await get_compute_adapter().delete_cluster(
             resource.gcp_project_id,
             resource.gcp_zone,
@@ -196,16 +209,65 @@ class OrphanedResourceService:
         return resource
 
     @staticmethod
+    async def _locate(resource: OrphanedResource) -> str | None:
+        """Look the orphan up by name across the project's locations.
+
+        Returns its location, ``"NOT_FOUND"`` when a complete listing does not include it (verified
+        absent), or None when that cannot be established.
+        """
+        from app.adapters.kubernetes.cluster_location import ClusterNotListed
+        from app.adapters.registry import get_compute_adapter
+
+        try:
+            return await get_compute_adapter().locate_cluster(resource.gcp_project_id, resource.resource_name)
+        except ClusterNotListed:
+            return "NOT_FOUND"
+        except Exception as exc:
+            logger.warning(
+                "Orphaned cluster %s could not be located (error_type=%s)", resource.resource_name, type(exc).__name__
+            )
+            return None
+
+    @staticmethod
+    async def _ensure_location(resource: OrphanedResource) -> bool:
+        """Make sure the orphan has a real location, locating it by name when it has none.
+
+        An orphan recorded without a location (it could not be determined at the time) is looked
+        up across the project's locations. Probing a guessed location would report NOT_FOUND and
+        read as "already gone" while the cluster still runs elsewhere.
+        """
+        from app.adapters.kubernetes.cluster_location import is_gke_location
+
+        if is_gke_location(resource.gcp_zone):
+            return True
+        located = await OrphanedResourceService._locate(resource)
+        if located is None or located == "NOT_FOUND":
+            return False
+        resource.gcp_zone = located
+        return True
+
+    @staticmethod
     async def _query_gke_status(
         session: AsyncSession,
         resource: OrphanedResource,
     ):
         """Probe the live state of an orphaned cluster via the compute adapter.
 
-        Returns (status_string, ClusterProbe_or_None). If the cluster cannot be
-        found, returns ("NOT_FOUND", None).
+        Returns (status_string, ClusterProbe_or_None). ``"NOT_FOUND"`` only when the cluster is
+        verified absent: the provider reports none at its location and a complete cross-location
+        listing does not include it (an older orphan may carry a guessed, stale region). Anything
+        not established is ``LOCATION_UNKNOWN`` or ``UNVERIFIED``, which cleanup never acts on.
         """
+        from app.adapters.kubernetes.cluster_location import is_gke_location
         from app.adapters.registry import get_compute_adapter
+
+        if not is_gke_location(resource.gcp_zone):
+            located = await OrphanedResourceService._locate(resource)
+            if located == "NOT_FOUND":
+                return "NOT_FOUND", None
+            if located is None:
+                return _LOCATION_UNKNOWN, None
+            resource.gcp_zone = located
 
         probe = await get_compute_adapter().probe_cluster(
             resource.gcp_project_id,
@@ -213,7 +275,25 @@ class OrphanedResourceService:
             resource.resource_name,
         )
         if probe.state == "NOT_FOUND":
-            return probe.state, None
+            located = await OrphanedResourceService._locate(resource)
+            if located == "NOT_FOUND":
+                return "NOT_FOUND", None
+            if located is None or located == resource.gcp_zone:
+                return _UNVERIFIED, None
+            logger.info(
+                "Orphaned cluster %s is at %s, not its recorded location %s",
+                resource.resource_name,
+                located,
+                resource.gcp_zone,
+            )
+            resource.gcp_zone = located
+            probe = await get_compute_adapter().probe_cluster(
+                resource.gcp_project_id, resource.gcp_zone, resource.resource_name
+            )
+            if probe.state == "NOT_FOUND":
+                return _UNVERIFIED, None
+        if probe.state == _UNVERIFIED:
+            return _UNVERIFIED, None
         return probe.state, probe
 
     @staticmethod
@@ -337,6 +417,7 @@ class OrphanedResourceService:
         recoverable: list[dict] = []
         provisioning: list[dict] = []
         dead: list[dict] = []
+        unverified: list[dict] = []
 
         for resource in resources:
             gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
@@ -355,6 +436,8 @@ class OrphanedResourceService:
                 recoverable.append(entry)
             elif gke_status in _PROVISIONING_STATUSES:
                 provisioning.append(entry)
+            elif gke_status in _UNVERIFIED_STATUSES:
+                unverified.append(entry)
             else:
                 dead.append(entry)
 
@@ -362,6 +445,9 @@ class OrphanedResourceService:
             "recoverable": recoverable,
             "provisioning": provisioning,
             "dead": dead,
+            # Location unknown or probe unverified: neither alive nor gone is established, so
+            # never cleaned up.
+            "unverified": unverified,
         }
 
     @staticmethod
@@ -401,6 +487,8 @@ class OrphanedResourceService:
         if probe:
             await _set_config(session, "gke_cluster_endpoint", probe.endpoint or "null")
             await _set_config(session, "gke_cluster_ca_cert", probe.ca_cert or "null")
+        # Replace the previous cluster's location; unknown is null, which refuses terminal setup.
+        await _set_config(session, "gke_cluster_location", (probe.location if probe else None) or "null")
 
         # Update kubernetes_cluster component state
         await session.execute(
@@ -466,7 +554,11 @@ class OrphanedResourceService:
             if resource.resource_type == "gke_cluster":
                 gke_status, _cluster = await OrphanedResourceService._query_gke_status(session, resource)
 
-                if gke_status in _RECOVERABLE_STATUSES or gke_status in _PROVISIONING_STATUSES:
+                if (
+                    gke_status in _RECOVERABLE_STATUSES
+                    or gke_status in _PROVISIONING_STATUSES
+                    or gke_status in _UNVERIFIED_STATUSES
+                ):
                     skipped += 1
                     continue
 

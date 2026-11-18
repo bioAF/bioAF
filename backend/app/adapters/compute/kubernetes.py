@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 """
 
 import asyncio
+from collections.abc import Callable
 import logging
 import os
 import shlex
@@ -25,14 +26,24 @@ from app.adapters.base import ComputeProvider
 from app.adapters.compute.k8s_manifest import ManifestInputs, NextflowLaunch, build_job_manifest, builds_nextflow
 from app.adapters.job_specs import CustomCommandJobSpec, JobSpec, NextflowJobSpec, job_spec_from_dict
 from app.adapters.capabilities import ProviderCapabilities
-from app.exceptions import ValidationError
+from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.platform.nextflow_params import INTERNAL_PARAMS, parameter_argument, refuse_malformed_parameter_names
 from app.platform.run_output_layout import directory_prefix, results_bucket_from_config, run_output_key
 from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
+from app.adapters.kubernetes.cluster_location import (
+    DISCOVERY_TIMEOUT_SECONDS,
+    LOCATION_KEY,
+    ClusterLocationUnknown,
+    find_gke_cluster_location,
+    gke_cluster_path,
+    resolve_gke_cluster_location,
+)
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
 from app.adapters.models import (
+    ConnectionDescription,
+    ConnectionTarget,
     ClusterDetail,
     ClusterMetrics,
     ClusterProbe,
@@ -51,6 +62,8 @@ from app.adapters.models import (
 from app.pipeline import nextflow_trace
 
 logger = logging.getLogger("bioaf.adapters.compute.k8s")
+
+DEFAULT_PIPELINE_NAMESPACE = "bioaf-pipelines"
 
 _JOB_STATUS_KEYS = {
     "job_id",
@@ -103,6 +116,7 @@ def _cluster_metrics_from_dict(d: dict) -> ClusterMetrics:
         memory_utilization_pct=d.get("memory_utilization_pct"),
         cost_burn_rate_hourly=d.get("cost_burn_rate_hourly"),
         node_pools=[NodePoolMetrics(**p) for p in d.get("node_pools", [])],
+        unavailable=d.get("unavailable"),
     )
 
 
@@ -176,6 +190,9 @@ class KubernetesComputeProvider(ComputeProvider):
         "gke_cluster_name",
         "gcp_project_id",
         "gcp_region",
+        # Terminal setup: the deployed GKE location and, on EKS, the account in the context alias.
+        "gke_cluster_location",
+        "aws_account_id",
         # aws_region lets the EKS ClusterAuth provider mint a region-correct STS
         # token; additive and ignored on GCP (the EKS endpoint/CA reuse the
         # gke_cluster_* keys above). pipeline_runner_role_arn is the AWS IRSA
@@ -254,11 +271,14 @@ class KubernetesComputeProvider(ComputeProvider):
 
     def capabilities(self) -> ProviderCapabilities:
         """Kubernetes compute supports cost estimation, autoscaling, exec,
-        spot/preemption retry, and job reports."""
+        spot/preemption retry, and job reports.
+
+        Simulated mode has no workload to open a shell in, so it offers no terminal access.
+        """
         return ProviderCapabilities(
             cost_estimation=True,
             autoscaling=True,
-            ssh_exec=True,
+            ssh_exec=not self.is_local,
             spot_retry=True,
             job_report=True,
             quota_introspection=True,
@@ -302,14 +322,10 @@ class KubernetesComputeProvider(ComputeProvider):
         preserve the stack view's existing contract (distinct from the lowercased
         controller_status that get_cluster_status reports).
         """
-        await self.load_cluster_config()
-        cfg = self._cluster_config or {}
-        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
-        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
-        region = _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
+        cluster_path = await self._gke_cluster_path()
 
         gke_client = self._get_gke_client()
-        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+        cluster = gke_client.get_cluster(name=cluster_path)
 
         node_pools = [
             NodePoolStatus(
@@ -344,8 +360,13 @@ class KubernetesComputeProvider(ComputeProvider):
         try:
             cluster = client.get_cluster(name=cluster_path)
         except Exception as exc:
-            logger.info("GKE cluster %s not reachable: %s", cluster_name, exc)
-            return ClusterProbe(state="NOT_FOUND")
+            from google.api_core import exceptions as gexc
+
+            if isinstance(exc, gexc.NotFound):
+                return ClusterProbe(state="NOT_FOUND")
+            # Denied, unavailable, or anything else: the cluster's existence was not checked.
+            logger.warning("GKE cluster %s could not be probed (error_type=%s)", cluster_name, type(exc).__name__)
+            return ClusterProbe(state="UNVERIFIED")
         endpoint = getattr(cluster, "endpoint", "") or None
         ca_cert = None
         master_auth = getattr(cluster, "master_auth", None)
@@ -355,6 +376,7 @@ class KubernetesComputeProvider(ComputeProvider):
             state=self._GKE_STATUS_MAP.get(cluster.status, "UNKNOWN"),
             endpoint=endpoint,
             ca_cert=ca_cert,
+            location=getattr(cluster, "location", "") or None,
         )
 
     async def delete_cluster(self, project_id: str, location: str, cluster_name: str) -> None:
@@ -402,13 +424,61 @@ class KubernetesComputeProvider(ComputeProvider):
         return _job_progress_from_dict(d)
 
     async def get_connection_command(self, job_id: str) -> str:
-        namespace = "bioaf-pipelines"
-        return f"kubectl exec -it -n {namespace} job/{job_id} -- /bin/bash"
+        """Unverified legacy form; terminal instructions use ``describe_connection``."""
+        from app.adapters.kubernetes.exec_access import PIPELINE_CONTAINER, render_exec_command
+
+        return render_exec_command(
+            pod=job_id, namespace=DEFAULT_PIPELINE_NAMESPACE, container=PIPELINE_CONTAINER, context=None, kind="job"
+        )
 
     def connection_setup_guide(self) -> str:
+        """The provider-selected guide for the loaded cluster settings, else the neutral fallback."""
+        from app.adapters.kubernetes import exec_access
         from app.adapters.kubernetes.connection import KUBECTL_SETUP_GUIDE
+        from app.exceptions import ConnectionTargetInvalidError
 
-        return KUBECTL_SETUP_GUIDE
+        try:
+            backend = exec_access.backend_for_cluster_auth()
+            return exec_access.cluster_access(
+                backend, self._cluster_config or {}, DEFAULT_PIPELINE_NAMESPACE
+            ).setup_guide
+        except ConnectionTargetInvalidError:
+            return KUBECTL_SETUP_GUIDE
+
+    def _connection_clients(self):
+        return self._get_k8s_core_client(), self._get_k8s_batch_client()
+
+    def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
+        if target.namespace:
+            return target
+        return target.model_copy(update={"namespace": DEFAULT_PIPELINE_NAMESPACE})
+
+    async def describe_connection(self, target: ConnectionTarget) -> ConnectionDescription:
+        from app.adapters.kubernetes import exec_access
+
+        if self.is_local:
+            raise ConnectionTargetInvalidError(
+                "Terminal instructions are not available in simulated compute mode.", reason="simulated_mode"
+            )
+
+        backend = exec_access.backend_for_cluster_auth()
+
+        async def load(budget: Callable[[], float]) -> dict:
+            await self._ensure_cluster_config_fresh()
+            cfg = self._cluster_config if self._cluster_config is not None else {}
+            if backend == "gke":
+                await exec_access.discover_gke_location(
+                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory, budget=budget
+                )
+            return cfg
+
+        return await exec_access.resolve_connection(
+            target,
+            default_namespace=DEFAULT_PIPELINE_NAMESPACE,
+            backend=backend,
+            load_config=load,
+            clients=self._connection_clients,
+        )
 
     # -- Local mode implementations --
 
@@ -796,6 +866,50 @@ class KubernetesComputeProvider(ComputeProvider):
         5: "ERROR",
         6: "DEGRADED",
     }
+
+    async def locate_cluster(self, project_id: str, cluster_name: str) -> str:
+        """Where ``cluster_name`` is in ``project_id``, from a complete cross-location listing."""
+        return await find_gke_cluster_location(project_id, cluster_name, list_clusters=self._gke_list_clusters)
+
+    async def deployed_cluster_location(self) -> str:
+        """The deployed GKE cluster's region or zone (recorded, or discovered and recorded)."""
+        _project, location, _name = await self._gke_cluster_identity()
+        return location
+
+    async def _gke_cluster_path(self) -> str:
+        return gke_cluster_path(*await self._gke_cluster_identity())
+
+    async def _gke_cluster_identity(self) -> tuple[str, str, str]:
+        """(project, deployed location, cluster name) of the deployed GKE cluster.
+
+        The location is ``gke_cluster_location`` (discovered by cluster name and recorded when an
+        older install lacks it), never the installation default ``gcp_region``. Raises
+        ``ClusterLocationUnknown`` when the cluster cannot be located; provider errors propagate.
+        """
+        await self.load_cluster_config()
+        cfg = self._cluster_config if self._cluster_config is not None else {}
+        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
+        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
+        if not cluster_name or not project_id:
+            raise ClusterLocationUnknown(
+                "GKE cluster identity not configured (gke_cluster_name / gcp_project_id missing). "
+                "Re-run compute deploy to populate platform_config."
+            )
+        location = await resolve_gke_cluster_location(
+            {**cfg, "gke_cluster_name": cluster_name, "gcp_project_id": project_id},
+            list_clusters=self._gke_list_clusters,
+            session_factory=self._session_factory,
+        )
+        cfg[LOCATION_KEY] = location
+        return project_id, location, cluster_name
+
+    def _gke_list_clusters(self, parent: str, timeout: float = DISCOVERY_TIMEOUT_SECONDS):
+        """Blocking GKE list under ``parent`` (``locations/-`` lists every location).
+
+        Returns the whole response: ``missing_zones`` says whether the list is complete. One
+        attempt within ``timeout``; no SDK retries past the caller's budget.
+        """
+        return self._get_gke_client().list_clusters(parent=parent, timeout=timeout, retry=None)
 
     def _get_gke_client(self):
         """Get a GKE ClusterManager client using platform_config credentials."""
@@ -1942,20 +2056,10 @@ class KubernetesComputeProvider(ComputeProvider):
 
     async def _k8s_get_cluster_status(self) -> dict:
         """Query GKE API for real cluster status."""
-        await self.load_cluster_config()
-        cfg = self._cluster_config or {}
-        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
-        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
-        region = _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
-
-        if not cluster_name or not project_id:
-            raise RuntimeError(
-                "GKE cluster identity not configured (gke_cluster_name / gcp_project_id missing). "
-                "Re-run compute deploy to populate platform_config."
-            )
+        cluster_path = await self._gke_cluster_path()
 
         gke_client = self._get_gke_client()
-        cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+        cluster = gke_client.get_cluster(name=cluster_path)
 
         node_pools = []
         total_nodes = 0
@@ -2027,35 +2131,32 @@ class KubernetesComputeProvider(ComputeProvider):
         If the GKE API call fails, returns safe zeros so the cost endpoint
         does not 500.
         """
-        await self.load_cluster_config()
-        cfg = self._cluster_config or {}
-        cluster_name = _resolve_cfg(cfg, "gke_cluster_name", "GKE_CLUSTER_NAME")
-        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
-        region = _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
 
-        _fallback = {
-            "cpu_utilization_pct": 0.0,
-            "memory_utilization_pct": 0.0,
-            "cost_burn_rate_hourly": 0.0,
-            "node_pools": [],
-        }
+        def _fallback(reason: str) -> dict:
+            # The existing zero-valued shape, marked so consumers never read it as zero activity.
+            return {
+                "cpu_utilization_pct": 0.0,
+                "memory_utilization_pct": 0.0,
+                "cost_burn_rate_hourly": 0.0,
+                "node_pools": [],
+                "unavailable": reason,
+            }
 
-        if not cluster_name or not project_id or not region:
-            logger.warning(
-                "Missing GKE cluster identity (name=%s, project=%s, region=%s). "
-                "Store gke_cluster_name, gcp_project_id, gcp_region in platform_config.",
-                cluster_name,
-                project_id,
-                region,
-            )
-            return _fallback
+        try:
+            cluster_path = await self._gke_cluster_path()
+        except ClusterLocationUnknown as exc:
+            logger.warning("GKE cluster metrics unavailable: %s", exc)
+            return _fallback("cluster_location_unknown")
+        except Exception:
+            logger.exception("Failed to locate the GKE cluster for metrics")
+            return _fallback("provider_unavailable")
 
         try:
             gke_client = self._get_gke_client()
-            cluster = gke_client.get_cluster(name=f"projects/{project_id}/locations/{region}/clusters/{cluster_name}")
+            cluster = gke_client.get_cluster(name=cluster_path)
         except Exception:
             logger.exception("Failed to fetch GKE cluster metrics")
-            return _fallback
+            return _fallback("provider_unavailable")
 
         total_cost = 0.0
         node_pools = []

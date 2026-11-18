@@ -110,6 +110,7 @@ def test_compute_get_cluster_metrics_returns_fallback_on_null_cluster_name(mode_
         "memory_utilization_pct": 0.0,
         "cost_burn_rate_hourly": 0.0,
         "node_pools": [],
+        "unavailable": "cluster_location_unknown",
     }
 
 

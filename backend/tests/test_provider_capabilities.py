@@ -110,8 +110,9 @@ def test_base_provider_capabilities_default_to_nothing():
 
 def test_kubernetes_compute_declares_its_capabilities():
     from app.adapters.compute.kubernetes import KubernetesComputeProvider
+    from app.settings_contract import ComputeMode
 
-    caps = KubernetesComputeProvider().capabilities()
+    caps = KubernetesComputeProvider(mode=ComputeMode.KUBERNETES).capabilities()
     assert _flags_true(caps) == {
         "cost_estimation",
         "autoscaling",
@@ -122,6 +123,16 @@ def test_kubernetes_compute_declares_its_capabilities():
         # Components page refuse a node pool that could not build a single node.
         "quota_introspection",
     }
+
+
+def test_simulated_kubernetes_compute_does_not_offer_terminal_access():
+    """Simulated mode has no workload to open a shell in, so the UI must not offer instructions."""
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+    from app.settings_contract import ComputeMode
+
+    caps = KubernetesComputeProvider(mode=ComputeMode.LOCAL).capabilities()
+    assert caps.ssh_exec is False
+    assert caps.cost_estimation is True
 
 
 def test_gcs_storage_declares_its_capabilities():
@@ -166,10 +177,10 @@ def test_registry_aggregates_active_capabilities(_reset_registry):
 
     registry.initialize_adapters_sync("kubernetes")
     caps = registry.get_active_capabilities()
+    # The test environment runs in simulated compute mode, which offers no terminal access.
     assert _flags_true(caps) == {
         "cost_estimation",
         "autoscaling",
-        "ssh_exec",
         "spot_retry",
         "job_report",
         "signed_url_upload",

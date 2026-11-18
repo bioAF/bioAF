@@ -20,6 +20,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+
+from app.adapters.models import ClusterMetrics
 import pytest_asyncio
 from sqlalchemy import select, text
 
@@ -77,7 +79,7 @@ def quiet_adapters(monkeypatch):
     from app.services import cost_service
 
     async def cluster_metrics():
-        return SimpleNamespace(node_pools=[])
+        return ClusterMetrics()
 
     async def storage_metrics():
         return SimpleNamespace(total_cost_monthly_usd=0.0)

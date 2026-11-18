@@ -223,7 +223,9 @@ async def test_the_budget_gate_follows_corrected_provider_imports(
         )
 
     async def no_cluster_cost():
-        return SimpleNamespace(node_pools=[])
+        from app.adapters.models import ClusterMetrics
+
+        return ClusterMetrics()
 
     async def no_storage_cost():
         return SimpleNamespace(total_cost_monthly_usd=0.0)

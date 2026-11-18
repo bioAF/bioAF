@@ -79,7 +79,13 @@ def test_storage_destroy_clears_every_supported_name():
 
 
 def test_compute_teardown_clearing_contract_is_only_cluster_identity():
-    assert set(COMPUTE_TEARDOWN_CLEARED_KEYS) == {"gke_cluster_name", "gke_cluster_endpoint", "gke_cluster_ca_cert"}
+    # The location goes with the cluster, so terminal setup can never name a torn-down cluster's region.
+    assert set(COMPUTE_TEARDOWN_CLEARED_KEYS) == {
+        "gke_cluster_name",
+        "gke_cluster_endpoint",
+        "gke_cluster_ca_cert",
+        "gke_cluster_location",
+    }
 
 
 def test_provider_specific_keys_stay_provider_specific():
@@ -206,3 +212,82 @@ async def test_storage_destroy_clears_reference_and_literature_buckets(session, 
         assert await _committed(db_engine, key) == "null", key
     rows = (await session.execute(text("SELECT value FROM platform_config WHERE key = 'storage_deployed'"))).one()
     assert rows[0] == "null"
+
+
+# The deployed GKE cluster's own location. gcp_region is only the installation default: a compute
+# deploy can override it and then restore it, so terminal setup must read this key instead.
+
+
+def test_gke_location_is_a_gcp_only_compute_output():
+    from app.services.deployment_outputs import COMPUTE_GCP_OUTPUTS
+
+    assert COMPUTE_GCP_OUTPUTS == {"cluster_location": "gke_cluster_location"}
+    assert not set(COMPUTE_GCP_OUTPUTS.values()) & set(COMPUTE_OUTPUTS.values())
+    assert not set(COMPUTE_GCP_OUTPUTS.values()) & set(COMPUTE_AWS_OUTPUTS.values())
+
+
+@pytest.mark.asyncio
+async def test_gcp_compute_deploy_records_the_cluster_location_after_a_region_override(session, db_engine):
+    from tests.test_deployment_characterization import _deploy, _seed_gcp_ready
+
+    user_id = await _seed_user(session)
+    await _seed_gcp_ready(session, storage_deployed="true")
+
+    await _deploy(
+        session,
+        user_id,
+        {
+            "compute": [
+                _event(
+                    "apply_complete",
+                    extra={"outputs": _outputs(cluster_name="bioaf-x", cluster_location="europe-west1")},
+                )
+            ]
+        },
+        compute_region="europe-west1",
+    )
+    await session.commit()
+
+    assert await _committed(db_engine, "gke_cluster_location") == "europe-west1"
+    # The override is restored; the cluster's location is kept separately.
+    assert await _committed(db_engine, "gcp_region") == "us-central1"
+
+
+@pytest.mark.asyncio
+async def test_gcp_sync_restores_the_cluster_location(session, db_engine):
+    from app.services.stack_deployment import sync_compute_config
+
+    await _seed_config(session, cloud_provider="gcp")
+    outputs = _outputs(cluster_name="gke", cluster_location="us-west1-b")
+
+    with patch("app.services.stack_deployment.TerraformExecutor.read_module_outputs", AsyncMock(return_value=outputs)):
+        populated = await sync_compute_config(session)
+    await session.commit()
+
+    assert populated == {"gke_cluster_name": "gke", "gke_cluster_location": "us-west1-b"}
+    assert await _committed(db_engine, "gke_cluster_location") == "us-west1-b"
+
+
+@pytest.mark.asyncio
+async def test_aws_compute_deploy_writes_no_gke_location(session, db_engine):
+    from tests.test_deployment_characterization import _deploy
+
+    user_id = await _seed_user(session)
+    await _seed_config(
+        session,
+        cloud_provider="aws",
+        aws_account_id="111122223333",
+        aws_region="us-west-1",
+        terraform_initialized="true",
+        compute_deployed="false",
+        storage_deployed="true",
+        aws_codebuild_project="bioaf-build",
+    )
+
+    with patch("app.services.stack_deployment._ensure_aws_cluster_autoscaler", AsyncMock(return_value="installed")):
+        await _deploy(
+            session, user_id, {"compute": [_event("apply_complete", extra={"outputs": _outputs(cluster_name="eks")})]}
+        )
+    await session.commit()
+
+    assert await _committed(db_engine, "gke_cluster_location") is None

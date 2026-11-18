@@ -20,12 +20,14 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.kubernetes.cluster_location import is_gke_location
 from app.exceptions import ConflictError, StateError, ValidationError
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
 from app.services.deployment_outputs import (
     COMPUTE_AWS_OUTPUTS,
+    COMPUTE_GCP_OUTPUTS,
     COMPUTE_OUTPUTS,
     COMPUTE_TEARDOWN_CLEARED_KEYS,
     IMAGE_BUILD_OUTPUTS,
@@ -75,6 +77,9 @@ class StackStatus(BaseModel):
     pubsub_configured: bool = False
     cluster: ClusterInfo | None = None
     has_orphaned_clusters: bool = False
+    # Compute is deployed but its live detail could not be read: "cluster_location_unknown",
+    # "provider_denied" (bioAF's cloud access), or "provider_unavailable" (try again later).
+    cluster_unavailable: str | None = None
 
 
 async def _get_gke_credentials(session: AsyncSession):
@@ -224,7 +229,13 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
         )
 
     except Exception as exc:
-        logger.error("Failed to query GKE cluster status: %s", exc)
+        from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown, classify_provider_failure
+
+        if isinstance(exc, ClusterLocationUnknown):
+            reason = "cluster_location_unknown"
+        else:
+            reason = "provider_denied" if classify_provider_failure(exc) == "denied" else "provider_unavailable"
+        logger.error("Failed to query GKE cluster status (%s, error_type=%s)", reason, type(exc).__name__)
         return StackStatus(
             compute_stack=stack,
             compute_deployed=True,
@@ -232,7 +243,30 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             pubsub_configured=pubsub,
             cluster=None,
             has_orphaned_clusters=has_orphans,
+            cluster_unavailable=reason,
         )
+
+
+async def _deployed_cluster_location(session: AsyncSession) -> str | None:
+    """Where the deployed GKE cluster is, for recording it as an orphan.
+
+    The recorded location, else discovered through the compute adapter, else None (unknown).
+    Never the installation default: probing a guessed region reports NOT_FOUND, which recovery
+    would read as "already gone" while the cluster keeps running elsewhere.
+    """
+    recorded = await _read_config(session, "gke_cluster_location")
+    if is_gke_location(recorded):
+        return recorded
+    from app.adapters.registry import get_compute_adapter
+
+    try:
+        return await get_compute_adapter().deployed_cluster_location()
+    except Exception as exc:
+        logger.warning(
+            "Deployed GKE cluster location unknown (error_type=%s); recording the orphan without one",
+            type(exc).__name__,
+        )
+    return None
 
 
 async def _read_config(session: AsyncSession, key: str) -> str:
@@ -426,6 +460,8 @@ async def _after_compute_apply(
     await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.WRITE_NULL)
     if cloud_provider == "aws":
         await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.WRITE_NULL)
+    else:
+        await persist_outputs(session, outputs, COMPUTE_GCP_OUTPUTS, BlankOutputs.WRITE_NULL)
 
     # Update kubernetes_cluster component state
     await session.execute(
@@ -462,10 +498,10 @@ async def _after_compute_apply(
     await session.flush()
 
 
-async def _record_failed_compute_orphans(session: AsyncSession) -> None:
-    """Log the expected cluster and its service accounts as orphaned."""
+async def _record_failed_compute_orphans(session: AsyncSession, attempted_location: str) -> None:
+    """Log the expected cluster and its service accounts as orphaned, where the attempt built it."""
     project_id = await _read_config(session, "gcp_project_id")
-    region = await _read_config(session, "gcp_region") or "us-central1"
+    region = attempted_location if is_gke_location(attempted_location) else "us-central1"
     org_slug = await _read_config(session, "org_slug")
     suffix = await _read_config(session, "deploy_suffix")
     if suffix and suffix != "null" and org_slug and org_slug != "null":
@@ -617,6 +653,9 @@ async def deploy_stack(
     # Restore defaults after deploy completes (success or failure).
     original_region = None
     original_zone = None
+    # The region this attempt deploys the cluster in (the module's region variable), kept so a
+    # failed attempt's orphan is recorded where it was built, not at the restored default.
+    attempted_location = ""
     compute = _PhaseRun(progress)
     interrupted = False
     try:
@@ -634,6 +673,7 @@ async def deploy_stack(
             if compute_zone:
                 original_zone = await _read_config(session, "gcp_zone")
                 await _set_config(session, "gcp_zone", compute_zone)
+            attempted_location = await _read_config(session, "gcp_region")
 
         new_suffix = secrets.token_hex(3)
         await _set_config(session, "deploy_suffix", new_suffix)
@@ -724,7 +764,7 @@ async def deploy_stack(
         return
 
     if compute.outcome.failed:
-        await _record_failed_compute_orphans(session)
+        await _record_failed_compute_orphans(session, attempted_location)
         yield TerraformProgressEvent(
             event_type="stack_error",
             message="Stack deployment failed during compute module. Storage buckets preserved.",
@@ -846,7 +886,7 @@ async def teardown_stack(
     if outcome.failed:
         # Log the cluster and its service accounts as orphaned
         project_id = await _read_config(session, "gcp_project_id")
-        region = await _read_config(session, "gcp_region") or "us-central1"
+        region = await _deployed_cluster_location(session)
         cluster_name = await _read_config(session, "gke_cluster_name")
         if cluster_name and cluster_name != "null":
             pid = project_id if project_id != "null" else ""
@@ -1105,5 +1145,7 @@ async def sync_compute_config(session: AsyncSession) -> dict[str, str]:
     populated = await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.SKIP)
     if await get_cloud_provider(session) == "aws":
         populated |= await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.SKIP)
+    else:
+        populated |= await persist_outputs(session, outputs, COMPUTE_GCP_OUTPUTS, BlankOutputs.SKIP)
     await session.flush()
     return populated

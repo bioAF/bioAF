@@ -6,6 +6,7 @@ Verifies get_cluster_status and get_cluster_metrics return data using mocked GKE
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.api_core.exceptions import NotFound
 from app.settings_contract import ComputeMode
 
 
@@ -23,6 +24,7 @@ async def test_k8s_adapter_get_cluster_status_with_mock(mode_adapter_factory):
         "gke_cluster_name": "bioaf-test",
         "gcp_project_id": "test-project",
         "gcp_region": "us-central1",
+        "gke_cluster_location": "us-central1",
     }
 
     # Mock GKE cluster response
@@ -89,6 +91,7 @@ async def test_k8s_adapter_get_cluster_detail_with_mock(mode_adapter_factory):
         "gke_cluster_name": "bioaf-test",
         "gcp_project_id": "test-project",
         "gcp_region": "us-central1",
+        "gke_cluster_location": "us-central1",
     }
 
     mock_cluster = MagicMock()
@@ -145,6 +148,7 @@ async def test_k8s_adapter_cluster_lifecycle_management(mode_adapter_factory):
     probe_cluster.status = 2  # RUNNING
     probe_cluster.endpoint = "10.0.0.1"
     probe_cluster.master_auth.cluster_ca_certificate = "fake-ca"
+    probe_cluster.location = "us-central1-a"
 
     mock_client = MagicMock()
     mock_client.list_clusters.return_value.clusters = [c1, c2]
@@ -162,6 +166,7 @@ async def test_k8s_adapter_cluster_lifecycle_management(mode_adapter_factory):
     mock_client.list_clusters.assert_called_once_with(parent="projects/proj/locations/us-central1-a")
     assert probe.state == "RUNNING"
     assert probe.endpoint == "10.0.0.1"
+    assert probe.location == "us-central1-a"
     assert probe.ca_cert == "fake-ca"
     mock_client.delete_cluster.assert_called_once_with(name="projects/proj/locations/us-central1-a/clusters/bioaf-a")
 
@@ -174,7 +179,7 @@ async def test_k8s_adapter_probe_cluster_not_found(mode_adapter_factory):
     provider = mode_adapter_factory(KubernetesComputeProvider, mode=ComputeMode.KUBERNETES)
 
     mock_client = MagicMock()
-    mock_client.get_cluster.side_effect = Exception("404 not found")
+    mock_client.get_cluster.side_effect = NotFound("404 Not Found")
 
     with patch(
         "app.adapters.compute.kubernetes.KubernetesComputeProvider._get_gke_client",

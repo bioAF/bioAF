@@ -98,3 +98,12 @@ async def test_get_cluster_status_returns_pool_info(session):
     assert result.cluster.interactive_pool.machine_type == "n2-standard-4"
     assert result.cluster.interactive_pool.max_nodes == 5
     assert result.cluster.interactive_pool.spot is False
+
+
+@pytest.mark.asyncio
+async def test_status_has_no_unavailable_reason_when_detail_is_read(session):
+    from app.services.stack_deployment import get_cluster_status
+
+    await _set_config(session, "compute_deployed", "false")
+    await session.commit()
+    assert (await get_cluster_status(session)).cluster_unavailable is None

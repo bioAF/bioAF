@@ -11,6 +11,7 @@ import { DetailModal } from "@/components/shared/DetailModal";
 import { api } from "@/lib/api";
 import { useComponents } from "@/hooks/useComponents";
 import { useResource } from "@/hooks/useResource";
+import { ConnectButton } from "@/components/shared/ConnectButton";
 import type {
   NotebookSession,
   SessionListResponse,
@@ -110,8 +111,10 @@ export default function NotebooksPage() {
     loadResourceProfiles();
   }, [bucket]);
 
-  // Sessions, keyed by bucket: re-read every 10 s while one is starting, each read
-  // after the previous one settles. A bucket's late answer cannot replace another's.
+  // Sessions, keyed by bucket: re-read every 10 s while one is starting, or while the
+  // details of an active session are open (so a stop clears its terminal instructions),
+  // each read after the previous one settles. A bucket's late answer cannot replace another's.
+  const viewingId = viewingSession?.id ?? null;
   const sessionsPath = `/api/v1/notebooks/sessions?bucket=${bucket}`;
   const sessionList = useResource(
     sessionsPath,
@@ -120,7 +123,12 @@ export default function NotebooksPage() {
       [sessionsPath],
     ),
     {
-      poll: ({ data }) => (data?.sessions.some((s) => s.status === "starting") ? 10000 : false),
+      poll: ({ data }) =>
+        data?.sessions.some(
+          (s) => s.status === "starting" || (s.id === viewingId && ["running", "idle"].includes(s.status)),
+        )
+          ? 10000
+          : false,
       onError: (e) => {
         // These sessions bill while they run, so "you have none" must never stand
         // in for "we could not ask". The comment was right and the render was not: the
@@ -625,6 +633,19 @@ export default function NotebooksPage() {
               </div>
             ))}
   
+            {(viewingSession.session_type === "jupyter" || viewingSession.session_type === "rstudio") && (
+              <ConnectButton
+                targetType="session"
+                targetId={viewingSession.id}
+                // The list's latest answer, not the snapshot taken when the details opened.
+                eligible={["running", "idle"].includes(
+                  sessions.find((s) => s.id === viewingSession.id)?.status ?? "",
+                )}
+                onStateRefused={() => void loadSessions()}
+                className="mt-4 pt-4 border-t"
+              />
+            )}
+
             {/* Provenance section for stopped sessions */}
             {viewingSession.status === "stopped" && (
               <div className="mt-4 pt-4 border-t">

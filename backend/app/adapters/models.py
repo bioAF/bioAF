@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Literal
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -178,7 +179,8 @@ class ClusterProbe(BaseModel):
     """Liveness probe of a (possibly orphaned) cluster looked up by name.
 
     ``state`` is a mapped status string ("RUNNING"/"PROVISIONING"/.../"UNKNOWN")
-    or "NOT_FOUND" when the cluster cannot be fetched. ``endpoint``/``ca_cert``
+    "NOT_FOUND" when the provider reports no such cluster at that location, or
+    "UNVERIFIED" when the probe failed (denied, unavailable). ``endpoint``/``ca_cert``
     let an orphan-adoption flow re-populate connection config without the caller
     touching a backend cluster object.
     """
@@ -186,6 +188,8 @@ class ClusterProbe(BaseModel):
     state: str
     endpoint: str | None = None
     ca_cert: str | None = None
+    # The cluster's own region or zone, as the provider reports it.
+    location: str | None = None
 
 
 class NodePoolMetrics(BaseModel):
@@ -201,6 +205,9 @@ class ClusterMetrics(BaseModel):
     cost_burn_rate_hourly: float | None = None
     node_pools: list[NodePoolMetrics] = Field(default_factory=list)
     provider_details: dict = Field(default_factory=dict)
+    # Set when the cluster could not be read (e.g. "cluster_location_unknown",
+    # "provider_unavailable"): the values are a fallback, not observed zero activity.
+    unavailable: str | None = None
 
 
 # --- Storage -----------------------------------------------------------------
@@ -447,3 +454,37 @@ class QuotaMetric(BaseModel):
     metric: str
     usage: float
     limit: float
+
+
+# --- Terminal instructions (ssh_exec) ----------------------------------------
+
+
+class ConnectionTarget(BaseModel):
+    """The workload an authorized database record names, under the shared identity rules.
+
+    Built only from the organization-scoped record (never from request input). ``provider_ref``
+    is the recorded Job (pipeline) or Pod (notebook) name; it is None only for a notebook with no
+    recorded pod, where the adapter applies its own launch naming rule to ``record_id``.
+    ``namespace`` None means the adapter's launch default.
+    """
+
+    model_config = {"frozen": True}
+
+    kind: Literal["pipeline_job", "notebook_session"]
+    record_id: int
+    provider_ref: str | None = None
+    namespace: str | None = None
+    user_id: int | None = None
+    session_type: str | None = None
+
+
+class ConnectionDescription(BaseModel):
+    """Verified terminal instructions: what the response and audit entry both report."""
+
+    command: str
+    provider_ref: str
+    pod_name: str
+    namespace: str
+    container: str
+    context: str
+    setup_guide: str
