@@ -31,6 +31,7 @@ from app.platform.run_output_layout import directory_prefix, results_bucket_from
 from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.cluster_location import (
+    DISCOVERY_TIMEOUT_SECONDS,
     LOCATION_KEY,
     ClusterLocationUnknown,
     gke_cluster_path,
@@ -455,12 +456,12 @@ class KubernetesComputeProvider(ComputeProvider):
 
         backend = exec_access.backend_for_cluster_auth()
 
-        async def load() -> dict:
+        async def load(budget: float) -> dict:
             await self._ensure_cluster_config_fresh()
             cfg = self._cluster_config if self._cluster_config is not None else {}
             if backend == "gke":
                 await exec_access.discover_gke_location(
-                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory
+                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory, budget=budget
                 )
             return cfg
 
@@ -891,9 +892,13 @@ class KubernetesComputeProvider(ComputeProvider):
         cfg[LOCATION_KEY] = location
         return project_id, location, cluster_name
 
-    def _gke_list_clusters(self, parent: str) -> list:
-        """Blocking GKE list of clusters under ``parent`` (``locations/-`` lists every location)."""
-        return list(self._get_gke_client().list_clusters(parent=parent).clusters or [])
+    def _gke_list_clusters(self, parent: str, timeout: float = DISCOVERY_TIMEOUT_SECONDS):
+        """Blocking GKE list under ``parent`` (``locations/-`` lists every location).
+
+        Returns the whole response: ``missing_zones`` says whether the list is complete. One
+        attempt within ``timeout``; no SDK retries past the caller's budget.
+        """
+        return self._get_gke_client().list_clusters(parent=parent, timeout=timeout, retry=None)
 
     def _get_gke_client(self):
         """Get a GKE ClusterManager client using platform_config credentials."""

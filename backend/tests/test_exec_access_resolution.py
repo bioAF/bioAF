@@ -47,7 +47,7 @@ NB = ConnectionTarget(
 
 
 async def _resolve(target, fake, *, default_namespace=None, cfg=GKE, backend="gke", deadline=10.0):
-    async def load():
+    async def load(budget):
         return cfg
 
     ns = default_namespace or ("bioaf-pipelines" if target.kind == "pipeline_job" else "bioaf-notebooks")
@@ -236,7 +236,7 @@ async def test_resolution_is_bounded_by_its_deadline():
 
 @pytest.mark.asyncio
 async def test_a_failure_building_the_cluster_client_is_a_provider_outage():
-    async def load():
+    async def load(budget):
         return GKE
 
     def clients():
@@ -367,7 +367,7 @@ async def test_the_check_reads_the_same_cluster_the_command_names_after_a_config
     seen = []
 
     async def capture(target, *, default_namespace, backend, load_config, clients, deadline=None):
-        cfg = await load_config()
+        cfg = await load_config(10.0)
         core, _batch = clients()
         seen.append((cfg["gke_cluster_endpoint"], core.api_client.endpoint))
 
@@ -432,41 +432,72 @@ async def test_a_slow_notebook_credential_refresh_stays_within_the_deadline(monk
     assert time.monotonic() - started < 0.8
 
 
+def _listing(*clusters, missing_zones=()):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        clusters=[SimpleNamespace(name=n, location=loc) for n, loc in clusters], missing_zones=list(missing_zones)
+    )
+
+
 @pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
 @pytest.mark.asyncio
 async def test_an_install_without_a_recorded_location_discovers_it_for_terminal_setup(adapter_cls, monkeypatch):
-    from types import SimpleNamespace
-
     is_compute = adapter_cls is KubernetesComputeProvider
     fake = FakeK8s(job=pipeline_job(), pods=[head_pod()]) if is_compute else FakeK8s(pod=notebook_pod())
     adapter = _live(adapter_cls(mode=ComputeMode.KUBERNETES), fake, monkeypatch)
     adapter._cluster_config = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
-    parents = []
+    calls = []
 
-    def list_clusters(parent):
-        parents.append(parent)
-        return [SimpleNamespace(name=GKE["gke_cluster_name"], location="europe-west1-b")]
+    def list_clusters(parent, timeout):
+        calls.append((parent, timeout))
+        return _listing((GKE["gke_cluster_name"], "europe-west1-b"))
 
     monkeypatch.setattr(adapter, "_gke_list_clusters", list_clusters)
 
     d = await adapter.describe_connection(PIPE if is_compute else NB)
 
-    assert parents == ["projects/lab-proj-1/locations/-"]
+    [(parent, timeout)] = calls
+    assert parent == "projects/lab-proj-1/locations/-"
+    # The listing gets what is left of the resolver's 10 s budget, not the SDK's own 20 s default.
+    assert 0 < timeout <= exec_access.RESOLUTION_DEADLINE_SECONDS
     assert d.context == "gke_lab-proj-1_europe-west1-b_bioaf-lab-abc123"
     assert "--zone europe-west1-b" in d.setup_guide
 
 
+def _raise(exc):
+    def list_clusters(parent, timeout):
+        raise exc
+
+    return list_clusters
+
+
 @pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
 @pytest.mark.parametrize(
-    "listing,expected",
+    "listing,expected,reason",
     [
-        (lambda parent: [], ConnectionTargetInvalidError),
-        (lambda parent: (_ for _ in ()).throw(RuntimeError("403 secret")), ConnectionProviderUnavailableError),
+        (lambda parent, timeout: _listing(), ConnectionTargetInvalidError, "cluster_setup_incomplete"),
+        (
+            lambda parent, timeout: _listing((GKE["gke_cluster_name"], "us-west1"), missing_zones=["asia-east1-a"]),
+            ConnectionTargetInvalidError,
+            "cluster_setup_incomplete",
+        ),
+        (
+            _raise(__import__("google.api_core.exceptions").api_core.exceptions.PermissionDenied("secret")),
+            ConnectionProviderUnavailableError,
+            "provider_denied",
+        ),
+        (
+            _raise(__import__("google.api_core.exceptions").api_core.exceptions.DeadlineExceeded("secret")),
+            ConnectionProviderTimeoutError,
+            "deadline_exceeded",
+        ),
+        (_raise(RuntimeError("secret")), ConnectionProviderUnavailableError, "provider_unavailable"),
     ],
 )
 @pytest.mark.asyncio
 async def test_terminal_setup_refuses_when_the_location_cannot_be_discovered(
-    adapter_cls, listing, expected, monkeypatch
+    adapter_cls, listing, expected, reason, monkeypatch
 ):
     adapter = _live(adapter_cls(mode=ComputeMode.KUBERNETES), FakeK8s(), monkeypatch)
     adapter._cluster_config = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
@@ -475,4 +506,24 @@ async def test_terminal_setup_refuses_when_the_location_cannot_be_discovered(
     target = PIPE if adapter_cls is KubernetesComputeProvider else NB
     with pytest.raises(expected) as exc:
         await adapter.describe_connection(target)
+    assert exc.value.reason == reason
     assert "secret" not in str(exc.value)
+
+
+@pytest.mark.parametrize("adapter_cls", [KubernetesComputeProvider, KubernetesNotebookProvider])
+@pytest.mark.asyncio
+async def test_the_listing_call_carries_the_budget_and_no_sdk_retries(adapter_cls, monkeypatch):
+    from unittest.mock import MagicMock
+
+    adapter = adapter_cls(mode=ComputeMode.KUBERNETES)
+    client = MagicMock()
+    client.list_clusters.return_value = _listing()
+    if adapter_cls is KubernetesComputeProvider:
+        monkeypatch.setattr(adapter, "_get_gke_client", lambda: client)
+    else:
+        monkeypatch.setattr(adapter, "_gke_cluster_manager", lambda: client)
+
+    response = adapter._gke_list_clusters("projects/p/locations/-", 2.5)
+
+    client.list_clusters.assert_called_once_with(parent="projects/p/locations/-", timeout=2.5, retry=None)
+    assert response is client.list_clusters.return_value

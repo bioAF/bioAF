@@ -4,7 +4,11 @@
 so it never identifies the cluster. The cluster's own region or zone is ``gke_cluster_location``,
 written from the compute Terraform output ``cluster_location``. Installs deployed before that output
 existed discover it once: list the project's clusters across all locations, match the recorded
-cluster name, and record the location. No match, or several, is unknown, never a guessed default.
+cluster name, and record the location.
+
+Discovery only answers when it is sure: the listing must be complete (GKE's ``missing_zones`` is
+empty), exactly one cluster must match, and the result is saved only while the recorded cluster is
+still the one that was looked up. Anything else is unknown, never a guessed default.
 """
 
 from __future__ import annotations
@@ -12,14 +16,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
+
+from sqlalchemy import text
 
 logger = logging.getLogger("bioaf.adapters.kubernetes.cluster_location")
 
 LOCATION_KEY = "gke_cluster_location"
+# The GKE client's own default is 20 s with retries; discovery passes an explicit budget instead.
+DISCOVERY_TIMEOUT_SECONDS = 15.0
 
 _GCP_REGION = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 _GCP_ZONE = re.compile(r"^[a-z]+-[a-z]+[0-9]+-[a-z]$")
+
+# ``list_clusters(parent, timeout)``: a blocking GKE list returning an object with ``clusters``
+# (each with ``name`` and ``location``) and ``missing_zones``.
+ClusterLister = Callable[[str, float], object]
 
 
 class ClusterLocationUnknown(RuntimeError):
@@ -38,22 +50,91 @@ def gke_cluster_path(project_id: str, location: str, cluster_name: str) -> str:
     return f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
 
 
+def classify_provider_failure(exc: BaseException) -> str:
+    """``denied`` (bioAF's cloud access), ``timeout``, or ``unavailable`` (try again)."""
+    from google.api_core import exceptions as gexc
+
+    if isinstance(exc, (gexc.PermissionDenied, gexc.Forbidden, gexc.Unauthenticated, gexc.Unauthorized)):
+        return "denied"
+    if isinstance(exc, (gexc.DeadlineExceeded, TimeoutError)):
+        return "timeout"
+    return "unavailable"
+
+
 def _clean(value: object) -> str:
-    text = (value or "").strip() if isinstance(value, str) else ""
-    return "" if text == "null" else text
+    text_value = (value or "").strip() if isinstance(value, str) else ""
+    return "" if text_value == "null" else text_value
+
+
+async def find_gke_cluster_location(
+    project_id: str, cluster_name: str, *, list_clusters: ClusterLister, timeout: float = DISCOVERY_TIMEOUT_SECONDS
+) -> str:
+    """The one location holding ``cluster_name`` in ``project_id``, from a complete listing.
+
+    Provider failures propagate for the caller to map (see ``classify_provider_failure``).
+    """
+    response = await asyncio.to_thread(list_clusters, f"projects/{project_id}/locations/-", timeout)
+    if list(getattr(response, "missing_zones", None) or []):
+        logger.warning("GKE cluster location not discovered: the cluster listing was incomplete")
+        raise ClusterLocationUnknown("GKE could not list every location, so the cluster's location is not certain")
+    locations = {
+        getattr(c, "location", "") for c in getattr(response, "clusters", None) or [] if c.name == cluster_name
+    }
+    if len(locations) != 1:
+        logger.warning("GKE cluster location not discovered: %d location(s) match the cluster", len(locations))
+        raise ClusterLocationUnknown("the GKE cluster was not found in exactly one location")
+    location = locations.pop()
+    if not is_gke_location(location):
+        raise ClusterLocationUnknown("GKE reported an unrecognized cluster location")
+    return location
+
+
+async def _record(session_factory, name: str, project: str, discovered: str) -> str:
+    """Save ``discovered`` only while ``name``/``project`` are still the recorded cluster.
+
+    The cluster-name row is locked first, so a deploy that rewrites the identity either commits
+    before this reads it (and discovery is refused) or waits and then overwrites this result.
+    Returns the location now recorded for that cluster.
+    """
+    async with session_factory() as session:
+        locked = (
+            await session.execute(text("SELECT value FROM platform_config WHERE key = 'gke_cluster_name' FOR UPDATE"))
+        ).scalar_one_or_none()
+        rows = dict(
+            (
+                await session.execute(
+                    text("SELECT key, value FROM platform_config WHERE key IN ('gcp_project_id', :loc)"),
+                    {"loc": LOCATION_KEY},
+                )
+            ).all()
+        )
+        if _clean(locked) != name or _clean(rows.get("gcp_project_id")) != project:
+            await session.rollback()
+            logger.warning("Discovered GKE location discarded: the recorded cluster changed during discovery")
+            raise ClusterLocationUnknown("the recorded cluster changed while its location was being discovered")
+        current = _clean(rows.get(LOCATION_KEY))
+        if is_gke_location(current):
+            await session.rollback()
+            return current
+        from app.platform.platform_config_service import PlatformConfigService
+
+        await PlatformConfigService.set(session, LOCATION_KEY, discovered)
+        await session.commit()
+    logger.info("Recorded the deployed GKE cluster location %s (discovered by cluster name)", discovered)
+    return discovered
 
 
 async def resolve_gke_cluster_location(
     cfg: dict,
     *,
-    list_clusters: Callable[[str], Iterable],
+    list_clusters: ClusterLister,
     session_factory=None,
+    timeout: float = DISCOVERY_TIMEOUT_SECONDS,
 ) -> str:
     """The deployed cluster's location: recorded, or discovered by name and then recorded.
 
-    ``list_clusters(parent)`` is a blocking GKE ``list_clusters`` read returning objects with
-    ``name`` and ``location``; it runs off the event loop. Provider failures propagate for the
-    caller to map. ``cfg`` (the caller's cached config) is updated with a discovered location.
+    ``cfg`` is the caller's cached config snapshot; it is updated only with a location that
+    belongs to the cluster it names.
     """
     recorded = _clean(cfg.get(LOCATION_KEY))
     if is_gke_location(recorded):
@@ -64,21 +145,8 @@ async def resolve_gke_cluster_location(
     if not name or not project:
         raise ClusterLocationUnknown("GKE cluster name or project is not recorded")
 
-    clusters = await asyncio.to_thread(list_clusters, f"projects/{project}/locations/-")
-    locations = {getattr(c, "location", "") for c in clusters or [] if getattr(c, "name", None) == name}
-    if len(locations) != 1:
-        logger.warning("GKE cluster location not discovered: %d location(s) match the recorded cluster", len(locations))
-        raise ClusterLocationUnknown("the recorded GKE cluster was not found in exactly one location")
-    location = locations.pop()
-    if not is_gke_location(location):
-        raise ClusterLocationUnknown("GKE reported an unrecognized cluster location")
-
-    cfg[LOCATION_KEY] = location
+    location = await find_gke_cluster_location(project, name, list_clusters=list_clusters, timeout=timeout)
     if session_factory is not None:
-        from app.platform.platform_config_service import PlatformConfigService
-
-        async with session_factory() as session:
-            await PlatformConfigService.set(session, LOCATION_KEY, location)
-            await session.commit()
-    logger.info("Recorded the deployed GKE cluster location %s (discovered by cluster name)", location)
+        location = await _record(session_factory, name, project, location)
+    cfg[LOCATION_KEY] = location
     return location

@@ -760,3 +760,26 @@ async def test_inventory_refuses_api_keys_outside_their_scope(client, session, a
     resp = await client.get("/api/infrastructure/compute/pods", headers=headers)
     assert resp.status_code == 403
     assert resp.json()["detail"] == "key_scope_missing"
+
+
+@pytest.mark.asyncio
+async def test_a_denied_location_discovery_reaches_the_user_as_an_access_problem(
+    client, admin_token, running_notebook_session, live_cluster, session, monkeypatch
+):
+    """An older install with no recorded GKE location: discovery is denied by the cloud."""
+    from google.api_core.exceptions import PermissionDenied
+
+    live_cluster.notebooks._cluster_config = {k: v for k, v in GKE.items() if k != "gke_cluster_location"}
+
+    def denied(parent, timeout):
+        raise PermissionDenied("container.clusters.list denied")
+
+    monkeypatch.setattr(live_cluster.notebooks, "_gke_list_clusters", denied)
+
+    resp = await client.post(f"/api/sessions/{running_notebook_session.id}/connect", headers=_auth(admin_token))
+
+    assert resp.status_code == 502
+    assert resp.json()["code"] == "connection_provider_unavailable"
+    assert resp.json()["details"] == {"reason": "provider_denied"}
+    assert "container.clusters.list" not in resp.text
+    assert await _audits(session, running_notebook_session.id) == []

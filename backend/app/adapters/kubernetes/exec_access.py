@@ -185,20 +185,41 @@ def cluster_access(backend: str, cfg: dict, namespace: str) -> ClusterAccess:
     return ClusterAccess(context=context, setup_guide=guide)
 
 
-async def discover_gke_location(cfg: dict, *, list_clusters: Callable[[str], object], session_factory) -> None:
+async def discover_gke_location(
+    cfg: dict, *, list_clusters: Callable[[str, float], object], session_factory, budget: float
+) -> None:
     """Fill a missing ``gke_cluster_location`` in ``cfg`` by cluster name (recorded for next time).
 
     Not found leaves it missing, so ``cluster_access`` refuses as setup incomplete. A provider
     failure is a safe provider error; its text goes nowhere but the error class to the log.
     """
-    from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown, resolve_gke_cluster_location
+    from app.adapters.kubernetes.cluster_location import (
+        ClusterLocationUnknown,
+        classify_provider_failure,
+        resolve_gke_cluster_location,
+    )
 
     try:
-        await resolve_gke_cluster_location(cfg, list_clusters=list_clusters, session_factory=session_factory)
+        await resolve_gke_cluster_location(
+            cfg, list_clusters=list_clusters, session_factory=session_factory, timeout=budget
+        )
     except ClusterLocationUnknown:
         return
     except Exception as exc:
-        logger.warning("Locating the GKE cluster for terminal setup failed (error_type=%s)", type(exc).__name__)
+        kind = classify_provider_failure(exc)
+        logger.warning(
+            "Locating the GKE cluster for terminal setup failed (%s, error_type=%s)", kind, type(exc).__name__
+        )
+        if kind == "denied":
+            raise ConnectionProviderUnavailableError(
+                "The cluster refused bioAF's check of this workload. Ask an administrator to review bioAF's "
+                "cluster access.",
+                reason="provider_denied",
+            ) from None
+        if kind == "timeout":
+            raise ConnectionProviderTimeoutError(
+                "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"
+            ) from None
         raise ConnectionProviderUnavailableError(
             "bioAF could not reach the cluster to check this workload. Try again in a moment.",
             reason="provider_unavailable",
@@ -344,7 +365,7 @@ async def resolve_connection(
     *,
     default_namespace: str,
     backend: str,
-    load_config: Callable[[], Awaitable[dict]],
+    load_config: Callable[[float], Awaitable[dict]],
     clients: Callable[[], tuple],
     deadline: float | None = None,
 ) -> ConnectionDescription:
@@ -365,7 +386,8 @@ async def resolve_connection(
     clock = _Deadline(RESOLUTION_DEADLINE_SECONDS if deadline is None else deadline)
 
     try:
-        cfg = await asyncio.wait_for(load_config(), timeout=clock.remaining())
+        # load_config gets the remaining budget so any cloud call it makes is bounded by it too.
+        cfg = await asyncio.wait_for(load_config(clock.remaining()), timeout=clock.remaining())
     except asyncio.TimeoutError:
         raise ConnectionProviderTimeoutError(
             "The cluster took too long to answer. Try again in a moment.", reason="deadline_exceeded"

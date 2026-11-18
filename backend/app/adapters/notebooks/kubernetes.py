@@ -218,15 +218,19 @@ class KubernetesNotebookProvider(NotebookProvider):
             return self._gke.core_v1(), None
         return client.CoreV1Api(api_client=api_client), None
 
-    def _gke_list_clusters(self, parent: str) -> list:
-        """Blocking GKE list of clusters under ``parent``, with platform_config credentials."""
+    def _gke_cluster_manager(self):
+        """GKE ClusterManager client with platform_config credentials."""
         from google.cloud import container_v1
 
         from app.adapters.credentials import credential_injector
 
         credentials = credential_injector.load_gcp_credentials(self._cluster_config or {})
-        client = container_v1.ClusterManagerClient(credentials=credentials)
-        return list(client.list_clusters(parent=parent).clusters or [])
+        return container_v1.ClusterManagerClient(credentials=credentials)
+
+    def _gke_list_clusters(self, parent: str, timeout: float):
+        """Blocking GKE list under ``parent``: the whole response (``missing_zones`` included),
+        one attempt within ``timeout``."""
+        return self._gke_cluster_manager().list_clusters(parent=parent, timeout=timeout, retry=None)
 
     def connection_reference(self, target: ConnectionTarget) -> ConnectionTarget:
         # A legacy record with no recorded pod gets the launch naming rule applied to its id.
@@ -248,7 +252,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         backend = exec_access.backend_for_cluster_auth()
 
-        async def load() -> dict:
+        async def load(budget: float) -> dict:
             # Database reads only (plus GKE location discovery off the event loop); the client is
             # refreshed for this config in _connection_clients.
             if self._session_factory is not None:
@@ -256,7 +260,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             cfg = self._cluster_config if self._cluster_config is not None else {}
             if backend == "gke":
                 await exec_access.discover_gke_location(
-                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory
+                    cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory, budget=budget
                 )
             return cfg
 

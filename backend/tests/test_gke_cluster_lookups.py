@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from app.adapters.compute.kubernetes import KubernetesComputeProvider
-from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown
+from app.adapters.kubernetes.cluster_location import DISCOVERY_TIMEOUT_SECONDS, ClusterLocationUnknown
 from app.adapters.models import ClusterMetrics
 from app.settings_contract import ComputeMode
 
@@ -51,7 +51,7 @@ def _adapter(monkeypatch, *, location="europe-west1", listed=()):
     }
     client = MagicMock()
     client.get_cluster.return_value = _gke_cluster()
-    client.list_clusters.return_value = SimpleNamespace(clusters=list(listed))
+    client.list_clusters.return_value = SimpleNamespace(clusters=list(listed), missing_zones=[])
     monkeypatch.setattr(adapter, "_get_gke_client", lambda: client)
     return adapter, client
 
@@ -81,7 +81,9 @@ async def test_an_install_without_a_recorded_location_discovers_it_once(monkeypa
 
     await _all_three(adapter)
 
-    client.list_clusters.assert_called_once_with(parent="projects/lab-proj-1/locations/-")
+    client.list_clusters.assert_called_once_with(
+        parent="projects/lab-proj-1/locations/-", timeout=DISCOVERY_TIMEOUT_SECONDS, retry=None
+    )
     assert [c.kwargs["name"] for c in client.get_cluster.call_args_list] == [DEPLOYED] * 3
     assert adapter._cluster_config["gke_cluster_location"] == "europe-west1"
 
