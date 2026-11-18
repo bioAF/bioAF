@@ -182,3 +182,20 @@ test("closing the details stops the extra polling", async () => {
   expect(reads()).toBe(before);
   jest.useRealTimers();
 });
+
+test("a container that has not started yet says so, keeps the control, and does not re-read the list", async () => {
+  sessions = [session(5, "jupyter", "running")];
+  const dialog = await openDetails(5);
+  const reads = () => mockGet.mock.calls.filter(([u]) => String(u).includes("/notebooks/sessions")).length;
+  const readsBefore = reads();
+  mockPost.mockRejectedValueOnce(
+    new ApiError(409, "raw", "connection_unavailable", { reason: "container_starting" }),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Show instructions" }));
+
+  expect(await within(dialog).findByTestId("connect-error")).toHaveTextContent(
+    "This analysis has not started running in the cluster yet. Try again in a moment.",
+  );
+  expect(within(dialog).getByRole("button", { name: "Show instructions" })).toBeInTheDocument();
+  expect(reads()).toBe(readsBefore);
+});

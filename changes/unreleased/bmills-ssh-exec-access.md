@@ -12,9 +12,9 @@
   name.
 - A collapsed **Connection details** section lists the exact workload, pod, container, namespace and cluster
   context, each with a short definition.
-- Refusals say what to do: refresh the details when the workload is no longer running, try again when the cluster
-  could not be reached in time, or ask an administrator when bioAF's own cluster access or setup is the problem.
-  Simulated compute mode offers no terminal instructions.
+- Refusals say what to do: refresh the details when the workload is no longer running, try again when it has
+  not started running yet or the cluster could not be reached in time, or ask an administrator when bioAF's own
+  cluster access or setup is the problem. Simulated compute mode offers no terminal instructions.
 - Each request writes a `connection_command_generated` audit entry naming the run or session, workload,
   namespace, container and cluster context. It records that instructions were shown, not that anyone connected.
 - Open notebook session details stay current, so a session stopped elsewhere loses its instructions.

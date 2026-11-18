@@ -253,6 +253,26 @@ def _container_running(pod, container: str) -> bool:
     return False
 
 
+def _container_starting(pod, container: str) -> bool:
+    """The container has not started yet: its pod waits for a node or an image, or it is being created.
+
+    A container that already ran (crash-looping, or terminated) is not starting.
+    """
+    if getattr(pod.status, "phase", None) in ("Succeeded", "Failed"):
+        return False
+    for status in getattr(pod.status, "container_statuses", None) or []:
+        if status.name == container:
+            if not (status.state and status.state.waiting):
+                return False
+            last = getattr(status, "last_state", None)
+            return not (last and last.terminated)
+    return True  # no status for it yet: the pod is still being scheduled
+
+
+def _not_started(what: str) -> ConnectionUnavailableError:
+    return _unavailable(f"{what} has not started running in the cluster yet.", "container_starting")
+
+
 def _owned_by(pod, uid: str) -> bool:
     return any(ref.kind == "Job" and ref.uid == uid for ref in (pod.metadata.owner_references or []))
 
@@ -282,12 +302,11 @@ def _resolve_pipeline_head(core, batch, target: ConnectionTarget, namespace: str
     pods = core.list_namespaced_pod(
         namespace=namespace, label_selector=f"job-name={target.provider_ref}", _request_timeout=deadline.remaining()
     ).items
-    eligible = [
-        p
-        for p in pods
-        if _owned_by(p, meta.uid) and not p.metadata.deletion_timestamp and _container_running(p, PIPELINE_CONTAINER)
-    ]
+    owned = [p for p in pods if _owned_by(p, meta.uid) and not p.metadata.deletion_timestamp]
+    eligible = [p for p in owned if _container_running(p, PIPELINE_CONTAINER)]
     if not eligible:
+        if any(_container_starting(p, PIPELINE_CONTAINER) for p in owned):
+            raise _not_started("This analysis's pipeline container")
         raise _unavailable("This analysis's pipeline container is not running.", "container_not_running")
     if len(eligible) > 1:
         raise _unavailable(
@@ -309,6 +328,8 @@ def _resolve_notebook_pod(core, target: ConnectionTarget, namespace: str, deadli
     if pod.metadata.deletion_timestamp:
         raise _unavailable("This session is shutting down.", "workload_ending")
     if not _container_running(pod, NOTEBOOK_CONTAINER):
+        if _container_starting(pod, NOTEBOOK_CONTAINER):
+            raise _not_started("This session's notebook container")
         raise _unavailable("This session's notebook container is not running.", "container_not_running")
     return pod.metadata.name
 

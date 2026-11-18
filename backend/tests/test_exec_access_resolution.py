@@ -164,11 +164,74 @@ async def test_notebook_pod_without_identity_labels_is_refused():
     assert exc.value.reason == "identity_mismatch"
 
 
-@pytest.mark.parametrize("state", ["waiting", "terminated"])
+@pytest.mark.parametrize("state,reason", [("waiting", "container_starting"), ("terminated", "container_not_running")])
 @pytest.mark.asyncio
-async def test_a_running_sync_sidecar_does_not_make_a_stopped_notebook_reachable(state):
+async def test_a_running_sync_sidecar_does_not_make_a_stopped_notebook_reachable(state, reason):
     with pytest.raises(ConnectionUnavailableError) as exc:
         await _resolve(NB, FakeK8s(pod=notebook_pod(notebook=state)))
+    assert exc.value.reason == reason
+
+
+# -- not started yet vs ended --------------------------------------------------------------------
+
+
+def _pending(pod):
+    """The pod as it is while its node scales up: Pending, no container has a status yet."""
+    pod.status.phase = "Pending"
+    pod.status.container_statuses = None
+    return pod
+
+
+def _crash_looping(pod, container):
+    from kubernetes.client import V1ContainerState, V1ContainerStateTerminated, V1ContainerStateWaiting
+
+    for status in pod.status.container_statuses:
+        if status.name == container:
+            status.state = V1ContainerState(waiting=V1ContainerStateWaiting(reason="CrashLoopBackOff"))
+            status.last_state = V1ContainerState(terminated=V1ContainerStateTerminated(exit_code=1))
+    return pod
+
+
+@pytest.mark.asyncio
+async def test_a_head_pod_waiting_for_its_node_is_starting_not_ended():
+    """Live on GKE: the run is recorded running while its head pod waits for a node to scale up."""
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[_pending(head_pod())]))
+    assert exc.value.reason == "container_starting"
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[head_pod(pipeline="waiting")]))
+    assert exc.value.reason == "container_starting"
+
+
+@pytest.mark.asyncio
+async def test_a_notebook_pod_waiting_for_its_node_is_starting():
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(NB, FakeK8s(pod=_pending(notebook_pod())))
+    assert exc.value.reason == "container_starting"
+
+
+@pytest.mark.asyncio
+async def test_a_crash_looping_or_finished_container_is_not_starting():
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[_crash_looping(head_pod(), "pipeline")]))
+    assert exc.value.reason == "container_not_running"
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(NB, FakeK8s(pod=_crash_looping(notebook_pod(), "notebook")))
+    assert exc.value.reason == "container_not_running"
+    finished = head_pod(pipeline="terminated")
+    finished.status.phase = "Succeeded"
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[finished]))
+    assert exc.value.reason == "container_not_running"
+
+
+@pytest.mark.asyncio
+async def test_a_starting_pod_of_another_job_or_one_being_deleted_does_not_count():
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[_pending(head_pod(owner_uid="other-uid"))]))
+    assert exc.value.reason == "container_not_running"
+    with pytest.raises(ConnectionUnavailableError) as exc:
+        await _resolve(PIPE, FakeK8s(job=pipeline_job(), pods=[_pending(head_pod(deleting=True))]))
     assert exc.value.reason == "container_not_running"
 
 

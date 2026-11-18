@@ -35,6 +35,7 @@ interface ConnectionResponse {
 
 const STATE_REFUSAL =
   "This analysis is no longer running. Refresh its details before requesting new instructions.";
+const NOT_STARTED = "This analysis has not started running in the cluster yet. Try again in a moment.";
 const COPY_FAILURE = "We couldn't copy the command. Select it and copy it manually.";
 const PROVIDER_OUTAGE = "bioAF could not check this analysis with the cluster right now. Try again in a moment.";
 const PROVIDER_DENIED =
@@ -70,6 +71,8 @@ function describeFailure(err: unknown): { message: string; stateChanged: boolean
     switch (err.code) {
       case "connection_unavailable":
         if (reason === "ambiguous_target") return { message: UNIDENTIFIED, stateChanged: false };
+        // The workload exists but its main container is still being scheduled or created.
+        if (reason === "container_starting") return { message: NOT_STARTED, stateChanged: false };
         return { message: STATE_REFUSAL, stateChanged: true };
       case "connection_provider_unavailable":
         return { message: reason === "provider_denied" ? PROVIDER_DENIED : PROVIDER_OUTAGE, stateChanged: false };

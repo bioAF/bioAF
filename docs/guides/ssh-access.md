@@ -61,6 +61,8 @@ kubectl exec -it --context <context> -n <namespace> <pod> --container <container
 
 - **The analysis is no longer running** (or it changed while instructions were prepared): refresh its
   details, then request new instructions.
+- **The analysis has not started running in the cluster yet:** its workload exists but is still waiting for
+  a node or its container image (a pool scaling up from zero takes a few minutes). Try again in a moment.
 - **bioAF could not check it with the cluster right now:** try again in a moment.
 - **The cluster refused bioAF's check,** or **terminal access is not set up for this installation:** ask
   an administrator. These are about bioAF's own cluster access and configuration, not your permissions.
