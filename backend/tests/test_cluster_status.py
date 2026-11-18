@@ -98,3 +98,53 @@ async def test_get_cluster_status_returns_pool_info(session):
     assert result.cluster.interactive_pool.machine_type == "n2-standard-4"
     assert result.cluster.interactive_pool.max_nodes == 5
     assert result.cluster.interactive_pool.spot is False
+
+
+@pytest.mark.parametrize(
+    "failure,reason",
+    [
+        ("unknown", "cluster_location_unknown"),
+        ("denied", "provider_denied"),
+        ("down", "provider_unavailable"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_status_says_why_cluster_detail_is_missing(client, admin_token, session, failure, reason):
+    """A deployed cluster whose detail can't be read is reported as unavailable, with a reason."""
+    from google.api_core.exceptions import PermissionDenied, ServiceUnavailable
+
+    from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown
+
+    await _set_config(session, "compute_deployed", "true")
+    await _set_config(session, "compute_stack", "kubernetes")
+    await session.commit()
+    error = {
+        "unknown": ClusterLocationUnknown("not found"),
+        "denied": PermissionDenied("container.clusters.get denied"),
+        "down": ServiceUnavailable("backend down"),
+    }[failure]
+
+    with patch(
+        "app.adapters.compute.kubernetes.KubernetesComputeProvider.get_cluster_detail",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        resp = await client.get(
+            "/api/v1/infrastructure/stack/status", headers={"Authorization": f"Bearer {admin_token}"}
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["compute_deployed"] is True
+    assert body["cluster"] is None
+    assert body["cluster_unavailable"] == reason
+    assert "denied" not in resp.text.replace("provider_denied", "")
+
+
+@pytest.mark.asyncio
+async def test_status_has_no_unavailable_reason_when_detail_is_read(session):
+    from app.services.stack_deployment import get_cluster_status
+
+    await _set_config(session, "compute_deployed", "false")
+    await session.commit()
+    assert (await get_cluster_status(session)).cluster_unavailable is None

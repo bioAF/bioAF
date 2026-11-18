@@ -16110,6 +16110,8 @@ export interface components {
         /** StackStatus */
         StackStatus: {
             cluster?: components["schemas"]["ClusterInfo"] | null;
+            /** Cluster Unavailable */
+            cluster_unavailable?: string | null;
             /** Compute Deployed */
             compute_deployed: boolean;
             /** Compute Stack */

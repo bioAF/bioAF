@@ -77,6 +77,9 @@ class StackStatus(BaseModel):
     pubsub_configured: bool = False
     cluster: ClusterInfo | None = None
     has_orphaned_clusters: bool = False
+    # Compute is deployed but its live detail could not be read: "cluster_location_unknown",
+    # "provider_denied" (bioAF's cloud access), or "provider_unavailable" (try again later).
+    cluster_unavailable: str | None = None
 
 
 async def _get_gke_credentials(session: AsyncSession):
@@ -226,7 +229,13 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
         )
 
     except Exception as exc:
-        logger.error("Failed to query GKE cluster status: %s", exc)
+        from app.adapters.kubernetes.cluster_location import ClusterLocationUnknown, classify_provider_failure
+
+        if isinstance(exc, ClusterLocationUnknown):
+            reason = "cluster_location_unknown"
+        else:
+            reason = "provider_denied" if classify_provider_failure(exc) == "denied" else "provider_unavailable"
+        logger.error("Failed to query GKE cluster status (%s, error_type=%s)", reason, type(exc).__name__)
         return StackStatus(
             compute_stack=stack,
             compute_deployed=True,
@@ -234,6 +243,7 @@ async def get_cluster_status(session: AsyncSession) -> StackStatus:
             pubsub_configured=pubsub,
             cluster=None,
             has_orphaned_clusters=has_orphans,
+            cluster_unavailable=reason,
         )
 
 

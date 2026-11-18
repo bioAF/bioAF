@@ -23816,6 +23816,17 @@
               }
             ]
           },
+          "cluster_unavailable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Unavailable"
+          },
           "compute_deployed": {
             "title": "Compute Deployed",
             "type": "boolean"
