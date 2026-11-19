@@ -618,6 +618,10 @@ async def terminate_verified(
     """
     from app.services.notebook_lifecycle import verify_workload
 
+    # A persisted obligation to save wins over any caller's inference from the session's status:
+    # once a save is owed, every retry (Stop, idle stop, the periodic pass) saves before deleting.
+    if (_lifecycle(ns).get("cleanup") or {}).get("save_outputs"):
+        ran = True
     verdict = await verify_workload(adapter, ns)
     if verdict.kind == "unmanaged" and not (ns.slurm_job_id or ns.compute_job_ref):
         return TerminationResult()  # as before: nothing recorded to terminate
@@ -638,8 +642,10 @@ async def terminate_verified(
         kwargs["working_bucket"] = working_bucket
     kwargs["session_type"] = ns.session_type
     kwargs["user_id"] = ns.user_id
-    if ran_flag:
+    if ran_flag or verdict.workload is not None:
         kwargs["ran"] = ran
+    if verdict.workload is not None:
+        kwargs["organization_id"] = verdict.workload.organization_id
     try:
         if verdict.workload is not None:
             target_id = str(verdict.workload.session_id)  # the verified workload's own session id

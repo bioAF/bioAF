@@ -127,3 +127,40 @@ def test_an_unexpected_client_error_is_a_failure_not_a_crash():
     result = release_workload(Broken(), WORKLOAD)
     assert result.pod.state == "failed"
     assert "RuntimeError" in (result.pod.detail or "")
+
+
+ORG_WORKLOAD = WORKLOAD.model_copy(update={"organization_id": 3})
+
+
+def _org(labels_obj, org):
+    labels_obj.metadata.labels = {**labels_obj.metadata.labels, "bioaf.io/organization": org}
+    return labels_obj
+
+
+def test_a_pod_or_service_labelled_for_another_organization_is_never_deleted():
+    for core in (
+        FakeCore(pods=[_org(notebook_pod(), "4")]),
+        FakeCore(services=[_org(notebook_service(), "4")]),
+    ):
+        result = release_workload(core, ORG_WORKLOAD)
+        assert result.blocked
+        assert core.deletes() == []
+
+
+def test_resources_labelled_for_the_same_organization_are_released():
+    core = FakeCore(pods=[_org(notebook_pod(), "3")], services=[_org(notebook_service(), "3")])
+    core.delete_is_immediate = True
+    assert release_workload(core, ORG_WORKLOAD).complete
+
+
+def test_older_resources_without_an_organization_label_follow_the_session_checks():
+    core = FakeCore(pods=[notebook_pod()], services=[notebook_service()])
+    core.delete_is_immediate = True
+    assert release_workload(core, ORG_WORKLOAD).complete
+
+
+def test_the_exec_ownership_check_also_refuses_another_organization():
+    from app.adapters.notebooks.lifecycle import pod_ownership
+
+    assert pod_ownership(FakeCore(pods=[_org(notebook_pod(), "4")]), ORG_WORKLOAD) == "foreign"
+    assert pod_ownership(FakeCore(pods=[_org(notebook_pod(), "3")]), ORG_WORKLOAD) == "owned"

@@ -441,3 +441,100 @@ async def test_a_hung_status_read_is_uncertainty_and_the_deadline_still_applies(
 
     row = await _row(factory, ns.id)
     assert (row.status, row.failure_reason) == ("failed", "startup_timeout")
+
+
+@pytest.mark.asyncio
+async def test_a_second_stop_after_an_outage_still_saves_before_deleting(
+    session, admin_user, db_engine, monkeypatch, mode_adapter_factory
+):
+    """The persisted obligation to save wins over the session's status, whoever retries."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services import notebook_service as svc_module
+    from tests.test_notebook_lifecycle_state import _k8s, _row, _seed
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ns = await _seed(session, admin_user, status="running")
+    ns.gcs_home_prefix = f"s3://bioaf-working/notebooks/{ns.id}/"
+    await session.commit()
+    pod_name = f"bioaf-notebook-{ns.id}"
+    core = FakeCore(
+        pods=[notebook_pod(ns.id, ns.user_id)],
+        services=[notebook_service(ns.id)],
+        errors={("read", "pod", pod_name): 500},
+    )
+    core.delete_is_immediate = True
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core)
+    monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: adapter)
+    order = []
+
+    def stream(fn, **kw):
+        command = " ".join(kw.get("command") or [])
+        order.append(("exec", command))
+        return _shell_output(command, 0)
+
+    original_delete = core.delete_namespaced_pod
+
+    def delete_pod(name, namespace, body=None, **kw):
+        order.append(("delete", name))
+        return original_delete(name, namespace, body=body, **kw)
+
+    core.delete_namespaced_pod = delete_pod
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", side_effect=stream),
+    ):
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+        assert (await _row(factory, ns.id)).status == "stopped"
+
+        core.errors.clear()  # the cluster recovers; the user presses Stop again
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+
+    home_saves = [i for i, (kind, c) in enumerate(order) if kind == "exec" and "sync /home/jovyan" in c]
+    deletes = [i for i, (kind, _) in enumerate(order) if kind == "delete"]
+    assert home_saves and deletes and home_saves[0] < deletes[0]
+    assert (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]["state"] == "complete"
+
+
+@pytest.mark.parametrize("same_org", [True, False], ids=["same-organization", "other-organization"])
+@pytest.mark.asyncio
+async def test_stop_respects_the_organization_label_on_new_resources(
+    session, admin_user, db_engine, monkeypatch, mode_adapter_factory, same_org
+):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services import notebook_service as svc_module
+    from tests.test_notebook_lifecycle_state import _k8s, _row, _seed
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ns = await _seed(session, admin_user, status="running")
+    org = str(admin_user.organization_id if same_org else admin_user.organization_id + 1)
+    pod, svc = notebook_pod(ns.id, ns.user_id), notebook_service(ns.id)
+    for obj in (pod, svc):
+        obj.metadata.labels = {**obj.metadata.labels, "bioaf.io/organization": org}
+    core = FakeCore(pods=[pod], services=[svc])
+    core.delete_is_immediate = True
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core)
+    monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: adapter)
+    execs = []
+
+    def stream(fn, **kw):
+        command = " ".join(kw.get("command") or [])
+        execs.append(command)
+        return _shell_output(command, 0)
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", side_effect=stream),
+    ):
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+
+    cleanup = (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]
+    if same_org:
+        assert not core.pods and not core.services and cleanup["state"] == "complete"
+    else:
+        assert execs == [] and core.deletes() == [] and cleanup["state"] == "blocked"

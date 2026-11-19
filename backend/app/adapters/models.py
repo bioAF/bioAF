@@ -414,6 +414,8 @@ class NotebookWorkload(BaseModel):
     namespace: str
     pod_name: str
     service_name: str
+    # Checked against the live objects' organization label when they carry one (newer launches).
+    organization_id: int | None = None
 
 
 ReleaseState = Literal["absent", "terminating", "failed", "blocked"]

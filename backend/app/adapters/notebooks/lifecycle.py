@@ -29,10 +29,17 @@ def _failure(exc: BaseException) -> str:
     return f"HTTP {status}" if status is not None else type(exc).__name__
 
 
+def _same_organization(labels: dict, w: NotebookWorkload) -> bool:
+    """A present organization label must name the session's organization; older resources have none."""
+    label = labels.get("bioaf.io/organization")
+    return label is None or (w.organization_id is not None and label == str(w.organization_id))
+
+
 def _pod_belongs(pod, w: NotebookWorkload) -> bool:
     labels = (pod.metadata.labels or {}) if pod.metadata else {}
     return (
-        labels.get("bioaf.io/session") == str(w.session_id)
+        _same_organization(labels, w)
+        and labels.get("bioaf.io/session") == str(w.session_id)
         and labels.get("bioaf.io/user") == str(w.user_id)
         and labels.get("bioaf.io/type") == w.session_type
     )
@@ -42,7 +49,11 @@ def _service_belongs(svc, w: NotebookWorkload) -> bool:
     labels = (svc.metadata.labels or {}) if svc.metadata else {}
     selector = (svc.spec.selector or {}) if svc.spec else {}
     session = str(w.session_id)
-    return labels.get("bioaf.io/session") == session and selector == {"bioaf.io/session": session}
+    return (
+        _same_organization(labels, w)
+        and labels.get("bioaf.io/session") == session
+        and selector == {"bioaf.io/session": session}
+    )
 
 
 def _release_one(

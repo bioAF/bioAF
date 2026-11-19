@@ -1061,6 +1061,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 namespace=namespace or DEFAULT_NOTEBOOK_NAMESPACE,
                 pod_name=pod_name or notebook_pod_name(ns.id),
                 service_name=service_name,
+                organization_id=getattr(ns, "organization_id", None),
             ),
             None,
         )
@@ -1159,6 +1160,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         session_type: str = "jupyter",
         user_id: int | None = None,
         ran: bool = True,
+        organization_id: int | None = None,
     ) -> dict:
         """Final git commit, sync outputs to GCS, then delete pod and service.
 
@@ -1181,6 +1183,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 namespace=namespace,
                 pod_name=pod_name,
                 service_name=notebook_service_name(session_id),
+                organization_id=organization_id,
             )
             # Live ownership before the first command runs in the pod, not only before the delete.
             ownership = await asyncio.to_thread(pod_ownership, core_client, workload)
