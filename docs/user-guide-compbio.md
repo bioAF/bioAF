@@ -46,6 +46,16 @@ resource profile and any applicable Project/Experiment scope.
 The session list and **Recreate** retain recorded scope. Recreate pre-fills a new launch; review its version,
 resources and inputs before confirming. Project scope does not by itself mount extra files.
 
+### Startup
+
+A launch can take several minutes when the interactive node pool is scaling up from zero or the node is
+downloading the notebook image for the first time; a later launch on the same node is usually ready in about a
+minute. The session shows as starting throughout. It becomes running only once its notebook container is ready
+and it has an address you can open. A launch fails early only for a definite error, such as an image that
+cannot be downloaded or a container that exits. Otherwise it fails after 30 minutes from launch, with
+"did not become ready" and the last cause bioAF observed. bioAF then deletes the session's pod and its
+LoadBalancer automatically. Stopping a session always wins over a launch result that arrives later.
+
 Use the session's storage-sync and output-registration actions to preserve work and its provenance. Session
 credentials support RStudio login. Idle-timeout behavior follows Workbench settings and session status;
 check the page rather than assuming a browser tab keeps a session alive.

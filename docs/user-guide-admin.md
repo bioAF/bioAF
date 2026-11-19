@@ -34,6 +34,25 @@ time. Deploy is blocked while conflicting resources remain. Resume and teardown 
 `infrastructure:deploy` and server-side ownership validation. A read-only role cannot recover resources
 merely because it can see their status.
 
+### Notebook Session Cleanup
+
+A notebook session that fails, stops, or never finishes starting has its pod and LoadBalancer Service deleted
+by a background pass that runs every minute. This also works after a backend restart. Before deleting
+anything, bioAF checks that the resource carries the session's own labels (session, user and type) and that
+the cluster is the one the session was launched on. A deletion counts as finished only once the resource is
+confirmed gone; until then it is retried. A session that was running when it failed has its outputs saved first.
+
+The progress is recorded on the session as `provider_metadata.lifecycle.cleanup.state`:
+
+- `pending`: deletion is in progress or will be retried (for example after a permission or network error).
+- `complete`: both resources are confirmed gone.
+- `blocked`: bioAF will not delete automatically, because a resource under the recorded name belongs to
+  another session or the cluster has changed since launch. The backend log names the session and the reason.
+
+To escalate a `blocked` session or a log warning about notebook resources "with no session record", inspect
+the named pod or Service in the `bioaf-notebooks` namespace and delete it by hand only after confirming it is
+not in use. bioAF never deletes a resource whose owner it cannot verify.
+
 ## Cost Center
 
 Open **Infrastructure > Cost Center** for spend, component breakdown, budgets and projections. GCP billing
