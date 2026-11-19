@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GeoExportModal } from "@/components/experiments/GeoExportModal";
 
 const mockApiGet = jest.fn();
@@ -327,6 +327,34 @@ describe("GeoExportModal", () => {
       expect(await screen.findByText("Some files may have lost their Sample references.")).toBeInTheDocument();
       expect(await screen.findByText("LIB10_R1.fastq.gz")).toBeInTheDocument();
       expect(mockApiPost).toHaveBeenCalledWith(READINESS);
+    });
+    it("ignores a readiness answer for a selection that has since changed", async () => {
+      let answer: (report: unknown) => void = () => {};
+      mockApiPost.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+      render(<GeoExportModal experimentId={1} isOpen onClose={jest.fn()} userRole="admin" />);
+      await waitFor(() => screen.getByText(/nf-core\/scrnaseq/));
+      fireEvent.click(screen.getByRole("button", { name: "Check Readiness" }));
+      fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+
+      await act(async () => answer(blocked));
+
+      expect(screen.queryByText("Validation Summary")).not.toBeInTheDocument();
+      expect(screen.queryByText("LIB10_R1.fastq.gz")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Download Export/ })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Check Readiness" })).toBeEnabled();
+    });
+
+    it("ignores a readiness failure for a selection that has since changed", async () => {
+      let fail: (error: unknown) => void = () => {};
+      mockApiPost.mockImplementationOnce(() => new Promise((_resolve, reject) => (fail = reject)));
+      render(<GeoExportModal experimentId={1} isOpen onClose={jest.fn()} userRole="admin" />);
+      await waitFor(() => screen.getByText(/nf-core\/scrnaseq/));
+      fireEvent.click(screen.getByRole("button", { name: "Check Readiness" }));
+      fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+
+      await act(async () => fail(new Error("old selection failed")));
+
+      expect(screen.queryByText("old selection failed")).not.toBeInTheDocument();
     });
   });
 });

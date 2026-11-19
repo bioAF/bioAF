@@ -1,7 +1,7 @@
 "use client";
 
 import { Modal } from "@/components/shared/Modal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api, ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Button } from "@/components/ui/Button";
@@ -147,6 +147,9 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
   const [downloading, setDownloading] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Every readiness request belongs to one selection; a change of selection retires it, so a late
+  // answer (or failure) for the old selection is never shown as the current one.
+  const readinessRequest = useRef(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -188,14 +191,20 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
   }
 
   // A report describes one run and one filter; showing it after either changes would mislead.
+  function invalidateReadiness() {
+    readinessRequest.current += 1;
+    setValidationReport(null);
+    setValidating(false);
+  }
+
   function selectRun(runId: number | "") {
     setSelectedRunId(runId);
-    setValidationReport(null);
+    invalidateReadiness();
   }
 
   function selectExcludeFailed(exclude: boolean) {
     setExcludeFailedSamples(exclude);
-    setValidationReport(null);
+    invalidateReadiness();
   }
 
   async function resolve(request: () => Promise<unknown>) {
@@ -229,18 +238,18 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
 
   async function handleCheckReadiness({ clearError = true }: { clearError?: boolean } = {}) {
     if (!selectedRunId) return;
+    const request = ++readinessRequest.current;
+    const current = () => request === readinessRequest.current;
     setValidating(true);
     if (clearError) setError(null);
     setValidationReport(null);
     try {
-      const report = await api.post<GeoValidationReport>(
-        exportUrl(true),
-      );
-      setValidationReport(report);
+      const report = await api.post<GeoValidationReport>(exportUrl(true));
+      if (current()) setValidationReport(report);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Validation failed");
+      if (current()) setError(err instanceof Error ? err.message : "Validation failed");
     } finally {
-      setValidating(false);
+      if (current()) setValidating(false);
     }
   }
 
