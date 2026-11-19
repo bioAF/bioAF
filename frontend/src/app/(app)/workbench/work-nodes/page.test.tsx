@@ -2,8 +2,9 @@ import { render, screen, waitFor, within } from "@/testing/renderWithProviders";
 import userEvent from "@testing-library/user-event";
 import WorkNodesPage from "./page";
 
+const mockRouterPush = jest.fn();
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockRouterPush }),
   usePathname: () => "/workbench/work-nodes",
 }));
 
@@ -39,14 +40,18 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role_name: "admin", email: "admin@test.com" }),
 }));
 
+// Defaults to every permission granted; the direct-entry tests narrow it per case.
+const mockUsePermissions = jest.fn();
 jest.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    canAccess: () => true,
-    roleName: "admin",
-    loading: false,
-    permissions: new Set(["work_nodes:launch", "work_nodes:view", "work_nodes:stop"]),
-  }),
+  usePermissions: () => mockUsePermissions(),
 }));
+
+const allPermissions = {
+  canAccess: () => true,
+  roleName: "admin",
+  loading: false,
+  permissions: new Set(["work_nodes:launch", "work_nodes:view", "work_nodes:stop"]),
+};
 
 import { api } from "@/lib/api";
 
@@ -154,6 +159,8 @@ function setupApiMocks(overrides: Partial<{ machineTypes: typeof machineTypes }>
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
+  mockRouterPush.mockReset();
+  mockUsePermissions.mockReturnValue(allPermissions);
 });
 
 async function openLaunchDialog(user: ReturnType<typeof userEvent.setup>) {
@@ -519,5 +526,111 @@ describe("WorkNodesPage launch click feedback", () => {
     const dismiss = screen.getByRole("button", { name: /^Dismiss$/i });
     await user.click(dismiss);
     expect(screen.queryByText(/quota exceeded/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Direct entry follows `work_nodes:view`, the same permission the navigation
+ * link and the API check. Notebook permissions play no part. A denied user is
+ * sent to the dashboard before the page reads anything, so a page load never
+ * carries node hostnames, addresses, or provider details to them.
+ */
+describe("WorkNodesPage direct entry by permission", () => {
+  const mockDelete = api.delete as jest.Mock;
+
+  const runningNode = {
+    id: 5,
+    user: { id: 1, name: "Node Owner", email: "owner@test.com" },
+    project: null,
+    project_id: null,
+    machine_type: "e2-standard-8",
+    cpu_cores: 8,
+    memory_gb: 32,
+    status: "running",
+    access_url: "ssh://10.0.0.1:22",
+    environment_version_id: 11,
+    input_file_ids: [],
+    github_repo_ids: [],
+    started_at: "2026-01-01T00:00:00Z",
+    stopped_at: null,
+  };
+
+  function grant(...keys: string[]) {
+    const granted = new Set(keys);
+    mockUsePermissions.mockReturnValue({
+      canAccess: (resource: string, action: string) => granted.has(`${resource}:${action}`),
+      roleName: "custom",
+      loading: false,
+      permissions: granted,
+    });
+  }
+
+  function serveRunningNode() {
+    setupApiMocks();
+    const base = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation((url: string) =>
+      url.includes("/api/v1/work-nodes/sessions") ? Promise.resolve({ sessions: [runningNode] }) : base(url),
+    );
+  }
+
+  beforeEach(() => mockDelete.mockReset());
+
+  it("lets a user with work_nodes:view and no notebook permission enter and load the node list", async () => {
+    grant("work_nodes:view");
+    serveRunningNode();
+    render(<WorkNodesPage />);
+    expect(await screen.findByText("Node Owner")).toBeInTheDocument();
+    expect(mockGet).toHaveBeenCalledWith(expect.stringContaining("/api/v1/work-nodes/sessions"), expect.anything());
+    expect(mockRouterPush).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "notebooks-only user", keys: ["notebooks:view"] },
+    { name: "user with no permissions", keys: [] as string[] },
+  ])("sends a $name to the dashboard without reading or changing anything", async ({ keys }) => {
+    grant(...keys);
+    serveRunningNode();
+    render(<WorkNodesPage />);
+    await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith("/dashboard"));
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(screen.queryByText("Node Owner")).not.toBeInTheDocument();
+    expect(screen.queryByText(/10\.0\.0\.1/)).not.toBeInTheDocument();
+  });
+
+  it("neither fetches nor redirects while permissions are still loading", async () => {
+    mockUsePermissions.mockReturnValue({ canAccess: () => false, roleName: "", loading: true, permissions: new Set() });
+    serveRunningNode();
+    render(<WorkNodesPage />);
+    // Let any effects and pending promises settle before asserting nothing happened.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(mockRouterPush).not.toHaveBeenCalled();
+  });
+
+  it("shows a view-only user a running node with no launch, stop, or recreate controls", async () => {
+    const user = userEvent.setup();
+    grant("work_nodes:view");
+    serveRunningNode();
+    render(<WorkNodesPage />);
+    const row = (await screen.findByText("Node Owner")).closest("tr")!;
+    expect(within(row).getByRole("button", { name: "Details" })).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Recreate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^New Work Node$/i })).not.toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "Details" }));
+    expect(screen.queryByRole("button", { name: /^Stop/i })).not.toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("shows the Stop control on a running node once work_nodes:stop is granted", async () => {
+    grant("work_nodes:view", "work_nodes:stop");
+    serveRunningNode();
+    render(<WorkNodesPage />);
+    const row = (await screen.findByText("Node Owner")).closest("tr")!;
+    expect(within(row).getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 });
