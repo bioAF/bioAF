@@ -187,6 +187,8 @@ def notebook_service_name(session_id) -> str:
 
 
 HOME_DIR = "/home/jovyan"
+# The jupyter image's notebook user (jovyan) and group (users).
+JUPYTER_UID_GID = "1000:100"
 
 
 class KubernetesNotebookProvider(NotebookProvider):
@@ -745,6 +747,17 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         # Build the home stage-in init container (CopyStager sync seam)
         sync_in_cmd = storage_adapter.sync_in_command(gcs_home_prefix, home_dir)
+        if session_type == "jupyter" and len(sync_in_cmd) == 3 and sync_in_cmd[:2] == ["/bin/sh", "-c"]:
+            # The init container restores the saved home as root, but JupyterLab runs as jovyan
+            # (uid 1000, gid 100) and must write under it: hand it over, and drop the previous
+            # server's runtime files (connection files valid only for a server that has exited).
+            # RStudio runs as root and chowns its own home at startup.
+            runtime_dir = f"{home_dir}/.local/share/jupyter/runtime"
+            sync_in_cmd = [
+                "/bin/sh",
+                "-c",
+                f"{sync_in_cmd[2]}; rm -rf {shell_word(runtime_dir)}; chown -R {JUPYTER_UID_GID} {shell_word(home_dir)}",
+            ]
         init_container = {
             "name": "gcs-sync-in",
             "image": staging_image,

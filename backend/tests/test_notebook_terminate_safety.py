@@ -699,3 +699,37 @@ async def test_a_retried_save_registers_each_output_once(session, admin_user, db
         )
     ).scalar()
     assert count == 1
+
+
+def _home_restore(session_type):
+    from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+
+    spec = {
+        "session_type": session_type,
+        "session_id": 77,
+        "user_id": 7,
+        "image": "test-image:latest",
+        "cpu_cores": 2,
+        "memory_gb": 4,
+        "node_pool": "interactive",
+    }
+    if session_type == "rstudio":
+        spec["session_credentials"] = {"username": "analyst", "password_hash": "h"}
+    manifest = KubernetesNotebookProvider()._build_pod_manifest(spec)
+    [restore] = [c for c in manifest["spec"]["initContainers"] if "rsync" in " ".join(c["command"])]
+    return restore["command"][-1]
+
+
+def test_a_restored_jupyter_home_belongs_to_the_notebook_user():
+    """Live on blackbird: a saved home restored by the root init container left .local owned by root, and
+    JupyterLab exited with PermissionError writing its runtime file. The restore hands the home to
+    jovyan (uid 1000, gid 100) and drops the previous server's runtime files."""
+    script = _home_restore("jupyter")
+    assert "chown -R 1000:100 /home/jovyan" in script
+    assert "rm -rf /home/jovyan/.local/share/jupyter/runtime" in script
+    assert script.index("rsync") < script.index("rm -rf") < script.index("chown")
+
+
+def test_the_rstudio_restore_is_unchanged():
+    """RStudio runs as root and chowns its own home at startup."""
+    assert "chown" not in _home_restore("rstudio")
