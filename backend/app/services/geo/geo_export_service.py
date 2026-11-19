@@ -17,6 +17,7 @@ from app.models.pipeline_run_review import PipelineRunReview
 from app.models.sample import Sample
 from app.services.geo.checksum_manifest import generate_checksum_manifest
 from app.services.geo.excel_generator import generate_geo_workbook
+from app.services.geo.file_associations import load_links, select_files
 from app.services.geo.qc_filter import GeoQcFilter, parse_qc_filter
 from app.services.geo.readme_generator import generate_readme
 from app.services.geo.validation import ValidationReport, validate_experiment_for_geo
@@ -141,12 +142,14 @@ class GeoExportService:
         else:
             pipeline_run = await GeoExportService._select_best_run(session, experiment_id)
 
-        # 4. Files linked to experiment
+        # 4. Candidate files: the Experiment's storage scope in this Organization (links filter it below)
         files_result = await session.execute(
-            select(File).where(
+            select(File)
+            .where(
                 File.organization_id == org_id,
                 File.storage_uri.contains(f"/experiments/{experiment_id}/"),
             )
+            .order_by(File.id)
         )
         files = list(files_result.scalars().all())
 
@@ -227,22 +230,23 @@ class GeoExportService:
                 "parameters_json": pipeline_run.parameters_json,
             }
 
-        raw_files = [f for f in files if f.file_type in ("fastq", "fastq.gz", "fq.gz")]
-        processed_files = [f for f in files if f.file_type not in ("fastq", "fastq.gz", "fq.gz")]
+        links = await load_links(session, [f.id for f in files])
+        selection = select_files(files, links, {s.id for s in samples})
 
-        # Build per-sample file data by matching filename prefix to sample external ID
         for sd in samples_data:
-            ext_id = sd["external_id"]
-            s_raw = [f for f in raw_files if f.filename.startswith(ext_id)]
-            s_proc = [f for f in processed_files if f.filename.startswith(ext_id)]
+            linked = selection.per_sample.get(sd["id"], [])
+            s_raw = [f for f in linked if _is_raw(f)]
+            s_proc = [f for f in linked if not _is_raw(f)]
             sd["files"] = {
                 "raw_filenames": ", ".join(f.filename for f in s_raw),
                 "processed_filenames": ", ".join(f.filename for f in s_proc),
                 "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in s_proc),
             }
 
+        raw_files = [f for f in selection.files if _is_raw(f)]
+        processed_files = [f for f in selection.files if not _is_raw(f)]
         files_data: dict | None = None
-        if files:
+        if selection.files:
             files_data = {
                 "raw_files": [
                     {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.storage_uri}
@@ -300,6 +304,13 @@ class GeoExportService:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+
+RAW_FILE_TYPES = ("fastq", "fastq.gz", "fq.gz")
+
+
+def _is_raw(f: File) -> bool:
+    return f.file_type in RAW_FILE_TYPES
 
 
 def _format_validation_report(report: ValidationReport) -> str:
