@@ -418,6 +418,19 @@ has its own ID (`<old ID>~<sample number>`), the old ID is shown beside it as
 "before upgrade", and looking up or creating a sample by the repeated old ID
 answers with the candidates instead of choosing one.
 
+After a successful upgrade, the backend also reports experiments whose GEO
+export needs a decision about legacy files: files without a Sample link whose
+names match a Sample (GEO export no longer uses names to decide which Sample a
+file belongs to). This report never stops or fails an update and does not hold
+up the application. Counts appear under `geo_association_advisory` in
+`update-status/schema-upgrade.json`; the file and Sample details are in a
+private `backups/bioaf_geo_association_advisory_<revision>_<time>.json`. Resolve
+each one in the running application from the experiment's **Export to GEO**,
+**Check Readiness** (see the GEO export guide). Only those experiments' GEO
+downloads wait for a decision. If the report could not complete (for example a
+timeout), it says `failed` and runs again on the next upgrade or restart; GEO
+readiness checks every export regardless.
+
 Until the upgrade has completed, the backend answers every request with a
 "finishing an upgrade" message and does no background work. The web app
 shows that message and picks up by itself when the backend is ready.
