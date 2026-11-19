@@ -10,6 +10,7 @@ from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
 from app.services.sequencing_enrichment import enrich_from_header
+from app.services.entity_references import verify_association_targets
 from app.services.file_service import FileService
 from app.runtime import spawn_event
 
@@ -99,6 +100,9 @@ class UploadService:
         from app.services.file_service import validate_external_id
 
         external_id = validate_external_id(external_id)
+        await verify_association_targets(
+            session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
+        )
         if external_id is not None:
             taken = await session.scalar(
                 select(File.id).where(File.organization_id == org_id, File.external_id == external_id)
@@ -180,6 +184,14 @@ class UploadService:
         pending = _pending_uploads.pop(upload_id, None)
         if not pending or pending["org_id"] != org_id:
             raise ValidationError("Invalid or expired upload_id")
+        # Checked at initiation; checked again because the targets may have changed since.
+        await verify_association_targets(
+            session,
+            org_id,
+            project_id=pending.get("project_id"),
+            experiment_id=pending.get("experiment_id"),
+            sample_ids=pending.get("sample_ids") or [],
+        )
 
         # Both MD5s are client assertions: they must agree, and the agreed value is then verified
         # independently against the stored bytes. Neither is recorded as an observed checksum.
@@ -302,6 +314,10 @@ class UploadService:
         proxied upload path works on any storage backend (GCS, NFS, ...), not just
         object stores (Phase 7).
         """
+        # Before the storage write: a refused target leaves no object and no record behind.
+        await verify_association_targets(
+            session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
+        )
         upload_id = str(uuid.uuid4())
         gcs_path = f"uploads/{upload_id}/{filename}"
 

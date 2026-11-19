@@ -231,3 +231,30 @@ async def file_identity_map(session: AsyncSession, files: list[File]) -> dict[in
             "samples": refs,
         }
     return result
+
+
+async def verify_association_targets(
+    session: AsyncSession,
+    org_id: int,
+    *,
+    project_id: int | None = None,
+    experiment_id: int | None = None,
+    sample_ids: Iterable[int] = (),
+) -> None:
+    """Refuse, before anything changes, a file association to a record outside ``org_id``.
+
+    The one check every association entry point runs first (the link operation, every upload path, the
+    link service): a missing record and another organization's record both answer "not found", so the
+    caller learns nothing about foreign identifiers. Reads only.
+    """
+    from app.exceptions import NotFoundError
+
+    for what, check in (
+        ("Project", lambda: _project_external_ids(session, [project_id], org_id)),
+        ("Experiment", lambda: _experiments(session, [experiment_id], org_id)),
+        ("Sample", lambda: sample_references(session, sample_ids, org_id)),
+    ):
+        try:
+            await check()
+        except InconsistentReference:
+            raise NotFoundError(f"{what} not found", plain_body=True) from None

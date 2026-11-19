@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.exceptions import ConflictError, ValidationError
+from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.organization import Organization
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
-from app.models.sample import Sample
+from app.models.sample import Sample, sample_files
 from app.services import entity_references
 from app.services.file_service import FileService, SourceIdentityAmbiguous
 
@@ -267,8 +267,13 @@ async def test_a_cross_organization_link_is_refused_without_leaking_identifiers(
     session.add(foreign)
     await session.flush()
     f = await _file(session, org)
-    await FileService.link_file_to_sample(session, f.id, foreign.id)
+    # The link operation refuses it outright, naming nothing foreign.
+    with pytest.raises(NotFoundError) as refused:
+        await FileService.link_file_to_sample(session, f.id, foreign.id)
+    assert "SECRET" not in str(refused.value) and "LIMS-EXP-X" not in str(refused.value)
 
+    # A cross-organization row that predates that check is still refused when snapshotted.
+    await session.execute(sample_files.insert().values(file_id=f.id, sample_id=foreign.id))
     with pytest.raises(entity_references.InconsistentReference) as err:
         await entity_references.file_relationships(session, f)
     assert "SECRET" not in str(err.value) and "LIMS-EXP-X" not in str(err.value)
