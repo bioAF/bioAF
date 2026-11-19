@@ -1565,12 +1565,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         ``running`` needs the notebook container ready and a LoadBalancer address.
         """
         from app.adapters.failure_classification import classify_pod_failure
-        from app.adapters.notebooks.lifecycle import (
-            REQUEST_TIMEOUT_SECONDS,
-            assess_pod,
-            pod_is_owned,
-            service_ownership,
-        )
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, assess_pod, pod_is_owned
 
         base = {"session_id": session_id, "pod_name": pod_name, "namespace": namespace, "session_type": session_type}
         try:
@@ -1608,11 +1603,17 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "failure_message": assessment.message,
             }
         if assessment.state == "ready":
-            if workload is not None and service_ownership(core_client, workload) != "owned":
-                # No address is published unless the Service is verified to be this session's too.
-                logger.warning("Service for session %s is not verified as its own; no address published", session_id)
-                return {**base, "status": "starting", "ownership": "service not verified"}
             port = 8888 if session_type == "jupyter" else 8787
+            if workload is not None:
+                # Ownership and the address from one Service response (see _verified_service_url).
+                url, why = self._verified_service_url(workload, port)
+                if why == "service not verified":
+                    logger.warning(
+                        "Service for session %s is not verified as its own; no address published", session_id
+                    )
+                if not url:
+                    return {**base, "status": "starting", "ownership": why}
+                return {**base, "status": "running", "access_url": url}
             url = self._resolve_service_url(notebook_service_name(session_id), namespace, port)
             return {**base, "status": "running", "access_url": url} if url else {**base, "status": "starting"}
 
@@ -1659,13 +1660,11 @@ class KubernetesNotebookProvider(NotebookProvider):
             return "running"
         return "starting"
 
-    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
-        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None.
+    def _service_document(self, service_name: str, namespace: str) -> tuple[int | None, dict | None]:
+        """One raw read of a Service: (HTTP status, document), or (None, None) on any error.
 
-        Uses raw httpx instead of the python K8s client (which returns a stale
-        ``ingress: None`` even when kubectl shows the IP). Swallows every error
-        and returns None so read-path callers (status reconciliation) never
-        raise on a not-yet-ready or unreachable service.
+        Uses raw httpx instead of the python K8s client (which returns a stale ``ingress: None``
+        even when kubectl shows the IP). Never raises, so read paths stay safe.
         """
         import httpx
 
@@ -1674,22 +1673,45 @@ class KubernetesNotebookProvider(NotebookProvider):
             config = api_client.configuration
             auth = api_client_auth_header(api_client)
             if not auth:
-                return None
-            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
+                return None, None
             resp = httpx.get(
-                svc_url,
+                f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}",
                 headers={"Authorization": auth},
                 verify=config.ssl_ca_cert or False,
                 timeout=10,
             )
-            if resp.status_code == 200:
-                ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
-                if ingress_list:
-                    ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
-                    return f"http://{ext_ip}:{container_port}"
+            return resp.status_code, (resp.json() if resp.status_code == 200 else None)
         except Exception:
+            return None, None
+
+    @staticmethod
+    def _ingress_url(doc: dict | None, container_port: int) -> str | None:
+        ingress_list = (((doc or {}).get("status") or {}).get("loadBalancer") or {}).get("ingress") or []
+        if not ingress_list:
             return None
-        return None
+        ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
+        return f"http://{ext_ip}:{container_port}" if ext_ip else None
+
+    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
+        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None (no ownership check)."""
+        _, doc = self._service_document(service_name, namespace)
+        return self._ingress_url(doc, container_port)
+
+    def _verified_service_url(self, workload: NotebookWorkload, container_port: int) -> tuple[str | None, str]:
+        """The address of ``workload``'s Service, from the same response that proves it is the session's.
+
+        One read: ownership (the shared Service rule) and the address come from one document, so a
+        Service replaced between two reads can never supply the address. Returns (url, reason).
+        """
+        from app.adapters.notebooks.lifecycle import service_document_belongs
+
+        status, doc = self._service_document(workload.service_name, workload.namespace)
+        if doc is None:
+            return None, "service absent" if status == 404 else "service unreadable"
+        if not service_document_belongs(doc, workload):
+            return None, "service not verified"
+        url = self._ingress_url(doc, container_port)
+        return url, "verified" if url else "address pending"
 
     async def _k8s_list_sessions(self, filters: dict | None = None) -> list[dict]:
         """List notebook pods in the namespace."""

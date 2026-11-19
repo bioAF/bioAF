@@ -27,7 +27,7 @@ from app.adapters.models import (
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 from app.models.notebook_session import NotebookSession
 from app.settings_contract import ComputeMode
-from tests.support.notebook_k8s_fakes import FakeCore, notebook_pod, notebook_service
+from tests.support.notebook_k8s_fakes import FakeCore, notebook_pod, notebook_service, serve_services_over_http
 
 POD, SVC = "bioaf-notebook-{}", "bioaf-notebook-svc-{}"
 T0 = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
@@ -77,7 +77,8 @@ def _k8s(mode_adapter_factory, monkeypatch, core, url=None):
     provider._api_client = MagicMock()
     provider._client_created_at = time.monotonic()
     monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
-    monkeypatch.setattr(provider, "_resolve_service_url", lambda *a: url)
+    # The real address resolver, answered by the fake cluster's Services (see the fakes module).
+    provider.service_reads = serve_services_over_http(monkeypatch, provider, core, url)
 
     async def cluster():
         return CLUSTER

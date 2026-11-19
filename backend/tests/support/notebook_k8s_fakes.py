@@ -186,3 +186,43 @@ class FakeCore:
 
     def deletes(self):
         return [c for c in self.calls if c[0] == "delete"]
+
+
+def serve_services_over_http(monkeypatch, provider, core: FakeCore, url: str | None) -> list[str]:
+    """Answer the adapter's raw Service reads from ``core`` as the API server would, over "HTTP".
+
+    The adapter reads a Service's LoadBalancer address with raw httpx (not the client), so this is
+    what exercises the real address resolver: each GET returns the Service's labels, selector and,
+    when ``url`` is given, an ingress for its host. Returns the list of Service names read.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from urllib.parse import urlparse
+
+    import httpx
+
+    from app.adapters.notebooks import kubernetes as nb_module
+
+    reads: list[str] = []
+    client = MagicMock()
+    client.configuration.host = "https://k8s.test"
+    client.configuration.ssl_ca_cert = None
+    monkeypatch.setattr(provider, "_get_api_client", lambda: client)
+    monkeypatch.setattr(nb_module, "api_client_auth_header", lambda _c: "Bearer test")
+
+    def get(address, **_):
+        name = address.rsplit("/", 1)[-1]
+        reads.append(name)
+        svc = core.services.get(name)
+        if svc is None:
+            return SimpleNamespace(status_code=404, json=lambda: {})
+        ingress = [{"ip": urlparse(url).hostname}] if url else []
+        doc = {
+            "metadata": {"name": name, "uid": svc.metadata.uid, "labels": dict(svc.metadata.labels or {})},
+            "spec": {"selector": dict(svc.spec.selector or {})},
+            "status": {"loadBalancer": {"ingress": ingress}},
+        }
+        return SimpleNamespace(status_code=200, json=lambda: doc)
+
+    monkeypatch.setattr(httpx, "get", get)
+    return reads

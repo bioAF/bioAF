@@ -133,3 +133,40 @@ async def test_an_unverifiable_launch_still_meets_its_deadline(
     row = await _row(factory, ns.id)
     assert row.status == "failed" and row.access_url is None
     assert CLUSTER  # the launch's recorded cluster matched; only the live labels disagreed
+
+
+@pytest.mark.asyncio
+async def test_ownership_and_the_address_come_from_one_service_read(
+    session, admin_user, factory, mode_adapter_factory, monkeypatch
+):
+    """No second read can bring in a replacement Service's address: there is only one read."""
+    ns = await _seed(session, admin_user)
+    org = admin_user.organization_id
+    core = _owned_core(ns, pod_org=org, svc_org=org)
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core, url=URL)
+
+    await _pass(factory, adapter, monkeypatch, T0 + timedelta(minutes=13))
+
+    assert (await _row(factory, ns.id)).access_url == URL
+    assert adapter.service_reads == [f"bioaf-notebook-svc-{ns.id}"]
+    assert [c for c in core.calls if c[:2] == ("read", "service")] == []
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_service_with_a_usable_address_publishes_nothing_through_the_real_resolver(
+    session, admin_user, factory, mode_adapter_factory, monkeypatch
+):
+    """The real resolver, a mocked API response: a foreign Service carrying an address is never used."""
+    from tests.support.notebook_k8s_fakes import notebook_service as svc_factory
+
+    ns = await _seed(session, admin_user)
+    org = admin_user.organization_id
+    core = _owned_core(ns, pod_org=org, svc_org=org)
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core, url=URL)
+    replacement = _labelled(svc_factory(ns.id, uid="svc-uid-2"), org + 1)
+    core.services[replacement.metadata.name] = replacement
+
+    await _pass(factory, adapter, monkeypatch, T0 + timedelta(minutes=13))
+
+    row = await _row(factory, ns.id)
+    assert (row.status, row.access_url) == ("starting", None)

@@ -45,15 +45,27 @@ def _pod_belongs(pod, w: NotebookWorkload) -> bool:
     )
 
 
-def _service_belongs(svc, w: NotebookWorkload) -> bool:
-    labels = (svc.metadata.labels or {}) if svc.metadata else {}
-    selector = (svc.spec.selector or {}) if svc.spec else {}
+def _service_identity_ok(labels: dict, selector: dict, w: NotebookWorkload) -> bool:
+    """The one Service ownership rule: same organization (when labelled), this session, its pod only."""
     session = str(w.session_id)
     return (
         _same_organization(labels, w)
         and labels.get("bioaf.io/session") == session
         and selector == {"bioaf.io/session": session}
     )
+
+
+def _service_belongs(svc, w: NotebookWorkload) -> bool:
+    labels = (svc.metadata.labels or {}) if svc.metadata else {}
+    selector = (svc.spec.selector or {}) if svc.spec else {}
+    return _service_identity_ok(labels, selector, w)
+
+
+def service_document_belongs(doc: dict, w: NotebookWorkload) -> bool:
+    """The same rule applied to a raw API response (as read for its LoadBalancer address)."""
+    labels = ((doc.get("metadata") or {}).get("labels")) or {}
+    selector = ((doc.get("spec") or {}).get("selector")) or {}
+    return _service_identity_ok(labels, selector, w)
 
 
 def _release_one(
@@ -109,20 +121,6 @@ def pod_ownership(core, w: NotebookWorkload, *, request_timeout: float = REQUEST
         logger.warning("Could not read notebook pod %s for session %s: %s", w.pod_name, w.session_id, _failure(exc))
         return "unknown"
     return "owned" if _pod_belongs(pod, w) else "foreign"
-
-
-def service_ownership(core, w: NotebookWorkload, *, request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> str:
-    """``owned``, ``absent``, ``foreign``, or ``unknown``: the same rule cleanup applies to the Service."""
-    try:
-        svc = core.read_namespaced_service(name=w.service_name, namespace=w.namespace, _request_timeout=request_timeout)
-    except Exception as exc:
-        if _status(exc) == 404:
-            return "absent"
-        logger.warning(
-            "Could not read notebook Service %s for session %s: %s", w.service_name, w.session_id, _failure(exc)
-        )
-        return "unknown"
-    return "owned" if _service_belongs(svc, w) else "foreign"
 
 
 def pod_is_owned(pod, w: NotebookWorkload) -> bool:
