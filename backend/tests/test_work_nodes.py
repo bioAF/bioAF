@@ -3,14 +3,22 @@
 TDD: write failing tests first, then implement.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 
-from app.adapters.models import ServiceState, VmInfo
+from app.adapters.models import ServiceState, TerminationResult, VmInfo
+from app.models.api_key import ApiKey
+from app.models.audit_log import AuditLog
+from app.models.notebook_session import ComputeSession
+from app.models.organization import Organization
+from app.models.user import User
+from app.services import api_key_service, role_service, service_account_service
 from app.services.auth_service import AuthService
+from app.services.bootstrap_roles import seed_builtin_roles
 
 
 @pytest_asyncio.fixture
@@ -899,3 +907,278 @@ async def test_heartbeat_timeout_uses_configured_value(session, admin_user, seed
         {"id": stale_session.id},
     )
     assert result.scalar() == "stopped"
+
+
+# -- Who may read and stop a work node --------------------------------------------------------
+#
+# Every lookup stays inside the caller's Organization: a node in another Organization answers
+# 404 exactly like a missing one, before any record change, provider call, or audit entry.
+# Within the Organization, any caller with work_nodes:view may read a node's detail (the same
+# rule as notebook session detail). Seeing everyone's nodes in the list, or stopping another
+# user's node, follows the users:deactivate grant, narrowed by an API key's scopes like every
+# other grant.
+
+FOREIGN_SECRETS = ("10.9.9.9", "foreign-instance", "out@other.test", "europe-west9-z")
+
+
+def _bearer(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _node(user: User, tag: str, **extra) -> ComputeSession:
+    fields = dict(
+        user_id=user.id,
+        organization_id=user.organization_id,
+        session_type="ssh",
+        resource_profile="n2-standard-4",
+        machine_type="n2-standard-4",
+        cpu_cores=4,
+        memory_gb=16,
+        status="running",
+        access_url=f"ssh://10.0.0.{user.id}:22",
+        gce_instance_name=f"{tag}-instance",
+        gce_zone="us-central1-a",
+        gce_project_id="test-project",
+    )
+    fields.update(extra)
+    return ComputeSession(**fields)
+
+
+@pytest_asyncio.fixture
+async def nodes(session, admin_user, comp_bio_user):
+    """Running nodes for an admin and a comp_bio user here, one in another Organization,
+    and a notebook session here that the work node routes must not treat as a node."""
+    other_org = Organization(name="Other Org", setup_complete=True)
+    session.add(other_org)
+    await session.flush()
+    other_roles = await seed_builtin_roles(session, other_org.id)
+    outsider = User(
+        email="out@other.test",
+        password_hash=AuthService.hash_password("outsiderpass1"),
+        role_id=other_roles["admin"],
+        organization_id=other_org.id,
+        status="active",
+    )
+    session.add(outsider)
+    await session.flush()
+    admins = _node(admin_user, "admin")
+    mine = _node(comp_bio_user, "comp-bio")
+    foreign = _node(outsider, "foreign", access_url="ssh://10.9.9.9:22", gce_zone="europe-west9-z")
+    notebook = ComputeSession(
+        user_id=comp_bio_user.id,
+        organization_id=comp_bio_user.organization_id,
+        session_type="jupyter",
+        resource_profile="small",
+        cpu_cores=2,
+        memory_gb=4,
+        status="running",
+    )
+    session.add_all([admins, mine, foreign, notebook])
+    await session.commit()
+    return SimpleNamespace(admin=admins.id, comp_bio=mine.id, foreign=foreign.id, notebook=notebook.id)
+
+
+@pytest.fixture
+def provider():
+    """The work node adapter, so a test can prove whether termination was reached."""
+    adapter = MagicMock(name="work node adapter")
+    adapter.terminate_vm = AsyncMock(return_value=TerminationResult())
+    with patch("app.services.work_node_service.get_work_node_adapter", return_value=adapter):
+        yield adapter
+
+
+async def _state(session, node_id: int) -> tuple[str, object]:
+    session.expire_all()
+    row = (
+        await session.execute(
+            select(ComputeSession.status, ComputeSession.stopped_at).where(ComputeSession.id == node_id)
+        )
+    ).one()
+    return row.status, row.stopped_at
+
+
+async def _stop_audits(session, node_id: int) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.entity_type == "work_node", AuditLog.entity_id == node_id, AuditLog.action == "stop")
+        )
+    ).scalar_one()
+
+
+async def _assert_untouched(session, provider, node_id: int) -> None:
+    assert await _state(session, node_id) == ("running", None)
+    provider.terminate_vm.assert_not_called()
+    assert await _stop_audits(session, node_id) == 0
+
+
+async def _custom_role_user(session, org_id: int, email: str, grants: list[tuple[str, str]]) -> dict:
+    role = await role_service.create_role(session, org_id, f"custom-{email}", permissions=grants)
+    user = User(
+        email=email,
+        password_hash=AuthService.hash_password("customrolepass1"),
+        role_id=role.id,
+        organization_id=org_id,
+        status="active",
+    )
+    session.add(user)
+    await session.commit()
+    role_service.invalidate_cache()
+    return _bearer(AuthService.create_token(user.id, user.email, role.id, org_id, role_name=role.name))
+
+
+async def _admin_key(session, admin_user, scopes: list[str]) -> dict:
+    """A key on an admin-role service account whose stored scopes are exactly these.
+
+    The mint API only issues the public scope alphabet, which has no work node scopes, so the
+    scopes are written directly: this proves the routes narrow by whatever a key holds.
+    """
+    account = await service_account_service.create(
+        session,
+        org_id=admin_user.organization_id,
+        display_name=f"Key {','.join(scopes)}",
+        role_id=admin_user.role_id,
+        created_by_user_id=admin_user.id,
+    )
+    key, secret = await api_key_service.mint(
+        session,
+        org_id=admin_user.organization_id,
+        sa_user_id=account.id,
+        name="key",
+        scopes=["projects:view"],
+        created_by_user_id=admin_user.id,
+    )
+    await session.execute(update(ApiKey).where(ApiKey.id == key.id).values(scopes=scopes))
+    await session.commit()
+    return _bearer(secret)
+
+
+@pytest.mark.parametrize("target", ["foreign", "missing", "notebook"])
+@pytest.mark.asyncio
+async def test_detail_of_a_foreign_missing_or_notebook_id_is_404_and_reveals_nothing(
+    client, admin_token, nodes, target
+):
+    node_id = {"foreign": nodes.foreign, "missing": 999999, "notebook": nodes.notebook}[target]
+    response = await client.get(f"/api/v1/work-nodes/sessions/{node_id}", headers=_bearer(admin_token))
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Work node not found"}
+    assert not any(secret in response.text for secret in FOREIGN_SECRETS)
+
+
+@pytest.mark.parametrize("target", ["foreign", "missing", "notebook"])
+@pytest.mark.asyncio
+async def test_an_admin_stopping_a_foreign_missing_or_notebook_id_gets_404_and_changes_nothing(
+    client, session, admin_token, nodes, provider, target
+):
+    node_id = {"foreign": nodes.foreign, "missing": 999999, "notebook": nodes.notebook}[target]
+    response = await client.post(f"/api/v1/work-nodes/sessions/{node_id}/stop", headers=_bearer(admin_token))
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Work node not found"}
+    assert not any(secret in response.text for secret in FOREIGN_SECRETS)
+    if target != "missing":
+        await _assert_untouched(session, provider, node_id)
+
+
+@pytest.mark.asyncio
+async def test_a_coworkers_node_detail_is_readable_within_the_organization(client, comp_bio_token, nodes):
+    response = await client.get(f"/api/v1/work-nodes/sessions/{nodes.admin}", headers=_bearer(comp_bio_token))
+    assert response.status_code == 200
+    assert response.json()["id"] == nodes.admin
+
+
+@pytest.mark.asyncio
+async def test_a_user_reads_and_stops_their_own_node(client, session, comp_bio_token, nodes, provider):
+    detail = await client.get(f"/api/v1/work-nodes/sessions/{nodes.comp_bio}", headers=_bearer(comp_bio_token))
+    assert detail.status_code == 200
+    assert detail.json()["gce_instance_name"] == "comp-bio-instance"
+
+    stopped = await client.post(f"/api/v1/work-nodes/sessions/{nodes.comp_bio}/stop", headers=_bearer(comp_bio_token))
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "stopped"
+    assert provider.terminate_vm.call_args.args[0] == "comp-bio-instance"
+    assert await _stop_audits(session, nodes.comp_bio) == 1
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_coworkers_node_needs_the_management_grant(client, session, admin_user, nodes, provider):
+    org_id = admin_user.organization_id
+    plain = await _custom_role_user(session, org_id, "plain@t.test", [("work_nodes", "view"), ("work_nodes", "stop")])
+    manager = await _custom_role_user(
+        session,
+        org_id,
+        "manager@t.test",
+        [("work_nodes", "view"), ("work_nodes", "stop"), ("users", "deactivate")],
+    )
+    denied = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=plain)
+    assert denied.status_code == 403
+    assert denied.json() == {"detail": "Can only stop your own work nodes"}
+    await _assert_untouched(session, provider, nodes.admin)
+
+    allowed = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=manager)
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "stopped"
+    provider.terminate_vm.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_the_management_grant_does_not_stand_in_for_the_stop_grant(client, session, admin_user, nodes, provider):
+    viewer_manager = await _custom_role_user(
+        session, admin_user.organization_id, "vm@t.test", [("work_nodes", "view"), ("users", "deactivate")]
+    )
+    response = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=viewer_manager)
+    assert response.status_code == 403
+    await _assert_untouched(session, provider, nodes.admin)
+
+
+@pytest.mark.asyncio
+async def test_the_list_shows_everyone_only_with_the_management_grant_and_never_another_org(
+    client, comp_bio_token, admin_token, nodes
+):
+    own = (await client.get("/api/v1/work-nodes/sessions", headers=_bearer(comp_bio_token))).json()
+    assert {s["id"] for s in own["sessions"]} == {nodes.comp_bio}
+    assert own["total"] == 1
+    everyone = (await client.get("/api/v1/work-nodes/sessions", headers=_bearer(admin_token))).json()
+    assert {s["id"] for s in everyone["sessions"]} == {nodes.admin, nodes.comp_bio}
+    assert everyone["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_key_without_the_management_scope_manages_only_its_own_nodes(
+    client, session, admin_user, nodes, provider
+):
+    narrow = await _admin_key(session, admin_user, ["work_nodes:view", "work_nodes:stop"])
+    listed = await client.get("/api/v1/work-nodes/sessions", headers=narrow)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["sessions"] == []
+    assert listed.json()["total"] == 0
+
+    denied = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=narrow)
+    assert denied.status_code == 403
+    await _assert_untouched(session, provider, nodes.admin)
+
+
+@pytest.mark.asyncio
+async def test_a_key_with_the_management_scope_manages_its_organization_only(
+    client, session, admin_user, nodes, provider
+):
+    wide = await _admin_key(session, admin_user, ["work_nodes:view", "work_nodes:stop", "users:deactivate"])
+    listed = (await client.get("/api/v1/work-nodes/sessions", headers=wide)).json()
+    assert {s["id"] for s in listed["sessions"]} == {nodes.admin, nodes.comp_bio}
+
+    foreign = await client.post(f"/api/v1/work-nodes/sessions/{nodes.foreign}/stop", headers=wide)
+    assert foreign.status_code == 404
+    await _assert_untouched(session, provider, nodes.foreign)
+
+    allowed = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=wide)
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_a_key_missing_the_action_scope_is_refused(client, session, admin_user, nodes, provider):
+    view_only = await _admin_key(session, admin_user, ["work_nodes:view", "users:deactivate"])
+    response = await client.post(f"/api/v1/work-nodes/sessions/{nodes.admin}/stop", headers=view_only)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "key_scope_missing"}
+    await _assert_untouched(session, provider, nodes.admin)

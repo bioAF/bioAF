@@ -8,9 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.api.dependencies import require_permission
+from app.api.dependencies import has_effective_permission, require_permission
 from app.platform.platform_config_service import PlatformConfigService
-from app.services import role_service
 from app.services.work_node_service import WorkNodeService
 from app.services.machine_types import MACHINE_TYPES
 from app.schemas.work_node import (
@@ -70,6 +69,23 @@ def _work_node_response(cs) -> WorkNodeResponse:
     )
 
 
+async def _node_in_org_or_404(session: AsyncSession, session_id: int, current_user: dict):
+    """The caller's Organization's work node, or 404 exactly as if it did not exist."""
+    compute_session = await WorkNodeService.get_work_node(session, session_id, org_id=int(current_user["org_id"]))
+    if not compute_session:
+        raise HTTPException(404, "Work node not found")
+    return compute_session
+
+
+async def _can_manage_all_nodes(session: AsyncSession, current_user: dict) -> bool:
+    """Whether the caller may list and stop other users' nodes in their Organization.
+
+    ``users:deactivate`` is the established grant (as for notebook sessions); an API key
+    must also hold it in its scopes.
+    """
+    return await has_effective_permission(session, current_user, "users", "deactivate")
+
+
 async def _get_config_value(session: AsyncSession, key: str) -> str | None:
     return await PlatformConfigService.get(session, key)
 
@@ -106,8 +122,7 @@ async def list_work_nodes(
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    can_view_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
-    filter_user_id = None if can_view_all else user_id
+    filter_user_id = None if await _can_manage_all_nodes(session, current_user) else user_id
 
     sessions_list, total = await WorkNodeService.list_work_nodes(
         session,
@@ -157,7 +172,7 @@ async def launch_work_node(
 
     await session.commit()
 
-    compute_session = await WorkNodeService.get_work_node(session, compute_session.id)
+    compute_session = await _node_in_org_or_404(session, compute_session.id, current_user)
     return _work_node_response(compute_session)
 
 
@@ -167,9 +182,7 @@ async def get_work_node_detail(
     current_user: dict = require_permission("work_nodes", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    compute_session = await WorkNodeService.get_work_node(session, session_id)
-    if not compute_session:
-        raise HTTPException(404, "Work node not found")
+    compute_session = await _node_in_org_or_404(session, session_id, current_user)
     return _work_node_response(compute_session)
 
 
@@ -181,18 +194,16 @@ async def stop_work_node(
 ):
     user_id = int(current_user["sub"])
 
-    compute_session = await WorkNodeService.get_work_node(session, session_id)
-    if not compute_session:
-        raise HTTPException(404, "Work node not found")
-
-    can_manage_all = await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate")
-    if not can_manage_all and compute_session.user_id != user_id:
+    compute_session = await _node_in_org_or_404(session, session_id, current_user)
+    if compute_session.user_id != user_id and not await _can_manage_all_nodes(session, current_user):
         raise HTTPException(403, "Can only stop your own work nodes")
 
-    compute_session = await WorkNodeService.stop_work_node(session, session_id, user_id)
+    compute_session = await WorkNodeService.stop_work_node(
+        session, compute_session.id, user_id, org_id=int(current_user["org_id"])
+    )
 
     await session.commit()
-    compute_session = await WorkNodeService.get_work_node(session, compute_session.id)
+    compute_session = await _node_in_org_or_404(session, compute_session.id, current_user)
     return _work_node_response(compute_session)
 
 

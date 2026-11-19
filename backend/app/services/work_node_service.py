@@ -330,8 +330,10 @@ class WorkNodeService:
         session: AsyncSession,
         session_id: int,
         user_id: int,
+        *,
+        org_id: int,
     ) -> ComputeSession:
-        compute_session = await WorkNodeService.get_work_node(session, session_id)
+        compute_session = await WorkNodeService.get_work_node(session, session_id, org_id=org_id)
         if not compute_session:
             raise NotFoundError("Work node not found")
 
@@ -493,14 +495,24 @@ class WorkNodeService:
     async def get_work_node(
         session: AsyncSession,
         session_id: int,
+        *,
+        org_id: int,
     ) -> ComputeSession | None:
+        """The work node with this id in this Organization, or None.
+
+        A node in another Organization is indistinguishable from a missing one.
+        """
         result = await session.execute(
             select(ComputeSession)
             .options(
                 selectinload(ComputeSession.user),
                 selectinload(ComputeSession.project),
             )
-            .where(ComputeSession.id == session_id, ComputeSession.session_type == "ssh")
+            .where(
+                ComputeSession.id == session_id,
+                ComputeSession.organization_id == org_id,
+                ComputeSession.session_type == "ssh",
+            )
         )
         return result.scalar_one_or_none()
 
