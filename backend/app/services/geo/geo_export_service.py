@@ -23,8 +23,6 @@ from app.services.geo.file_associations import (
     POLICY_REVISION,
     RAW_FILE_TYPES,
     AssociationFinding,
-    load_links,
-    select_files,
 )
 from app.services.geo.qc_filter import GeoQcFilter, parse_qc_filter
 from app.services.geo.readme_generator import generate_readme
@@ -275,8 +273,7 @@ class GeoExportService:
                 "parameters_json": pipeline_run.parameters_json,
             }
 
-        links = await load_links(session, [f.id for f in files])
-        selection = select_files(files, links, {s.id for s in samples})
+        selection, findings = await file_associations.associate(session, org_id, experiment_id, files, samples)
 
         for sd in samples_data:
             linked = selection.per_sample.get(sd["id"], [])
@@ -306,7 +303,6 @@ class GeoExportService:
                 "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in processed_files),
             }
 
-        findings = await file_associations.findings_for(session, org_id, experiment_id, selection, samples)
         return GeoExportData(experiment_id, experiment_data, samples_data, pipeline_data, files_data, findings)
 
     @staticmethod

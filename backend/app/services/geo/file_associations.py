@@ -157,20 +157,23 @@ class AssociationFinding:
         }
 
 
-async def findings_for(
+async def associate(
     session: AsyncSession,
     org_id: int,
     experiment_id: int,
-    selection: FileSelection,
+    candidates: list[File],
     selected_samples: list[Any],
-) -> list[AssociationFinding]:
-    """Findings for this request's selection, with their current acknowledgment status.
+) -> tuple[FileSelection, list[AssociationFinding]]:
+    """The export's file selection and its findings, decided together from the current links.
 
-    Never swallows a failure: if the check cannot run, the export is refused with a typed error
-    rather than read as "no findings".
+    Loading links, selecting files and detecting findings are one check: if any part of it cannot run,
+    the export is refused with a typed error, never built from a partial or unknown association state.
     """
     try:
-        return await _findings(session, org_id, experiment_id, selection, selected_samples)
+        links = await load_links(session, [f.id for f in candidates])
+        selection = select_files(candidates, links, {s.id for s in selected_samples})
+        findings = await _findings(session, org_id, experiment_id, selection, selected_samples)
+        return selection, findings
     except Exception as exc:
         logger.warning("GEO file association check failed for experiment %d: %s", experiment_id, type(exc).__name__)
         raise GeoAssociationCheckUnavailableError(

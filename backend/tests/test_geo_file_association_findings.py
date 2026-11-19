@@ -612,3 +612,31 @@ async def test_superseries_refuses_when_a_nested_check_cannot_run(
     resp = await client.post(f"/api/projects/{legacy_project['project_id']}/export/geo", headers=_bearer(admin_token))
     assert resp.status_code == 503, resp.text
     assert resp.json()["details"]["experiment_ids"] == [legacy_project["experiment_id"]]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_link_lookup_refuses_like_a_failed_detector(
+    client, admin_token, comp_bio_token, legacy_project, monkeypatch
+):
+    """Loading or selecting associations is part of the check: its failure never yields a partial export."""
+    from app.services.geo import file_associations
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("link lookup unavailable")
+
+    monkeypatch.setattr(file_associations, "load_links", broken)
+    project = await client.post(
+        f"/api/projects/{legacy_project['project_id']}/export/geo", headers=_bearer(admin_token)
+    )
+    assert project.status_code == 503, project.text
+    assert set(project.json()["details"]["experiment_ids"]) == {
+        legacy_project["experiment_id"],
+        legacy_project["clean_id"],
+    }
+
+    for validate_only in (True, False):
+        resp = await client.post(
+            _export_url(legacy_project["experiment_id"], validate_only=validate_only), headers=_bearer(comp_bio_token)
+        )
+        assert resp.status_code == 503, resp.text
+        assert "link lookup unavailable" not in resp.text
