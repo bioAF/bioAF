@@ -511,3 +511,190 @@ def test_the_dump_checksum_streams_the_file_instead_of_loading_it(tmp_path):
         tracemalloc.stop()
     assert digest == expected.hexdigest()
     assert peak < 8 * 1024 * 1024
+
+
+# --- GEO file association advisory (non-blocking) ------------------------------------------------------
+#
+# GEO export now takes Sample file ownership from links only. The upgrade reports legacy unlinked files
+# that the old filename rule tied to Samples, but that report never blocks or fails the upgrade: it runs
+# after the lock is released, and its own failure only marks the advisory incomplete. Runtime GEO
+# readiness and download check every request regardless.
+
+ADVISORY = "geo_association_advisory"
+
+
+async def _populate_legacy_geo(case: CaseDatabase) -> dict:
+    conn = await case.connect()
+    try:
+        org = await conn.fetchval("SELECT id FROM organizations WHERE name = 'Lab'")
+        exp = await conn.fetchval("SELECT id FROM experiments WHERE organization_id = $1", org)
+
+        async def file(org_id, exp_id, name, kind):
+            uri = f"gs://raw/experiments/{exp_id}/{name}"
+            return await conn.fetchval(
+                "INSERT INTO files (organization_id, gcs_uri, storage_uri, filename, file_type) "
+                "VALUES ($1, $2, $2, $3, $4) RETURNING id",
+                org_id,
+                uri,
+                name,
+                kind,
+            )
+
+        await file(org, exp, "S-0_R1.fastq.gz", "fastq.gz")  # unlinked, named after S-0: a finding
+        linked = await file(org, exp, "lane.fastq.gz", "fastq.gz")
+        s1 = await conn.fetchval("SELECT id FROM samples WHERE experiment_id = $1 AND external_id = 'S-1'", exp)
+        await conn.execute("INSERT INTO sample_files (sample_id, file_id) VALUES ($1, $2)", s1, linked)
+        await file(org, exp, "matrix.h5", "h5")  # unlinked, named after nobody: an Experiment-level asset
+
+        other = await conn.fetchval("INSERT INTO organizations (name) VALUES ('Other lab') RETURNING id")
+        other_exp = await conn.fetchval(
+            "INSERT INTO experiments (organization_id, name, status) VALUES ($1, 'x', 'registered') RETURNING id", other
+        )
+        await conn.execute(
+            "INSERT INTO samples (experiment_id, external_id, status, qc_status) VALUES ($1, 'T-1', 'registered', 'fail')",
+            other_exp,
+        )
+        await file(other, other_exp, "T-1_counts.h5", "h5")  # matches only a failed Sample
+        return {"links": await conn.fetch("SELECT * FROM sample_files ORDER BY id")}
+    finally:
+        await conn.close()
+
+
+async def _geo_state(case: CaseDatabase) -> dict:
+    conn = await case.connect()
+    try:
+        return {
+            "links": await conn.fetch("SELECT * FROM sample_files ORDER BY id"),
+            "acks": await conn.fetchval("SELECT count(*) FROM geo_file_association_acknowledgments"),
+        }
+    finally:
+        await conn.close()
+
+
+def _status(case: CaseDatabase) -> dict:
+    done = case.run("-m", "app.schema_upgrade", "status")
+    assert done.returncode == 0, done.stderr[-3000:]
+    return json.loads(done.stdout)
+
+
+def test_legacy_geo_findings_are_reported_without_holding_up_an_older_updaters_upgrade(released):
+    case, _ = released
+    before = asyncio.run(_populate_legacy_geo(case))
+
+    done = case.run()  # an older updater's own `alembic upgrade head`
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert "need review before their GEO export" in done.stdout
+
+    record = _record(case)
+    assert record["status"] == "completed" and record["step"] == "validated"
+    assert _status(case)["settled"] is True
+    advisory = record[ADVISORY]
+    assert advisory["status"] == "completed" and advisory["revision"] == code_head()
+    assert advisory["policy_revision"] == 1 and advisory["completed_at"]
+    assert advisory["organizations_scanned"] == 2
+    assert advisory["unlinked_candidate_files"] == 3
+    assert advisory["unresolved"]["exclude_failed"] == {
+        "experiments": 1,
+        "files": 1,
+        "sample_pairs": 1,
+        "raw_files": 1,
+        "processed_files": 0,
+    }
+    assert advisory["unresolved"]["include_all"]["files"] == 2
+    assert advisory["unresolved"]["include_all"]["processed_files"] == 1
+    # The broadly readable record carries counts only.
+    for secret in ("S-0_R1", "T-1_counts", "gs://", "matrix"):
+        assert secret not in json.dumps(record)
+
+    # The detail is in an operator-private report beside the backups.
+    report = case.backups / advisory["report"]
+    assert oct(report.stat().st_mode & 0o777) == "0o600"
+    detail = json.loads(report.read_text())
+    named = {
+        f["filename"]
+        for org in detail["organizations"]
+        for exp in org["experiments"]
+        for findings in exp["unresolved"].values()
+        for f in findings
+    }
+    assert named == {"S-0_R1.fastq.gz", "T-1_counts.h5"}
+
+    # Nothing scientific was rewritten: no links added, no acknowledgments, an empty table ready for them.
+    after = asyncio.run(_geo_state(case))
+    assert after == {"links": before["links"], "acks": 0}
+
+
+def test_a_fresh_install_reports_no_geo_findings(case_db):
+    done = case_db.run(*ENTRYPOINT_RUN)
+    assert done.returncode == 0, done.stderr[-3000:]
+    advisory = _record(case_db)[ADVISORY]
+    assert advisory["status"] == "completed"
+    assert advisory["unresolved"]["include_all"]["files"] == 0
+
+
+def test_a_completed_advisory_is_not_repeated(released):
+    case, _ = released
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    first = _record(case)
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    assert _record(case) == first
+    assert len(list(case.backups.glob("bioaf_geo_association_advisory_*.json"))) == 1
+
+
+def _mark_interrupted(case: CaseDatabase) -> None:
+    """What an advisory killed mid-scan leaves behind: a completed upgrade, an advisory still running."""
+    path = case.status / "schema-upgrade.json"
+    record = json.loads(path.read_text())
+    record[ADVISORY] = {**record[ADVISORY], "status": "running"}
+    for key in ("unresolved", "completed_at", "report"):
+        record[ADVISORY].pop(key, None)
+    path.write_text(json.dumps(record))
+
+
+def test_a_timed_out_advisory_leaves_the_upgrade_completed_and_is_retried(released):
+    case, _ = released
+    asyncio.run(_populate_legacy_geo(case))
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    _mark_interrupted(case)
+
+    async def _run_while_links_are_locked():
+        holder = await case.connect()
+        try:
+            async with holder.transaction():
+                await holder.execute("LOCK TABLE sample_files IN ACCESS EXCLUSIVE MODE")
+                return await asyncio.to_thread(
+                    case.run, *ENTRYPOINT_RUN, BIOAF_GEO_ASSOCIATION_ADVISORY_TIMEOUT_SECONDS="1"
+                )
+        finally:
+            await holder.close()
+
+    done = asyncio.run(_run_while_links_are_locked())
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert "GEO file association check did not complete" in done.stdout
+    record = _record(case)
+    assert record["status"] == "completed" and _status(case)["settled"] is True
+    advisory = record[ADVISORY]
+    assert advisory["status"] == "failed" and advisory["step"] == "scan" and advisory["error"]
+    assert "unresolved" not in advisory  # an incomplete scan never reads as zero findings
+
+    retried = case.run(*ENTRYPOINT_RUN)
+    assert retried.returncode == 0, retried.stderr[-3000:]
+    advisory = _record(case)[ADVISORY]
+    assert advisory["status"] == "completed" and advisory["unresolved"]["include_all"]["files"] == 2
+
+
+def test_an_unwritable_advisory_report_fails_only_the_advisory(released, tmp_path):
+    case, _ = released
+    asyncio.run(_populate_legacy_geo(case))
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    _mark_interrupted(case)
+    not_a_directory = tmp_path / "backups-file"
+    not_a_directory.write_text("")
+
+    done = case.run(*ENTRYPOINT_RUN, BIOAF_UPGRADE_BACKUPS_DIR=str(not_a_directory))
+    assert done.returncode == 0, done.stderr[-3000:]
+    record = _record(case)
+    assert record["status"] == "completed" and _status(case)["settled"] is True
+    advisory = record[ADVISORY]
+    assert advisory["status"] == "failed" and advisory["step"] == "report"
+    assert "unresolved" not in advisory

@@ -327,7 +327,40 @@ def _validate(conn: Connection, destination: str) -> dict[str, Any]:
 
 
 def run(conn: Connection, url: str, destination: str | None, migrate: Callable[[Connection], None]) -> None:
-    """Lock, back up, migrate, validate, record. ``destination`` None means a read-only command."""
+    """Lock, back up, migrate, validate, record. ``destination`` None means a read-only command.
+
+    After a successful upgrade to this code's head, and after the lock is released (the gate is open),
+    the advisory reports run: they can mark themselves incomplete but never change the upgrade's outcome.
+    """
+    _upgrade(conn, url, destination, migrate)
+    if destination is not None and destination == code_head():
+        _advisory_reports(conn, destination)
+
+
+def _record_advisory(key: str, value: dict[str, Any]) -> None:
+    """Merge one advisory's status into the record, leaving the upgrade's own verdict untouched."""
+    write_status({**read_status(), key: value})
+
+
+def _advisory_reports(conn: Connection, revision: str) -> None:
+    from app.services.geo import association_advisory
+
+    try:
+        if association_advisory.is_current(read_status().get(association_advisory.RECORD_KEY), revision):
+            return
+        conn.rollback()
+        association_advisory.run(
+            conn,
+            revision,
+            Path(settings.upgrade_backups_dir),
+            settings.geo_association_advisory_timeout_seconds,
+            lambda value: _record_advisory(association_advisory.RECORD_KEY, value),
+        )
+    except Exception:  # never the upgrade's failure
+        logger.warning("Post-upgrade advisory reporting failed", exc_info=True)
+
+
+def _upgrade(conn: Connection, url: str, destination: str | None, migrate: Callable[[Connection], None]) -> None:
     _lock(conn)
     try:
         if destination is None:
