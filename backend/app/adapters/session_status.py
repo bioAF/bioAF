@@ -68,6 +68,69 @@ async def update_compute_session(
 _UNSET = object()
 
 
+def _transition_statement(
+    *,
+    organization_id: int,
+    session_id: int,
+    expected_statuses: tuple[str, ...],
+    expected_job_ref: str | None,
+    status: str | None,
+    access_url,
+    failure_reason: str | None,
+    failure_message: str | None,
+    lifecycle: dict | None,
+    started_at=None,
+):
+    """The one conditional UPDATE every lifecycle transition uses (None when nothing to write)."""
+    import json
+
+    params: dict = {
+        "id": session_id,
+        "org": organization_id,
+        "expected": list(expected_statuses),
+        "ref": expected_job_ref,
+    }
+    assignments: list[str] = []
+    if status is not None:
+        assignments.append("status = :status")
+        params["status"] = status
+    if access_url is not _UNSET:
+        assignments.append("access_url = :url")
+        params["url"] = access_url
+    if started_at is not None:
+        assignments.append("started_at = COALESCE(started_at, :started_at)")
+        params["started_at"] = started_at
+    if failure_reason is not None or failure_message is not None:
+        assignments.append("failure_reason = :reason, failure_message = :msg")
+        params.update(reason=failure_reason, msg=failure_message)
+    if lifecycle:
+        assignments.append(
+            "provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || jsonb_build_object("
+            "'lifecycle', COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb))"
+        )
+        params["lifecycle"] = json.dumps(lifecycle)
+    if not assignments:
+        return None
+    sql = (
+        f"UPDATE compute_sessions SET {', '.join(assignments)} "
+        "WHERE id = :id AND organization_id = :org AND status = ANY(:expected) "
+        "AND compute_job_ref IS NOT DISTINCT FROM :ref"
+    )
+    return text(sql), params
+
+
+async def transition_in(db, **kwargs) -> bool:
+    """``transition_compute_session`` inside the caller's transaction (no commit). True if it applied."""
+    kwargs.setdefault("access_url", _UNSET)
+    for key in ("status", "failure_reason", "failure_message", "lifecycle", "started_at"):
+        kwargs.setdefault(key, None)
+    statement = _transition_statement(**kwargs)
+    if statement is None:
+        return False
+    result = await db.execute(*statement)
+    return bool(result.rowcount)
+
+
 async def transition_compute_session(
     session_factory,
     *,
@@ -88,48 +151,28 @@ async def transition_compute_session(
     ``provider_metadata.lifecycle``; every other metadata key is preserved. True if the row changed.
     Never raises (logged), like ``update_compute_session``.
     """
-    import json
-
     if not session_factory or organization_id is None:
         logger.warning("Session %s: no session factory or organization; not updating it", session_id)
         return False
-    params: dict = {
-        "id": session_id,
-        "org": organization_id,
-        "expected": list(expected_statuses),
-        "ref": expected_job_ref,
-    }
-    assignments: list[str] = []
-    if status is not None:
-        assignments.append("status = :status")
-        params["status"] = status
-    if access_url is not _UNSET:
-        assignments.append("access_url = :url")
-        params["url"] = access_url
-    if failure_reason is not None or failure_message is not None:
-        assignments.append("failure_reason = :reason, failure_message = :msg")
-        params.update(reason=failure_reason, msg=failure_message)
-    if lifecycle:
-        assignments.append(
-            "provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || jsonb_build_object("
-            "'lifecycle', COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb))"
-        )
-        params["lifecycle"] = json.dumps(lifecycle)
-    if not assignments:
-        return False
-    ref_clause = "compute_job_ref IS NOT DISTINCT FROM :ref"
-    sql = (
-        f"UPDATE compute_sessions SET {', '.join(assignments)} "
-        f"WHERE id = :id AND organization_id = :org AND status = ANY(:expected) AND {ref_clause}"
-    )
     try:
         async with session_factory() as db:
-            result = await db.execute(text(sql), params)
+            applied = await transition_in(
+                db,
+                organization_id=organization_id,
+                session_id=session_id,
+                expected_statuses=expected_statuses,
+                expected_job_ref=expected_job_ref,
+                status=status,
+                access_url=access_url,
+                failure_reason=failure_reason,
+                failure_message=failure_message,
+                lifecycle=lifecycle,
+            )
             await db.commit()
     except Exception:
         logger.exception("Failed to update session %s in DB", session_id)
         return False
-    if not result.rowcount:
+    if not applied:
         logger.info(
             "Session %s was not updated: it is no longer %s under workload %s",
             session_id,

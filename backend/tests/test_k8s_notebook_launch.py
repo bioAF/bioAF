@@ -304,6 +304,13 @@ class TestTerminateSession:
         assert "stopped_at" in result
 
 
+def _notebook_container_running(mock_core):
+    """ "running" needs the notebook container itself running, not just a Ready pod."""
+    from tests.support.notebook_k8s_fakes import container_status
+
+    mock_core.read_namespaced_pod.return_value.status.container_statuses = [container_status("notebook", "running")]
+
+
 class TestGetSessionStatus:
     @pytest.mark.asyncio
     async def test_running_status(self, adapter, mock_k8s_clients):
@@ -342,6 +349,7 @@ class TestGetSessionStatus:
         """A live session resolves its LoadBalancer URL so the status endpoint can
         read access_url off the normalized SessionStatus (Phase 5)."""
         mock_core, _ = mock_k8s_clients
+        _notebook_container_running(mock_core)
         adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
         adapter._resolve_service_url = MagicMock(return_value="http://1.2.3.4:8888")
 
@@ -360,6 +368,7 @@ class TestGetSessionStatus:
     async def test_rstudio_resolves_port_8787(self, adapter, mock_k8s_clients):
         """RStudio sessions resolve the URL on the RStudio port."""
         mock_core, _ = mock_k8s_clients
+        _notebook_container_running(mock_core)
         adapter._get_k8s_core_client = MagicMock(return_value=mock_core)
         adapter._resolve_service_url = MagicMock(return_value="http://1.2.3.4:8787")
 

@@ -107,7 +107,8 @@ def notebook_service(session_id: int = 42, *, uid: str = "svc-uid-1", selector: 
 class FakeCore:
     """CoreV1Api stand-in for pods and Services in one namespace."""
 
-    def __init__(self, *, pods=(), services=(), errors: dict | None = None):
+    def __init__(self, *, pods=(), services=(), errors: dict | None = None, events: list[tuple] = ()):
+        self.events = list(events)  # (reason, message) for the session's pod
         self.pods = {p.metadata.name: p for p in pods}
         self.services = {s.metadata.name: s for s in services}
         # (verb, kind, name) -> HTTP status to raise, e.g. ("delete", "pod", "bioaf-notebook-42"): 403
@@ -154,6 +155,12 @@ class FakeCore:
 
     def delete_namespaced_service(self, name, namespace, body=None, **_):
         return self._delete(self.services, "service", name, namespace, body)
+
+    def list_namespaced_event(self, namespace, field_selector=None, **_):
+        from types import SimpleNamespace
+
+        self.calls.append(("events", field_selector))
+        return SimpleNamespace(items=[SimpleNamespace(reason=r, message=m) for r, m in self.events])
 
     def finish_terminating(self):
         """The API server finishes every pending deletion."""

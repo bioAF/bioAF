@@ -90,8 +90,25 @@ async def test_a_pod_creation_error_deletes_nothing(adapter, monkeypatch):
     assert core.deletes() == []
 
 
-async def _no_wait(_seconds):
-    return None
+class _FastClock:
+    """Sleeping advances a fake clock, so a launch's deadline passes without real waiting."""
+
+    def __init__(self):
+        from datetime import datetime, timezone
+
+        self.now = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
+
+    async def sleep(self, seconds):
+        from datetime import timedelta
+
+        self.now += timedelta(seconds=seconds)
+
+
+def _fast_clock(monkeypatch):
+    clock = _FastClock()
+    monkeypatch.setattr(nb_module.asyncio, "sleep", clock.sleep)
+    monkeypatch.setattr(nb_module, "_utcnow", lambda: clock.now)
+    return clock
 
 
 @pytest.mark.parametrize("phase", ["Pending", "Failed"])
@@ -101,7 +118,7 @@ async def test_a_launch_marked_failed_by_the_readiness_check_is_released(adapter
     core = FakeCore(pods=[notebook_pod(phase=phase, ready=False, notebook="waiting")], services=[notebook_service()])
     core.delete_is_immediate = True
     monkeypatch.setattr(adapter, "_get_k8s_core_client", lambda: core)
-    monkeypatch.setattr(nb_module.asyncio, "sleep", _no_wait)
+    _fast_clock(monkeypatch)
     updates = []
 
     async def record(_factory, **kw):
@@ -109,7 +126,6 @@ async def test_a_launch_marked_failed_by_the_readiness_check_is_released(adapter
         return True  # the session was still starting
 
     monkeypatch.setattr(nb_module, "transition_compute_session", record)
-    monkeypatch.setattr(adapter, "_classify_pod_failure_from_api", AsyncMock(return_value=("unknown", "x")))
 
     await adapter._poll_session_ready(
         42, POD, SVC, "bioaf-notebooks", 8888, organization_id=1, user_id=7, session_type="jupyter"

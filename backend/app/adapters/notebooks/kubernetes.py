@@ -103,6 +103,13 @@ def _config_text(value) -> str:
     return "" if text_value == "null" else text_value
 
 
+READINESS_POLL_SECONDS = 5
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 # A launch observer may only move a session still in one of these states.
 STARTING_STATUSES = ("pending", "starting")
 
@@ -1005,9 +1012,11 @@ class KubernetesNotebookProvider(NotebookProvider):
         user_id: int = 0,
         session_type: str = "jupyter",
     ) -> None:
-        """Background: poll for pod readiness and LB IP, then update the DB.
+        """Background: watch a new launch until it is usable or has failed, then record it.
 
-        A launch it marks failed is also released: its pod and Service are deleted.
+        Decides with the shared launch policy (``readiness.decide_launch``): node scale-up and
+        image download are progress, an Unknown pod phase is uncertainty, and only a confirmed
+        failure or the overall deadline fails the launch. A launch it fails is also released.
         """
         workload = NotebookWorkload(
             session_id=int(session_id),
@@ -1017,69 +1026,39 @@ class KubernetesNotebookProvider(NotebookProvider):
             pod_name=pod_name,
             service_name=service_name,
         )
+        from app.adapters.notebooks.readiness import decide_launch
+
+        started = _utcnow()
         try:
-            core_client = self._get_k8s_core_client()
-
-            # Wait for pod readiness (up to 5 minutes)
-            pod_ready = False
-            for _ in range(60):
-                try:
-                    pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
-                    if pod.status.phase == "Running":
-                        conditions = pod.status.conditions or []
-                        if any(c.type == "Ready" and c.status == "True" for c in conditions):
-                            pod_ready = True
-                            break
-                    if pod.status.phase in ("Failed", "Unknown"):
-                        logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                        reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                        await self._fail_launch(organization_id, workload, reason, message)
-                        return
-                except Exception:
-                    pass
-                await asyncio.sleep(5)
-
-            if not pod_ready:
-                logger.error("Pod %s not ready after 5 min", pod_name)
-                reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                await self._fail_launch(organization_id, workload, reason, message)
-                return
-
-            # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
-            # lookup is shared with the status read path via _resolve_service_url
-            # (raw httpx, since the python client returns a stale ingress: None).
-            # Keep the auth pre-check here so a misconfigured client fails the
-            # background task loudly rather than silently spinning.
-            api_client = self._get_api_client()
-            if not api_client_auth_header(api_client):
-                raise RuntimeError(
-                    "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
+            while True:
+                observed = await self.get_session_status(
+                    session_id, pod_name=pod_name, namespace=namespace, session_type=session_type
                 )
-
-            access_url = None
-            for attempt in range(36):
-                access_url = self._resolve_service_url(service_name, namespace, container_port)
-                if access_url:
-                    logger.info("External URL for session %s: %s", session_id, access_url)
-                    break
-                await asyncio.sleep(5)
-
-            if not access_url:
-                logger.warning(
-                    "LoadBalancer IP not ready for %s after 3 min",
-                    service_name,
+                decision = decide_launch(
+                    observed.status,
+                    observed.access_url,
+                    observed.provider_details or {},
+                    started=started,
+                    now=_utcnow(),
                 )
-
-            await transition_compute_session(
-                self._session_factory,
-                organization_id=organization_id,
-                session_id=int(session_id),
-                expected_statuses=STARTING_STATUSES,
-                expected_job_ref=pod_name,
-                status="running",
-                access_url=access_url,
-            )
-
+                if decision.action == "ready":
+                    await transition_compute_session(
+                        self._session_factory,
+                        organization_id=organization_id,
+                        session_id=int(session_id),
+                        expected_statuses=STARTING_STATUSES,
+                        expected_job_ref=pod_name,
+                        status="running",
+                        access_url=decision.access_url,
+                    )
+                    return
+                if decision.action == "fail":
+                    logger.error("Notebook session %s failed to start: %s", session_id, decision.reason)
+                    await self._fail_launch(
+                        organization_id, workload, decision.reason or "unknown", decision.message or ""
+                    )
+                    return
+                await asyncio.sleep(READINESS_POLL_SECONDS)
         except Exception as e:
             from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
@@ -1154,30 +1133,6 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         core_client = self._get_k8s_core_client()
         return await asyncio.to_thread(release_workload, core_client, workload)
-
-    async def _classify_pod_failure_from_api(
-        self,
-        core_client,
-        pod_name: str,
-        namespace: str,
-    ) -> tuple[str, str]:
-        """Query the K8s API for events on `pod_name` and run them through the
-        shared classifier. Returns (failure_reason, failure_message) even if
-        the API call fails (falls back to "unknown")."""
-        from app.adapters.failure_classification import classify_pod_failure, FAILURE_REASON_UNKNOWN
-
-        events: list[dict] = []
-        try:
-            field_selector = f"involvedObject.name={pod_name}"
-            evt_list = core_client.list_namespaced_event(namespace=namespace, field_selector=field_selector)
-            for evt in evt_list.items or []:
-                events.append(
-                    {"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""}
-                )
-        except Exception:
-            logger.exception("Failed to fetch pod events for %s/%s", namespace, pod_name)
-            return (FAILURE_REASON_UNKNOWN, "Pod did not become ready and pod events were unavailable.")
-        return classify_pod_failure(events)
 
     async def _update_session_in_db(
         self,
@@ -1483,6 +1438,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         than reaching into the K8s client themselves.
         """
         core_client = self._get_k8s_core_client()
+        if session_type in INTERACTIVE_SESSION_TYPES:
+            return await asyncio.to_thread(
+                self._interactive_status, core_client, session_id, pod_name, namespace, session_type
+            )
 
         try:
             pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -1535,6 +1494,74 @@ class KubernetesNotebookProvider(NotebookProvider):
                 result["access_url"] = url
 
         return result
+
+    def _interactive_status(self, core_client, session_id, pod_name: str, namespace: str, session_type: str) -> dict:
+        """A Jupyter/RStudio session's status from the shared launch assessment (blocking).
+
+        Unknown or unreadable is ``unknown``, never ``error``; a missing pod is ``error``;
+        ``running`` needs the notebook container ready and a LoadBalancer address.
+        """
+        from app.adapters.failure_classification import classify_pod_failure
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, assess_pod
+
+        base = {"session_id": session_id, "pod_name": pod_name, "namespace": namespace, "session_type": session_type}
+        try:
+            pod = core_client.read_namespaced_pod(
+                name=pod_name, namespace=namespace, _request_timeout=REQUEST_TIMEOUT_SECONDS
+            )
+        except Exception as exc:
+            if getattr(exc, "status", None) == 404:
+                return {
+                    **base,
+                    "status": "error",
+                    "failure_reason": "unknown",
+                    "failure_message": "The session's workload no longer exists in the cluster.",
+                }
+            logger.warning("Could not read pod %s: %s", pod_name, type(exc).__name__)
+            return {**base, "status": "unknown"}
+
+        assessment = assess_pod(pod, [])
+        events: list[dict] = []
+        if assessment.state != "ready":
+            events = self._pod_events(core_client, pod_name, namespace)
+            assessment = assess_pod(pod, events)
+        if assessment.state == "uncertain":
+            return {**base, "status": "unknown"}
+        if assessment.state == "failed":
+            return {
+                **base,
+                "status": "error",
+                "failure_reason": assessment.reason,
+                "failure_message": assessment.message,
+            }
+        if assessment.state == "ready":
+            port = 8888 if session_type == "jupyter" else 8787
+            url = self._resolve_service_url(notebook_service_name(session_id), namespace, port)
+            return {**base, "status": "running", "access_url": url} if url else {**base, "status": "starting"}
+
+        result = {**base, "status": "starting"}
+        cause_reason, cause_message = classify_pod_failure(events) if events else ("unknown", "")
+        if cause_reason != "unknown":
+            result.update(waiting_reason=cause_reason, waiting_message=(cause_message or "")[:500])
+        return result
+
+    @staticmethod
+    def _pod_events(core_client, pod_name: str, namespace: str) -> list[dict]:
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS
+
+        try:
+            listing = core_client.list_namespaced_event(
+                namespace=namespace,
+                field_selector=f"involvedObject.name={pod_name}",
+                _request_timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.warning("Could not read events for pod %s", pod_name)
+            return []
+        return [
+            {"reason": getattr(e, "reason", "") or "", "message": getattr(e, "message", "") or ""}
+            for e in (getattr(listing, "items", None) or [])
+        ]
 
     @staticmethod
     def _headless_container_status(pod) -> str:

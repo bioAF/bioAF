@@ -59,8 +59,25 @@ async def _row(factory, session_id):
         return (await db.execute(select(NotebookSession).where(NotebookSession.id == session_id))).scalar_one()
 
 
-async def _no_wait(_seconds):
-    return None
+class _FastClock:
+    """Sleeping advances a fake clock, so a launch's deadline passes without real waiting."""
+
+    def __init__(self):
+        from datetime import datetime, timezone
+
+        self.now = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
+
+    async def sleep(self, seconds):
+        from datetime import timedelta
+
+        self.now += timedelta(seconds=seconds)
+
+
+def _fast_clock(monkeypatch):
+    clock = _FastClock()
+    monkeypatch.setattr(nb_module.asyncio, "sleep", clock.sleep)
+    monkeypatch.setattr(nb_module, "_utcnow", lambda: clock.now)
+    return clock
 
 
 def _adapter(mode_adapter_factory, factory, monkeypatch, core):
@@ -71,8 +88,7 @@ def _adapter(mode_adapter_factory, factory, monkeypatch, core):
     monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
     monkeypatch.setattr(provider, "_get_api_client", lambda: MagicMock())
     monkeypatch.setattr(nb_module, "api_client_auth_header", lambda _c: "Bearer t")
-    monkeypatch.setattr(nb_module.asyncio, "sleep", _no_wait)
-    monkeypatch.setattr(provider, "_classify_pod_failure_from_api", AsyncMock(return_value=("unknown", "x")))
+    _fast_clock(monkeypatch)
     return provider
 
 
@@ -184,7 +200,7 @@ async def test_a_failed_launch_records_pending_cleanup_before_deleting_then_its_
     [(status_then, cleanup_then)] = seen_before_delete
     assert status_then == "failed" and (cleanup_then or {}).get("state") == "pending"
     row = await _row(factory, ns.id)
-    assert (row.status, row.failure_reason) == ("failed", "unknown")
+    assert (row.status, row.failure_reason) == ("failed", "startup_timeout")
     assert row.provider_metadata["keep"] == "me"  # unrelated keys survive
     cleanup = row.provider_metadata["lifecycle"]["cleanup"]
     assert (cleanup["state"], cleanup["pod"], cleanup["service"]) == ("complete", "absent", "absent")
@@ -302,3 +318,87 @@ async def test_stop_records_whether_its_resources_are_gone(
     assert row.status == "stopped"
     cleanup = row.provider_metadata["lifecycle"]["cleanup"]
     assert (cleanup["state"], cleanup["pod"], cleanup["service"]) == (expected, release[0], release[1])
+
+
+# -- the launch's own readiness check uses the shared decision ------------------------------------
+
+
+class _Clock:
+    def __init__(self):
+        from datetime import datetime, timezone
+
+        self.now = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
+
+    async def sleep(self, seconds):
+        from datetime import timedelta
+
+        self.now += timedelta(seconds=seconds)
+
+
+def _scripted(core, ns, script):
+    """Replace the pod on each read according to ``script(now)``."""
+    original = core.read_namespaced_pod
+
+    def read(name, namespace, **kw):
+        pod = script()
+        if pod is None:
+            core.pods.pop(name, None)
+        else:
+            core.pods[name] = pod
+        return original(name, namespace, **kw)
+
+    core.read_namespaced_pod = read
+
+
+@pytest.mark.asyncio
+async def test_a_cold_start_still_pulling_after_five_minutes_becomes_usable_at_thirteen(
+    session, admin_user, factory, mode_adapter_factory, monkeypatch
+):
+    from datetime import timedelta
+
+    ns = await _seed(session, admin_user)
+    clock = _Clock()
+    start = clock.now
+    core = FakeCore(services=[notebook_service(ns.id)], events=[("Pulling", 'Pulling image "bioaf-scrna"')])
+
+    def script():
+        if clock.now - start < timedelta(seconds=26):
+            return notebook_pod(ns.id, ns.user_id, phase="Unknown", ready=False, notebook=None)
+        if clock.now - start < timedelta(minutes=13):
+            return notebook_pod(ns.id, ns.user_id, phase="Pending", ready=False, notebook="waiting")
+        return notebook_pod(ns.id, ns.user_id)
+
+    _scripted(core, ns, script)
+    adapter = _adapter(mode_adapter_factory, factory, monkeypatch, core)
+    monkeypatch.setattr(nb_module.asyncio, "sleep", clock.sleep)
+    monkeypatch.setattr(nb_module, "_utcnow", lambda: clock.now)
+    monkeypatch.setattr(adapter, "_resolve_service_url", lambda *a: "http://1.2.3.4:8888")
+
+    await _poll(adapter, ns)
+
+    row = await _row(factory, ns.id)
+    assert (row.status, row.access_url) == ("running", "http://1.2.3.4:8888")
+    assert clock.now - start >= timedelta(minutes=13)
+    assert core.deletes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_launch_that_never_finishes_fails_at_the_overall_deadline_and_is_released(
+    session, admin_user, factory, mode_adapter_factory, monkeypatch
+):
+    from datetime import timedelta
+
+    ns = await _seed(session, admin_user)
+    clock = _Clock()
+    start = clock.now
+    core = _pending_core(ns)
+    adapter = _adapter(mode_adapter_factory, factory, monkeypatch, core)
+    monkeypatch.setattr(nb_module.asyncio, "sleep", clock.sleep)
+    monkeypatch.setattr(nb_module, "_utcnow", lambda: clock.now)
+
+    await _poll(adapter, ns)
+
+    row = await _row(factory, ns.id)
+    assert (row.status, row.failure_reason) == ("failed", "startup_timeout")
+    assert timedelta(minutes=30) <= clock.now - start < timedelta(minutes=31)
+    assert row.provider_metadata["lifecycle"]["cleanup"]["state"] == "complete"
