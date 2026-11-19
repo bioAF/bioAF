@@ -25,7 +25,7 @@ from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
-from app.adapters.session_status import transition_compute_session, update_compute_session
+from app.adapters.session_status import update_compute_session
 from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
     ConnectionDescription,
@@ -38,7 +38,6 @@ from app.adapters.models import (
     WorkloadRelease,
     to_service_state,
 )
-from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -95,23 +94,12 @@ def notebook_pod_name(session_id) -> str:
     return f"bioaf-notebook-{session_id}"
 
 
-INTERACTIVE_SESSION_TYPES = ("jupyter", "rstudio")
+from app.adapters.notebooks.readiness import INTERACTIVE_SESSION_TYPES  # noqa: E402
 
 
 def _config_text(value) -> str:
     text_value = value.strip() if isinstance(value, str) else ""
     return "" if text_value == "null" else text_value
-
-
-READINESS_POLL_SECONDS = 5
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-# A launch observer may only move a session still in one of these states.
-STARTING_STATUSES = ("pending", "starting")
 
 
 def notebook_service_name(session_id) -> str:
@@ -975,21 +963,8 @@ class KubernetesNotebookProvider(NotebookProvider):
                 raise
             logger.info("Created service %s in %s", service_name, namespace)
 
-            # Launch background task to poll for pod readiness and LB IP,
-            # then update the DB session record once both are available.
-            runtime.spawn(
-                self._poll_session_ready(
-                    session_id,
-                    pod_name,
-                    service_name,
-                    namespace,
-                    container_port,
-                    organization_id=session_spec.get("organization_id"),
-                    user_id=int(session_spec.get("user_id") or 0),
-                    session_type=session_type,
-                ),
-                role="notebook-readiness",
-            )
+            # Readiness is observed by the periodic notebook pass and the session list
+            # (app.services.notebook_lifecycle), not by a task tied to this process.
 
         return {
             "session_id": session_id,
@@ -999,106 +974,6 @@ class KubernetesNotebookProvider(NotebookProvider):
             "access_url": None,
             "gcs_home_prefix": gcs_home_prefix,
         }
-
-    async def _poll_session_ready(
-        self,
-        session_id: int,
-        pod_name: str,
-        service_name: str,
-        namespace: str,
-        container_port: int,
-        *,
-        organization_id: int | None = None,
-        user_id: int = 0,
-        session_type: str = "jupyter",
-    ) -> None:
-        """Background: watch a new launch until it is usable or has failed, then record it.
-
-        Decides with the shared launch policy (``readiness.decide_launch``): node scale-up and
-        image download are progress, an Unknown pod phase is uncertainty, and only a confirmed
-        failure or the overall deadline fails the launch. A launch it fails is also released.
-        """
-        workload = NotebookWorkload(
-            session_id=int(session_id),
-            user_id=int(user_id),
-            session_type=session_type,
-            namespace=namespace,
-            pod_name=pod_name,
-            service_name=service_name,
-        )
-        from app.adapters.notebooks.readiness import decide_launch
-
-        started = _utcnow()
-        try:
-            while True:
-                observed = await self.get_session_status(
-                    session_id, pod_name=pod_name, namespace=namespace, session_type=session_type
-                )
-                decision = decide_launch(
-                    observed.status,
-                    observed.access_url,
-                    observed.provider_details or {},
-                    started=started,
-                    now=_utcnow(),
-                )
-                if decision.action == "ready":
-                    await transition_compute_session(
-                        self._session_factory,
-                        organization_id=organization_id,
-                        session_id=int(session_id),
-                        expected_statuses=STARTING_STATUSES,
-                        expected_job_ref=pod_name,
-                        status="running",
-                        access_url=decision.access_url,
-                    )
-                    return
-                if decision.action == "fail":
-                    logger.error("Notebook session %s failed to start: %s", session_id, decision.reason)
-                    await self._fail_launch(
-                        organization_id, workload, decision.reason or "unknown", decision.message or ""
-                    )
-                    return
-                await asyncio.sleep(READINESS_POLL_SECONDS)
-        except Exception as e:
-            from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
-
-            logger.exception("Background poll failed for session %s", session_id)
-            await self._fail_launch(organization_id, workload, FAILURE_REASON_UNKNOWN, f"Background poll raised: {e}")
-
-    async def _fail_launch(self, organization_id, workload: NotebookWorkload, reason: str, message: str) -> None:
-        """Mark a still-starting launch failed with cleanup pending, release it, record the result.
-
-        If the session has meanwhile been stopped (or relaunched under another workload), nothing
-        is written or deleted: whatever finished it owns its cleanup.
-        """
-        common = {
-            "organization_id": organization_id,
-            "session_id": workload.session_id,
-            "expected_job_ref": workload.pod_name,
-        }
-        now = datetime.now(timezone.utc)
-        if not await transition_compute_session(
-            self._session_factory,
-            expected_statuses=STARTING_STATUSES,
-            status="failed",
-            access_url=None,
-            failure_reason=reason,
-            failure_message=message,
-            lifecycle={"cleanup": {"state": "pending", "updated_at": now.isoformat()}},
-            **common,
-        ):
-            return
-        try:
-            release = await self.release_session_resources(workload)
-        except Exception:
-            logger.exception("Releasing session %s after a failed launch failed", workload.session_id)
-            return
-        await transition_compute_session(
-            self._session_factory,
-            expected_statuses=("failed",),
-            lifecycle={"cleanup": release.as_cleanup(datetime.now(timezone.utc))},
-            **common,
-        )
 
     def reserve_workload(self, session_id: int, user_id: int, session_type: str) -> NotebookWorkload | None:
         """Interactive Jupyter/RStudio sessions only: headless runs and Work Nodes have their own lifecycles."""
@@ -1112,6 +987,56 @@ class KubernetesNotebookProvider(NotebookProvider):
             pod_name=notebook_pod_name(session_id),
             service_name=notebook_service_name(session_id),
         )
+
+    def recorded_workload(self, ns) -> NotebookWorkload | None:
+        """The workload a recorded interactive session owns, from what launch recorded.
+
+        The pod is the recorded ``compute_job_ref`` (never a historical ``slurm_job_id``); the
+        Service is the recorded name, else the launch naming rule for the session id.
+        """
+        from app.adapters.kubernetes.exec_access import is_namespace, is_resource_name
+
+        if self.is_local or ns.session_type not in INTERACTIVE_SESSION_TYPES:
+            return None
+        metadata = ns.provider_metadata or {}
+        pod_name = ns.compute_job_ref
+        namespace = metadata.get("namespace") or DEFAULT_NOTEBOOK_NAMESPACE
+        service_name = metadata.get("service_name") or notebook_service_name(ns.id)
+        if not (is_resource_name(pod_name) and is_resource_name(service_name) and is_namespace(namespace)):
+            logger.warning("Notebook session %s has no usable recorded workload identity", ns.id)
+            return None
+        return NotebookWorkload(
+            session_id=int(ns.id),
+            user_id=int(ns.user_id),
+            session_type=ns.session_type,
+            namespace=namespace,
+            pod_name=pod_name,
+            service_name=service_name,
+        )
+
+    async def labelled_workloads(self) -> dict[int, list[str]]:
+        """Session id -> pod and Service names carrying a ``bioaf.io/session`` label (raises on read errors)."""
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS
+
+        if self.is_local:
+            return {}
+        core = self._get_k8s_core_client()
+
+        def read() -> dict[int, list[str]]:
+            found: dict[int, list[str]] = {}
+            for lister in (core.list_namespaced_pod, core.list_namespaced_service):
+                listing = lister(
+                    namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+                    label_selector="bioaf.io/session",
+                    _request_timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                for obj in listing.items or []:
+                    raw = ((obj.metadata.labels or {}) if obj.metadata else {}).get("bioaf.io/session", "")
+                    if raw.isdigit():
+                        found.setdefault(int(raw), []).append(obj.metadata.name)
+            return found
+
+        return await asyncio.to_thread(read)
 
     async def workload_cluster(self) -> str | None:
         """``<project or account>/<location or region>/<cluster>`` from the recorded cluster config."""

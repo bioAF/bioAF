@@ -1,8 +1,8 @@
 """A notebook launch that fails releases what it created.
 
 Pod creation precedes Service creation, so a Service failure leaves an accepted pod: it is released
-before the error propagates. A launch the readiness check gives up on is released too, not left
-holding a node and a LoadBalancer with no usable session.
+before the error propagates. A pod-creation error deletes nothing: no resource is known to exist.
+(Launches that fail later are released by the periodic pass; see test_notebook_reconcile.py.)
 """
 
 import time
@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from kubernetes.client.exceptions import ApiException
 
-from app.adapters.notebooks import kubernetes as nb_module
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
 from app.settings_contract import ComputeMode
 from tests.support.notebook_k8s_fakes import FakeCore, notebook_pod, notebook_service
@@ -88,49 +87,3 @@ async def test_a_pod_creation_error_deletes_nothing(adapter, monkeypatch):
     with pytest.raises(ApiException):
         await adapter._k8s_launch_session(_spec())
     assert core.deletes() == []
-
-
-class _FastClock:
-    """Sleeping advances a fake clock, so a launch's deadline passes without real waiting."""
-
-    def __init__(self):
-        from datetime import datetime, timezone
-
-        self.now = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
-
-    async def sleep(self, seconds):
-        from datetime import timedelta
-
-        self.now += timedelta(seconds=seconds)
-
-
-def _fast_clock(monkeypatch):
-    clock = _FastClock()
-    monkeypatch.setattr(nb_module.asyncio, "sleep", clock.sleep)
-    monkeypatch.setattr(nb_module, "_utcnow", lambda: clock.now)
-    return clock
-
-
-@pytest.mark.parametrize("phase", ["Pending", "Failed"])
-@pytest.mark.asyncio
-async def test_a_launch_marked_failed_by_the_readiness_check_is_released(adapter, monkeypatch, phase):
-    """Finding reproduction: the pod stayed Pending for every read and nothing was deleted."""
-    core = FakeCore(pods=[notebook_pod(phase=phase, ready=False, notebook="waiting")], services=[notebook_service()])
-    core.delete_is_immediate = True
-    monkeypatch.setattr(adapter, "_get_k8s_core_client", lambda: core)
-    _fast_clock(monkeypatch)
-    updates = []
-
-    async def record(_factory, **kw):
-        updates.append(kw.get("status"))
-        return True  # the session was still starting
-
-    monkeypatch.setattr(nb_module, "transition_compute_session", record)
-
-    await adapter._poll_session_ready(
-        42, POD, SVC, "bioaf-notebooks", 8888, organization_id=1, user_id=7, session_type="jupyter"
-    )
-
-    assert updates == ["failed", None]  # failed with cleanup pending, then the cleanup result
-    assert {c[1] for c in core.deletes()} == {"pod", "service"}
-    assert not core.pods and not core.services

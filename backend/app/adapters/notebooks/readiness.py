@@ -12,6 +12,10 @@ from datetime import datetime, timedelta, timezone
 
 from app.adapters.models import ServiceState
 
+# Session types whose launch, readiness and cleanup this lifecycle manages. Work Nodes ("ssh") and
+# headless executions have their own lifecycles.
+INTERACTIVE_SESSION_TYPES = ("jupyter", "rstudio")
+
 # Node provisioning, image download, initialization, and an address, all together.
 STARTUP_DEADLINE = timedelta(minutes=30)
 STARTUP_TIMEOUT_REASON = "startup_timeout"

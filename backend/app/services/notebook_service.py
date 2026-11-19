@@ -306,7 +306,35 @@ class NotebookService:
             raise NotFoundError("Session not found")
 
         old_status = notebook_session.status
+        await NotebookService.terminate_and_save_outputs(
+            session, notebook_session, ran=old_status in ("running", "idle")
+        )
 
+        notebook_session.status = "stopped"
+        notebook_session.stopped_at = datetime.now(timezone.utc)
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="notebook_session",
+            entity_id=notebook_session.id,
+            action="stop",
+            details={"session_type": notebook_session.session_type},
+            previous_value={"status": old_status},
+        )
+        return notebook_session
+
+    @staticmethod
+    async def terminate_and_save_outputs(
+        session: AsyncSession, notebook_session: NotebookSession, *, ran: bool, adapter=None
+    ) -> TerminationResult:
+        """Save the session's work (when it ran), register its outputs, and release its resources.
+
+        Shared by stop and by the periodic pass for a session that failed while running, so
+        output saving is never bypassed by cleanup. Records cleanup progress; the caller sets the
+        session's status.
+        """
         # Look up working bucket for output sync
         working_bucket = ""
         working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
@@ -319,7 +347,7 @@ class NotebookService:
         terminate_result = TerminationResult()
         if notebook_session.slurm_job_id or notebook_session.compute_job_ref:
             try:
-                notebook_adapter = get_notebook_adapter()
+                notebook_adapter = adapter or get_notebook_adapter()
                 terminate_result = await notebook_adapter.terminate_session(
                     notebook_session.slurm_job_id or "",
                     pod_name=notebook_session.compute_job_ref or "",
@@ -328,12 +356,13 @@ class NotebookService:
                     working_bucket=working_bucket,
                     session_type=notebook_session.session_type,
                     user_id=notebook_session.user_id,
-                    ran=old_status in ("running", "idle"),
+                    ran=ran,
                 )
             except Exception as e:
                 logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
                 if _lifecycle(notebook_session):
-                    _set_cleanup(notebook_session, {"state": "pending"})
+                    # Saving may not have happened; a retry saves again before deleting.
+                    _set_cleanup(notebook_session, {"state": "pending", **({"save_outputs": True} if ran else {})})
         record_release(notebook_session, terminate_result)
 
         # Register output files (ADR-040)
@@ -355,7 +384,7 @@ class NotebookService:
                     ],
                 )
             except Exception as e:
-                logger.warning("Output registration failed for session %d: %s", session_id, e)
+                logger.warning("Output registration failed for session %d: %s", notebook_session.id, e)
 
         gcs_output_prefix = terminate_result.output_prefix
         if gcs_output_prefix:
@@ -377,22 +406,9 @@ class NotebookService:
                     )
                     notebook_session.gcs_output_prefix = final_prefix
             except Exception as e:
-                logger.warning("Failed to move outputs to results bucket for session %d: %s", session_id, e)
+                logger.warning("Failed to move outputs to results bucket for session %d: %s", notebook_session.id, e)
 
-        notebook_session.status = "stopped"
-        notebook_session.stopped_at = datetime.now(timezone.utc)
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="notebook_session",
-            entity_id=notebook_session.id,
-            action="stop",
-            details={"session_type": notebook_session.session_type},
-            previous_value={"status": old_status},
-        )
-        return notebook_session
+        return terminate_result
 
     @staticmethod
     async def list_sessions(

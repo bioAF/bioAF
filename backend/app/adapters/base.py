@@ -642,6 +642,14 @@ class NotebookProvider(ABC):
         """
         return None
 
+    def recorded_workload(self, ns) -> NotebookWorkload | None:
+        """The workload a recorded session owns, or None when this backend manages none."""
+        return None
+
+    async def labelled_workloads(self) -> dict[int, list[str]]:
+        """Session id -> names of the session-labelled resources that exist (empty when not managed)."""
+        return {}
+
     async def workload_cluster(self) -> str | None:
         """An identifier for the cluster workloads are created in, recorded with each launch."""
         return None

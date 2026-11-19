@@ -156,6 +156,18 @@ class FakeCore:
     def delete_namespaced_service(self, name, namespace, body=None, **_):
         return self._delete(self.services, "service", name, namespace, body)
 
+    def list_namespaced_pod(self, namespace, label_selector=None, **_):
+        from types import SimpleNamespace
+
+        self.calls.append(("list", "pod", label_selector))
+        return SimpleNamespace(items=list(self.pods.values()))
+
+    def list_namespaced_service(self, namespace, label_selector=None, **_):
+        from types import SimpleNamespace
+
+        self.calls.append(("list", "service", label_selector))
+        return SimpleNamespace(items=list(self.services.values()))
+
     def list_namespaced_event(self, namespace, field_selector=None, **_):
         from types import SimpleNamespace
 
