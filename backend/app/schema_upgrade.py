@@ -104,10 +104,24 @@ def _status_lock():
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+RECORD_MODE = 0o644
+
+
 def _replace(path: Path, record: dict[str, Any]) -> None:
-    """Write a unique staging file, then rename it over the record (a reader never sees half a file)."""
+    """Write a unique staging file, then rename it over the record (a reader never sees half a file).
+
+    The record keeps the mode and owner it had (0644 when new), so the host operator can still read
+    it after the backend, running as root, rewrites it.
+    """
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".schema-upgrade.", suffix=".tmp")
     try:
+        try:
+            current = path.stat()
+        except FileNotFoundError:
+            current = None
+        os.fchmod(fd, (current.st_mode & 0o777) if current else RECORD_MODE)
+        if current is not None and os.geteuid() == 0:
+            os.fchown(fd, current.st_uid, current.st_gid)
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps(record, indent=1, default=str))
         os.replace(tmp, path)

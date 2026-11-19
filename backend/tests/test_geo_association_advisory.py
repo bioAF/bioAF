@@ -244,3 +244,113 @@ async def test_concurrent_record_writers_never_collide_or_lose_the_verdict(dirs)
     record = schema_upgrade.read_status()
     assert record["status"] == "completed" and record["target_revision"] == head
     assert not list(schema_upgrade.status_path().parent.glob("*.tmp"))
+
+
+# --- the running API stays responsive ---------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def large(session, admin_user):
+    """One Experiment big enough that matching it in one piece stalls an event loop for seconds."""
+    from sqlalchemy import insert
+
+    from app.models.experiment import Experiment
+    from app.models.file import File
+    from app.models.sample import Sample
+
+    exp = Experiment(name="Large", organization_id=admin_user.organization_id)
+    session.add(exp)
+    await session.flush()
+    await session.execute(
+        insert(Sample),
+        [{"experiment_id": exp.id, "external_id": f"SAMPLE-{i:04d}", "organism": "Homo sapiens"} for i in range(400)],
+    )
+    await session.execute(
+        insert(File),
+        [
+            {
+                "organization_id": admin_user.organization_id,
+                "gcs_uri": f"gs://raw/experiments/{exp.id}/lane_{i}.fastq.gz",
+                "storage_uri": f"gs://raw/experiments/{exp.id}/lane_{i}.fastq.gz",
+                "filename": f"lane_{i}.fastq.gz",
+                "file_type": "fastq.gz",
+            }
+            for i in range(12000)
+        ],
+    )
+    await session.commit()
+
+
+async def _max_loop_gap(work) -> float:
+    """Run ``work`` while a 10 ms heartbeat measures the longest the event loop went without it."""
+    loop = asyncio.get_running_loop()
+    gaps = [0.0]
+    done = asyncio.Event()
+
+    async def heartbeat():
+        last = loop.time()
+        while not done.is_set():
+            await asyncio.sleep(0.01)
+            now = loop.time()
+            gaps.append(now - last)
+            last = now
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        await work
+    finally:
+        done.set()
+        await beat
+    return max(gaps)
+
+
+async def test_a_large_scan_never_stalls_the_event_loop(db_engine, dirs, large):
+    gap = await _max_loop_gap(association_advisory.run_once(db_engine))
+    advisory = schema_upgrade.read_status()[KEY]
+    assert advisory["status"] == "completed" and advisory["unlinked_candidate_files"] == 12000
+    assert gap < 0.5, f"event loop stalled {gap:.2f}s"
+
+
+async def test_the_deadline_stops_a_large_scan_promptly(db_engine, dirs, large, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "geo_association_advisory_timeout_seconds", 0.2)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    gap = await _max_loop_gap(association_advisory.run_once(db_engine))
+    assert loop.time() - started < 2
+    assert gap < 0.5, f"event loop stalled {gap:.2f}s"
+    advisory = schema_upgrade.read_status()[KEY]
+    assert advisory["status"] == "failed" and advisory["error"] == "TimeoutError"
+
+
+# --- the record stays readable by the host operator --------------------------------------------------
+
+
+async def test_record_writes_keep_the_records_mode(dirs):
+    path = schema_upgrade.status_path()
+    path.chmod(0o644)
+    schema_upgrade.write_status(schema_upgrade.read_status())
+    assert oct(path.stat().st_mode & 0o777) == "0o644"
+    assert schema_upgrade.update_advisory(KEY, {"status": "running"}, schema_upgrade.code_head())
+    assert oct(path.stat().st_mode & 0o777) == "0o644"
+
+
+async def test_a_new_record_is_readable_like_before(tmp_path, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "update_status_dir", str(tmp_path / "fresh"))
+    schema_upgrade.write_status({"status": "in_progress"})
+    assert oct(schema_upgrade.status_path().stat().st_mode & 0o777) == "0o644"
+
+
+async def test_a_root_writer_keeps_the_records_owner(dirs, monkeypatch):
+    import os
+
+    path = schema_upgrade.status_path()
+    owner = (path.stat().st_uid, path.stat().st_gid)
+    chowned: list[tuple] = []
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: chowned.append((uid, gid)))
+    schema_upgrade.write_status(schema_upgrade.read_status())
+    assert chowned == [owner]

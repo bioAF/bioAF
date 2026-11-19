@@ -13,7 +13,10 @@ under both QC filters. Prefix matches are diagnostic only; nothing is written to
 Bounds:
 - time: one deadline (``geo_association_advisory_timeout_seconds``) for the whole scan and report, and the
   same value as a per-statement ``statement_timeout`` in a read-only transaction;
-- memory: one Experiment's unlinked candidates and Samples at a time; findings stream to the report.
+- memory: one Experiment's Samples and one chunk of its unlinked files at a time; findings stream to
+  the report;
+- the event loop: matching and report writes run in a worker thread in bounded chunks, with the
+  deadline checked between files, so a large installation never stalls the serving API.
 
 Outputs:
 - bounded counts in the upgrade record (``geo_association_advisory``), written only beside the completed
@@ -28,6 +31,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,15 +81,67 @@ def _empty_counts() -> dict[str, dict[str, int]]:
     }
 
 
-async def _scan_experiment(conn: AsyncConnection, org_id: int, exp_id: int, counts: dict, report: IO[str]) -> int:
-    """One Experiment's unresolved findings, streamed to ``report``; returns its unlinked candidate count."""
-    unlinked = [
-        SimpleNamespace(**row._mapping)
-        for row in await conn.execute(
-            text(f"SELECT f.id, f.filename, f.storage_uri, f.file_type {_CANDIDATES} AND e.id = :e ORDER BY f.id"),
-            {"e": exp_id},
-        )
-    ]
+# Matching work per thread call, in file x Sample comparisons: small enough that one call ends well
+# within a deadline check interval.
+_CHUNK_COMPARISONS = 200_000
+_MAX_CHUNK_FILES = 1000
+
+
+def _check(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise TimeoutError("GEO association advisory deadline passed")
+
+
+def _match_chunk(
+    org_id: int,
+    exp_id: int,
+    files: list[Any],
+    selections: dict[GeoQcFilter, list[Any]],
+    acks: dict[tuple[int, int], str],
+    counts: dict,
+    seen: dict[GeoQcFilter, bool],
+    report: IO[str],
+    deadline: float,
+) -> None:
+    """Match one chunk of files and write its findings. Runs in a worker thread, never on the event loop."""
+    for qc_filter, selected in selections.items():
+        tally = counts[qc_filter.value]
+        for f in files:
+            _check(deadline)
+            for _, matched in detect_findings([f], selected):
+                pending = [s for s in matched if acks.get((f.id, s.id)) != pair_fingerprint(f, set(), s)]
+                if not pending:
+                    continue
+                kind = "raw" if f.file_type in RAW_FILE_TYPES else "processed"
+                line = {
+                    "organization_id": org_id,
+                    "experiment_id": exp_id,
+                    "qc_status_filter": qc_filter.value,
+                    "file_id": f.id,
+                    "filename": f.filename,
+                    "file_kind": kind,
+                    "samples": [
+                        {"sample_id": s.id, "external_id": s.external_id, "qc_status": s.qc_status} for s in pending
+                    ],
+                }
+                report.write(json.dumps(line) + "\n")
+                tally["files"] += 1
+                tally["sample_pairs"] += len(pending)
+                tally[f"{kind}_files"] += 1
+                if not seen[qc_filter]:
+                    seen[qc_filter] = True
+                    tally["experiments"] += 1
+
+
+async def _scan_experiment(
+    conn: AsyncConnection, org_id: int, exp_id: int, counts: dict, report: IO[str], deadline: float
+) -> int:
+    """One Experiment's unresolved findings, streamed to ``report``; returns its unlinked candidate count.
+
+    Holds one Experiment's Samples and one chunk of its unlinked files at a time. Matching and report
+    writes run in a worker thread in bounded chunks, so the event loop keeps serving requests, and the
+    deadline is checked between every file.
+    """
     samples = [
         SimpleNamespace(**row._mapping)
         for row in await conn.execute(
@@ -103,34 +159,25 @@ async def _scan_experiment(conn: AsyncConnection, org_id: int, exp_id: int, coun
             {"e": exp_id, "rev": POLICY_REVISION},
         )
     }
-    for qc_filter in GeoQcFilter:
-        selected = [s for s in samples if qc_filter is GeoQcFilter.INCLUDE_ALL or s.qc_status != "fail"]
-        tally = counts[qc_filter.value]
-        unresolved = 0
-        for f, matched in detect_findings(unlinked, selected):
-            pending = [s for s in matched if acks.get((f.id, s.id)) != pair_fingerprint(f, set(), s)]
-            if not pending:
-                continue
-            kind = "raw" if f.file_type in RAW_FILE_TYPES else "processed"
-            line = {
-                "organization_id": org_id,
-                "experiment_id": exp_id,
-                "qc_status_filter": qc_filter.value,
-                "file_id": f.id,
-                "filename": f.filename,
-                "file_kind": kind,
-                "samples": [
-                    {"sample_id": s.id, "external_id": s.external_id, "qc_status": s.qc_status} for s in pending
-                ],
-            }
-            report.write(json.dumps(line) + "\n")
-            tally["files"] += 1
-            tally["sample_pairs"] += len(pending)
-            tally[f"{kind}_files"] += 1
-            unresolved += 1
-        if unresolved:
-            tally["experiments"] += 1
-    return len(unlinked)
+    selections = {f: [s for s in samples if f is GeoQcFilter.INCLUDE_ALL or s.qc_status != "fail"] for f in GeoQcFilter}
+    seen = {f: False for f in GeoQcFilter}
+    chunk = max(1, min(_MAX_CHUNK_FILES, _CHUNK_COMPARISONS // max(1, len(samples))))
+    unlinked = 0
+    stream = await conn.stream(
+        text(f"SELECT f.id, f.filename, f.storage_uri, f.file_type {_CANDIDATES} AND e.id = :e ORDER BY f.id"),
+        {"e": exp_id},
+    )
+    async for rows in stream.partitions(chunk):
+        _check(deadline)
+        files = [SimpleNamespace(**row._mapping) for row in rows]
+        unlinked += len(files)
+        await asyncio.to_thread(_match_chunk, org_id, exp_id, files, selections, acks, counts, seen, report, deadline)
+    return unlinked
+
+
+def _sync_report(report: IO[str]) -> None:
+    report.flush()
+    os.fsync(report.fileno())
 
 
 def _open_report(backups: Path, revision: str) -> tuple[IO[str], Path]:
@@ -151,6 +198,7 @@ def _open_report(backups: Path, revision: str) -> tuple[IO[str], Path]:
 async def _scan_and_report(
     engine: AsyncEngine, revision: str, backups: Path, timeout: float, step: dict[str, str]
 ) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
     step["name"] = "report"
     report, path = _open_report(backups, revision)
     try:
@@ -180,11 +228,11 @@ async def _scan_and_report(
                 )
             ).all()
             for org_id, exp_id in experiments:
-                unlinked_total += await _scan_experiment(conn, org_id, exp_id, counts, report)
+                _check(deadline)
+                unlinked_total += await _scan_experiment(conn, org_id, exp_id, counts, report, deadline)
             await conn.rollback()
         step["name"] = "report"
-        report.flush()
-        os.fsync(report.fileno())
+        await asyncio.to_thread(_sync_report, report)
     finally:
         report.close()
     return {
