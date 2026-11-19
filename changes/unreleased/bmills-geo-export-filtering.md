@@ -23,8 +23,9 @@
 
 ### Updating
 
-- After an update, bioAF reports which experiments have files waiting for that
-  decision. The counts are in `update-status/schema-upgrade.json` and the file
-  details in a private report in `backups/`. The report never stops an update
-  or takes bioAF offline, and only the affected GEO downloads wait. Resolve
+- Shortly after an updated bioAF starts, it reports which experiments have
+  files waiting for that decision. The counts are in
+  `update-status/schema-upgrade.json` and the file details in a private report
+  in `backups/`. The report runs in the background: it never stops an update
+  or delays bioAF starting, and only the affected GEO downloads wait. Resolve
   them from each experiment's Export to GEO, Check Readiness.

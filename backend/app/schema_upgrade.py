@@ -34,6 +34,7 @@ second database). Full restores are exercised in the test suite.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -41,7 +42,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -88,13 +91,49 @@ def read_status() -> dict[str, Any]:
         return {}
 
 
-def write_status(record: dict[str, Any]) -> None:
-    """Atomically replace the record (a reader never sees half a file)."""
+@contextmanager
+def _status_lock():
+    """Serialize every writer of the record, across threads and processes (lifecycle and backend)."""
     path = status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(record, indent=1, default=str))
-    os.replace(tmp, path)
+    with open(path.parent / ".schema-upgrade.lock", "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield path
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _replace(path: Path, record: dict[str, Any]) -> None:
+    """Write a unique staging file, then rename it over the record (a reader never sees half a file)."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".schema-upgrade.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(record, indent=1, default=str))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def write_status(record: dict[str, Any]) -> None:
+    """Atomically replace the record."""
+    with _status_lock() as path:
+        _replace(path, record)
+
+
+def update_advisory(key: str, value: dict[str, Any], revision: str) -> bool:
+    """Merge an advisory's status into the record, only beside the completed upgrade it belongs to.
+
+    Re-read under the lock, so it never overwrites a newer verdict: if the record is no longer the
+    completed upgrade to ``revision`` (an upgrade started, failed or moved on), nothing is written.
+    """
+    with _status_lock() as path:
+        record = read_status()
+        if record.get("status") != "completed" or record.get("target_revision") != revision:
+            return False
+        _replace(path, {**record, key: value})
+        return True
 
 
 def code_head() -> str:
@@ -329,38 +368,9 @@ def _validate(conn: Connection, destination: str) -> dict[str, Any]:
 def run(conn: Connection, url: str, destination: str | None, migrate: Callable[[Connection], None]) -> None:
     """Lock, back up, migrate, validate, record. ``destination`` None means a read-only command.
 
-    After a successful upgrade to this code's head, and after the lock is released (the gate is open),
-    the advisory reports run: they can mark themselves incomplete but never change the upgrade's outcome.
+    Nothing else runs here: advisory reports (app/services/geo/association_advisory.py) run in the
+    started backend, so they never delay the entrypoint's upgrade or the API's start.
     """
-    _upgrade(conn, url, destination, migrate)
-    if destination is not None and destination == code_head():
-        _advisory_reports(conn, destination)
-
-
-def _record_advisory(key: str, value: dict[str, Any]) -> None:
-    """Merge one advisory's status into the record, leaving the upgrade's own verdict untouched."""
-    write_status({**read_status(), key: value})
-
-
-def _advisory_reports(conn: Connection, revision: str) -> None:
-    from app.services.geo import association_advisory
-
-    try:
-        if association_advisory.is_current(read_status().get(association_advisory.RECORD_KEY), revision):
-            return
-        conn.rollback()
-        association_advisory.run(
-            conn,
-            revision,
-            Path(settings.upgrade_backups_dir),
-            settings.geo_association_advisory_timeout_seconds,
-            lambda value: _record_advisory(association_advisory.RECORD_KEY, value),
-        )
-    except Exception:  # never the upgrade's failure
-        logger.warning("Post-upgrade advisory reporting failed", exc_info=True)
-
-
-def _upgrade(conn: Connection, url: str, destination: str | None, migrate: Callable[[Connection], None]) -> None:
     _lock(conn)
     try:
         if destination is None:

@@ -109,14 +109,16 @@ async def test_startup_runs_its_steps_in_order_and_starts_owned_workers(startup)
         ]
         roles = owner.roles()
         # 31 with the checksum verification worker (01 webhooks plan, 01C.2); 32 with the notebook
-        # lifecycle pass (notebook launch recovery).
-        assert len(roles) == 32
+        # lifecycle pass (notebook launch recovery); 33 with the GEO association advisory (one-shot,
+        # still waiting out its startup delay here).
+        assert len(roles) == 33
         assert {
             "pipeline-monitor",
             "pubsub-listener",
             "webhook-worker",
             "file-verification-worker",
             "postgres-backup",
+            "geo-association-advisory",
         } <= set(roles)
         assert _subscriber_count() > before
         workers = owner.tasks()
