@@ -2,7 +2,7 @@
 
 import { Modal } from "@/components/shared/Modal";
 import { useState, useEffect } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import type {
@@ -13,6 +13,7 @@ import type {
   PipelineRun,
   PipelineRunListResponse,
 } from "@/lib/types";
+import type { GeoFileAssociationFinding } from "@/lib/types/files";
 
 interface GeoExportModalProps {
   experimentId: number;
@@ -71,6 +72,84 @@ function FieldStatusIcon({ status }: { status: string }) {
   }
 }
 
+function FileAssociationFinding({
+  finding,
+  busy,
+  onLink,
+  onKeep,
+}: {
+  finding: GeoFileAssociationFinding;
+  busy: boolean;
+  onLink: (sampleId: number) => void;
+  onKeep: (reason: string) => void;
+}) {
+  const [keeping, setKeeping] = useState(false);
+  const [reason, setReason] = useState("");
+  const reasonId = `keep-reason-${finding.file_id}`;
+  const pending = finding.samples.filter((s) => !s.acknowledged);
+
+  return (
+    <li className="bg-gray-50 rounded-md p-3 text-sm space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-xs break-all">{finding.filename}</span>
+        {finding.resolved ? (
+          <span className="text-green-600 text-xs">Resolved</span>
+        ) : (
+          <span className="text-red-600 text-xs">Needs review</span>
+        )}
+      </div>
+      <p className="text-gray-600">
+        This {finding.file_kind} file has no Sample links. Its name matches{" "}
+        {finding.samples.map((s) => s.external_id).join(", ")}.
+      </p>
+      {!finding.resolved && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {pending.map((s) => (
+              <button
+                key={s.sample_id}
+                onClick={() => onLink(s.sample_id)}
+                disabled={busy}
+                className="border border-gray-300 rounded-md px-3 py-1 text-xs hover:bg-white disabled:opacity-50"
+              >
+                Link to {s.external_id}
+              </button>
+            ))}
+            <button
+              onClick={() => setKeeping(true)}
+              disabled={busy || keeping}
+              className="border border-gray-300 rounded-md px-3 py-1 text-xs hover:bg-white disabled:opacity-50"
+            >
+              Keep at experiment level
+            </button>
+          </div>
+          {keeping && (
+            <div className="space-y-2">
+              <label htmlFor={reasonId} className="block text-xs text-gray-700">
+                Reason (the file stays listed for the experiment, without a reference on these samples)
+              </label>
+              <textarea
+                id={reasonId}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={2}
+                className="w-full border border-gray-300 rounded-md px-2 py-1 text-xs"
+              />
+              <button
+                onClick={() => onKeep(reason.trim())}
+                disabled={busy || !reason.trim()}
+                className="bg-bioaf-600 text-white px-3 py-1 rounded-md text-xs disabled:opacity-50"
+              >
+                Confirm
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoExportModalProps) {
   const [pipelineRuns, setPipelineRuns] = useState<PipelineRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<number | "">("");
@@ -78,6 +157,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
   const [validationReport, setValidationReport] = useState<GeoValidationReport | null>(null);
   const [validating, setValidating] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -119,10 +199,50 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
     return `/api/experiments/${experimentId}/export/geo?${params.toString()}`;
   }
 
-  async function handleCheckReadiness() {
+  // A report describes one run and one filter; showing it after either changes would mislead.
+  function selectRun(runId: number | "") {
+    setSelectedRunId(runId);
+    setValidationReport(null);
+  }
+
+  function selectExcludeFailed(exclude: boolean) {
+    setExcludeFailedSamples(exclude);
+    setValidationReport(null);
+  }
+
+  async function resolve(request: () => Promise<unknown>) {
+    setResolving(true);
+    setError(null);
+    try {
+      await request();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The file could not be updated");
+      setResolving(false);
+      return;
+    }
+    setResolving(false);
+    await handleCheckReadiness({ clearError: false });
+  }
+
+  function linkFile(fileId: number, sampleId: number) {
+    return resolve(() => api.post(`/api/files/${fileId}/link`, { sample_id: sampleId }));
+  }
+
+  function keepAtExperimentLevel(finding: GeoFileAssociationFinding, reason: string) {
+    return resolve(() =>
+      api.post(`/api/experiments/${experimentId}/export/geo/file-associations/acknowledgments`, {
+        file_id: finding.file_id,
+        sample_ids: finding.samples.map((s) => s.sample_id),
+        fingerprint: finding.fingerprint,
+        reason,
+      }),
+    );
+  }
+
+  async function handleCheckReadiness({ clearError = true }: { clearError?: boolean } = {}) {
     if (!selectedRunId) return;
     setValidating(true);
-    setError(null);
+    if (clearError) setError(null);
     setValidationReport(null);
     try {
       const report = await api.post<GeoValidationReport>(
@@ -149,10 +269,18 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
-    } finally {
       setDownloading(false);
+      // The server found files to resolve: show them, keeping its explanation on screen.
+      if (err instanceof ApiError && err.code === "geo_file_associations_unresolved") {
+        await handleCheckReadiness({ clearError: false });
+      }
+      return;
     }
+    setDownloading(false);
   }
+
+  const findings = validationReport?.file_association_findings ?? [];
+  const downloadBlocked = validationReport?.download_blocked === true;
 
   return (
     <Modal open title="Export to GEO" onClose={onClose} size="lg">
@@ -164,7 +292,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
           </label>
           <select id="pipeline-run"
             value={selectedRunId}
-            onChange={(e) => setSelectedRunId(e.target.value ? Number(e.target.value) : "")}
+            onChange={(e) => selectRun(e.target.value ? Number(e.target.value) : "")}
             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
           >
             <option value="">Select a pipeline run...</option>
@@ -188,7 +316,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
             type="checkbox"
             id="exclude-failed"
             checked={excludeFailedSamples}
-            onChange={(e) => setExcludeFailedSamples(e.target.checked)}
+            onChange={(e) => selectExcludeFailed(e.target.checked)}
             className="rounded border-gray-300"
           />
           <label htmlFor="exclude-failed" className="text-sm text-gray-700">
@@ -199,7 +327,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
         {/* Action Buttons */}
         <div className="flex gap-3">
           <button
-            onClick={handleCheckReadiness}
+            onClick={() => handleCheckReadiness()}
             disabled={!selectedRunId || validating}
             className="bg-bioaf-600 text-white px-5 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
@@ -208,7 +336,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
           </button>
           <button
             onClick={handleDownload}
-            disabled={!selectedRunId || downloading}
+            disabled={!selectedRunId || downloading || downloadBlocked}
             className="bg-green-600 text-white px-5 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {downloading && <LoadingSpinner size="sm" />}
@@ -226,6 +354,30 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
         {/* Validation Report */}
         {validationReport && (
           <div className="space-y-6">
+            {/* File associations: separate from the metadata summary, and they gate download */}
+            {findings.length > 0 && (
+              <div>
+                <h3 className="text-md font-semibold mb-2">File Associations</h3>
+                {downloadBlocked && (
+                  <p className="text-sm text-gray-700 mb-2">
+                    Resolve these files before downloading: link each one to the sample that owns it, or keep it at
+                    experiment level without per-sample references.
+                  </p>
+                )}
+                <ul className="space-y-2">
+                  {findings.map((finding) => (
+                    <FileAssociationFinding
+                      key={finding.file_id}
+                      finding={finding}
+                      busy={resolving || validating}
+                      onLink={(sampleId) => linkFile(finding.file_id, sampleId)}
+                      onKeep={(reason) => keepAtExperimentLevel(finding, reason)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Summary */}
             <div>
               <h3 className="text-md font-semibold mb-3">Validation Summary</h3>
