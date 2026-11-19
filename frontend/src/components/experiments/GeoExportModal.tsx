@@ -109,7 +109,15 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
 
   if (!isOpen) return null;
 
-  const qcFilter = excludeFailedSamples ? "pass" : "";
+  // Readiness and download must select the same Samples, so both build their query here and differ
+  // only in validate_only. The filter is always explicit: unchecked means include_all, not "omit".
+  function exportUrl(validateOnly: boolean): string {
+    const params = new URLSearchParams();
+    if (validateOnly) params.set("validate_only", "true");
+    params.set("pipeline_run_id", String(selectedRunId));
+    params.set("qc_status_filter", excludeFailedSamples ? "exclude_failed" : "include_all");
+    return `/api/experiments/${experimentId}/export/geo?${params.toString()}`;
+  }
 
   async function handleCheckReadiness() {
     if (!selectedRunId) return;
@@ -118,7 +126,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
     setValidationReport(null);
     try {
       const report = await api.post<GeoValidationReport>(
-        `/api/experiments/${experimentId}/export/geo?validate_only=true&pipeline_run_id=${selectedRunId}${qcFilter ? `&qc_status_filter=${qcFilter}` : ""}`,
+        exportUrl(true),
       );
       setValidationReport(report);
     } catch (err) {
@@ -134,7 +142,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
     setError(null);
     try {
       await api.download(
-        `/api/experiments/${experimentId}/export/geo?pipeline_run_id=${selectedRunId}${qcFilter ? `&qc_status_filter=${qcFilter}` : ""}`,
+        exportUrl(false),
         "POST",
         undefined,
         { filename: `geo_export_experiment_${experimentId}.zip` },

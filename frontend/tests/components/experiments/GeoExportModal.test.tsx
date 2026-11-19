@@ -186,14 +186,27 @@ describe("GeoExportModal", () => {
     expect(checkbox).toBeChecked();
   });
 
-  it("adds qc_status_filter=pass to validation URL when exclude-failed is checked", async () => {
+  it("checks readiness without failed samples when exclude-failed is checked", async () => {
     mockApiPost.mockResolvedValue(mockValidationReport);
     render(<GeoExportModal experimentId={1} isOpen onClose={jest.fn()} userRole="admin" />);
     await waitFor(() => screen.getByText(/nf-core\/scrnaseq/));
     fireEvent.click(screen.getByRole("button", { name: "Check Readiness" }));
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(
-        expect.stringContaining("qc_status_filter=pass")
+        "/api/experiments/1/export/geo?validate_only=true&pipeline_run_id=10&qc_status_filter=exclude_failed"
+      );
+    });
+  });
+
+  it("checks readiness with every sample when exclude-failed is unchecked", async () => {
+    mockApiPost.mockResolvedValue(mockValidationReport);
+    render(<GeoExportModal experimentId={1} isOpen onClose={jest.fn()} userRole="admin" />);
+    await waitFor(() => screen.getByText(/nf-core\/scrnaseq/));
+    fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+    fireEvent.click(screen.getByRole("button", { name: "Check Readiness" }));
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/experiments/1/export/geo?validate_only=true&pipeline_run_id=10&qc_status_filter=include_all"
       );
     });
   });
