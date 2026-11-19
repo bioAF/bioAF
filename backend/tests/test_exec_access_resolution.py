@@ -600,10 +600,11 @@ async def test_the_listing_timeout_is_what_remains_when_the_cloud_call_starts():
     # The clock starts inside load(), which only runs after the deadline has started. That
     # makes `1.0 - elapsed` a true upper bound on the time left at the call, with no slack for
     # however long the setup before resolve_connection takes on a busy runner.
-    started = None
+    started: float | None = None
     seen = []
 
     def list_clusters(parent, timeout):
+        assert started is not None, "the listing ran before the config refresh started"
         seen.append((time.monotonic() - started, timeout))
         return _listing((GKE["gke_cluster_name"], "europe-west1-b"))
 
