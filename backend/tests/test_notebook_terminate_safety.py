@@ -38,8 +38,22 @@ def _storage():
     return s
 
 
-async def _terminate(adapter, core, *, failing=None):
-    """Stop session 42 (owner 7) with home and output saving; ``failing`` picks commands that raise."""
+def _shell_output(command: str, exit_code: int) -> str:
+    """What the real client returns: captured output only, never the remote exit code itself.
+
+    A command that reports its own status (bioAF's save commands do) prints it in its output.
+    """
+    from app.adapters.notebooks.kubernetes import EXIT_MARKER
+
+    return f"some output\n{EXIT_MARKER}{exit_code}\n" if EXIT_MARKER in command else "some output\n"
+
+
+async def _terminate(adapter, core, *, failing=None, exits_nonzero=None):
+    """Stop session 42 (owner 7) with home and output saving.
+
+    ``failing`` picks commands whose connection raises; ``exits_nonzero`` picks commands that run
+    over a healthy connection but exit 1 (the real client returns normally either way).
+    """
     adapter._get_k8s_core_client = lambda: core
     execs = []
 
@@ -48,7 +62,7 @@ async def _terminate(adapter, core, *, failing=None):
         execs.append(command)
         if failing and failing(command):
             raise RuntimeError("storage unavailable")
-        return ""
+        return _shell_output(command, 1 if exits_nonzero and exits_nonzero(command) else 0)
 
     with (
         patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
@@ -129,6 +143,115 @@ async def test_a_failed_save_keeps_the_pod_and_service_for_a_retry(adapter, whic
     assert POD in core.pods and SVC in core.services
     assert result["release"]["pod"]["state"] == "failed"
     assert "not saved" in result["release"]["pod"]["detail"]
+
+
+@pytest.mark.parametrize(
+    "which",
+    [lambda c: "sync /home/jovyan" in c, lambda c: "/outputs" in c],
+    ids=["home", "outputs"],
+)
+@pytest.mark.asyncio
+async def test_a_save_command_that_exits_nonzero_keeps_the_pod(adapter, which):
+    """The client returns captured output without the exit code: a failed rsync must still count as failed."""
+    core = FakeCore(pods=[notebook_pod(42, 7)], services=[notebook_service(42)])
+    core.delete_is_immediate = True
+
+    result, _ = await _terminate(adapter, core, exits_nonzero=which)
+
+    assert result["save_failed"] is True
+    assert core.deletes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_save_whose_exit_status_is_missing_is_not_assumed_to_have_worked(adapter):
+    core = FakeCore(pods=[notebook_pod(42, 7)], services=[notebook_service(42)])
+    core.delete_is_immediate = True
+    adapter._get_k8s_core_client = lambda: core
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", return_value=""),
+    ):
+        result = await adapter._k8s_terminate_session(
+            session_id=42,
+            pod_name=POD,
+            namespace="bioaf-notebooks",
+            gcs_home_prefix="s3://bioaf-working/notebooks/42/",
+            working_bucket="bioaf-working",
+            session_type="jupyter",
+            user_id=7,
+            ran=True,
+        )
+
+    assert result["save_failed"] is True
+    assert core.deletes() == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_running_pod_keeps_its_obligation_to_save(adapter):
+    core = FakeCore(pods=[notebook_pod(42, 7)], services=[notebook_service(42)], errors={("read", "pod", POD): 500})
+
+    result, execs = await _terminate(adapter, core)
+
+    assert execs == [] and core.deletes() == []
+    assert result["save_failed"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_a_cluster_outage_saves_first_once_it_recovers(
+    session, admin_user, db_engine, monkeypatch, mode_adapter_factory
+):
+    """Both steps: Stop cannot read the pod's ownership; the next healthy pass saves, then deletes."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services import notebook_service as svc_module
+    from tests.test_notebook_lifecycle_state import T0, _k8s, _pass, _row, _seed
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ns = await _seed(session, admin_user, status="running")
+    ns.gcs_home_prefix = f"s3://bioaf-working/notebooks/{ns.id}/"
+    await session.commit()
+    pod_name = f"bioaf-notebook-{ns.id}"
+    core = FakeCore(
+        pods=[notebook_pod(ns.id, ns.user_id)],
+        services=[notebook_service(ns.id)],
+        errors={("read", "pod", pod_name): 500},
+    )
+    core.delete_is_immediate = True
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core)
+    monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: adapter)
+    order = []
+
+    def stream(fn, **kw):
+        command = " ".join(kw.get("command") or [])
+        order.append(("exec", command))
+        return _shell_output(command, 0)
+
+    original_delete = core.delete_namespaced_pod
+
+    def delete_pod(name, namespace, body=None, **kw):
+        order.append(("delete", name))
+        return original_delete(name, namespace, body=body, **kw)
+
+    core.delete_namespaced_pod = delete_pod
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", side_effect=stream),
+    ):
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+        cleanup = (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]
+        assert cleanup["state"] == "pending" and cleanup["save_outputs"] is True
+        assert order == []
+
+        core.errors.clear()  # the cluster recovers
+        await _pass(factory, adapter, monkeypatch, T0 + timedelta(minutes=5))
+
+    home_saves = [i for i, (kind, c) in enumerate(order) if kind == "exec" and "sync /home/jovyan" in c]
+    deletes = [i for i, (kind, _) in enumerate(order) if kind == "delete"]
+    assert home_saves and deletes and home_saves[0] < deletes[0]
+    assert (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]["state"] == "complete"
 
 
 @pytest.mark.asyncio

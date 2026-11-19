@@ -641,9 +641,11 @@ async def terminate_verified(
     if ran_flag:
         kwargs["ran"] = ran
     try:
-        result = await adapter.terminate_session(
-            ns.slurm_job_id or "" if session_id_arg is None else session_id_arg, **kwargs
-        )
+        if verdict.workload is not None:
+            target_id = str(verdict.workload.session_id)  # the verified workload's own session id
+        else:
+            target_id = ns.slurm_job_id or "" if session_id_arg is None else session_id_arg
+        result = await adapter.terminate_session(target_id, **kwargs)
     except Exception as e:
         logger.warning("Failed to terminate session %s: %s", ns.id, e)
         if _lifecycle(ns) or verdict.kind == "ok":

@@ -104,6 +104,32 @@ def _config_text(value) -> str:
     return "" if text_value == "null" else text_value
 
 
+# The Kubernetes exec client returns captured output only, never the remote exit code, so a save
+# command reports its own status on a final line and is trusted only when that line says 0.
+EXIT_MARKER = "BIOAF_EXIT_STATUS="
+
+
+def with_exit_status(command: list[str]) -> list[str]:
+    """``command`` run in a subshell, followed by a line carrying its exit status."""
+    import shlex
+
+    if len(command) == 3 and command[:2] == ["/bin/sh", "-c"]:
+        script = command[2]
+    else:
+        script = shlex.join(command)
+    return ["/bin/sh", "-c", f'( {script} ); echo "{EXIT_MARKER}$?"']
+
+
+def require_clean_exit(output, what: str) -> None:
+    """Raise unless ``output`` ends with this command's own zero exit status."""
+    status = None
+    for line in str(output or "").splitlines():
+        if line.startswith(EXIT_MARKER):
+            status = line[len(EXIT_MARKER) :].strip()
+    if status != "0":
+        raise RuntimeError(f"{what} did not succeed (exit status {status if status is not None else 'unknown'})")
+
+
 def ownership_labels(session_spec: dict) -> dict[str, str]:
     """Labels every resource of a session carries, so its owner can be verified before any delete."""
     labels = {
@@ -1163,7 +1189,11 @@ class KubernetesNotebookProvider(NotebookProvider):
                 return self._terminated(session_id, [], "", await self.release_session_resources(workload))
             if ownership == "unknown":
                 unread = ResourceRelease(state="failed", detail="pod ownership could not be read")
-                return self._terminated(session_id, [], "", WorkloadRelease(pod=unread, service=unread))
+                result = self._terminated(session_id, [], "", WorkloadRelease(pod=unread, service=unread))
+                if ran:
+                    # Nothing was saved: the retry must save before it deletes.
+                    result["save_failed"] = True
+                return result
             if ownership == "absent":
                 pod_name_for_exec = ""
         save_failed = False
@@ -1230,16 +1260,17 @@ class KubernetesNotebookProvider(NotebookProvider):
                 from app.adapters.registry import get_storage_adapter
 
                 sync_cmd = get_storage_adapter().sync_out_command(HOME_DIR, gcs_home_prefix)
-                stream(
+                output = stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
-                    command=sync_cmd,
+                    command=with_exit_status(sync_cmd),
                     stderr=True,
                     stdin=False,
                     stdout=True,
                     tty=False,
                 )
+                require_clean_exit(output, "home directory sync")
                 logger.info("GCS sync-out complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
@@ -1283,18 +1314,19 @@ class KubernetesNotebookProvider(NotebookProvider):
                 # its inner command inside the empty-dir guard + auth prefix.
                 sync_inner = storage_adapter.sync_out_command("/outputs", gcs_output_prefix)[-1]
                 outputs_shell = f'{_auth_prefix}if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then {sync_inner}; fi'
-                stream(
+                output = stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
                     container=_SYNC_CONTAINER,
-                    command=["/bin/sh", "-c", outputs_shell],
+                    command=with_exit_status(["/bin/sh", "-c", outputs_shell]),
                     stderr=True,
                     stdin=False,
                     stdout=True,
                     tty=False,
                     _request_timeout=1800,
                 )
+                require_clean_exit(output, "outputs sync")
                 logger.info("Outputs sync complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
