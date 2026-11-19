@@ -31,6 +31,8 @@ from tests.support.notebook_k8s_fakes import FakeCore, notebook_pod, notebook_se
 
 POD, SVC = "bioaf-notebook-{}", "bioaf-notebook-svc-{}"
 T0 = datetime(2026, 11, 13, 2, 44, 59, tzinfo=timezone.utc)
+# A reserved launch always records its (complete) cluster identity.
+CLUSTER = "lab-proj/us-east1/bioaf-lab"
 
 
 @pytest.fixture
@@ -58,7 +60,7 @@ async def _seed(session, admin_user, *, status="starting", job_ref="auto", metad
         else {
             "pod_name": ns.compute_job_ref,
             "namespace": "bioaf-notebooks",
-            "lifecycle": {"reserved_at": T0.isoformat()},
+            "lifecycle": {"reserved_at": T0.isoformat(), "cluster": CLUSTER},
         }
     )
     await session.commit()
@@ -78,7 +80,7 @@ def _k8s(mode_adapter_factory, monkeypatch, core, url=None):
     monkeypatch.setattr(provider, "_resolve_service_url", lambda *a: url)
 
     async def cluster():
-        return None
+        return CLUSTER
 
     monkeypatch.setattr(provider, "workload_cluster", cluster)
     return provider
@@ -160,7 +162,11 @@ async def test_a_failed_launch_records_pending_cleanup_before_deleting_then_its_
     ns = await _seed(
         session,
         admin_user,
-        metadata={"pod_name": POD.format(1), "keep": "me", "lifecycle": {"reserved_at": T0.isoformat()}},
+        metadata={
+            "pod_name": POD.format(1),
+            "keep": "me",
+            "lifecycle": {"reserved_at": T0.isoformat(), "cluster": CLUSTER},
+        },
     )
     core = _pending_core(ns)
     loop = asyncio.get_running_loop()

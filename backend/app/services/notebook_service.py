@@ -651,6 +651,9 @@ async def terminate_verified(
             mark_cleanup_pending(ns, save_outputs=ran)
         return TerminationResult()
     record_release(ns, result)
+    if result.provider_details.get("save_failed"):
+        # The work was not saved and the pod was kept: the retry saves before it deletes.
+        mark_cleanup_pending(ns, save_outputs=True)
     return result
 
 
@@ -671,6 +674,13 @@ async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession)
     if workload is None:
         return False
     cluster = await adapter.workload_cluster()
+    if not cluster:
+        # Cleanup must never act on a cluster other than the one a session runs on; without a
+        # complete identity nothing is created.
+        raise ConflictError(
+            "bioAF could not confirm which cluster this session would run on, so it was not started. "
+            "Ask an administrator to check the compute stack."
+        )
     ns.compute_job_ref = workload.pod_name
     ns.k8s_pod_name = workload.pod_name
     ns.k8s_namespace = workload.namespace

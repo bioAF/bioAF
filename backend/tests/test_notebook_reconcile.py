@@ -55,7 +55,11 @@ async def _seed(
     ns.compute_job_ref = f"bioaf-notebook-{ns.id}"
     meta = {"pod_name": ns.compute_job_ref, "namespace": "bioaf-notebooks"}
     if lifecycle is not None:
-        meta["lifecycle"] = {"reserved_at": (NOW - timedelta(minutes=minutes_ago)).isoformat(), **lifecycle}
+        meta["lifecycle"] = {
+            "reserved_at": (NOW - timedelta(minutes=minutes_ago)).isoformat(),
+            "cluster": CLUSTER,
+            **lifecycle,
+        }
     ns.provider_metadata = meta
     await session.commit()
     return ns
@@ -280,7 +284,7 @@ def _k8s(mode_adapter_factory, monkeypatch, core):
     monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
 
     async def cluster():
-        return None
+        return CLUSTER
 
     monkeypatch.setattr(provider, "workload_cluster", cluster)
     return provider

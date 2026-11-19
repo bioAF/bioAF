@@ -31,6 +31,7 @@ from app.adapters.models import (
     ConnectionDescription,
     ConnectionTarget,
     NotebookWorkload,
+    ResourceRelease,
     SessionInfo,
     SessionStatus,
     StoredObject,
@@ -79,6 +80,7 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
             "session_id": d.get("session_id"),
             "stopped_at": d.get("stopped_at"),
             **({"release": d["release"]} if d.get("release") else {}),
+            **({"save_failed": True} if d.get("save_failed") else {}),
         },
     )
 
@@ -1065,18 +1067,33 @@ class KubernetesNotebookProvider(NotebookProvider):
         return await asyncio.to_thread(read)
 
     async def workload_cluster(self) -> str | None:
-        """``<project or account>/<location or region>/<cluster>`` from the recorded cluster config."""
+        """``<project or account>/<location or region>/<cluster>``, complete, or None.
+
+        GKE: project, deployed location (recorded, else discovered and recorded; see
+        cluster_location), cluster name. EKS: account, region, cluster name. A partial identity
+        is None: it cannot tell two clusters apart.
+        """
+        from app.adapters.kubernetes import exec_access
+        from app.adapters.kubernetes.cluster_location import resolve_gke_cluster_location
+
         if self.is_local:
             return None
         try:
-            cfg = await self._gke.load_cluster_config() or {}
-        except Exception:
-            logger.warning("Cluster identity unavailable for a notebook launch record", exc_info=True)
+            cfg = dict(await self._gke.load_cluster_config() or {})
+            name = _config_text(cfg.get("gke_cluster_name"))
+            if exec_access.backend_for_cluster_auth() == "eks":
+                owner, where = _config_text(cfg.get("aws_account_id")), _config_text(cfg.get("aws_region"))
+            else:
+                owner = _config_text(cfg.get("gcp_project_id"))
+                where = ""
+                if name and owner:
+                    where = await resolve_gke_cluster_location(
+                        cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory
+                    )
+        except Exception as exc:
+            logger.warning("Cluster identity unavailable for a notebook launch record (%s)", type(exc).__name__)
             return None
-        name = _config_text(cfg.get("gke_cluster_name"))
-        owner = _config_text(cfg.get("gcp_project_id")) or _config_text(cfg.get("aws_account_id"))
-        where = _config_text(cfg.get("gke_cluster_location")) or _config_text(cfg.get("aws_region"))
-        return f"{owner}/{where}/{name}" if name else None
+        return f"{owner}/{where}/{name}" if name and owner and where else None
 
     async def release_session_resources(self, workload: NotebookWorkload) -> WorkloadRelease:
         """Delete the session's pod and Service, each verified and independently; see lifecycle."""
@@ -1125,11 +1142,31 @@ class KubernetesNotebookProvider(NotebookProvider):
         """
         from kubernetes.stream import stream
 
+        from app.adapters.notebooks.lifecycle import pod_ownership
+
         core_client = self._get_k8s_core_client()
-        if not ran:
-            pod_name_for_exec = ""
-        else:
-            pod_name_for_exec = pod_name
+        pod_name_for_exec = pod_name if ran else ""
+        workload = None
+        if user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
+            workload = NotebookWorkload(
+                session_id=int(session_id),
+                user_id=int(user_id),
+                session_type=session_type,
+                namespace=namespace,
+                pod_name=pod_name,
+                service_name=notebook_service_name(session_id),
+            )
+            # Live ownership before the first command runs in the pod, not only before the delete.
+            ownership = await asyncio.to_thread(pod_ownership, core_client, workload)
+            if ownership == "foreign":
+                # release_workload reports the pod blocked and deletes nothing that is not ours.
+                return self._terminated(session_id, [], "", await self.release_session_resources(workload))
+            if ownership == "unknown":
+                unread = ResourceRelease(state="failed", detail="pod ownership could not be read")
+                return self._terminated(session_id, [], "", WorkloadRelease(pod=unread, service=unread))
+            if ownership == "absent":
+                pod_name_for_exec = ""
+        save_failed = False
 
         # Final git commit + push before sync-out
         git_branch = None
@@ -1206,6 +1243,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 logger.info("GCS sync-out complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
+                save_failed = True
 
         # Sync /outputs/ and capture scripts to the working bucket via the gcs-sync
         # sidecar (ADR-040). The sidecar runs the storage backend's staging_image
@@ -1260,6 +1298,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 logger.info("Outputs sync complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
+                save_failed = True
 
             # 2. Capture notebook/script files (flat) into the scripts prefix. `find -exec` hands
             #    the names to the copy as arguments (no `read`, so newlines and backslashes
@@ -1328,25 +1367,20 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
-        if user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
-            release = await self.release_session_resources(
-                NotebookWorkload(
-                    session_id=int(session_id),
-                    user_id=int(user_id),
-                    session_type=session_type,
-                    namespace=namespace,
-                    pod_name=pod_name,
-                    service_name=notebook_service_name(session_id),
+        if workload is not None:
+            if save_failed and workload is not None and pod_name_for_exec:
+                # The session's work was not saved: keep its pod and Service so a retry can save
+                # before anything is deleted.
+                logger.warning("Keeping pod %s: the session's work was not saved", pod_name)
+                kept = WorkloadRelease(
+                    pod=ResourceRelease(state="failed", detail="outputs not saved; pod kept for a retry"),
+                    service=ResourceRelease(state="failed", detail="kept until outputs are saved"),
                 )
-            )
-            return {
-                "session_id": session_id,
-                "status": "stopped",
-                "stopped_at": datetime.now(timezone.utc).isoformat(),
-                "output_files": output_files,
-                "gcs_output_prefix": gcs_output_prefix,
-                "release": release.model_dump(),
-            }
+                result = self._terminated(session_id, output_files, gcs_output_prefix, kept)
+                result["save_failed"] = True
+                return result
+            release = await self.release_session_resources(workload)
+            return self._terminated(session_id, output_files, gcs_output_prefix, release)
 
         # Delete pod (headless runs and callers that do not name the owner)
         try:
@@ -1373,6 +1407,17 @@ class KubernetesNotebookProvider(NotebookProvider):
             "stopped_at": datetime.now(timezone.utc).isoformat(),
             "output_files": output_files,
             "gcs_output_prefix": gcs_output_prefix,
+        }
+
+    @staticmethod
+    def _terminated(session_id, output_files, gcs_output_prefix, release: WorkloadRelease) -> dict:
+        return {
+            "session_id": session_id,
+            "status": "stopped",
+            "stopped_at": datetime.now(timezone.utc).isoformat(),
+            "output_files": output_files,
+            "gcs_output_prefix": gcs_output_prefix,
+            "release": release.model_dump(),
         }
 
     async def _k8s_get_session_status(

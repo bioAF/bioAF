@@ -31,6 +31,8 @@ OBSERVE_BATCH = 50
 CLEANUP_BATCH = 25
 # Bound on observing or releasing one session; output saving has its own request timeouts.
 ITEM_TIMEOUT_SECONDS = 60.0
+# A status read that takes longer is uncertainty: the session is still judged against its deadline.
+STATUS_READ_TIMEOUT_SECONDS = 30.0
 
 
 def _pending_cleanup(now: datetime) -> dict:
@@ -49,13 +51,16 @@ async def observe_session(
         return False
     now = now or datetime.now(timezone.utc)
     try:
-        observed = await get_notebook_adapter().get_session_status(
-            session_id=ns.id,
-            pod_name=ns.compute_job_ref,
-            namespace=ns.provider_namespace or "bioaf-notebooks",
-            session_type=ns.session_type,
+        observed = await asyncio.wait_for(
+            get_notebook_adapter().get_session_status(
+                session_id=ns.id,
+                pod_name=ns.compute_job_ref,
+                namespace=ns.provider_namespace or "bioaf-notebooks",
+                session_type=ns.session_type,
+            ),
+            timeout=STATUS_READ_TIMEOUT_SECONDS,
         )
-    except Exception as exc:
+    except Exception as exc:  # including a read that hangs past its bound
         # Uncertainty, not failure: the overall startup deadline still applies.
         logger.warning("Session %s status read failed (%s)", ns.id, type(exc).__name__)
         observed = SessionStatus(session_id=str(ns.id), status=ServiceState.UNKNOWN)
@@ -141,12 +146,20 @@ async def verify_workload(adapter, ns: NotebookSession, *, now: datetime | None 
     a cluster that cannot be confirmed right now defers it.
     """
     now = now or datetime.now(timezone.utc)
-    if not getattr(adapter, "manages_workloads", False) or ns.session_type not in INTERACTIVE_SESSION_TYPES:
+    if getattr(adapter, "manages_workloads", False) is not True or ns.session_type not in INTERACTIVE_SESSION_TYPES:
         return Verdict("unmanaged")
     workload, why = adapter.resolve_workload(ns)
     if workload is None:
         return Verdict("blocked", cleanup={"state": "blocked", "detail": why, "updated_at": now.isoformat()})
-    recorded = ((ns.provider_metadata or {}).get("lifecycle") or {}).get("cluster")
+    lifecycle = (ns.provider_metadata or {}).get("lifecycle") or {}
+    recorded = lifecycle.get("cluster")
+    if not recorded and lifecycle.get("reserved_at"):
+        # A reserved launch always records its cluster; one without it is never acted on here.
+        logger.warning("Notebook session %s's launch recorded no cluster; not acting automatically", ns.id)
+        return Verdict(
+            "blocked",
+            cleanup={"state": "blocked", "detail": "launch recorded no cluster", "updated_at": now.isoformat()},
+        )
     if recorded:
         current = await adapter.workload_cluster()
         if current is None:
@@ -241,7 +254,7 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
     """
     now = now or datetime.now(timezone.utc)
     counts = {"observed": 0, "cleaned": 0, "errors": 0}
-    if not getattr(get_notebook_adapter(), "manages_workloads", False):
+    if getattr(get_notebook_adapter(), "manages_workloads", False) is not True:
         return counts
 
     starting = await _ids(

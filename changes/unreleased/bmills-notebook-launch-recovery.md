@@ -10,3 +10,7 @@
   A background pass deletes them every minute, after checking that they belong to the session, and keeps
   retrying until they are confirmed gone. It also cleans up such leftovers from earlier sessions. A session
   that failed while running has its outputs saved first.
+- Stopping a notebook session never deletes it while its work is unsaved: if saving the home directory or
+  outputs fails, the session's pod is kept and the save is retried first. bioAF also checks that a pod belongs
+  to the session before running any command in it, and refuses to start a session when it cannot confirm
+  which cluster the session would run on.

@@ -88,6 +88,18 @@ def _release_one(
     return ResourceRelease(state="terminating")
 
 
+def pod_ownership(core, w: NotebookWorkload, *, request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> str:
+    """``owned``, ``absent``, ``foreign`` (another workload holds the name), or ``unknown`` (unreadable)."""
+    try:
+        pod = core.read_namespaced_pod(name=w.pod_name, namespace=w.namespace, _request_timeout=request_timeout)
+    except Exception as exc:
+        if _status(exc) == 404:
+            return "absent"
+        logger.warning("Could not read notebook pod %s for session %s: %s", w.pod_name, w.session_id, _failure(exc))
+        return "unknown"
+    return "owned" if _pod_belongs(pod, w) else "foreign"
+
+
 def release_workload(core, w: NotebookWorkload, *, request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> WorkloadRelease:
     """Delete the session's pod and Service, each independently; complete only when both are gone."""
     pod = _release_one(

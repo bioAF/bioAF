@@ -41,6 +41,9 @@ by a background pass that runs every minute. This also works after a backend res
 anything, bioAF checks that the resource carries the session's own labels (session, user and type) and that
 the cluster is the one the session was launched on. A deletion counts as finished only once the resource is
 confirmed gone; until then it is retried. A session that was running when it failed has its outputs saved first.
+If saving a session's home directory or outputs fails (for example, during a storage outage), its pod and
+Service are kept and the save is retried before anything is deleted. A new session is not started at all
+unless bioAF can confirm which cluster it would run on (project or account, location, and cluster name).
 
 The progress is recorded on the session as `provider_metadata.lifecycle.cleanup.state`:
 

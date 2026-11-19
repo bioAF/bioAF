@@ -156,6 +156,10 @@ class FakeCore:
     def delete_namespaced_service(self, name, namespace, body=None, **_):
         return self._delete(self.services, "service", name, namespace, body)
 
+    def connect_get_namespaced_pod_exec(self, *args, **kwargs):
+        """The exec entry point; tests patch ``kubernetes.stream.stream`` to observe exec calls."""
+        raise AssertionError("exec must go through kubernetes.stream.stream")
+
     def list_namespaced_pod(self, namespace, label_selector=None, **_):
         from types import SimpleNamespace
 
