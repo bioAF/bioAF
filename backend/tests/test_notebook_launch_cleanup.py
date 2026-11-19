@@ -104,18 +104,17 @@ async def test_a_launch_marked_failed_by_the_readiness_check_is_released(adapter
     monkeypatch.setattr(nb_module.asyncio, "sleep", _no_wait)
     updates = []
 
-    async def record(organization_id, session_id, **kw):
-        updates.append(kw["status"])
+    async def record(_factory, **kw):
+        updates.append(kw.get("status"))
+        return True  # the session was still starting
 
-    monkeypatch.setattr(
-        adapter, "_update_session_in_db", lambda org, sid, status, access_url, **kw: record(org, sid, status=status)
-    )
+    monkeypatch.setattr(nb_module, "transition_compute_session", record)
     monkeypatch.setattr(adapter, "_classify_pod_failure_from_api", AsyncMock(return_value=("unknown", "x")))
 
     await adapter._poll_session_ready(
         42, POD, SVC, "bioaf-notebooks", 8888, organization_id=1, user_id=7, session_type="jupyter"
     )
 
-    assert updates == ["failed"]
+    assert updates == ["failed", None]  # failed with cleanup pending, then the cleanup result
     assert {c[1] for c in core.deletes()} == {"pod", "service"}
     assert not core.pods and not core.services

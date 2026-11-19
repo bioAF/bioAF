@@ -135,9 +135,13 @@ class NotebookService:
         session.add(notebook_session)
         await session.flush()
 
+        # Name the workload and commit it before any provider call, so a crash between creating
+        # resources and saving the result still leaves a record of what may exist.
+        notebook_adapter = get_notebook_adapter()
+        reserved = await _reserve_workload(session, notebook_adapter, notebook_session)
+
         # Launch via the notebook adapter (BAL)
         try:
-            notebook_adapter = get_notebook_adapter()
             spec: dict = {
                 "session_type": session_type,
                 "resource_profile": resource_profile,
@@ -220,12 +224,15 @@ class NotebookService:
             # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
             notebook_session.compute_job_ref = result.provider_details.get("pod_name")
             notebook_session.provider_metadata = {
-                k: v
-                for k, v in {
-                    "pod_name": result.provider_details.get("pod_name"),
-                    "namespace": result.provider_details.get("namespace"),
-                }.items()
-                if v is not None
+                **(notebook_session.provider_metadata or {}),
+                **{
+                    k: v
+                    for k, v in {
+                        "pod_name": result.provider_details.get("pod_name"),
+                        "namespace": result.provider_details.get("namespace"),
+                    }.items()
+                    if v is not None
+                },
             }
             notebook_session.access_url = result.access_url
             notebook_session.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
@@ -257,6 +264,8 @@ class NotebookService:
             reason, message = classify_gce_vm_failure(str(e))
             notebook_session.failure_reason = reason
             notebook_session.failure_message = message
+            if reserved:
+                _set_cleanup(notebook_session, {"state": "pending"})
             raise
         except Exception as e:
             from app.adapters.failure_classification import classify_gce_vm_failure
@@ -265,6 +274,9 @@ class NotebookService:
             reason, message = classify_gce_vm_failure(str(e))
             notebook_session.failure_reason = reason
             notebook_session.failure_message = message
+            # Resources may exist even though the call failed (accepted, then the response was lost).
+            if reserved:
+                _set_cleanup(notebook_session, {"state": "pending"})
             logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
             if "not found or not accessible" in str(e):
                 raise
@@ -315,9 +327,14 @@ class NotebookService:
                     gcs_home_prefix=notebook_session.gcs_home_prefix or "",
                     working_bucket=working_bucket,
                     session_type=notebook_session.session_type,
+                    user_id=notebook_session.user_id,
+                    ran=old_status in ("running", "idle"),
                 )
             except Exception as e:
                 logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
+                if _lifecycle(notebook_session):
+                    _set_cleanup(notebook_session, {"state": "pending"})
+        record_release(notebook_session, terminate_result)
 
         # Register output files (ADR-040)
         output_files = terminate_result.output_files
@@ -487,14 +504,19 @@ class NotebookService:
                         if ns.slurm_job_id or ns.compute_job_ref:
                             try:
                                 notebook_adapter = get_notebook_adapter()
-                                await notebook_adapter.terminate_session(
+                                result = await notebook_adapter.terminate_session(
                                     ns.slurm_job_id or "",
                                     pod_name=ns.compute_job_ref or "",
                                     namespace=ns.provider_namespace or "bioaf-notebooks",
                                     gcs_home_prefix=ns.gcs_home_prefix or "",
+                                    session_type=ns.session_type,
+                                    user_id=ns.user_id,
                                 )
+                                record_release(ns, result)
                             except Exception as e:
                                 logger.warning("Failed to terminate idle session: %s", e)
+                                if _lifecycle(ns):
+                                    _set_cleanup(ns, {"state": "pending"})
 
             await session.flush()
             await session.commit()
@@ -502,6 +524,52 @@ class NotebookService:
 
         except Exception as e:
             logger.error("Idle session check failed: %s", e)
+
+
+def _lifecycle(ns: NotebookSession) -> dict:
+    return dict((ns.provider_metadata or {}).get("lifecycle") or {})
+
+
+def _set_cleanup(ns: NotebookSession, cleanup: dict) -> None:
+    """Record resource-cleanup progress; the failure fields are left as they are."""
+    lifecycle = _lifecycle(ns)
+    lifecycle["cleanup"] = {"updated_at": datetime.now(timezone.utc).isoformat(), **cleanup}
+    # Assign a new dict so SQLAlchemy writes the JSONB column.
+    ns.provider_metadata = {**(ns.provider_metadata or {}), "lifecycle": lifecycle}
+
+
+def mark_cleanup_pending(ns: NotebookSession) -> None:
+    _set_cleanup(ns, {"state": "pending"})
+
+
+def record_release(ns: NotebookSession, result: TerminationResult) -> None:
+    """Record what a terminate call released, when the adapter reports it."""
+    from app.adapters.models import WorkloadRelease
+
+    release = result.provider_details.get("release")
+    if not release:
+        return
+    _set_cleanup(ns, WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc)))
+
+
+async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession) -> bool:
+    """Record and commit the workload this launch will create; False when the backend names none."""
+    workload = adapter.reserve_workload(ns.id, ns.user_id, ns.session_type)
+    if workload is None:
+        return False
+    cluster = await adapter.workload_cluster()
+    ns.compute_job_ref = workload.pod_name
+    ns.k8s_pod_name = workload.pod_name
+    ns.k8s_namespace = workload.namespace
+    ns.provider_metadata = {
+        **(ns.provider_metadata or {}),
+        "pod_name": workload.pod_name,
+        "namespace": workload.namespace,
+        "service_name": workload.service_name,
+        "lifecycle": {"reserved_at": datetime.now(timezone.utc).isoformat(), "cluster": cluster},
+    }
+    await session.commit()
+    return True
 
 
 def _slugify(name: str) -> str:

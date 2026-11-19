@@ -443,6 +443,11 @@ class WorkloadRelease(BaseModel):
     def blocked(self) -> bool:
         return "blocked" in (self.pod.state, self.service.state)
 
+    def as_cleanup(self, at: datetime) -> dict:
+        """The ``provider_metadata.lifecycle.cleanup`` record for this outcome."""
+        state = "complete" if self.complete else "blocked" if self.blocked else "pending"
+        return {"state": state, "pod": self.pod.state, "service": self.service.state, "updated_at": at.isoformat()}
+
 
 # --- Work-node VMs -----------------------------------------------------------
 

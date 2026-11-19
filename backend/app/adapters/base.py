@@ -10,6 +10,8 @@ from typing import BinaryIO
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.adapters.job_specs import JobSpec
 from app.adapters.models import (
+    NotebookWorkload,
+    WorkloadRelease,
     ConnectionDescription,
     ConnectionTarget,
     CellxgeneInstance,
@@ -632,6 +634,21 @@ class NotebookProvider(ABC):
     async def load_cluster_config(self, force: bool = False) -> dict | None:
         """Optionally pre-load backend config at startup. No-op by default."""
         return None
+
+    def reserve_workload(self, session_id: int, user_id: int, session_type: str) -> NotebookWorkload | None:
+        """The resources a launch of this session will create, named before anything is created.
+
+        None when this backend does not manage notebook workloads this way (simulated, SLURM).
+        """
+        return None
+
+    async def workload_cluster(self) -> str | None:
+        """An identifier for the cluster workloads are created in, recorded with each launch."""
+        return None
+
+    async def release_session_resources(self, workload: NotebookWorkload) -> WorkloadRelease:
+        """Delete ``workload``'s resources after verifying they still belong to it."""
+        raise NotImplementedError
 
     @abstractmethod
     async def launch_session(self, session_spec: dict) -> SessionInfo:

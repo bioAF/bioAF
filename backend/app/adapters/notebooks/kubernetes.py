@@ -25,7 +25,7 @@ from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
 from app.adapters.kubernetes.service_account import ensure_service_account_annotations
-from app.adapters.session_status import update_compute_session
+from app.adapters.session_status import transition_compute_session, update_compute_session
 from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
     ConnectionDescription,
@@ -76,7 +76,11 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
             for o in d.get("output_files", [])
         ],
         output_prefix=d.get("gcs_output_prefix", ""),
-        provider_details={"session_id": d.get("session_id"), "stopped_at": d.get("stopped_at")},
+        provider_details={
+            "session_id": d.get("session_id"),
+            "stopped_at": d.get("stopped_at"),
+            **({"release": d["release"]} if d.get("release") else {}),
+        },
     )
 
 
@@ -89,6 +93,18 @@ DEFAULT_NOTEBOOK_NAMESPACE = "bioaf-notebooks"
 def notebook_pod_name(session_id) -> str:
     """The pod name launch gives a session: one ``bioaf-notebook-`` prefix on the bare id."""
     return f"bioaf-notebook-{session_id}"
+
+
+INTERACTIVE_SESSION_TYPES = ("jupyter", "rstudio")
+
+
+def _config_text(value) -> str:
+    text_value = value.strip() if isinstance(value, str) else ""
+    return "" if text_value == "null" else text_value
+
+
+# A launch observer may only move a session still in one of these states.
+STARTING_STATUSES = ("pending", "starting")
 
 
 def notebook_service_name(session_id) -> str:
@@ -1017,15 +1033,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     if pod.status.phase in ("Failed", "Unknown"):
                         logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
                         reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                        await self._update_session_in_db(
-                            organization_id,
-                            session_id,
-                            status="failed",
-                            access_url=None,
-                            failure_reason=reason,
-                            failure_message=message,
-                        )
-                        await self.release_session_resources(workload)
+                        await self._fail_launch(organization_id, workload, reason, message)
                         return
                 except Exception:
                     pass
@@ -1034,15 +1042,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             if not pod_ready:
                 logger.error("Pod %s not ready after 5 min", pod_name)
                 reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                await self._update_session_in_db(
-                    organization_id,
-                    session_id,
-                    status="failed",
-                    access_url=None,
-                    failure_reason=reason,
-                    failure_message=message,
-                )
-                await self.release_session_resources(workload)
+                await self._fail_launch(organization_id, workload, reason, message)
                 return
 
             # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
@@ -1070,24 +1070,83 @@ class KubernetesNotebookProvider(NotebookProvider):
                     service_name,
                 )
 
-            await self._update_session_in_db(organization_id, session_id, status="running", access_url=access_url)
+            await transition_compute_session(
+                self._session_factory,
+                organization_id=organization_id,
+                session_id=int(session_id),
+                expected_statuses=STARTING_STATUSES,
+                expected_job_ref=pod_name,
+                status="running",
+                access_url=access_url,
+            )
 
         except Exception as e:
             from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
 
             logger.exception("Background poll failed for session %s", session_id)
-            await self._update_session_in_db(
-                organization_id,
-                session_id,
-                status="failed",
-                access_url=None,
-                failure_reason=FAILURE_REASON_UNKNOWN,
-                failure_message=f"Background poll raised: {e}",
-            )
-            try:
-                await self.release_session_resources(workload)
-            except Exception:
-                logger.exception("Releasing session %s after a failed readiness check failed", session_id)
+            await self._fail_launch(organization_id, workload, FAILURE_REASON_UNKNOWN, f"Background poll raised: {e}")
+
+    async def _fail_launch(self, organization_id, workload: NotebookWorkload, reason: str, message: str) -> None:
+        """Mark a still-starting launch failed with cleanup pending, release it, record the result.
+
+        If the session has meanwhile been stopped (or relaunched under another workload), nothing
+        is written or deleted: whatever finished it owns its cleanup.
+        """
+        common = {
+            "organization_id": organization_id,
+            "session_id": workload.session_id,
+            "expected_job_ref": workload.pod_name,
+        }
+        now = datetime.now(timezone.utc)
+        if not await transition_compute_session(
+            self._session_factory,
+            expected_statuses=STARTING_STATUSES,
+            status="failed",
+            access_url=None,
+            failure_reason=reason,
+            failure_message=message,
+            lifecycle={"cleanup": {"state": "pending", "updated_at": now.isoformat()}},
+            **common,
+        ):
+            return
+        try:
+            release = await self.release_session_resources(workload)
+        except Exception:
+            logger.exception("Releasing session %s after a failed launch failed", workload.session_id)
+            return
+        await transition_compute_session(
+            self._session_factory,
+            expected_statuses=("failed",),
+            lifecycle={"cleanup": release.as_cleanup(datetime.now(timezone.utc))},
+            **common,
+        )
+
+    def reserve_workload(self, session_id: int, user_id: int, session_type: str) -> NotebookWorkload | None:
+        """Interactive Jupyter/RStudio sessions only: headless runs and Work Nodes have their own lifecycles."""
+        if self.is_local or session_type not in INTERACTIVE_SESSION_TYPES:
+            return None
+        return NotebookWorkload(
+            session_id=int(session_id),
+            user_id=int(user_id),
+            session_type=session_type,
+            namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+            pod_name=notebook_pod_name(session_id),
+            service_name=notebook_service_name(session_id),
+        )
+
+    async def workload_cluster(self) -> str | None:
+        """``<project or account>/<location or region>/<cluster>`` from the recorded cluster config."""
+        if self.is_local:
+            return None
+        try:
+            cfg = await self._gke.load_cluster_config() or {}
+        except Exception:
+            logger.warning("Cluster identity unavailable for a notebook launch record", exc_info=True)
+            return None
+        name = _config_text(cfg.get("gke_cluster_name"))
+        owner = _config_text(cfg.get("gcp_project_id")) or _config_text(cfg.get("aws_account_id"))
+        where = _config_text(cfg.get("gke_cluster_location")) or _config_text(cfg.get("aws_region"))
+        return f"{owner}/{where}/{name}" if name else None
 
     async def release_session_resources(self, workload: NotebookWorkload) -> WorkloadRelease:
         """Delete the session's pod and Service, each verified and independently; see lifecycle."""
@@ -1149,16 +1208,27 @@ class KubernetesNotebookProvider(NotebookProvider):
         gcs_home_prefix: str = "",
         working_bucket: str = "",
         session_type: str = "jupyter",
+        user_id: int | None = None,
+        ran: bool = True,
     ) -> dict:
-        """Final git commit, sync outputs to GCS, then delete pod and service."""
+        """Final git commit, sync outputs to GCS, then delete pod and service.
+
+        ``ran=False`` (the session never became usable) skips the in-pod save steps: there is no
+        work to save, and exec into a pod that never started only fails. An interactive session
+        whose owner is given is released through the verified path and reports the outcome.
+        """
         from kubernetes.stream import stream
 
         core_client = self._get_k8s_core_client()
+        if not ran:
+            pod_name_for_exec = ""
+        else:
+            pod_name_for_exec = pod_name
 
         # Final git commit + push before sync-out
         git_branch = None
         git_commit = None
-        if pod_name:
+        if pod_name_for_exec:
             try:
                 git_cmd = [
                     "/bin/sh",
@@ -1212,7 +1282,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 logger.exception("Failed to store git info for compute session")
 
         # Sync home directory to GCS before termination (CopyStager sync seam)
-        if gcs_home_prefix and pod_name:
+        if gcs_home_prefix and pod_name_for_exec:
             try:
                 from app.adapters.registry import get_storage_adapter
 
@@ -1253,7 +1323,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         output_files: list[dict] = []
         gcs_output_prefix = ""
-        if working_bucket and pod_name:
+        if working_bucket and pod_name_for_exec:
             gcs_output_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/outputs/")
             gcs_scripts_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/scripts/")
 
@@ -1352,7 +1422,27 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
-        # Delete pod
+        if user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
+            release = await self.release_session_resources(
+                NotebookWorkload(
+                    session_id=int(session_id),
+                    user_id=int(user_id),
+                    session_type=session_type,
+                    namespace=namespace,
+                    pod_name=pod_name,
+                    service_name=notebook_service_name(session_id),
+                )
+            )
+            return {
+                "session_id": session_id,
+                "status": "stopped",
+                "stopped_at": datetime.now(timezone.utc).isoformat(),
+                "output_files": output_files,
+                "gcs_output_prefix": gcs_output_prefix,
+                "release": release.model_dump(),
+            }
+
+        # Delete pod (headless runs and callers that do not name the owner)
         try:
             core_client.delete_namespaced_pod(name=pod_name, namespace=namespace)
             logger.info("Deleted pod %s", pod_name)

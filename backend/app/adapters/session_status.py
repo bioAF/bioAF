@@ -63,3 +63,79 @@ async def update_compute_session(
         "Updated session %s: status=%s access_url=%s failure_reason=%s", session_id, status, access_url, failure_reason
     )
     return True
+
+
+_UNSET = object()
+
+
+async def transition_compute_session(
+    session_factory,
+    *,
+    organization_id: int | None,
+    session_id: int,
+    expected_statuses: tuple[str, ...],
+    expected_job_ref: str | None,
+    status: str | None = None,
+    access_url: str | None | object = _UNSET,
+    failure_reason: str | None = None,
+    failure_message: str | None = None,
+    lifecycle: dict | None = None,
+) -> bool:
+    """Change a session only while it is still in ``expected_statuses`` under ``expected_job_ref``.
+
+    The compare and the write are one statement, so a stop (or a relaunch under another workload)
+    that lands first always wins and this changes nothing. ``lifecycle`` keys are merged into
+    ``provider_metadata.lifecycle``; every other metadata key is preserved. True if the row changed.
+    Never raises (logged), like ``update_compute_session``.
+    """
+    import json
+
+    if not session_factory or organization_id is None:
+        logger.warning("Session %s: no session factory or organization; not updating it", session_id)
+        return False
+    params: dict = {
+        "id": session_id,
+        "org": organization_id,
+        "expected": list(expected_statuses),
+        "ref": expected_job_ref,
+    }
+    assignments: list[str] = []
+    if status is not None:
+        assignments.append("status = :status")
+        params["status"] = status
+    if access_url is not _UNSET:
+        assignments.append("access_url = :url")
+        params["url"] = access_url
+    if failure_reason is not None or failure_message is not None:
+        assignments.append("failure_reason = :reason, failure_message = :msg")
+        params.update(reason=failure_reason, msg=failure_message)
+    if lifecycle:
+        assignments.append(
+            "provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || jsonb_build_object("
+            "'lifecycle', COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb))"
+        )
+        params["lifecycle"] = json.dumps(lifecycle)
+    if not assignments:
+        return False
+    ref_clause = "compute_job_ref IS NOT DISTINCT FROM :ref"
+    sql = (
+        f"UPDATE compute_sessions SET {', '.join(assignments)} "
+        f"WHERE id = :id AND organization_id = :org AND status = ANY(:expected) AND {ref_clause}"
+    )
+    try:
+        async with session_factory() as db:
+            result = await db.execute(text(sql), params)
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to update session %s in DB", session_id)
+        return False
+    if not result.rowcount:
+        logger.info(
+            "Session %s was not updated: it is no longer %s under workload %s",
+            session_id,
+            "/".join(expected_statuses),
+            expected_job_ref,
+        )
+        return False
+    logger.info("Updated session %s: status=%s lifecycle=%s", session_id, status, sorted((lifecycle or {}).keys()))
+    return True
