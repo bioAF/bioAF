@@ -375,3 +375,32 @@ async def test_a_launch_no_longer_starts_its_own_readiness_task(mode_adapter_fac
     await provider._k8s_launch_session(_spec())
 
     assert "notebook-readiness" not in spawned
+
+
+@pytest.mark.asyncio
+async def test_a_reserved_launch_whose_pod_is_not_created_yet_is_left_to_finish(
+    session, admin_user, factory, monkeypatch, mode_adapter_factory
+):
+    """The pass can run between the reservation commit and pod creation: absence then is not failure."""
+    ns = await _seed(session, admin_user, status="pending", minutes_ago=0)
+    core = FakeCore()
+
+    await _pass(factory, _k8s(mode_adapter_factory, monkeypatch, core), monkeypatch)
+
+    assert (await _row(factory, ns.id)).status == "pending"
+    assert core.deletes() == []
+
+
+@pytest.mark.asyncio
+async def test_a_reserved_launch_that_never_created_its_pod_fails_at_the_deadline(
+    session, admin_user, factory, monkeypatch, mode_adapter_factory
+):
+    """A crash between reservation and creation: the deadline still ends it, and cleanup finds nothing."""
+    ns = await _seed(session, admin_user, status="pending", minutes_ago=31, lifecycle={})
+    core = FakeCore()
+
+    await _pass(factory, _k8s(mode_adapter_factory, monkeypatch, core), monkeypatch)
+
+    row = await _row(factory, ns.id)
+    assert (row.status, row.failure_reason) == ("failed", "startup_timeout")
+    assert _cleanup(row)["state"] == "complete"

@@ -62,7 +62,12 @@ async def observe_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
     applied = False
     if ns.status in STARTING:
         started = launch_started_at(ns.provider_metadata, started_at=ns.started_at, created_at=ns.created_at)
-        decision = decide_launch(observed.status, observed.access_url, details, started=started, now=now)
+        status = observed.status
+        if ns.status == "pending" and details.get("workload_missing"):
+            # Reserved but not created yet (the launch request may still be creating it): only
+            # the overall deadline ends this, never the absence itself.
+            status = ServiceState.STARTING
+        decision = decide_launch(status, observed.access_url, details, started=started, now=now)
         if decision.action == "ready":
             applied = await transition_in(
                 db,

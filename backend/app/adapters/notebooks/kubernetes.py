@@ -1448,6 +1448,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 return {
                     **base,
                     "status": "error",
+                    "workload_missing": True,
                     "failure_reason": "unknown",
                     "failure_message": "The session's workload no longer exists in the cluster.",
                 }
