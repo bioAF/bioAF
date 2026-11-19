@@ -148,3 +148,65 @@ async def test_an_all_failed_experiment_keeps_only_unlinked_assets(client, comp_
     assert pkg.samples == {}
     assert pkg.checksums == ["count_matrix.h5"]
     assert pkg.readme == ["count_matrix.h5"]
+
+
+@pytest.mark.asyncio
+async def test_new_uploads_carry_their_selected_sample_into_geo(
+    client, admin_token, comp_bio_token, session, admin_user
+):
+    """An upload made for a selected Sample is referenced on that Sample's row; one made only for the
+    Experiment stays an Experiment-level asset. New data works under the link policy without repair."""
+    import io
+    from unittest.mock import patch
+
+    from app.models.component import PlatformConfig
+    from app.models.sample import Sample
+    from tests.test_upload_ingest_bucket import _storage_adapter
+
+    session.add(PlatformConfig(key="ingest_bucket_name", value="bioaf-ingest-test"))
+    resp = await client.post(
+        "/api/experiments",
+        json={"name": "GEO Uploads", "description": "New uploads."},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    exp_id = resp.json()["id"]
+    owner = Sample(experiment_id=exp_id, external_id="UP1", organism="Homo sapiens", qc_status="pass")
+    session.add(owner)
+    await session.commit()
+
+    auth = {"Authorization": f"Bearer {admin_token}"}
+    with patch("app.adapters.registry.get_storage_adapter", return_value=_storage_adapter()):
+        for name, query in (("reads.fastq.gz", f"&sample_ids={owner.id}"), ("UP1_matrix.h5", "")):
+            up = await client.post(
+                f"/api/files/upload/simple?experiment_id={exp_id}{query}",
+                files={"file": (name, io.BytesIO(b"data"), "application/octet-stream")},
+                headers=auth,
+            )
+            assert up.status_code == 200, up.text
+
+    # The Experiment-only upload is named after UP1, so it is reported until someone decides.
+    report = await client.post(
+        f"/api/experiments/{exp_id}/export/geo?validate_only=true",
+        headers={"Authorization": f"Bearer {comp_bio_token}"},
+    )
+    assert [f["filename"] for f in report.json()["file_association_findings"]] == ["UP1_matrix.h5"]
+    finding = report.json()["file_association_findings"][0]
+    ack = await client.post(
+        f"/api/experiments/{exp_id}/export/geo/file-associations/acknowledgments",
+        json={
+            "file_id": finding["file_id"],
+            "sample_ids": [owner.id],
+            "fingerprint": finding["fingerprint"],
+            "reason": "Matrix covers the whole experiment",
+        },
+        headers=auth,
+    )
+    assert ack.status_code == 200, ack.text
+
+    download = await client.post(
+        f"/api/experiments/{exp_id}/export/geo", headers={"Authorization": f"Bearer {comp_bio_token}"}
+    )
+    assert download.status_code == 200, download.text
+    pkg = read_package(download.content)
+    assert pkg.samples == {"UP1": {"raw": ["reads.fastq.gz"], "processed": []}}
+    assert sorted(pkg.readme) == ["UP1_matrix.h5", "reads.fastq.gz"]
