@@ -150,6 +150,10 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
   // Every readiness request belongs to one selection; a change of selection retires it, so a late
   // answer (or failure) for the old selection is never shown as the current one.
   const readinessRequest = useRef(0);
+  // Bumped only when the selection (run or filter) changes. A resolution or refused download started
+  // under one selection must not start a readiness refresh after the selection moved on: the refresh
+  // would be built from the old selection's run and filter.
+  const selection = useRef(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -192,6 +196,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
 
   // A report describes one run and one filter; showing it after either changes would mislead.
   function invalidateReadiness() {
+    selection.current += 1;
     readinessRequest.current += 1;
     setValidationReport(null);
     setValidating(false);
@@ -208,6 +213,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
   }
 
   async function resolve(request: () => Promise<unknown>) {
+    const startedUnder = selection.current;
     setResolving(true);
     setError(null);
     try {
@@ -218,7 +224,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
       return;
     }
     setResolving(false);
-    await handleCheckReadiness({ clearError: false });
+    if (startedUnder === selection.current) await handleCheckReadiness({ clearError: false });
   }
 
   function linkFile(fileId: number, sampleId: number) {
@@ -255,6 +261,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
 
   async function handleDownload() {
     if (!selectedRunId) return;
+    const startedUnder = selection.current;
     setDownloading(true);
     setError(null);
     try {
@@ -268,7 +275,11 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
       setError(err instanceof Error ? err.message : "Download failed");
       setDownloading(false);
       // The server found files to resolve: show them, keeping its explanation on screen.
-      if (err instanceof ApiError && err.code === "geo_file_associations_unresolved") {
+      if (
+        err instanceof ApiError &&
+        err.code === "geo_file_associations_unresolved" &&
+        startedUnder === selection.current
+      ) {
         await handleCheckReadiness({ clearError: false });
       }
       return;

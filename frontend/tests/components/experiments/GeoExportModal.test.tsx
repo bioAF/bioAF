@@ -356,5 +356,39 @@ describe("GeoExportModal", () => {
 
       expect(screen.queryByText("old selection failed")).not.toBeInTheDocument();
     });
+    it("does not refresh readiness for the old selection after a resolution finishes late", async () => {
+      let linked: (value: unknown) => void = () => {};
+      mockApiPost
+        .mockResolvedValueOnce(blocked)
+        .mockImplementationOnce(() => new Promise((resolve) => (linked = resolve)))
+        .mockResolvedValue(mockValidationReport);
+      await checkReadiness();
+      fireEvent.click(screen.getByRole("button", { name: "Link to LIB10" }));
+      fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+
+      await act(async () => linked({ status: "linked" }));
+
+      expect(mockApiPost).toHaveBeenCalledTimes(2);
+      expect(screen.getByLabelText("Exclude failed samples")).not.toBeChecked();
+      expect(screen.queryByText("Validation Summary")).not.toBeInTheDocument();
+    });
+
+    it("does not refresh readiness for the old selection after a refused download finishes late", async () => {
+      const { ApiError } = jest.requireMock("@/lib/api");
+      let refuse: (error: unknown) => void = () => {};
+      mockApiDownload.mockImplementationOnce(() => new Promise((_resolve, reject) => (refuse = reject)));
+      render(<GeoExportModal experimentId={1} isOpen onClose={jest.fn()} userRole="admin" />);
+      await waitFor(() => screen.getByText(/nf-core\/scrnaseq/));
+      fireEvent.click(screen.getByRole("button", { name: /Download Export/ }));
+      fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+
+      await act(async () =>
+        refuse(new ApiError(409, "Some files may have lost their Sample references.", "geo_file_associations_unresolved", {})),
+      );
+
+      expect(mockApiPost).not.toHaveBeenCalled();
+      expect(screen.queryByText("Validation Summary")).not.toBeInTheDocument();
+    });
+
   });
 });
