@@ -207,19 +207,23 @@ async def _load(db: AsyncSession, session_id: int) -> NotebookSession | None:
     return (await db.execute(select(NotebookSession).where(NotebookSession.id == session_id))).scalar_one_or_none()
 
 
-async def _record_cleanup(db, ns: NotebookSession, cleanup: dict) -> None:
-    # An owed save is never erased by a cleanup outcome; only a confirmed save clears it.
-    owed = (((ns.provider_metadata or {}).get("lifecycle") or {}).get("cleanup") or {}).get("save_outputs")
-    if owed:
-        cleanup = {**cleanup, "save_outputs": True}
+async def record_cleanup(db: AsyncSession, ns: NotebookSession, cleanup: dict) -> None:
+    """The one write of a session's cleanup record (Stop, idle stops, launch, the periodic pass).
+
+    A conditional update on the session's workload in the caller's transaction. It keeps an owed
+    save unless ``cleanup`` sets ``save_outputs: False`` (a confirmed save); see ``transition_in``.
+    Pending in-memory changes are flushed first and the row's metadata is reloaded after.
+    """
+    await db.flush()
     await transition_in(
         db,
         organization_id=ns.organization_id,
         session_id=ns.id,
-        expected_statuses=(ns.status,),
+        expected_statuses=None,
         expected_job_ref=ns.compute_job_ref,
-        lifecycle={"cleanup": cleanup},
+        lifecycle={"cleanup": {"updated_at": datetime.now(timezone.utc).isoformat(), **cleanup}},
     )
+    await db.refresh(ns, ["provider_metadata"])
 
 
 async def cleanup_session(db: AsyncSession, ns: NotebookSession, *, now: datetime) -> None:
@@ -239,7 +243,7 @@ async def cleanup_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
         return
     if verdict.kind != "ok":
         if verdict.kind == "blocked":
-            await _record_cleanup(db, ns, verdict.cleanup or {})
+            await record_cleanup(db, ns, verdict.cleanup or {})
         return
     release = await asyncio.wait_for(adapter.release_session_resources(verdict.workload), timeout=ITEM_TIMEOUT_SECONDS)
     if release.blocked:
@@ -248,7 +252,7 @@ async def cleanup_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
             "an operator should review them",
             ns.id,
         )
-    await _record_cleanup(db, ns, release.as_cleanup(now))
+    await record_cleanup(db, ns, release.as_cleanup(now))
 
 
 async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:

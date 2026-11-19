@@ -256,7 +256,7 @@ class _Adapter:
         self.release = release
         self.row_at_launch = None
 
-    def reserve_workload(self, session_id, user_id, session_type):
+    def reserve_workload(self, session_id, user_id, session_type, *, organization_id=None):
         return NotebookWorkload(
             session_id=session_id,
             user_id=user_id,
@@ -264,6 +264,7 @@ class _Adapter:
             namespace="bioaf-notebooks",
             pod_name=POD.format(session_id),
             service_name=SVC.format(session_id),
+            organization_id=organization_id,
         )
 
     async def workload_cluster(self):

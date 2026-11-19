@@ -67,7 +67,7 @@ class SessionMonitorService:
 
         logger.info("Terminating idle session %d (pod %s)", ns.id, ns.compute_job_ref)
 
-        await terminate_verified(ns, get_notebook_adapter(), ran=True, session_id_arg=ns.id)
+        await terminate_verified(session, ns, get_notebook_adapter(), ran=True, session_id_arg=ns.id)
 
         now = datetime.now(timezone.utc)
         ns.status = "stopped"

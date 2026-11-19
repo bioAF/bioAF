@@ -602,7 +602,7 @@ async def test_a_blocked_stop_never_erases_an_owed_save(
     deletes = [i for i, (kind, _) in enumerate(order) if kind == "delete"]
     assert home_saves and deletes and home_saves[0] < deletes[0]
     final = await cleanup()
-    assert final["state"] == "complete" and "save_outputs" not in final
+    assert final["state"] == "complete" and not final.get("save_outputs")  # confirmed save clears it
 
 
 @pytest.mark.asyncio

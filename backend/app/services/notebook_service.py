@@ -339,6 +339,7 @@ class NotebookService:
 
         # Terminate via the notebook adapter, after the shared identity and cluster checks
         terminate_result = await terminate_verified(
+            session,
             notebook_session,
             adapter or get_notebook_adapter(),
             ran=ran,
@@ -498,7 +499,7 @@ class NotebookService:
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now
-                        await terminate_verified(ns, get_notebook_adapter(), ran=True)
+                        await terminate_verified(session, ns, get_notebook_adapter(), ran=True)
 
             await session.flush()
             await session.commit()
@@ -510,24 +511,6 @@ class NotebookService:
 
 def _lifecycle(ns: NotebookSession) -> dict:
     return dict((ns.provider_metadata or {}).get("lifecycle") or {})
-
-
-def _set_cleanup(ns: NotebookSession, cleanup: dict, *, saved: bool = False) -> None:
-    """Record resource-cleanup progress; the failure fields are left as they are.
-
-    An owed save (``save_outputs``) is a separate fact from the latest cleanup outcome: it is kept
-    through blocked, deferred and failed outcomes and cleared only once a save is confirmed.
-    """
-    lifecycle = _lifecycle(ns)
-    previous = lifecycle.get("cleanup") or {}
-    record = {"updated_at": datetime.now(timezone.utc).isoformat(), **cleanup}
-    if previous.get("save_outputs") and not saved:
-        record["save_outputs"] = True
-    if saved:
-        record.pop("save_outputs", None)
-    lifecycle["cleanup"] = record
-    # Assign a new dict so SQLAlchemy writes the JSONB column.
-    ns.provider_metadata = {**(ns.provider_metadata or {}), "lifecycle": lifecycle}
 
 
 def _add_input_files(session: AsyncSession, ns: NotebookSession, input_file_ids: list[int] | None) -> None:
@@ -606,11 +589,14 @@ async def _fail_reserved_launch(session: AsyncSession, ns: NotebookSession, reas
     )
 
 
-def mark_cleanup_pending(ns: NotebookSession, *, save_outputs: bool = False) -> None:
-    _set_cleanup(ns, {"state": "pending", **({"save_outputs": True} if save_outputs else {})})
+async def mark_cleanup_pending(session: AsyncSession, ns: NotebookSession, *, save_outputs: bool = False) -> None:
+    from app.services.notebook_lifecycle import record_cleanup
+
+    await record_cleanup(session, ns, {"state": "pending", **({"save_outputs": True} if save_outputs else {})})
 
 
 async def terminate_verified(
+    session: AsyncSession,
     ns: NotebookSession,
     adapter,
     *,
@@ -623,10 +609,10 @@ async def terminate_verified(
 
     Checks the shared recorded identity and the recorded cluster first (``verify_workload``); a
     conflict or a changed cluster blocks it, an unconfirmable cluster defers it, and in either
-    case nothing is exec'd into or deleted. A failure keeps the obligation to save outputs when
-    the session ran, so a retry saves before it deletes.
+    case nothing is exec'd into or deleted. Cleanup progress is recorded through the one cleanup
+    write (``record_cleanup``), which keeps an owed save until a save is confirmed.
     """
-    from app.services.notebook_lifecycle import verify_workload
+    from app.services.notebook_lifecycle import record_cleanup, verify_workload
 
     # A persisted obligation to save wins over any caller's inference from the session's status:
     # once a save is owed, every retry (Stop, idle stop, the periodic pass) saves before deleting.
@@ -639,7 +625,7 @@ async def terminate_verified(
         cleanup = dict(verdict.cleanup or {})
         if verdict.kind == "deferred" and ran:
             cleanup["save_outputs"] = True
-        _set_cleanup(ns, cleanup)
+        await record_cleanup(session, ns, cleanup)
         logger.warning("Session %s was not terminated now: %s", ns.id, cleanup.get("detail") or "deferred")
         return TerminationResult()
 
@@ -655,10 +641,10 @@ async def terminate_verified(
     if ran_flag or verdict.workload is not None:
         kwargs["ran"] = ran
     if verdict.workload is not None:
-        kwargs["organization_id"] = verdict.workload.organization_id
+        kwargs["workload"] = verdict.workload  # the verified identity, used as is by the adapter
     try:
         if verdict.workload is not None:
-            target_id = str(verdict.workload.session_id)  # the verified workload's own session id
+            target_id = str(verdict.workload.session_id)
         else:
             target_id = ns.slurm_job_id or "" if session_id_arg is None else session_id_arg
         result = await adapter.terminate_session(target_id, **kwargs)
@@ -666,33 +652,38 @@ async def terminate_verified(
         logger.warning("Failed to terminate session %s: %s", ns.id, e)
         if _lifecycle(ns) or verdict.kind == "ok":
             # Saving may not have happened; a retry saves again before deleting.
-            mark_cleanup_pending(ns, save_outputs=ran)
+            await mark_cleanup_pending(session, ns, save_outputs=ran)
         return TerminationResult()
-    record_release(ns, result)
+    await record_release(session, ns, result)
     if result.provider_details.get("save_failed"):
         # The work was not saved and the pod was kept: the retry saves before it deletes.
-        mark_cleanup_pending(ns, save_outputs=True)
+        await mark_cleanup_pending(session, ns, save_outputs=True)
     return result
 
 
-def record_release(ns: NotebookSession, result: TerminationResult) -> None:
-    """Record what a terminate call released, when the adapter reports it."""
+async def record_release(session: AsyncSession, ns: NotebookSession, result: TerminationResult) -> None:
+    """Record what a terminate call released, when the adapter reports it.
+
+    A confirmed save (the adapter's ``saved``) is the only thing that clears an owed save.
+    """
     from app.adapters.models import WorkloadRelease
+    from app.services.notebook_lifecycle import record_cleanup
 
     release = result.provider_details.get("release")
     if not release:
         return
-    _set_cleanup(
-        ns,
-        WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc)),
-        saved=bool(result.provider_details.get("saved")),
-    )
+    cleanup = WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc))
+    if result.provider_details.get("saved"):
+        cleanup["save_outputs"] = False
+    await record_cleanup(session, ns, cleanup)
 
 
 async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession) -> bool:
     """Record and commit the workload this launch will create; False when the backend names none."""
     reserve = getattr(adapter, "reserve_workload", None)
-    workload = reserve(ns.id, ns.user_id, ns.session_type) if callable(reserve) else None
+    workload = (
+        reserve(ns.id, ns.user_id, ns.session_type, organization_id=ns.organization_id) if callable(reserve) else None
+    )
     if workload is None:
         return False
     cluster = await adapter.workload_cluster()

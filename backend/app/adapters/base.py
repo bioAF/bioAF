@@ -635,7 +635,9 @@ class NotebookProvider(ABC):
         """Optionally pre-load backend config at startup. No-op by default."""
         return None
 
-    def reserve_workload(self, session_id: int, user_id: int, session_type: str) -> NotebookWorkload | None:
+    def reserve_workload(
+        self, session_id: int, user_id: int, session_type: str, *, organization_id: int | None = None
+    ) -> NotebookWorkload | None:
         """The resources a launch of this session will create, named before anything is created.
 
         None when this backend does not manage notebook workloads this way (simulated, SLURM).

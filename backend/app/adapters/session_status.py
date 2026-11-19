@@ -72,7 +72,7 @@ def _transition_statement(
     *,
     organization_id: int,
     session_id: int,
-    expected_statuses: tuple[str, ...],
+    expected_statuses: tuple[str, ...] | None,
     expected_job_ref: str | None,
     status: str | None,
     access_url,
@@ -87,7 +87,7 @@ def _transition_statement(
     params: dict = {
         "id": session_id,
         "org": organization_id,
-        "expected": list(expected_statuses),
+        "expected": list(expected_statuses or ()),
         "ref": expected_job_ref,
     }
     assignments: list[str] = []
@@ -104,23 +104,42 @@ def _transition_statement(
         assignments.append("failure_reason = :reason, failure_message = :msg")
         params.update(reason=failure_reason, msg=failure_message)
     if lifecycle:
+        rest = {k: v for k, v in lifecycle.items() if k != "cleanup"}
+        merged = "COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb)"
+        params["lifecycle"] = json.dumps(rest)
+        if "cleanup" in lifecycle:
+            # An owed save survives every cleanup outcome unless the new record explicitly
+            # confirms it (save_outputs: false). The rule lives here, in the one update every
+            # writer uses, so concurrent writers cannot drop it.
+            merged = (
+                f"({merged}) || jsonb_build_object('cleanup', "
+                "(CASE WHEN provider_metadata #>> '{lifecycle,cleanup,save_outputs}' = 'true' "
+                "THEN jsonb_build_object('save_outputs', true) ELSE '{}'::jsonb END) "
+                "|| CAST(:cleanup AS jsonb))"
+            )
+            params["cleanup"] = json.dumps(lifecycle["cleanup"])
         assignments.append(
-            "provider_metadata = COALESCE(provider_metadata, '{}'::jsonb) || jsonb_build_object("
-            "'lifecycle', COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb))"
+            f"provider_metadata = COALESCE(provider_metadata, '{{}}'::jsonb) || jsonb_build_object('lifecycle', {merged})"
         )
-        params["lifecycle"] = json.dumps(lifecycle)
     if not assignments:
         return None
+    status_clause = "AND status = ANY(:expected) " if expected_statuses is not None else ""
     sql = (
         f"UPDATE compute_sessions SET {', '.join(assignments)} "
-        "WHERE id = :id AND organization_id = :org AND status = ANY(:expected) "
+        f"WHERE id = :id AND organization_id = :org {status_clause}"
         "AND compute_job_ref IS NOT DISTINCT FROM :ref"
     )
     return text(sql), params
 
 
 async def transition_in(db, **kwargs) -> bool:
-    """``transition_compute_session`` inside the caller's transaction (no commit). True if it applied."""
+    """One conditional lifecycle update in the caller's transaction (no commit). True if it applied.
+
+    Applies only while the row is in ``expected_statuses`` (None: any status) under
+    ``expected_job_ref``. ``lifecycle`` keys merge into ``provider_metadata.lifecycle`` and every
+    other metadata key is kept; a ``cleanup`` entry keeps an owed save unless it sets
+    ``save_outputs: False``.
+    """
     kwargs.setdefault("access_url", _UNSET)
     for key in ("status", "failure_reason", "failure_message", "lifecycle", "started_at"):
         kwargs.setdefault(key, None)
@@ -129,56 +148,3 @@ async def transition_in(db, **kwargs) -> bool:
         return False
     result = await db.execute(*statement)
     return bool(result.rowcount)
-
-
-async def transition_compute_session(
-    session_factory,
-    *,
-    organization_id: int | None,
-    session_id: int,
-    expected_statuses: tuple[str, ...],
-    expected_job_ref: str | None,
-    status: str | None = None,
-    access_url: str | None | object = _UNSET,
-    failure_reason: str | None = None,
-    failure_message: str | None = None,
-    lifecycle: dict | None = None,
-) -> bool:
-    """Change a session only while it is still in ``expected_statuses`` under ``expected_job_ref``.
-
-    The compare and the write are one statement, so a stop (or a relaunch under another workload)
-    that lands first always wins and this changes nothing. ``lifecycle`` keys are merged into
-    ``provider_metadata.lifecycle``; every other metadata key is preserved. True if the row changed.
-    Never raises (logged), like ``update_compute_session``.
-    """
-    if not session_factory or organization_id is None:
-        logger.warning("Session %s: no session factory or organization; not updating it", session_id)
-        return False
-    try:
-        async with session_factory() as db:
-            applied = await transition_in(
-                db,
-                organization_id=organization_id,
-                session_id=session_id,
-                expected_statuses=expected_statuses,
-                expected_job_ref=expected_job_ref,
-                status=status,
-                access_url=access_url,
-                failure_reason=failure_reason,
-                failure_message=failure_message,
-                lifecycle=lifecycle,
-            )
-            await db.commit()
-    except Exception:
-        logger.exception("Failed to update session %s in DB", session_id)
-        return False
-    if not applied:
-        logger.info(
-            "Session %s was not updated: it is no longer %s under workload %s",
-            session_id,
-            "/".join(expected_statuses),
-            expected_job_ref,
-        )
-        return False
-    logger.info("Updated session %s: status=%s lifecycle=%s", session_id, status, sorted((lifecycle or {}).keys()))
-    return True

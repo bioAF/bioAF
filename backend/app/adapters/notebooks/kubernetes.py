@@ -131,18 +131,39 @@ def require_clean_exit(output, what: str) -> None:
         raise RuntimeError(f"{what} did not succeed (exit status {status if status is not None else 'unknown'})")
 
 
-def launch_workload(session_spec: dict, namespace: str) -> NotebookWorkload:
-    """The workload a launch creates, with the same identity its ownership labels carry."""
-    session_id = session_spec.get("session_id", 0)
-    org = session_spec.get("organization_id")
+def notebook_workload(
+    session_id,
+    user_id,
+    session_type: str,
+    *,
+    organization_id: int | None = None,
+    namespace: str | None = None,
+    pod_name: str | None = None,
+    service_name: str | None = None,
+) -> NotebookWorkload:
+    """The one way a notebook workload identity is built (reservation, launch, cleanup, stop).
+
+    Names default to the launch naming rule; recorded names are passed in when they exist.
+    """
     return NotebookWorkload(
         session_id=int(session_id),
-        user_id=int(session_spec.get("user_id") or 0),
-        session_type=session_spec.get("session_type", "jupyter"),
+        user_id=int(user_id or 0),
+        session_type=session_type,
+        namespace=namespace or DEFAULT_NOTEBOOK_NAMESPACE,
+        pod_name=pod_name or notebook_pod_name(session_id),
+        service_name=service_name or notebook_service_name(session_id),
+        organization_id=int(organization_id) if organization_id is not None else None,
+    )
+
+
+def launch_workload(session_spec: dict, namespace: str) -> NotebookWorkload:
+    """The workload a launch creates, with the same identity its ownership labels carry."""
+    return notebook_workload(
+        session_spec.get("session_id", 0),
+        session_spec.get("user_id"),
+        session_spec.get("session_type", "jupyter"),
+        organization_id=session_spec.get("organization_id"),
         namespace=namespace,
-        pod_name=notebook_pod_name(session_id),
-        service_name=notebook_service_name(session_id),
-        organization_id=int(org) if org is not None else None,
     )
 
 
@@ -1019,18 +1040,13 @@ class KubernetesNotebookProvider(NotebookProvider):
             "gcs_home_prefix": gcs_home_prefix,
         }
 
-    def reserve_workload(self, session_id: int, user_id: int, session_type: str) -> NotebookWorkload | None:
+    def reserve_workload(
+        self, session_id: int, user_id: int, session_type: str, *, organization_id: int | None = None
+    ) -> NotebookWorkload | None:
         """Interactive Jupyter/RStudio sessions only: headless runs and Work Nodes have their own lifecycles."""
         if self.is_local or session_type not in INTERACTIVE_SESSION_TYPES:
             return None
-        return NotebookWorkload(
-            session_id=int(session_id),
-            user_id=int(user_id),
-            session_type=session_type,
-            namespace=DEFAULT_NOTEBOOK_NAMESPACE,
-            pod_name=notebook_pod_name(session_id),
-            service_name=notebook_service_name(session_id),
-        )
+        return notebook_workload(session_id, user_id, session_type, organization_id=organization_id)
 
     @property
     def manages_workloads(self) -> bool:
@@ -1061,14 +1077,14 @@ class KubernetesNotebookProvider(NotebookProvider):
         if not is_resource_name(service_name):
             return None, "invalid recorded identity"
         return (
-            NotebookWorkload(
-                session_id=int(ns.id),
-                user_id=int(ns.user_id),
-                session_type=ns.session_type,
-                namespace=namespace or DEFAULT_NOTEBOOK_NAMESPACE,
-                pod_name=pod_name or notebook_pod_name(ns.id),
-                service_name=service_name,
+            notebook_workload(
+                ns.id,
+                ns.user_id,
+                ns.session_type,
                 organization_id=getattr(ns, "organization_id", None),
+                namespace=namespace,
+                pod_name=pod_name,
+                service_name=service_name,
             ),
             None,
         )
@@ -1167,7 +1183,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         session_type: str = "jupyter",
         user_id: int | None = None,
         ran: bool = True,
-        organization_id: int | None = None,
+        workload: NotebookWorkload | None = None,
     ) -> dict:
         """Final git commit, sync outputs to GCS, then delete pod and service.
 
@@ -1181,17 +1197,13 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         core_client = self._get_k8s_core_client()
         pod_name_for_exec = pod_name if ran else ""
-        workload = None
-        if user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
-            workload = NotebookWorkload(
-                session_id=int(session_id),
-                user_id=int(user_id),
-                session_type=session_type,
-                namespace=namespace,
-                pod_name=pod_name,
-                service_name=notebook_service_name(session_id),
-                organization_id=organization_id,
-            )
+        if workload is not None:
+            pod_name, namespace = workload.pod_name, workload.namespace
+            pod_name_for_exec = pod_name if ran else ""
+        elif user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
+            # A caller that names the owner but not a verified workload: same builder, legacy names.
+            workload = notebook_workload(session_id, user_id, session_type, namespace=namespace, pod_name=pod_name)
+        if workload is not None:
             # Live ownership before the first command runs in the pod, not only before the delete.
             ownership = await asyncio.to_thread(pod_ownership, core_client, workload)
             if ownership == "foreign":
