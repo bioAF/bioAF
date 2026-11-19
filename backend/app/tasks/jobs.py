@@ -191,6 +191,18 @@ async def _session_monitor(session) -> None:
     await SessionMonitorService.poll_notebook_sessions(session)
 
 
+def _notebook_lifecycle() -> Iteration:
+    """Observe notebook launches and finish their cleanup (app/services/notebook_lifecycle.py)."""
+    factory = _factory()
+
+    async def iteration() -> None:
+        from app.services.notebook_lifecycle import reconcile_pass
+
+        await reconcile_pass(factory)
+
+    return iteration
+
+
 async def _work_node_heartbeat(session) -> None:
     from app.services.work_node_service import WorkNodeService
 
@@ -432,6 +444,7 @@ PERIODIC_JOBS: list[PeriodicJob] = [
     _job(
         "idle-session-check", _with_session(_idle_session_check), 5 * MINUTE, 5 * MINUTE, "Idle session check error: %s"
     ),
+    _job("notebook-lifecycle", _notebook_lifecycle, MINUTE, MINUTE, "Notebook lifecycle pass error: %s"),
     _job("quota-reset", _with_session(_quota_reset), HOUR, HOUR, "Quota reset error: %s"),
     _job("pipeline-monitor", _with_session(_pipeline_monitor), 30, 30, "Pipeline monitor error: %s"),
     _job("plot-archive-watcher", _plot_archive_watcher, MINUTE, MINUTE, "Plot archive watcher error: %s"),

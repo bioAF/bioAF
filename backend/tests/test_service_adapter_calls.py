@@ -274,6 +274,10 @@ async def test_stop_terminates_the_session_through_the_notebook_adapter(session,
             "gcs_home_prefix": "gs://bioaf-working/notebooks/7/",
             "working_bucket": "bioaf-working",
             "session_type": "jupyter",
+            # The owner, so cleanup can verify the pod's labels; ran, so a session that never
+            # started is not exec'd into (notebook launch recovery).
+            "user_id": comp_bio_user.id,
+            "ran": True,
         }
     ]
     assert stopped.status == "stopped"
@@ -315,6 +319,8 @@ async def test_a_session_idle_past_the_timeout_is_stopped_and_terminated(session
             "pod_name": "bioaf-notebook-7",
             "namespace": "lab-notebooks",
             "gcs_home_prefix": "gs://bioaf-working/notebooks/7/",
+            "session_type": "jupyter",
+            "user_id": comp_bio_user.id,
         }
     ]
 

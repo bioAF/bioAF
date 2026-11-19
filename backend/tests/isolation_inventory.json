@@ -2355,9 +2355,14 @@
    "route": "committed_reset_candidate"
   },
   "test_notebook_session_sync.py": {
-   "category": "no_database",
-   "evidence": [],
-   "route": "none"
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "async_sessionmaker",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_notebook_sessions_v1.py": {
    "category": "real_commit",

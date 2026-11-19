@@ -135,9 +135,13 @@ class NotebookService:
         session.add(notebook_session)
         await session.flush()
 
+        # Name the workload and commit it before any provider call, so a crash between creating
+        # resources and saving the result still leaves a record of what may exist.
+        notebook_adapter = get_notebook_adapter()
+        reserved = await _reserve_workload(session, notebook_adapter, notebook_session)
+
         # Launch via the notebook adapter (BAL)
         try:
-            notebook_adapter = get_notebook_adapter()
             spec: dict = {
                 "session_type": session_type,
                 "resource_profile": resource_profile,
@@ -218,14 +222,25 @@ class NotebookService:
             notebook_session.k8s_pod_name = result.provider_details.get("pod_name")
             notebook_session.k8s_namespace = result.provider_details.get("namespace")
             # Backend-neutral handle + provider detail (BAL Phase 4); dual-written.
+            if reserved:
+                notebook_session.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
+                await _complete_reserved_launch(session, notebook_session, result)
+                _add_input_files(session, notebook_session, input_file_ids)
+                return await _finish_launch_record(
+                    session, notebook_session, user_id, session_type, resource_profile, experiment_id, project_id
+                )
+
             notebook_session.compute_job_ref = result.provider_details.get("pod_name")
             notebook_session.provider_metadata = {
-                k: v
-                for k, v in {
-                    "pod_name": result.provider_details.get("pod_name"),
-                    "namespace": result.provider_details.get("namespace"),
-                }.items()
-                if v is not None
+                **(notebook_session.provider_metadata or {}),
+                **{
+                    k: v
+                    for k, v in {
+                        "pod_name": result.provider_details.get("pod_name"),
+                        "namespace": result.provider_details.get("namespace"),
+                    }.items()
+                    if v is not None
+                },
             }
             notebook_session.access_url = result.access_url
             notebook_session.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
@@ -238,29 +253,34 @@ class NotebookService:
                 notebook_session.status = "starting"
 
             # Create NotebookSessionFile input rows
-            if input_file_ids:
-                from app.models.notebook_session_file import NotebookSessionFile
-
-                for fid in input_file_ids:
-                    session.add(
-                        NotebookSessionFile(
-                            session_id=notebook_session.id,
-                            file_id=fid,
-                            access_type="input",
-                        )
-                    )
+            _add_input_files(session, notebook_session, input_file_ids)
 
         except DomainError as e:
             from app.adapters.failure_classification import classify_gce_vm_failure
 
-            notebook_session.status = "failed"
             reason, message = classify_gce_vm_failure(str(e))
+            if reserved:
+                # Recorded (and committed) before the error propagates: the reservation is already visible.
+                await _fail_reserved_launch(session, notebook_session, reason, message)
+                await session.commit()
+                raise
+            notebook_session.status = "failed"
             notebook_session.failure_reason = reason
             notebook_session.failure_message = message
             raise
         except Exception as e:
             from app.adapters.failure_classification import classify_gce_vm_failure
 
+            if reserved:
+                reason, message = classify_gce_vm_failure(str(e))
+                logger.error("Failed to launch notebook session %d: %s", notebook_session.id, e)
+                await _fail_reserved_launch(session, notebook_session, reason, message)
+                if "not found or not accessible" in str(e):
+                    await session.commit()
+                    raise
+                return await _finish_launch_record(
+                    session, notebook_session, user_id, session_type, resource_profile, experiment_id, project_id
+                )
             notebook_session.status = "failed"
             reason, message = classify_gce_vm_failure(str(e))
             notebook_session.failure_reason = reason
@@ -269,23 +289,9 @@ class NotebookService:
             if "not found or not accessible" in str(e):
                 raise
 
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="notebook_session",
-            entity_id=notebook_session.id,
-            action="launch",
-            details={
-                "session_type": session_type,
-                "resource_profile": resource_profile,
-                "experiment_id": experiment_id,
-                "project_id": project_id,
-                "status": notebook_session.status,
-            },
+        return await _finish_launch_record(
+            session, notebook_session, user_id, session_type, resource_profile, experiment_id, project_id
         )
-        return notebook_session
 
     @staticmethod
     async def stop_session(session: AsyncSession, session_id: int, user_id: int) -> NotebookSession:
@@ -294,7 +300,35 @@ class NotebookService:
             raise NotFoundError("Session not found")
 
         old_status = notebook_session.status
+        await NotebookService.terminate_and_save_outputs(
+            session, notebook_session, ran=old_status in ("running", "idle")
+        )
 
+        notebook_session.status = "stopped"
+        notebook_session.stopped_at = datetime.now(timezone.utc)
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="notebook_session",
+            entity_id=notebook_session.id,
+            action="stop",
+            details={"session_type": notebook_session.session_type},
+            previous_value={"status": old_status},
+        )
+        return notebook_session
+
+    @staticmethod
+    async def terminate_and_save_outputs(
+        session: AsyncSession, notebook_session: NotebookSession, *, ran: bool, adapter=None
+    ) -> TerminationResult:
+        """Save the session's work (when it ran), register its outputs, and release its resources.
+
+        Shared by stop and by the periodic pass for a session that failed while running, so
+        output saving is never bypassed by cleanup. Records cleanup progress; the caller sets the
+        session's status.
+        """
         # Look up working bucket for output sync
         working_bucket = ""
         working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
@@ -303,21 +337,15 @@ class NotebookService:
             if val and val != "null":
                 working_bucket = val
 
-        # Terminate via the notebook adapter
-        terminate_result = TerminationResult()
-        if notebook_session.slurm_job_id or notebook_session.compute_job_ref:
-            try:
-                notebook_adapter = get_notebook_adapter()
-                terminate_result = await notebook_adapter.terminate_session(
-                    notebook_session.slurm_job_id or "",
-                    pod_name=notebook_session.compute_job_ref or "",
-                    namespace=notebook_session.provider_namespace or "bioaf-notebooks",
-                    gcs_home_prefix=notebook_session.gcs_home_prefix or "",
-                    working_bucket=working_bucket,
-                    session_type=notebook_session.session_type,
-                )
-            except Exception as e:
-                logger.warning("Failed to terminate session %s: %s", notebook_session.slurm_job_id, e)
+        # Terminate via the notebook adapter, after the shared identity and cluster checks
+        terminate_result = await terminate_verified(
+            session,
+            notebook_session,
+            adapter or get_notebook_adapter(),
+            ran=ran,
+            working_bucket=working_bucket,
+            ran_flag=True,
+        )
 
         # Register output files (ADR-040)
         output_files = terminate_result.output_files
@@ -338,7 +366,7 @@ class NotebookService:
                     ],
                 )
             except Exception as e:
-                logger.warning("Output registration failed for session %d: %s", session_id, e)
+                logger.warning("Output registration failed for session %d: %s", notebook_session.id, e)
 
         gcs_output_prefix = terminate_result.output_prefix
         if gcs_output_prefix:
@@ -360,22 +388,9 @@ class NotebookService:
                     )
                     notebook_session.gcs_output_prefix = final_prefix
             except Exception as e:
-                logger.warning("Failed to move outputs to results bucket for session %d: %s", session_id, e)
+                logger.warning("Failed to move outputs to results bucket for session %d: %s", notebook_session.id, e)
 
-        notebook_session.status = "stopped"
-        notebook_session.stopped_at = datetime.now(timezone.utc)
-        await session.flush()
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="notebook_session",
-            entity_id=notebook_session.id,
-            action="stop",
-            details={"session_type": notebook_session.session_type},
-            previous_value={"status": old_status},
-        )
-        return notebook_session
+        return terminate_result
 
     @staticmethod
     async def list_sessions(
@@ -484,17 +499,7 @@ class NotebookService:
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now
-                        if ns.slurm_job_id or ns.compute_job_ref:
-                            try:
-                                notebook_adapter = get_notebook_adapter()
-                                await notebook_adapter.terminate_session(
-                                    ns.slurm_job_id or "",
-                                    pod_name=ns.compute_job_ref or "",
-                                    namespace=ns.provider_namespace or "bioaf-notebooks",
-                                    gcs_home_prefix=ns.gcs_home_prefix or "",
-                                )
-                            except Exception as e:
-                                logger.warning("Failed to terminate idle session: %s", e)
+                        await terminate_verified(session, ns, get_notebook_adapter(), ran=True)
 
             await session.flush()
             await session.commit()
@@ -502,6 +507,205 @@ class NotebookService:
 
         except Exception as e:
             logger.error("Idle session check failed: %s", e)
+
+
+def _lifecycle(ns: NotebookSession) -> dict:
+    return dict((ns.provider_metadata or {}).get("lifecycle") or {})
+
+
+def _add_input_files(session: AsyncSession, ns: NotebookSession, input_file_ids: list[int] | None) -> None:
+    if not input_file_ids:
+        return
+    from app.models.notebook_session_file import NotebookSessionFile
+
+    for fid in input_file_ids:
+        session.add(NotebookSessionFile(session_id=ns.id, file_id=fid, access_type="input"))
+
+
+async def _finish_launch_record(
+    session: AsyncSession, ns: NotebookSession, user_id, session_type, resource_profile, experiment_id, project_id
+) -> NotebookSession:
+    await session.flush()
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="notebook_session",
+        entity_id=ns.id,
+        action="launch",
+        details={
+            "session_type": session_type,
+            "resource_profile": resource_profile,
+            "experiment_id": experiment_id,
+            "project_id": project_id,
+            "status": ns.status,
+        },
+    )
+    return ns
+
+
+async def _settle_reserved_launch(session: AsyncSession, ns: NotebookSession, **change) -> None:
+    """Apply a reserved launch's outcome only while it is still pending under its workload.
+
+    If a stop (or anything else) finished the session meanwhile, its state stands; whatever the
+    launch may have created after that is queued for cleanup rather than left behind a finished
+    record. The in-memory row is reloaded so the caller reports what is stored.
+    """
+    from app.adapters.session_status import transition_in
+
+    target = {"organization_id": ns.organization_id, "session_id": ns.id, "expected_job_ref": ns.compute_job_ref}
+    await session.flush()
+    if not await transition_in(session, expected_statuses=("pending",), **change, **target):
+        logger.warning("Notebook session %s finished while launching; queueing its resources for cleanup", ns.id)
+        await transition_in(
+            session,
+            expected_statuses=("stopped", "failed"),
+            lifecycle={"cleanup": {"state": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}},
+            **target,
+        )
+    await session.refresh(ns)
+
+
+async def _complete_reserved_launch(session: AsyncSession, ns: NotebookSession, result) -> None:
+    status = {"error": "failed", "running": "running"}.get(result.status, "starting")
+    change: dict = {"status": status, "access_url": result.access_url}
+    if status == "failed":
+        change.update(
+            failure_reason="unknown",
+            failure_message="The session failed to start.",
+            lifecycle={"cleanup": {"state": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    await _settle_reserved_launch(session, ns, **change)
+
+
+async def _fail_reserved_launch(session: AsyncSession, ns: NotebookSession, reason: str, message: str) -> None:
+    # Resources may exist even though the call failed (accepted, then the response was lost).
+    await _settle_reserved_launch(
+        session,
+        ns,
+        status="failed",
+        failure_reason=reason,
+        failure_message=message,
+        lifecycle={"cleanup": {"state": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+
+
+async def mark_cleanup_pending(session: AsyncSession, ns: NotebookSession, *, save_outputs: bool = False) -> None:
+    from app.services.notebook_lifecycle import record_cleanup
+
+    await record_cleanup(session, ns, {"state": "pending", **({"save_outputs": True} if save_outputs else {})})
+
+
+async def terminate_verified(
+    session: AsyncSession,
+    ns: NotebookSession,
+    adapter,
+    *,
+    ran: bool,
+    working_bucket: str | None = None,
+    ran_flag: bool = False,
+    session_id_arg: str | None = None,
+) -> TerminationResult:
+    """The one way any stop terminates a session: verify, then exec/save/delete, then record.
+
+    Checks the shared recorded identity and the recorded cluster first (``verify_workload``); a
+    conflict or a changed cluster blocks it, an unconfirmable cluster defers it, and in either
+    case nothing is exec'd into or deleted. Cleanup progress is recorded through the one cleanup
+    write (``record_cleanup``), which keeps an owed save until a save is confirmed.
+    """
+    from app.services.notebook_lifecycle import record_cleanup, verify_workload
+
+    # A persisted obligation to save wins over any caller's inference from the session's status:
+    # once a save is owed, every retry (Stop, idle stop, the periodic pass) saves before deleting.
+    if (_lifecycle(ns).get("cleanup") or {}).get("save_outputs"):
+        ran = True
+    verdict = await verify_workload(adapter, ns)
+    if verdict.kind == "unmanaged" and not (ns.slurm_job_id or ns.compute_job_ref):
+        return TerminationResult()  # as before: nothing recorded to terminate
+    if verdict.kind in ("blocked", "deferred"):
+        cleanup = dict(verdict.cleanup or {})
+        if verdict.kind == "deferred" and ran:
+            cleanup["save_outputs"] = True
+        await record_cleanup(session, ns, cleanup)
+        logger.warning("Session %s was not terminated now: %s", ns.id, cleanup.get("detail") or "deferred")
+        return TerminationResult()
+
+    kwargs: dict = {
+        "pod_name": verdict.workload.pod_name if verdict.workload else (ns.compute_job_ref or ""),
+        "namespace": verdict.workload.namespace if verdict.workload else (ns.provider_namespace or "bioaf-notebooks"),
+        "gcs_home_prefix": ns.gcs_home_prefix or "",
+    }
+    if working_bucket is not None:
+        kwargs["working_bucket"] = working_bucket
+    kwargs["session_type"] = ns.session_type
+    kwargs["user_id"] = ns.user_id
+    if ran_flag or verdict.workload is not None:
+        kwargs["ran"] = ran
+    if verdict.workload is not None:
+        kwargs["workload"] = verdict.workload  # the verified identity, used as is by the adapter
+    try:
+        if verdict.workload is not None:
+            target_id = str(verdict.workload.session_id)
+        else:
+            target_id = ns.slurm_job_id or "" if session_id_arg is None else session_id_arg
+        result = await adapter.terminate_session(target_id, **kwargs)
+    except Exception as e:
+        logger.warning("Failed to terminate session %s: %s", ns.id, e)
+        if _lifecycle(ns) or verdict.kind == "ok":
+            # Saving may not have happened; a retry saves again before deleting.
+            await mark_cleanup_pending(session, ns, save_outputs=ran)
+        return TerminationResult()
+    await record_release(session, ns, result)
+    if result.provider_details.get("save_failed"):
+        # The work was not saved and the pod was kept: the retry saves before it deletes.
+        await mark_cleanup_pending(session, ns, save_outputs=True)
+    return result
+
+
+async def record_release(session: AsyncSession, ns: NotebookSession, result: TerminationResult) -> None:
+    """Record what a terminate call released, when the adapter reports it.
+
+    A confirmed save (the adapter's ``saved``) is the only thing that clears an owed save.
+    """
+    from app.adapters.models import WorkloadRelease
+    from app.services.notebook_lifecycle import record_cleanup
+
+    release = result.provider_details.get("release")
+    if not release:
+        return
+    cleanup = WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc))
+    if result.provider_details.get("saved"):
+        cleanup["save_outputs"] = False
+    await record_cleanup(session, ns, cleanup)
+
+
+async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession) -> bool:
+    """Record and commit the workload this launch will create; False when the backend names none."""
+    reserve = getattr(adapter, "reserve_workload", None)
+    workload = (
+        reserve(ns.id, ns.user_id, ns.session_type, organization_id=ns.organization_id) if callable(reserve) else None
+    )
+    if workload is None:
+        return False
+    cluster = await adapter.workload_cluster()
+    if not cluster:
+        # Cleanup must never act on a cluster other than the one a session runs on; without a
+        # complete identity nothing is created.
+        raise ConflictError(
+            "bioAF could not confirm which cluster this session would run on, so it was not started. "
+            "Ask an administrator to check the compute stack."
+        )
+    ns.compute_job_ref = workload.pod_name
+    ns.k8s_pod_name = workload.pod_name
+    ns.k8s_namespace = workload.namespace
+    ns.provider_metadata = {
+        **(ns.provider_metadata or {}),
+        "pod_name": workload.pod_name,
+        "namespace": workload.namespace,
+        "service_name": workload.service_name,
+        "lifecycle": {"reserved_at": datetime.now(timezone.utc).isoformat(), "cluster": cluster},
+    }
+    await session.commit()
+    return True
 
 
 def _slugify(name: str) -> str:

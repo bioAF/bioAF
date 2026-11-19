@@ -399,6 +399,58 @@ class SessionStatus(BaseModel):
     provider_details: dict = Field(default_factory=dict)
 
 
+class NotebookWorkload(BaseModel):
+    """The provider resources one interactive notebook session owns, as recorded by bioAF.
+
+    Every lifecycle action (readiness, cleanup) addresses exactly these names and checks the
+    live objects still carry this session's identity before acting on them.
+    """
+
+    model_config = {"frozen": True}
+
+    session_id: int
+    user_id: int
+    session_type: str
+    namespace: str
+    pod_name: str
+    service_name: str
+    # Checked against the live objects' organization label when they carry one (newer launches).
+    organization_id: int | None = None
+
+
+ReleaseState = Literal["absent", "terminating", "failed", "blocked"]
+
+
+class ResourceRelease(BaseModel):
+    """One resource's release outcome.
+
+    ``absent``: confirmed gone. ``terminating``: deletion accepted, not yet gone. ``failed``: not
+    released this time (read or delete error); retry. ``blocked``: the live object belongs to
+    something else, so it is never deleted automatically.
+    """
+
+    state: ReleaseState
+    detail: str | None = None
+
+
+class WorkloadRelease(BaseModel):
+    pod: ResourceRelease
+    service: ResourceRelease
+
+    @property
+    def complete(self) -> bool:
+        return self.pod.state == "absent" and self.service.state == "absent"
+
+    @property
+    def blocked(self) -> bool:
+        return "blocked" in (self.pod.state, self.service.state)
+
+    def as_cleanup(self, at: datetime) -> dict:
+        """The ``provider_metadata.lifecycle.cleanup`` record for this outcome."""
+        state = "complete" if self.complete else "blocked" if self.blocked else "pending"
+        return {"state": state, "pod": self.pod.state, "service": self.service.state, "updated_at": at.isoformat()}
+
+
 # --- Work-node VMs -----------------------------------------------------------
 
 

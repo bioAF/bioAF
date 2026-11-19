@@ -150,7 +150,11 @@ async def test_notebook_stop_captures_every_script_once_as_data(sh, tmp_path, st
         await adapter._k8s_terminate_session(
             session_id=42, pod_name="p", working_bucket="w", gcs_home_prefix=storage.build_uri("w", "notebooks/7/")
         )
-    sidecar = [c.kwargs["command"][2] for c in stream.call_args_list if c.kwargs.get("container") == "gcs-sync"]
+    sidecar = [
+        c.kwargs["command"][2]
+        for c in stream.call_args_list
+        if c.kwargs.get("container") == "gcs-sync" and "notebooks/7/" not in c.kwargs["command"][2]
+    ]
     outputs_shell, scripts_shell = sidecar[0], sidecar[1]
     sh.run(_mapped(outputs_shell, tmp_path, "/outputs"))
     sh.run(_mapped(scripts_shell, tmp_path, HOME_DIR))

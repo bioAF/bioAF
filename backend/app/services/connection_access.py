@@ -16,7 +16,12 @@ guessed). A notebook's ``slurm_job_id`` holds its canonical session id, not a po
 
 from __future__ import annotations
 
-from app.adapters.kubernetes.exec_access import is_namespace, is_resource_name
+from app.adapters.kubernetes.exec_access import (
+    agreed_value,
+    is_resource_name,
+    recorded_namespace,
+    recorded_notebook_identity,
+)
 from app.adapters.models import ConnectionTarget
 from app.exceptions import ConnectionTargetInvalidError, ConnectionUnavailableError
 from app.models.notebook_session import NotebookSession
@@ -27,28 +32,9 @@ NOTEBOOK_STATES = ("running", "idle")
 NOTEBOOK_TYPES = ("jupyter", "rstudio")
 
 
-def _agreed(values: list, what: str, *, valid) -> str | None:
-    """The single value the populated fields agree on, or None when none is populated."""
-    present = []
-    for value in values:
-        if value is None or value == "":
-            continue
-        if not isinstance(value, str) or not valid(value):
-            raise ConnectionTargetInvalidError(
-                f"The recorded {what} for this analysis is not a valid Kubernetes name.", reason="invalid_identity"
-            )
-        present.append(value)
-    if len(set(present)) > 1:
-        raise ConnectionTargetInvalidError(
-            f"This analysis has conflicting recorded {what} values, so bioAF cannot tell which workload it is.",
-            reason="conflicting_identity",
-        )
-    return present[0] if present else None
-
-
-def _namespace(record) -> str | None:
-    meta = record.provider_metadata or {}
-    return _agreed([meta.get("namespace"), record.k8s_namespace], "namespace", valid=is_namespace)
+# One rule set for every reader of a recorded identity (terminal access, stop, cleanup).
+_agreed = agreed_value
+_namespace = recorded_namespace
 
 
 def pipeline_target(run: PipelineRun) -> ConnectionTarget:
@@ -83,13 +69,12 @@ def notebook_target(nb: NotebookSession) -> ConnectionTarget:
             f"This session is in the '{nb.status}' state; terminal instructions need it to be running or idle.",
             reason="not_running",
         )
-    meta = nb.provider_metadata or {}
-    pod = _agreed([nb.compute_job_ref, meta.get("pod_name"), nb.k8s_pod_name], "pod", valid=is_resource_name)
+    pod, namespace = recorded_notebook_identity(nb)
     return ConnectionTarget(
         kind="notebook_session",
         record_id=nb.id,
         provider_ref=pod,
-        namespace=_namespace(nb),
+        namespace=namespace,
         user_id=nb.user_id,
         session_type=nb.session_type,
     )

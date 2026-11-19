@@ -179,6 +179,7 @@ TIMINGS = {
     "session-monitor": (60, 60),
     "work-node-heartbeat": (60, 60),
     "idle-session-check": (300, 300),
+    "notebook-lifecycle": (60, 60),
     "quota-reset": (3600, 3600),
     "storage-stats-refresh": (3600, 3600),
     "backup-health-check": (3600, 3600),
@@ -199,6 +200,7 @@ TIMINGS = {
 MESSAGES = {
     "job-status-sync": "Job status sync error: %s",
     "idle-session-check": "Idle session check error: %s",
+    "notebook-lifecycle": "Notebook lifecycle pass error: %s",
     "quota-reset": "Quota reset error: %s",
     "pipeline-monitor": "Pipeline monitor error: %s",
     "plot-archive-watcher": "Plot archive watcher error: %s",
@@ -232,7 +234,7 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    assert len(jobs.PERIODIC_JOBS) == 28
+    assert len(jobs.PERIODIC_JOBS) == 29
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):

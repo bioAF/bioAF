@@ -108,8 +108,9 @@ async def test_startup_runs_its_steps_in_order_and_starts_owned_workers(startup)
             "glossary_orphans",
         ]
         roles = owner.roles()
-        # 31 with the checksum verification worker (01 webhooks plan, 01C.2).
-        assert len(roles) == 31
+        # 31 with the checksum verification worker (01 webhooks plan, 01C.2); 32 with the notebook
+        # lifecycle pass (notebook launch recovery).
+        assert len(roles) == 32
         assert {
             "pipeline-monitor",
             "pubsub-listener",

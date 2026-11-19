@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import Callable
 import logging
 import posixpath
+import shlex
 import uuid
 from datetime import datetime, timezone
 
@@ -30,13 +31,15 @@ from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
     ConnectionDescription,
     ConnectionTarget,
+    NotebookWorkload,
+    ResourceRelease,
     SessionInfo,
     SessionStatus,
     StoredObject,
     TerminationResult,
+    WorkloadRelease,
     to_service_state,
 )
-from app import runtime
 
 logger = logging.getLogger("bioaf.adapters.notebooks.k8s")
 
@@ -74,7 +77,13 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
             for o in d.get("output_files", [])
         ],
         output_prefix=d.get("gcs_output_prefix", ""),
-        provider_details={"session_id": d.get("session_id"), "stopped_at": d.get("stopped_at")},
+        provider_details={
+            "session_id": d.get("session_id"),
+            "stopped_at": d.get("stopped_at"),
+            **({"release": d["release"]} if d.get("release") else {}),
+            **({"save_failed": True} if d.get("save_failed") else {}),
+            **({"saved": True} if d.get("saved") else {}),
+        },
     )
 
 
@@ -89,7 +98,97 @@ def notebook_pod_name(session_id) -> str:
     return f"bioaf-notebook-{session_id}"
 
 
+from app.adapters.notebooks.readiness import INTERACTIVE_SESSION_TYPES  # noqa: E402
+
+
+def _config_text(value) -> str:
+    text_value = value.strip() if isinstance(value, str) else ""
+    return "" if text_value == "null" else text_value
+
+
+# The Kubernetes exec client returns captured output only, never the remote exit code, so a save
+# command reports its own status on a final line and is trusted only when that line says 0.
+EXIT_MARKER = "BIOAF_EXIT_STATUS="
+
+
+def with_exit_status(command: list[str]) -> list[str]:
+    """``command`` run in a subshell, followed by a line carrying its exit status."""
+    import shlex
+
+    if len(command) == 3 and command[:2] == ["/bin/sh", "-c"]:
+        script = command[2]
+    else:
+        script = shlex.join(command)
+    return ["/bin/sh", "-c", f'( {script} ); echo "{EXIT_MARKER}$?"']
+
+
+def require_clean_exit(output, what: str) -> None:
+    """Raise unless ``output`` ends with this command's own zero exit status."""
+    status = None
+    for line in str(output or "").splitlines():
+        if line.startswith(EXIT_MARKER):
+            status = line[len(EXIT_MARKER) :].strip()
+    if status != "0":
+        raise RuntimeError(f"{what} did not succeed (exit status {status if status is not None else 'unknown'})")
+
+
+def notebook_workload(
+    session_id,
+    user_id,
+    session_type: str,
+    *,
+    organization_id: int | None = None,
+    namespace: str | None = None,
+    pod_name: str | None = None,
+    service_name: str | None = None,
+) -> NotebookWorkload:
+    """The one way a notebook workload identity is built (reservation, launch, cleanup, stop).
+
+    Names default to the launch naming rule; recorded names are passed in when they exist.
+    """
+    return NotebookWorkload(
+        session_id=int(session_id),
+        user_id=int(user_id or 0),
+        session_type=session_type,
+        namespace=namespace or DEFAULT_NOTEBOOK_NAMESPACE,
+        pod_name=pod_name or notebook_pod_name(session_id),
+        service_name=service_name or notebook_service_name(session_id),
+        organization_id=int(organization_id) if organization_id is not None else None,
+    )
+
+
+def launch_workload(session_spec: dict, namespace: str) -> NotebookWorkload:
+    """The workload a launch creates, with the same identity its ownership labels carry."""
+    return notebook_workload(
+        session_spec.get("session_id", 0),
+        session_spec.get("user_id"),
+        session_spec.get("session_type", "jupyter"),
+        organization_id=session_spec.get("organization_id"),
+        namespace=namespace,
+    )
+
+
+def ownership_labels(session_spec: dict) -> dict[str, str]:
+    """Labels every resource of a session carries, so its owner can be verified before any delete."""
+    labels = {
+        "bioaf.io/managed": "true",
+        "bioaf.io/session": str(session_spec.get("session_id", 0)),
+        "bioaf.io/user": str(session_spec.get("user_id", "")),
+        "bioaf.io/type": session_spec.get("session_type", "jupyter"),
+    }
+    if session_spec.get("organization_id") is not None:
+        labels["bioaf.io/organization"] = str(session_spec["organization_id"])
+    return labels
+
+
+def notebook_service_name(session_id) -> str:
+    """The LoadBalancer Service name launch gives an interactive session."""
+    return f"bioaf-notebook-svc-{session_id}"
+
+
 HOME_DIR = "/home/jovyan"
+# The jupyter image's notebook user (jovyan) and group (users).
+JUPYTER_UID_GID = "1000:100"
 
 
 class KubernetesNotebookProvider(NotebookProvider):
@@ -648,6 +747,17 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         # Build the home stage-in init container (CopyStager sync seam)
         sync_in_cmd = storage_adapter.sync_in_command(gcs_home_prefix, home_dir)
+        if session_type == "jupyter" and len(sync_in_cmd) == 3 and sync_in_cmd[:2] == ["/bin/sh", "-c"]:
+            # The init container restores the saved home as root, but JupyterLab runs as jovyan
+            # (uid 1000, gid 100) and must write under it: hand it over, and drop the previous
+            # server's runtime files (connection files valid only for a server that has exited).
+            # RStudio runs as root and chowns its own home at startup.
+            runtime_dir = f"{home_dir}/.local/share/jupyter/runtime"
+            sync_in_cmd = [
+                "/bin/sh",
+                "-c",
+                f"{sync_in_cmd[2]}; rm -rf {shell_word(runtime_dir)}; chown -R {JUPYTER_UID_GID} {shell_word(home_dir)}",
+            ]
         init_container = {
             "name": "gcs-sync-in",
             "image": staging_image,
@@ -833,9 +943,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             "name": pod_name,
             "namespace": namespace,
             "labels": {
-                "bioaf.io/session": str(session_id),
-                "bioaf.io/user": str(user_id),
-                "bioaf.io/type": session_type,
+                **ownership_labels(session_spec),
                 "bioaf.io/pool": node_pool,
             },
         }
@@ -888,7 +996,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         # the chpasswd command embedded in pod_manifest into pod_name, which
         # then trips py/clear-text-logging at every subsequent log call.
         pod_name = notebook_pod_name(session_id)
-        service_name = f"bioaf-notebook-svc-{session_id}"
+        service_name = notebook_service_name(session_id)
 
         session_type = session_spec.get("session_type", "jupyter")
         if session_type == "jupyter":
@@ -911,9 +1019,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "metadata": {
                     "name": service_name,
                     "namespace": namespace,
-                    "labels": {
-                        "bioaf.io/session": str(session_id),
-                    },
+                    "labels": ownership_labels(session_spec),
                 },
                 "spec": {
                     "selector": {"bioaf.io/session": str(session_id)},
@@ -927,22 +1033,17 @@ class KubernetesNotebookProvider(NotebookProvider):
                     "type": "LoadBalancer",
                 },
             }
-            core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
+            try:
+                core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
+            except Exception:
+                # The pod was accepted; release it rather than leave it holding a node.
+                logger.exception("Creating service %s failed; releasing pod %s", service_name, pod_name)
+                await self.release_session_resources(launch_workload(session_spec, namespace))
+                raise
             logger.info("Created service %s in %s", service_name, namespace)
 
-            # Launch background task to poll for pod readiness and LB IP,
-            # then update the DB session record once both are available.
-            runtime.spawn(
-                self._poll_session_ready(
-                    session_id,
-                    pod_name,
-                    service_name,
-                    namespace,
-                    container_port,
-                    organization_id=session_spec.get("organization_id"),
-                ),
-                role="notebook-readiness",
-            )
+            # Readiness is observed by the periodic notebook pass and the session list
+            # (app.services.notebook_lifecycle), not by a task tied to this process.
 
         return {
             "session_id": session_id,
@@ -953,122 +1054,117 @@ class KubernetesNotebookProvider(NotebookProvider):
             "gcs_home_prefix": gcs_home_prefix,
         }
 
-    async def _poll_session_ready(
-        self,
-        session_id: int,
-        pod_name: str,
-        service_name: str,
-        namespace: str,
-        container_port: int,
-        *,
-        organization_id: int | None = None,
-    ) -> None:
-        """Background: poll for pod readiness and LB IP, then update the DB."""
+    def reserve_workload(
+        self, session_id: int, user_id: int, session_type: str, *, organization_id: int | None = None
+    ) -> NotebookWorkload | None:
+        """Interactive Jupyter/RStudio sessions only: headless runs and Work Nodes have their own lifecycles."""
+        if self.is_local or session_type not in INTERACTIVE_SESSION_TYPES:
+            return None
+        return notebook_workload(session_id, user_id, session_type, organization_id=organization_id)
+
+    @property
+    def manages_workloads(self) -> bool:
+        return not self.is_local
+
+    def resolve_workload(self, ns) -> tuple[NotebookWorkload | None, str | None]:
+        """The workload a recorded interactive session owns, or (None, why not).
+
+        Uses the shared recorded-identity rules (``exec_access.recorded_notebook_identity``):
+        conflicting or invalid recorded values are refused, never resolved by precedence. Only
+        when no pod is recorded at all does the launch naming rule supply one; ownership is then
+        still verified against the live object's labels before anything is deleted.
+        """
+        from app.adapters.kubernetes.exec_access import is_resource_name, recorded_notebook_identity
+        from app.exceptions import ConnectionTargetInvalidError
+
+        if self.is_local or ns.session_type not in INTERACTIVE_SESSION_TYPES:
+            return None, "not a managed interactive session"
         try:
-            core_client = self._get_k8s_core_client()
-
-            # Wait for pod readiness (up to 5 minutes)
-            pod_ready = False
-            for _ in range(60):
-                try:
-                    pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
-                    if pod.status.phase == "Running":
-                        conditions = pod.status.conditions or []
-                        if any(c.type == "Ready" and c.status == "True" for c in conditions):
-                            pod_ready = True
-                            break
-                    if pod.status.phase in ("Failed", "Unknown"):
-                        logger.error("Pod %s entered %s phase", pod_name, pod.status.phase)
-                        reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                        await self._update_session_in_db(
-                            organization_id,
-                            session_id,
-                            status="failed",
-                            access_url=None,
-                            failure_reason=reason,
-                            failure_message=message,
-                        )
-                        return
-                except Exception:
-                    pass
-                await asyncio.sleep(5)
-
-            if not pod_ready:
-                logger.error("Pod %s not ready after 5 min", pod_name)
-                reason, message = await self._classify_pod_failure_from_api(core_client, pod_name, namespace)
-                await self._update_session_in_db(
-                    organization_id,
-                    session_id,
-                    status="failed",
-                    access_url=None,
-                    failure_reason=reason,
-                    failure_message=message,
-                )
-                return
-
-            # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
-            # lookup is shared with the status read path via _resolve_service_url
-            # (raw httpx, since the python client returns a stale ingress: None).
-            # Keep the auth pre-check here so a misconfigured client fails the
-            # background task loudly rather than silently spinning.
-            api_client = self._get_api_client()
-            if not api_client_auth_header(api_client):
-                raise RuntimeError(
-                    "K8s ApiClient has no Authorization header; _build_out_of_cluster_client did not set one."
-                )
-
-            access_url = None
-            for attempt in range(36):
-                access_url = self._resolve_service_url(service_name, namespace, container_port)
-                if access_url:
-                    logger.info("External URL for session %s: %s", session_id, access_url)
-                    break
-                await asyncio.sleep(5)
-
-            if not access_url:
-                logger.warning(
-                    "LoadBalancer IP not ready for %s after 3 min",
-                    service_name,
-                )
-
-            await self._update_session_in_db(organization_id, session_id, status="running", access_url=access_url)
-
-        except Exception as e:
-            from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
-
-            logger.exception("Background poll failed for session %s", session_id)
-            await self._update_session_in_db(
-                organization_id,
-                session_id,
-                status="failed",
-                access_url=None,
-                failure_reason=FAILURE_REASON_UNKNOWN,
-                failure_message=f"Background poll raised: {e}",
+            pod_name, namespace = recorded_notebook_identity(ns)
+        except ConnectionTargetInvalidError as exc:
+            detail = (
+                "conflicting recorded identity" if exc.reason == "conflicting_identity" else "invalid recorded identity"
             )
+            logger.warning("Notebook session %s: %s; not acting on its resources", ns.id, detail)
+            return None, detail
+        service_name = (ns.provider_metadata or {}).get("service_name") or notebook_service_name(ns.id)
+        if not is_resource_name(service_name):
+            return None, "invalid recorded identity"
+        return (
+            notebook_workload(
+                ns.id,
+                ns.user_id,
+                ns.session_type,
+                organization_id=getattr(ns, "organization_id", None),
+                namespace=namespace,
+                pod_name=pod_name,
+                service_name=service_name,
+            ),
+            None,
+        )
 
-    async def _classify_pod_failure_from_api(
-        self,
-        core_client,
-        pod_name: str,
-        namespace: str,
-    ) -> tuple[str, str]:
-        """Query the K8s API for events on `pod_name` and run them through the
-        shared classifier. Returns (failure_reason, failure_message) even if
-        the API call fails (falls back to "unknown")."""
-        from app.adapters.failure_classification import classify_pod_failure, FAILURE_REASON_UNKNOWN
+    def recorded_workload(self, ns) -> NotebookWorkload | None:
+        return self.resolve_workload(ns)[0]
 
-        events: list[dict] = []
-        try:
-            field_selector = f"involvedObject.name={pod_name}"
-            evt_list = core_client.list_namespaced_event(namespace=namespace, field_selector=field_selector)
-            for evt in evt_list.items or []:
-                events.append(
-                    {"reason": getattr(evt, "reason", "") or "", "message": getattr(evt, "message", "") or ""}
+    async def labelled_workloads(self) -> dict[int, list[str]]:
+        """Session id -> pod and Service names carrying a ``bioaf.io/session`` label (raises on read errors)."""
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS
+
+        if self.is_local:
+            return {}
+        core = self._get_k8s_core_client()
+
+        def read() -> dict[int, list[str]]:
+            found: dict[int, list[str]] = {}
+            for lister in (core.list_namespaced_pod, core.list_namespaced_service):
+                listing = lister(
+                    namespace=DEFAULT_NOTEBOOK_NAMESPACE,
+                    label_selector="bioaf.io/session",
+                    _request_timeout=REQUEST_TIMEOUT_SECONDS,
                 )
-        except Exception:
-            logger.exception("Failed to fetch pod events for %s/%s", namespace, pod_name)
-            return (FAILURE_REASON_UNKNOWN, "Pod did not become ready and pod events were unavailable.")
-        return classify_pod_failure(events)
+                for obj in listing.items or []:
+                    raw = ((obj.metadata.labels or {}) if obj.metadata else {}).get("bioaf.io/session", "")
+                    if raw.isdigit():
+                        found.setdefault(int(raw), []).append(obj.metadata.name)
+            return found
+
+        return await asyncio.to_thread(read)
+
+    async def workload_cluster(self) -> str | None:
+        """``<project or account>/<location or region>/<cluster>``, complete, or None.
+
+        GKE: project, deployed location (recorded, else discovered and recorded; see
+        cluster_location), cluster name. EKS: account, region, cluster name. A partial identity
+        is None: it cannot tell two clusters apart.
+        """
+        from app.adapters.kubernetes import exec_access
+        from app.adapters.kubernetes.cluster_location import resolve_gke_cluster_location
+
+        if self.is_local:
+            return None
+        try:
+            cfg = dict(await self._gke.load_cluster_config() or {})
+            name = _config_text(cfg.get("gke_cluster_name"))
+            if exec_access.backend_for_cluster_auth() == "eks":
+                owner, where = _config_text(cfg.get("aws_account_id")), _config_text(cfg.get("aws_region"))
+            else:
+                owner = _config_text(cfg.get("gcp_project_id"))
+                where = ""
+                if name and owner:
+                    where = await resolve_gke_cluster_location(
+                        cfg, list_clusters=self._gke_list_clusters, session_factory=self._session_factory
+                    )
+        except Exception as exc:
+            logger.warning("Cluster identity unavailable for a notebook launch record (%s)", type(exc).__name__)
+            return None
+        return f"{owner}/{where}/{name}" if name and owner and where else None
+
+    async def release_session_resources(self, workload: NotebookWorkload) -> WorkloadRelease:
+        """Delete the session's pod and Service, each verified and independently; see lifecycle."""
+        from app.adapters.notebooks.lifecycle import release_workload
+
+        core_client = self._get_k8s_core_client()
+        return await asyncio.to_thread(release_workload, core_client, workload)
 
     async def _update_session_in_db(
         self,
@@ -1099,16 +1195,49 @@ class KubernetesNotebookProvider(NotebookProvider):
         gcs_home_prefix: str = "",
         working_bucket: str = "",
         session_type: str = "jupyter",
+        user_id: int | None = None,
+        ran: bool = True,
+        workload: NotebookWorkload | None = None,
     ) -> dict:
-        """Final git commit, sync outputs to GCS, then delete pod and service."""
+        """Final git commit, sync outputs to GCS, then delete pod and service.
+
+        ``ran=False`` (the session never became usable) skips the in-pod save steps: there is no
+        work to save, and exec into a pod that never started only fails. An interactive session
+        whose owner is given is released through the verified path and reports the outcome.
+        """
         from kubernetes.stream import stream
 
+        from app.adapters.notebooks.lifecycle import pod_ownership
+
         core_client = self._get_k8s_core_client()
+        pod_name_for_exec = pod_name if ran else ""
+        if workload is not None:
+            pod_name, namespace = workload.pod_name, workload.namespace
+            pod_name_for_exec = pod_name if ran else ""
+        elif user_id is not None and session_type in INTERACTIVE_SESSION_TYPES and pod_name:
+            # A caller that names the owner but not a verified workload: same builder, legacy names.
+            workload = notebook_workload(session_id, user_id, session_type, namespace=namespace, pod_name=pod_name)
+        if workload is not None:
+            # Live ownership before the first command runs in the pod, not only before the delete.
+            ownership = await asyncio.to_thread(pod_ownership, core_client, workload)
+            if ownership == "foreign":
+                # release_workload reports the pod blocked and deletes nothing that is not ours.
+                return self._terminated(session_id, [], "", await self.release_session_resources(workload))
+            if ownership == "unknown":
+                unread = ResourceRelease(state="failed", detail="pod ownership could not be read")
+                result = self._terminated(session_id, [], "", WorkloadRelease(pod=unread, service=unread))
+                if ran:
+                    # Nothing was saved: the retry must save before it deletes.
+                    result["save_failed"] = True
+                return result
+            if ownership == "absent":
+                pod_name_for_exec = ""
+        save_failed = False
 
         # Final git commit + push before sync-out
         git_branch = None
         git_commit = None
-        if pod_name:
+        if pod_name_for_exec:
             try:
                 git_cmd = [
                     "/bin/sh",
@@ -1128,6 +1257,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
+                    container="notebook",  # the pod has two containers; an unnamed exec is refused
                     command=git_cmd,
                     stderr=True,
                     stdin=False,
@@ -1162,24 +1292,35 @@ class KubernetesNotebookProvider(NotebookProvider):
                 logger.exception("Failed to store git info for compute session")
 
         # Sync home directory to GCS before termination (CopyStager sync seam)
-        if gcs_home_prefix and pod_name:
+        if gcs_home_prefix and pod_name_for_exec:
             try:
                 from app.adapters.registry import get_storage_adapter
 
-                sync_cmd = get_storage_adapter().sync_out_command(HOME_DIR, gcs_home_prefix)
-                stream(
+                home_storage = get_storage_adapter()
+                sync_cmd = home_storage.sync_out_command(HOME_DIR, gcs_home_prefix)
+                # Run in the gcs-sync sidecar: it mounts the home volume and has the storage CLI and
+                # credentials (the same place the outputs save runs). The pod has two containers,
+                # so an exec that names none is refused by the API server.
+                key = "/secrets/gcp/key.json"
+                auth = home_storage.cli_auth_command(key)
+                auth_prefix = f"if [ -f {shell_word(key)} ]; then {auth}; fi; " if auth else ""
+                home_shell = auth_prefix + (sync_cmd[-1] if sync_cmd[:2] == ["/bin/sh", "-c"] else shlex.join(sync_cmd))
+                output = stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
-                    command=sync_cmd,
+                    container="gcs-sync",
+                    command=with_exit_status(["/bin/sh", "-c", home_shell]),
                     stderr=True,
                     stdin=False,
                     stdout=True,
                     tty=False,
                 )
+                require_clean_exit(output, "home directory sync")
                 logger.info("GCS sync-out complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("GCS sync-out failed for pod %s: %s", pod_name, e)
+                save_failed = True
 
         # Sync /outputs/ and capture scripts to the working bucket via the gcs-sync
         # sidecar (ADR-040). The sidecar runs the storage backend's staging_image
@@ -1203,7 +1344,7 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         output_files: list[dict] = []
         gcs_output_prefix = ""
-        if working_bucket and pod_name:
+        if working_bucket and pod_name_for_exec:
             gcs_output_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/outputs/")
             gcs_scripts_prefix = storage_adapter.build_uri(working_bucket, f"sessions/{session_id}/scripts/")
 
@@ -1219,21 +1360,23 @@ class KubernetesNotebookProvider(NotebookProvider):
                 # its inner command inside the empty-dir guard + auth prefix.
                 sync_inner = storage_adapter.sync_out_command("/outputs", gcs_output_prefix)[-1]
                 outputs_shell = f'{_auth_prefix}if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then {sync_inner}; fi'
-                stream(
+                output = stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
                     container=_SYNC_CONTAINER,
-                    command=["/bin/sh", "-c", outputs_shell],
+                    command=with_exit_status(["/bin/sh", "-c", outputs_shell]),
                     stderr=True,
                     stdin=False,
                     stdout=True,
                     tty=False,
                     _request_timeout=1800,
                 )
+                require_clean_exit(output, "outputs sync")
                 logger.info("Outputs sync complete for pod %s", pod_name)
             except Exception as e:
                 logger.warning("Outputs sync failed for pod %s: %s", pod_name, e)
+                save_failed = True
 
             # 2. Capture notebook/script files (flat) into the scripts prefix. `find -exec` hands
             #    the names to the copy as arguments (no `read`, so newlines and backslashes
@@ -1302,7 +1445,26 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception as e:
                 logger.warning("Output file listing failed for pod %s: %s", pod_name, e)
 
-        # Delete pod
+        if workload is not None:
+            if save_failed and workload is not None and pod_name_for_exec:
+                # The session's work was not saved: keep its pod and Service so a retry can save
+                # before anything is deleted.
+                logger.warning("Keeping pod %s: the session's work was not saved", pod_name)
+                kept = WorkloadRelease(
+                    pod=ResourceRelease(state="failed", detail="outputs not saved; pod kept for a retry"),
+                    service=ResourceRelease(state="failed", detail="kept until outputs are saved"),
+                )
+                result = self._terminated(session_id, output_files, gcs_output_prefix, kept)
+                result["save_failed"] = True
+                return result
+            release = await self.release_session_resources(workload)
+            result = self._terminated(session_id, output_files, gcs_output_prefix, release)
+            # Saved, or nothing left to save: the saves ran and succeeded, the session never
+            # ran, or its pod is already gone. Only now may an owed save be cleared.
+            result["saved"] = True
+            return result
+
+        # Delete pod (headless runs and callers that do not name the owner)
         try:
             core_client.delete_namespaced_pod(name=pod_name, namespace=namespace)
             logger.info("Deleted pod %s", pod_name)
@@ -1329,12 +1491,24 @@ class KubernetesNotebookProvider(NotebookProvider):
             "gcs_output_prefix": gcs_output_prefix,
         }
 
+    @staticmethod
+    def _terminated(session_id, output_files, gcs_output_prefix, release: WorkloadRelease) -> dict:
+        return {
+            "session_id": session_id,
+            "status": "stopped",
+            "stopped_at": datetime.now(timezone.utc).isoformat(),
+            "output_files": output_files,
+            "gcs_output_prefix": gcs_output_prefix,
+            "release": release.model_dump(),
+        }
+
     async def _k8s_get_session_status(
         self,
         session_id: int | str = 0,
         pod_name: str = "",
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
         session_type: str = "",
+        workload: NotebookWorkload | None = None,
     ) -> dict:
         """Query K8s API for pod status, resolving the LoadBalancer URL if live.
 
@@ -1343,6 +1517,10 @@ class KubernetesNotebookProvider(NotebookProvider):
         than reaching into the K8s client themselves.
         """
         core_client = self._get_k8s_core_client()
+        if session_type in INTERACTIVE_SESSION_TYPES:
+            return await asyncio.to_thread(
+                self._interactive_status, core_client, session_id, pod_name, namespace, session_type, workload
+            )
 
         try:
             pod = core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -1396,6 +1574,97 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         return result
 
+    def _interactive_status(
+        self,
+        core_client,
+        session_id,
+        pod_name: str,
+        namespace: str,
+        session_type: str,
+        workload: NotebookWorkload | None = None,
+    ) -> dict:
+        """A Jupyter/RStudio session's status from the shared launch assessment (blocking).
+
+        Unknown or unreadable is ``unknown``, never ``error``; a missing pod is ``error``;
+        ``running`` needs the notebook container ready and a LoadBalancer address.
+        """
+        from app.adapters.failure_classification import classify_pod_failure
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, assess_pod, pod_is_owned
+
+        base = {"session_id": session_id, "pod_name": pod_name, "namespace": namespace, "session_type": session_type}
+        try:
+            pod = core_client.read_namespaced_pod(
+                name=pod_name, namespace=namespace, _request_timeout=REQUEST_TIMEOUT_SECONDS
+            )
+        except Exception as exc:
+            if getattr(exc, "status", None) == 404:
+                return {
+                    **base,
+                    "status": "error",
+                    "workload_missing": True,
+                    "failure_reason": "unknown",
+                    "failure_message": "The session's workload no longer exists in the cluster.",
+                }
+            logger.warning("Could not read pod %s: %s", pod_name, type(exc).__name__)
+            return {**base, "status": "unknown"}
+
+        if workload is not None and not pod_is_owned(pod, workload):
+            # Not this session's pod (another session, user, type or organization): never ready.
+            logger.warning("Pod %s does not carry session %s's identity; not reporting it ready", pod_name, session_id)
+            return {**base, "status": "unknown", "ownership": "pod mismatch"}
+        assessment = assess_pod(pod, [])
+        events: list[dict] = []
+        if assessment.state != "ready":
+            events = self._pod_events(core_client, pod_name, namespace)
+            assessment = assess_pod(pod, events)
+        if assessment.state == "uncertain":
+            return {**base, "status": "unknown"}
+        if assessment.state == "failed":
+            return {
+                **base,
+                "status": "error",
+                "failure_reason": assessment.reason,
+                "failure_message": assessment.message,
+            }
+        if assessment.state == "ready":
+            port = 8888 if session_type == "jupyter" else 8787
+            if workload is not None:
+                # Ownership and the address from one Service response (see _verified_service_url).
+                url, why = self._verified_service_url(workload, port)
+                if why == "service not verified":
+                    logger.warning(
+                        "Service for session %s is not verified as its own; no address published", session_id
+                    )
+                if not url:
+                    return {**base, "status": "starting", "ownership": why}
+                return {**base, "status": "running", "access_url": url}
+            url = self._resolve_service_url(notebook_service_name(session_id), namespace, port)
+            return {**base, "status": "running", "access_url": url} if url else {**base, "status": "starting"}
+
+        result = {**base, "status": "starting"}
+        cause_reason, cause_message = classify_pod_failure(events) if events else ("unknown", "")
+        if cause_reason != "unknown":
+            result.update(waiting_reason=cause_reason, waiting_message=(cause_message or "")[:500])
+        return result
+
+    @staticmethod
+    def _pod_events(core_client, pod_name: str, namespace: str) -> list[dict]:
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS
+
+        try:
+            listing = core_client.list_namespaced_event(
+                namespace=namespace,
+                field_selector=f"involvedObject.name={pod_name}",
+                _request_timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.warning("Could not read events for pod %s", pod_name)
+            return []
+        return [
+            {"reason": getattr(e, "reason", "") or "", "message": getattr(e, "message", "") or ""}
+            for e in (getattr(listing, "items", None) or [])
+        ]
+
     @staticmethod
     def _headless_container_status(pod) -> str:
         """Map a headless pod's `notebook` container terminated state to a session status.
@@ -1415,13 +1684,11 @@ class KubernetesNotebookProvider(NotebookProvider):
             return "running"
         return "starting"
 
-    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
-        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None.
+    def _service_document(self, service_name: str, namespace: str) -> tuple[int | None, dict | None]:
+        """One raw read of a Service: (HTTP status, document), or (None, None) on any error.
 
-        Uses raw httpx instead of the python K8s client (which returns a stale
-        ``ingress: None`` even when kubectl shows the IP). Swallows every error
-        and returns None so read-path callers (status reconciliation) never
-        raise on a not-yet-ready or unreachable service.
+        Uses raw httpx instead of the python K8s client (which returns a stale ``ingress: None``
+        even when kubectl shows the IP). Never raises, so read paths stay safe.
         """
         import httpx
 
@@ -1430,22 +1697,45 @@ class KubernetesNotebookProvider(NotebookProvider):
             config = api_client.configuration
             auth = api_client_auth_header(api_client)
             if not auth:
-                return None
-            svc_url = f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}"
+                return None, None
             resp = httpx.get(
-                svc_url,
+                f"{config.host}/api/v1/namespaces/{namespace}/services/{service_name}",
                 headers={"Authorization": auth},
                 verify=config.ssl_ca_cert or False,
                 timeout=10,
             )
-            if resp.status_code == 200:
-                ingress_list = resp.json().get("status", {}).get("loadBalancer", {}).get("ingress") or []
-                if ingress_list:
-                    ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
-                    return f"http://{ext_ip}:{container_port}"
+            return resp.status_code, (resp.json() if resp.status_code == 200 else None)
         except Exception:
+            return None, None
+
+    @staticmethod
+    def _ingress_url(doc: dict | None, container_port: int) -> str | None:
+        ingress_list = (((doc or {}).get("status") or {}).get("loadBalancer") or {}).get("ingress") or []
+        if not ingress_list:
             return None
-        return None
+        ext_ip = ingress_list[0].get("ip") or ingress_list[0].get("hostname")
+        return f"http://{ext_ip}:{container_port}" if ext_ip else None
+
+    def _resolve_service_url(self, service_name: str, namespace: str, container_port: int) -> str | None:
+        """Single-attempt LoadBalancer external-IP lookup -> http URL, or None (no ownership check)."""
+        _, doc = self._service_document(service_name, namespace)
+        return self._ingress_url(doc, container_port)
+
+    def _verified_service_url(self, workload: NotebookWorkload, container_port: int) -> tuple[str | None, str]:
+        """The address of ``workload``'s Service, from the same response that proves it is the session's.
+
+        One read: ownership (the shared Service rule) and the address come from one document, so a
+        Service replaced between two reads can never supply the address. Returns (url, reason).
+        """
+        from app.adapters.notebooks.lifecycle import service_document_belongs
+
+        status, doc = self._service_document(workload.service_name, workload.namespace)
+        if doc is None:
+            return None, "service absent" if status == 404 else "service unreadable"
+        if not service_document_belongs(doc, workload):
+            return None, "service not verified"
+        url = self._ingress_url(doc, container_port)
+        return url, "verified" if url else "address pending"
 
     async def _k8s_list_sessions(self, filters: dict | None = None) -> list[dict]:
         """List notebook pods in the namespace."""

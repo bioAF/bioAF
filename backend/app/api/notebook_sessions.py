@@ -24,7 +24,6 @@ from app.schemas.notebook_session import (
     ProjectSummary,
 )
 from app.services.notebook_service import NotebookService
-from app.adapters.models import ServiceState
 from app.adapters.registry import get_notebook_adapter
 
 logger = logging.getLogger("bioaf.api.notebook_sessions")
@@ -124,44 +123,12 @@ async def _get_config_value(session: AsyncSession, key: str) -> str | None:
 async def _sync_session_from_k8s(ns, session: AsyncSession) -> None:
     """Reconcile a session's status and access_url from the notebook adapter.
 
-    Reads the normalized SessionStatus from the NotebookProvider interface
-    (which resolves pod phase and the LoadBalancer URL) and maps it back onto
-    the DB record. No backend privates or K8s service URLs leak in here.
+    The decision and the conditional write are the shared lifecycle's (``notebook_lifecycle``), so
+    a page load never revives a session that was stopped after it was read.
     """
-    if not ns.compute_job_ref:
-        return
+    from app.services.notebook_lifecycle import observe_session
 
-    try:
-        adapter = get_notebook_adapter()
-        status = await adapter.get_session_status(
-            session_id=ns.id,
-            pod_name=ns.compute_job_ref,
-            namespace=ns.provider_namespace or "bioaf-notebooks",
-            session_type=ns.session_type,
-        )
-    except Exception:
-        logger.debug("Adapter session status failed for session %s", ns.id, exc_info=True)
-        return
-
-    changed = False
-
-    if status.status == ServiceState.RUNNING and ns.status == "starting":
-        ns.status = "running"
-        if not ns.started_at:
-            from datetime import datetime, timezone
-
-            ns.started_at = datetime.now(timezone.utc)
-        changed = True
-    elif status.status == ServiceState.ERROR and ns.status not in ("stopped", "failed"):
-        ns.status = "failed"
-        changed = True
-
-    if not ns.access_url and status.access_url and ns.status in ("starting", "running"):
-        ns.access_url = status.access_url
-        changed = True
-
-    if changed:
-        await session.flush()
+    await observe_session(session, ns)
 
 
 # -- Session endpoints --

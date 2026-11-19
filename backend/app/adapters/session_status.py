@@ -63,3 +63,88 @@ async def update_compute_session(
         "Updated session %s: status=%s access_url=%s failure_reason=%s", session_id, status, access_url, failure_reason
     )
     return True
+
+
+_UNSET = object()
+
+
+def _transition_statement(
+    *,
+    organization_id: int,
+    session_id: int,
+    expected_statuses: tuple[str, ...] | None,
+    expected_job_ref: str | None,
+    status: str | None,
+    access_url,
+    failure_reason: str | None,
+    failure_message: str | None,
+    lifecycle: dict | None,
+    started_at=None,
+):
+    """The one conditional UPDATE every lifecycle transition uses (None when nothing to write)."""
+    import json
+
+    params: dict = {
+        "id": session_id,
+        "org": organization_id,
+        "expected": list(expected_statuses or ()),
+        "ref": expected_job_ref,
+    }
+    assignments: list[str] = []
+    if status is not None:
+        assignments.append("status = :status")
+        params["status"] = status
+    if access_url is not _UNSET:
+        assignments.append("access_url = :url")
+        params["url"] = access_url
+    if started_at is not None:
+        assignments.append("started_at = COALESCE(started_at, :started_at)")
+        params["started_at"] = started_at
+    if failure_reason is not None or failure_message is not None:
+        assignments.append("failure_reason = :reason, failure_message = :msg")
+        params.update(reason=failure_reason, msg=failure_message)
+    if lifecycle:
+        rest = {k: v for k, v in lifecycle.items() if k != "cleanup"}
+        merged = "COALESCE(provider_metadata -> 'lifecycle', '{}'::jsonb) || CAST(:lifecycle AS jsonb)"
+        params["lifecycle"] = json.dumps(rest)
+        if "cleanup" in lifecycle:
+            # An owed save survives every cleanup outcome unless the new record explicitly
+            # confirms it (save_outputs: false). The rule lives here, in the one update every
+            # writer uses, so concurrent writers cannot drop it.
+            merged = (
+                f"({merged}) || jsonb_build_object('cleanup', "
+                "(CASE WHEN provider_metadata #>> '{lifecycle,cleanup,save_outputs}' = 'true' "
+                "THEN jsonb_build_object('save_outputs', true) ELSE '{}'::jsonb END) "
+                "|| CAST(:cleanup AS jsonb))"
+            )
+            params["cleanup"] = json.dumps(lifecycle["cleanup"])
+        assignments.append(
+            f"provider_metadata = COALESCE(provider_metadata, '{{}}'::jsonb) || jsonb_build_object('lifecycle', {merged})"
+        )
+    if not assignments:
+        return None
+    status_clause = "AND status = ANY(:expected) " if expected_statuses is not None else ""
+    sql = (
+        f"UPDATE compute_sessions SET {', '.join(assignments)} "
+        f"WHERE id = :id AND organization_id = :org {status_clause}"
+        "AND compute_job_ref IS NOT DISTINCT FROM :ref"
+    )
+    return text(sql), params
+
+
+async def transition_in(db, **kwargs) -> bool:
+    """One conditional lifecycle update in the caller's transaction (no commit). True if it applied.
+
+    Applies only while the row is in ``expected_statuses`` (None: any status) under
+    ``expected_job_ref``. ``lifecycle`` keys merge into ``provider_metadata.lifecycle`` and every
+    other metadata key is kept; a ``cleanup`` entry keeps an owed save unless it sets
+    ``save_outputs: False``.
+    """
+    kwargs.setdefault("access_url", _UNSET)
+    for key in ("status", "failure_reason", "failure_message", "lifecycle", "started_at"):
+        kwargs.setdefault(key, None)
+    statement = _transition_statement(**kwargs)
+    if statement is None:
+        return False
+    result = await db.execute(*statement)
+    return bool(result.rowcount)
