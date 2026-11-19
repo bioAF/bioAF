@@ -625,3 +625,77 @@ async def test_a_blocked_periodic_cleanup_never_erases_an_owed_save(session, adm
 
     cleanup = (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]
     assert cleanup["state"] == "blocked" and cleanup["save_outputs"] is True
+
+
+@pytest.mark.asyncio
+async def test_each_save_command_names_the_container_that_can_run_it(adapter):
+    """A notebook pod has two containers; an exec without one is refused (live: HTTP 400 handshake).
+
+    The home directory is saved from the gcs-sync sidecar (it mounts home and has the storage CLI
+    and credentials, like the outputs save); the git commit runs in the notebook container.
+    """
+    core = FakeCore(pods=[notebook_pod(42, 7)], services=[notebook_service(42)])
+    core.delete_is_immediate = True
+    adapter._get_k8s_core_client = lambda: core
+    calls = []
+
+    def stream(fn, **kw):
+        command = " ".join(kw.get("command") or [])
+        calls.append((kw.get("container"), command))
+        return _shell_output(command, 0)
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", side_effect=stream),
+    ):
+        await adapter._k8s_terminate_session(
+            session_id=42,
+            pod_name=POD,
+            namespace="bioaf-notebooks",
+            gcs_home_prefix="s3://bioaf-working/notebooks/42/",
+            working_bucket="bioaf-working",
+            session_type="jupyter",
+            user_id=7,
+            ran=True,
+        )
+
+    assert all(container for container, _ in calls), calls
+    [(home_container, _)] = [c for c in calls if "sync /home/jovyan" in c[1]]
+    [(git_container, _)] = [c for c in calls if "git add" in c[1]]
+    assert (home_container, git_container) == ("gcs-sync", "notebook")
+
+
+@pytest.mark.asyncio
+async def test_a_retried_save_registers_each_output_once(session, admin_user, db_engine, monkeypatch):
+    """Live on blackbird: each retry registered the same output again (two file rows in a minute)."""
+    from sqlalchemy import func, select
+
+    from app.adapters.models import ResourceRelease, StoredObject, TerminationResult, WorkloadRelease
+    from app.models.file import File
+    from app.services import notebook_service as svc_module
+    from tests.test_notebook_lifecycle_state import _seed
+    from tests.test_notebook_reconcile import FakeAdapter
+
+    ns = await _seed(session, admin_user, status="stopped")
+    kept = WorkloadRelease(pod=ResourceRelease(state="failed"), service=ResourceRelease(state="failed"))
+    output = StoredObject(
+        filename="result.csv", storage_uri=f"gs://w/sessions/{ns.id}/outputs/result.csv", size_bytes=12
+    )
+    adapter = FakeAdapter()
+    adapter.terminate_session = AsyncMock(
+        return_value=TerminationResult(
+            output_files=[output], provider_details={"release": kept.model_dump(), "save_failed": True}
+        )
+    )
+    monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: adapter)
+
+    for _ in range(3):
+        await svc_module.NotebookService.terminate_and_save_outputs(session, ns, ran=True)
+        await session.commit()
+
+    count = (
+        await session.execute(
+            select(func.count(File.id)).where(File.source_notebook_session_id == ns.id, File.filename == "result.csv")
+        )
+    ).scalar()
+    assert count == 1

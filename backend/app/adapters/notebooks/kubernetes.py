@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import Callable
 import logging
 import posixpath
+import shlex
 import uuid
 from datetime import datetime, timezone
 
@@ -1243,6 +1244,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
+                    container="notebook",  # the pod has two containers; an unnamed exec is refused
                     command=git_cmd,
                     stderr=True,
                     stdin=False,
@@ -1281,12 +1283,21 @@ class KubernetesNotebookProvider(NotebookProvider):
             try:
                 from app.adapters.registry import get_storage_adapter
 
-                sync_cmd = get_storage_adapter().sync_out_command(HOME_DIR, gcs_home_prefix)
+                home_storage = get_storage_adapter()
+                sync_cmd = home_storage.sync_out_command(HOME_DIR, gcs_home_prefix)
+                # Run in the gcs-sync sidecar: it mounts the home volume and has the storage CLI and
+                # credentials (the same place the outputs save runs). The pod has two containers,
+                # so an exec that names none is refused by the API server.
+                key = "/secrets/gcp/key.json"
+                auth = home_storage.cli_auth_command(key)
+                auth_prefix = f"if [ -f {shell_word(key)} ]; then {auth}; fi; " if auth else ""
+                home_shell = auth_prefix + (sync_cmd[-1] if sync_cmd[:2] == ["/bin/sh", "-c"] else shlex.join(sync_cmd))
                 output = stream(
                     core_client.connect_get_namespaced_pod_exec,
                     name=pod_name,
                     namespace=namespace,
-                    command=with_exit_status(sync_cmd),
+                    container="gcs-sync",
+                    command=with_exit_status(["/bin/sh", "-c", home_shell]),
                     stderr=True,
                     stdin=False,
                     stdout=True,

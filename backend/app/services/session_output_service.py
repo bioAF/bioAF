@@ -61,9 +61,30 @@ class SessionOutputService:
         from app.services.file_service import FileService
         from app.services.file_verification_service import Expectation, FileVerificationService
 
+        from sqlalchemy import select
+
+        from app.models.file import File
+
+        # A save can be retried (a stop whose pod could not be released yet runs the save again):
+        # an output this session already registered is not registered a second time.
+        existing = set(
+            (
+                await session.execute(
+                    select(File.filename).where(
+                        File.source_notebook_session_id == session_id,
+                        File.organization_id == organization_id,
+                        File.source_type == source_type,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         registered = 0
         for f in gcs_files:
             filename = f["filename"]
+            if filename in existing:
+                continue
             # Skip excluded files
             if filename in _EXCLUDED_FILENAMES or filename.startswith("."):
                 if filename in _EXCLUDED_FILENAMES:
