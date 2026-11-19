@@ -111,6 +111,25 @@ def pod_ownership(core, w: NotebookWorkload, *, request_timeout: float = REQUEST
     return "owned" if _pod_belongs(pod, w) else "foreign"
 
 
+def service_ownership(core, w: NotebookWorkload, *, request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> str:
+    """``owned``, ``absent``, ``foreign``, or ``unknown``: the same rule cleanup applies to the Service."""
+    try:
+        svc = core.read_namespaced_service(name=w.service_name, namespace=w.namespace, _request_timeout=request_timeout)
+    except Exception as exc:
+        if _status(exc) == 404:
+            return "absent"
+        logger.warning(
+            "Could not read notebook Service %s for session %s: %s", w.service_name, w.session_id, _failure(exc)
+        )
+        return "unknown"
+    return "owned" if _service_belongs(svc, w) else "foreign"
+
+
+def pod_is_owned(pod, w: NotebookWorkload) -> bool:
+    """The ownership rule for a pod already read (readiness reads it once for both purposes)."""
+    return _pod_belongs(pod, w)
+
+
 def release_workload(core, w: NotebookWorkload, *, request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> WorkloadRelease:
     """Delete the session's pod and Service, each independently; complete only when both are gone."""
     pod = _release_one(

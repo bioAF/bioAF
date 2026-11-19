@@ -50,20 +50,36 @@ async def observe_session(
     if not ns.compute_job_ref:
         return False
     now = now or datetime.now(timezone.utc)
-    try:
-        observed = await asyncio.wait_for(
-            get_notebook_adapter().get_session_status(
+    adapter = get_notebook_adapter()
+    uncertain = SessionStatus(session_id=str(ns.id), status=ServiceState.UNKNOWN)
+    # The same identity and cluster checks as Stop and cleanup, before anything can be reported
+    # ready or an address published. Not verifiable is not ready (the deadline still applies).
+    verdict = await verify_workload(adapter, ns, now=now)
+    if verdict.kind in ("blocked", "deferred"):
+        logger.warning("Session %s: workload not verified (%s); not reporting it ready", ns.id, verdict.kind)
+        observed = uncertain
+    else:
+        if verdict.kind == "ok":
+            read = adapter.get_session_status(
+                session_id=ns.id,
+                pod_name=verdict.workload.pod_name,
+                namespace=verdict.workload.namespace,
+                session_type=ns.session_type,
+                workload=verdict.workload,
+            )
+        else:
+            read = adapter.get_session_status(
                 session_id=ns.id,
                 pod_name=ns.compute_job_ref,
                 namespace=ns.provider_namespace or "bioaf-notebooks",
                 session_type=ns.session_type,
-            ),
-            timeout=STATUS_READ_TIMEOUT_SECONDS,
-        )
-    except Exception as exc:  # including a read that hangs past its bound
-        # Uncertainty, not failure: the overall startup deadline still applies.
-        logger.warning("Session %s status read failed (%s)", ns.id, type(exc).__name__)
-        observed = SessionStatus(session_id=str(ns.id), status=ServiceState.UNKNOWN)
+            )
+        try:
+            observed = await asyncio.wait_for(read, timeout=STATUS_READ_TIMEOUT_SECONDS)
+        except Exception as exc:  # including a read that hangs past its bound
+            # Uncertainty, not failure: the overall startup deadline still applies.
+            logger.warning("Session %s status read failed (%s)", ns.id, type(exc).__name__)
+            observed = uncertain
 
     target = {"organization_id": ns.organization_id, "session_id": ns.id, "expected_job_ref": ns.compute_job_ref}
     details = observed.provider_details or {}

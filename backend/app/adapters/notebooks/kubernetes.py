@@ -1484,6 +1484,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         pod_name: str = "",
         namespace: str = DEFAULT_NOTEBOOK_NAMESPACE,
         session_type: str = "",
+        workload: NotebookWorkload | None = None,
     ) -> dict:
         """Query K8s API for pod status, resolving the LoadBalancer URL if live.
 
@@ -1494,7 +1495,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         core_client = self._get_k8s_core_client()
         if session_type in INTERACTIVE_SESSION_TYPES:
             return await asyncio.to_thread(
-                self._interactive_status, core_client, session_id, pod_name, namespace, session_type
+                self._interactive_status, core_client, session_id, pod_name, namespace, session_type, workload
             )
 
         try:
@@ -1549,14 +1550,27 @@ class KubernetesNotebookProvider(NotebookProvider):
 
         return result
 
-    def _interactive_status(self, core_client, session_id, pod_name: str, namespace: str, session_type: str) -> dict:
+    def _interactive_status(
+        self,
+        core_client,
+        session_id,
+        pod_name: str,
+        namespace: str,
+        session_type: str,
+        workload: NotebookWorkload | None = None,
+    ) -> dict:
         """A Jupyter/RStudio session's status from the shared launch assessment (blocking).
 
         Unknown or unreadable is ``unknown``, never ``error``; a missing pod is ``error``;
         ``running`` needs the notebook container ready and a LoadBalancer address.
         """
         from app.adapters.failure_classification import classify_pod_failure
-        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, assess_pod
+        from app.adapters.notebooks.lifecycle import (
+            REQUEST_TIMEOUT_SECONDS,
+            assess_pod,
+            pod_is_owned,
+            service_ownership,
+        )
 
         base = {"session_id": session_id, "pod_name": pod_name, "namespace": namespace, "session_type": session_type}
         try:
@@ -1575,6 +1589,10 @@ class KubernetesNotebookProvider(NotebookProvider):
             logger.warning("Could not read pod %s: %s", pod_name, type(exc).__name__)
             return {**base, "status": "unknown"}
 
+        if workload is not None and not pod_is_owned(pod, workload):
+            # Not this session's pod (another session, user, type or organization): never ready.
+            logger.warning("Pod %s does not carry session %s's identity; not reporting it ready", pod_name, session_id)
+            return {**base, "status": "unknown", "ownership": "pod mismatch"}
         assessment = assess_pod(pod, [])
         events: list[dict] = []
         if assessment.state != "ready":
@@ -1590,6 +1608,10 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "failure_message": assessment.message,
             }
         if assessment.state == "ready":
+            if workload is not None and service_ownership(core_client, workload) != "owned":
+                # No address is published unless the Service is verified to be this session's too.
+                logger.warning("Service for session %s is not verified as its own; no address published", session_id)
+                return {**base, "status": "starting", "ownership": "service not verified"}
             port = 8888 if session_type == "jupyter" else 8787
             url = self._resolve_service_url(notebook_service_name(session_id), namespace, port)
             return {**base, "status": "running", "access_url": url} if url else {**base, "status": "starting"}
