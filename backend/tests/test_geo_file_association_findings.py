@@ -439,6 +439,7 @@ async def test_a_failed_detector_builds_no_package(session, legacy, monkeypatch)
         raise RuntimeError("detector unavailable")
 
     monkeypatch.setattr(file_associations, "detect_findings", boom)
+
     def record_build(*args, **kwargs):
         built.append(1)
         return b""
@@ -475,3 +476,92 @@ async def test_deleting_an_acknowledged_sample_or_file_is_not_blocked(client, ad
     await session.commit()
     remaining = await session.execute(select(func.count()).select_from(text("geo_file_association_acknowledgments")))
     assert remaining.scalar_one() == 0
+
+
+# --- SuperSeries ------------------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def legacy_project(session, admin_user, legacy):
+    """The legacy Experiment plus a clean one, in one project."""
+    from app.models.experiment import Experiment
+    from app.models.project import Project
+    from app.models.sample import Sample
+
+    project = Project(name="Legacy Project", organization_id=admin_user.organization_id)
+    session.add(project)
+    await session.flush()
+    await session.execute(
+        text("UPDATE experiments SET project_id = :p WHERE id = :e"), {"p": project.id, "e": legacy["experiment_id"]}
+    )
+    clean = Experiment(name="Clean", organization_id=admin_user.organization_id, project_id=project.id)
+    session.add(clean)
+    await session.flush()
+    session.add(Sample(experiment_id=clean.id, external_id="CLEAN1", organism="Homo sapiens", qc_status="pass"))
+    await session.commit()
+    return {**legacy, "project_id": project.id, "clean_id": clean.id}
+
+
+@pytest.mark.asyncio
+async def test_superseries_refuses_an_unresolved_nested_finding_instead_of_a_partial_archive(
+    client, admin_token, legacy_project, session
+):
+    from app.exceptions import GeoFileAssociationsUnresolvedError
+    from app.services.geo.superseries_export_service import SuperSeriesExportService
+
+    with pytest.raises(GeoFileAssociationsUnresolvedError) as refused:
+        await SuperSeriesExportService.export(session, legacy_project["project_id"], legacy_project["org_id"])
+    assert refused.value.details["experiment_ids"] == [legacy_project["experiment_id"]]
+
+    resp = await client.post(f"/api/projects/{legacy_project['project_id']}/export/geo", headers=_bearer(admin_token))
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "geo_file_associations_unresolved"
+    assert body["details"]["experiment_ids"] == [legacy_project["experiment_id"]]
+    assert {f["experiment_id"] for f in body["details"]["findings"]} == {legacy_project["experiment_id"]}
+    audited = await session.execute(text("SELECT count(*) FROM audit_log WHERE entity_type = 'geo_superseries_export'"))
+    assert audited.scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_superseries_checks_every_experiment_before_building_any(session, legacy_project, monkeypatch):
+    from app.exceptions import GeoFileAssociationsUnresolvedError
+    from app.services.geo import geo_export_service
+    from app.services.geo.superseries_export_service import SuperSeriesExportService
+
+    built = []
+    real = geo_export_service.GeoExportService.build_package
+
+    def record(data):
+        built.append(data.experiment_id)
+        return real(data)
+
+    monkeypatch.setattr(geo_export_service.GeoExportService, "build_package", staticmethod(record))
+    with pytest.raises(GeoFileAssociationsUnresolvedError):
+        await SuperSeriesExportService.export(session, legacy_project["project_id"], legacy_project["org_id"])
+    assert built == []
+
+
+@pytest.mark.asyncio
+async def test_resolving_the_nested_finding_lets_the_project_download_proceed(client, admin_token, legacy_project):
+    import zipfile
+    from io import BytesIO
+
+    report = await _readiness(client, admin_token, legacy_project["experiment_id"])
+    ack = await _acknowledge(
+        client, admin_token, legacy_project["experiment_id"], _finding(report, "LIB10_R1.fastq.gz")
+    )
+    assert ack.status_code == 200, ack.text
+
+    resp = await client.post(f"/api/projects/{legacy_project['project_id']}/export/geo", headers=_bearer(admin_token))
+    assert resp.status_code == 200, resp.text
+    nested = [n for n in zipfile.ZipFile(BytesIO(resp.content)).namelist() if n.startswith("experiments/")]
+    assert len(nested) == 2
+
+    # include_all also needs the failed-only match resolved.
+    everyone = await client.post(
+        f"/api/projects/{legacy_project['project_id']}/export/geo?qc_status_filter=include_all",
+        headers=_bearer(admin_token),
+    )
+    assert everyone.status_code == 409
+    assert [f["filename"] for f in everyone.json()["details"]["findings"]] == ["LIBF_R1.fastq.gz"]

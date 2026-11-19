@@ -10,10 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import NotFoundError, ValidationError
+from app.exceptions import GeoFileAssociationsUnresolvedError, NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.project import Project
-from app.services.geo.geo_export_service import GeoExportService
+from app.services.geo.geo_export_service import GeoExportData, GeoExportService
 from app.services.geo.qc_filter import parse_qc_filter
 
 logger = logging.getLogger("bioaf.geo.superseries")
@@ -87,16 +87,41 @@ class SuperSeriesExportService:
         # Cross-experiment validation
         cross_validation = SuperSeriesExportService._cross_validate(experiments)
 
+        # Gather every sub-Series first, and refuse the whole package if any has unresolved file association
+        # findings: the per-experiment handler below must never turn that blocker into a partial archive.
+        gathered: dict[int, GeoExportData] = {}
+        gather_errors: dict[int, str] = {}
+        for exp in experiments:
+            run_id = (pipeline_run_ids or {}).get(exp.id)
+            try:
+                gathered[exp.id] = await GeoExportService.gather(session, exp.id, org_id, run_id, qc_status_filter)
+            except Exception as e:
+                logger.warning("Failed to export experiment %d: %s", exp.id, e)
+                gather_errors[exp.id] = str(e)
+        blocked = [data for data in gathered.values() if data.unresolved]
+        if blocked:
+            raise GeoFileAssociationsUnresolvedError(
+                "Some files in this project may have lost their Sample references. Resolve them in each "
+                "Experiment's GEO readiness check, then download again.",
+                details={
+                    "experiment_ids": [data.experiment_id for data in blocked],
+                    "findings": [
+                        {"experiment_id": data.experiment_id, **f.as_dict()}
+                        for data in blocked
+                        for f in data.unresolved
+                    ],
+                },
+            )
+
         # Generate per-experiment sub-Series exports
         sub_series: list[dict] = []
         experiment_zips: dict[str, bytes] = {}
 
         for exp in experiments:
-            run_id = (pipeline_run_ids or {}).get(exp.id)
             try:
-                exp_zip_bytes, exp_filename = await GeoExportService.export(
-                    session, exp.id, org_id, run_id, qc_status_filter
-                )
+                if exp.id in gather_errors:
+                    raise RuntimeError(gather_errors[exp.id])
+                exp_zip_bytes, exp_filename = GeoExportService.build_package(gathered[exp.id])
                 exp_safe_name = exp.name.replace(" ", "_")[:50]
                 sub_series.append(
                     {
@@ -107,7 +132,8 @@ class SuperSeriesExportService:
                 )
                 experiment_zips[f"experiments/{exp_safe_name}/{exp_filename}"] = exp_zip_bytes
             except Exception as e:
-                logger.warning("Failed to export experiment %d: %s", exp.id, e)
+                if exp.id not in gather_errors:
+                    logger.warning("Failed to export experiment %d: %s", exp.id, e)
                 sub_series.append(
                     {
                         "experiment_id": exp.id,
