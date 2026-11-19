@@ -570,7 +570,8 @@ def record_release(ns: NotebookSession, result: TerminationResult) -> None:
 
 async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession) -> bool:
     """Record and commit the workload this launch will create; False when the backend names none."""
-    workload = adapter.reserve_workload(ns.id, ns.user_id, ns.session_type)
+    reserve = getattr(adapter, "reserve_workload", None)
+    workload = reserve(ns.id, ns.user_id, ns.session_type) if callable(reserve) else None
     if workload is None:
         return False
     cluster = await adapter.workload_cluster()
