@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import GeoFileAssociationsUnresolvedError, NotFoundError, ValidationError
+from app.exceptions import (
+    GeoAssociationCheckUnavailableError,
+    GeoFileAssociationsUnresolvedError,
+    NotFoundError,
+    ValidationError,
+)
 from app.models.experiment import Experiment
 from app.models.project import Project
 from app.services.geo.geo_export_service import GeoExportData, GeoExportService
@@ -91,13 +96,22 @@ class SuperSeriesExportService:
         # findings: the per-experiment handler below must never turn that blocker into a partial archive.
         gathered: dict[int, GeoExportData] = {}
         gather_errors: dict[int, str] = {}
+        unchecked: list[int] = []
         for exp in experiments:
             run_id = (pipeline_run_ids or {}).get(exp.id)
             try:
                 gathered[exp.id] = await GeoExportService.gather(session, exp.id, org_id, run_id, qc_status_filter)
+            except GeoAssociationCheckUnavailableError:
+                unchecked.append(exp.id)
             except Exception as e:
                 logger.warning("Failed to export experiment %d: %s", exp.id, e)
                 gather_errors[exp.id] = str(e)
+        if unchecked:
+            raise GeoAssociationCheckUnavailableError(
+                "bioAF could not check file associations for every experiment in this project, so the GEO "
+                "export was not built. Try again; the technical detail is in the application logs.",
+                details={"experiment_ids": unchecked},
+            )
         blocked = [data for data in gathered.values() if data.unresolved]
         if blocked:
             raise GeoFileAssociationsUnresolvedError(

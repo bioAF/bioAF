@@ -446,9 +446,30 @@ async def test_a_failed_detector_builds_no_package(session, legacy, monkeypatch)
 
     monkeypatch.setattr(geo_export_service, "generate_geo_workbook", record_build)
 
-    with pytest.raises(RuntimeError, match="detector unavailable"):
+    from app.exceptions import GeoAssociationCheckUnavailableError
+
+    with pytest.raises(GeoAssociationCheckUnavailableError):
         await geo_export_service.GeoExportService.export(session, legacy["experiment_id"], legacy["org_id"])
     assert built == []
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_check_refuses_readiness_and_download_over_http(
+    client, comp_bio_token, legacy, monkeypatch
+):
+    from app.services.geo import file_associations
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("detector unavailable")
+
+    monkeypatch.setattr(file_associations, "detect_findings", boom)
+    for validate_only in (True, False):
+        resp = await client.post(
+            _export_url(legacy["experiment_id"], validate_only=validate_only), headers=_bearer(comp_bio_token)
+        )
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["code"] == "geo_association_check_unavailable"
+        assert "detector unavailable" not in resp.text
 
 
 @pytest.mark.asyncio
@@ -565,3 +586,29 @@ async def test_resolving_the_nested_finding_lets_the_project_download_proceed(cl
     )
     assert everyone.status_code == 409
     assert [f["filename"] for f in everyone.json()["details"]["findings"]] == ["LIBF_R1.fastq.gz"]
+
+
+@pytest.mark.asyncio
+async def test_superseries_refuses_when_a_nested_check_cannot_run(
+    client, admin_token, legacy_project, session, monkeypatch
+):
+    """Not knowing whether an Experiment has findings must refuse the package, not drop the Experiment."""
+    from app.exceptions import GeoAssociationCheckUnavailableError
+    from app.services.geo import file_associations
+    from app.services.geo.superseries_export_service import SuperSeriesExportService
+
+    real = file_associations.detect_findings
+
+    def fail_for_legacy(unlinked, selected):
+        if any(s.experiment_id == legacy_project["experiment_id"] for s in selected):
+            raise RuntimeError("detector unavailable")
+        return real(unlinked, selected)
+
+    monkeypatch.setattr(file_associations, "detect_findings", fail_for_legacy)
+    with pytest.raises(GeoAssociationCheckUnavailableError) as refused:
+        await SuperSeriesExportService.export(session, legacy_project["project_id"], legacy_project["org_id"])
+    assert refused.value.details["experiment_ids"] == [legacy_project["experiment_id"]]
+
+    resp = await client.post(f"/api/projects/{legacy_project['project_id']}/export/geo", headers=_bearer(admin_token))
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["details"]["experiment_ids"] == [legacy_project["experiment_id"]]

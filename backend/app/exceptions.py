@@ -144,6 +144,17 @@ class GeoFileAssociationsUnresolvedError(ConflictError):
     code = "geo_file_associations_unresolved"
 
 
+class GeoAssociationCheckUnavailableError(DomainError):
+    """GEO file associations could not be checked, so the export cannot be shown to be safe.
+
+    Refuses readiness and download (never treated as "no findings"); a SuperSeries carries
+    ``details["experiment_ids"]`` for the Experiments that could not be checked.
+    """
+
+    status_code = 503
+    code = "geo_association_check_unavailable"
+
+
 class GeoAssociationAcknowledgmentStaleError(ConflictError):
     """The acknowledged file/Sample pairs no longer match the current finding; run readiness again."""
 

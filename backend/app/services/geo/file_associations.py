@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,10 +23,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions import GeoAssociationCheckUnavailableError
 from app.models.file import File
 from app.models.geo_file_association_acknowledgment import GeoFileAssociationAcknowledgment
 from app.models.sample import sample_files
 
+
+logger = logging.getLogger("bioaf.geo.file_associations")
 
 RAW_FILE_TYPES = ("fastq", "fastq.gz", "fq.gz")
 
@@ -162,8 +166,26 @@ async def findings_for(
 ) -> list[AssociationFinding]:
     """Findings for this request's selection, with their current acknowledgment status.
 
-    Never swallows a failure: an exception here must stop the export, not read as "no findings".
+    Never swallows a failure: if the check cannot run, the export is refused with a typed error
+    rather than read as "no findings".
     """
+    try:
+        return await _findings(session, org_id, experiment_id, selection, selected_samples)
+    except Exception as exc:
+        logger.warning("GEO file association check failed for experiment %d: %s", experiment_id, type(exc).__name__)
+        raise GeoAssociationCheckUnavailableError(
+            "bioAF could not check this experiment's file associations, so the GEO export was not built. "
+            "Try again; if it keeps failing, the technical detail is in the application logs."
+        ) from exc
+
+
+async def _findings(
+    session: AsyncSession,
+    org_id: int,
+    experiment_id: int,
+    selection: FileSelection,
+    selected_samples: list[Any],
+) -> list[AssociationFinding]:
     detected = detect_findings(selection.unlinked, selected_samples)
     if not detected:
         return []
