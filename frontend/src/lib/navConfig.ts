@@ -79,7 +79,7 @@ export const navConfig: NavSection[] = [
     icon: "notebook",
     children: [
       { label: "Notebook Sessions", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
-      { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" }, capability: "work_nodes" },
+      { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "work_nodes", action: "view" }, capability: "work_nodes" },
       { label: "Workbench Templates", path: "/environments", permission: { resource: "environments", action: "view" } },
     ],
   },

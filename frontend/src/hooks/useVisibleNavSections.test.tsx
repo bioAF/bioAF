@@ -129,3 +129,67 @@ test("reports a permission-load failure instead of returning a usable empty nav"
   const { result } = renderHook(() => useVisibleNavSections());
   expect(result.current.permissionsFailed).toBe(true);
 });
+
+/**
+ * The Work Nodes link follows the permission its page and API actually check:
+ * `work_nodes:view`. Notebook visibility is a different grant. The built-in
+ * bench role has `notebooks:view` without `work_nodes:view`, and a link that
+ * only bounces the user back to the dashboard is not discoverability.
+ */
+describe("Work Nodes navigation follows work_nodes:view", () => {
+  function grant(...keys: string[]) {
+    const granted = new Set(keys);
+    mockPermissions.mockReturnValue({
+      canAccess: (resource: string, action: string) => granted.has(`${resource}:${action}`),
+      roleName: "custom",
+      loading: false,
+      failed: false,
+    });
+  }
+
+  function workbenchChildren(sections: { label: string; children?: { label: string }[] }[]) {
+    const workbench = sections.find((s) => s.label === "Workbench");
+    return workbench ? workbench.children!.map((c) => c.label) : null;
+  }
+
+  test.each([
+    { name: "Work Nodes view only", keys: ["work_nodes:view"], visible: true },
+    { name: "notebooks view only (the bench pattern)", keys: ["notebooks:view", "environments:view"], visible: false },
+    { name: "both views", keys: ["work_nodes:view", "notebooks:view"], visible: true },
+    { name: "neither view", keys: ["environments:view"], visible: false },
+  ])("$name: Work Nodes link visible is $visible", ({ keys, visible }) => {
+    grant(...keys);
+    const { result } = renderHook(() => useVisibleNavSections());
+    const children = workbenchChildren(result.current.sections) ?? [];
+    if (visible) expect(children).toContain("Work Nodes");
+    else expect(children).not.toContain("Work Nodes");
+  });
+
+  test("hides Work Nodes when the provider lacks the work_nodes capability, even with view permission", () => {
+    grant("work_nodes:view", "environments:view");
+    mockCapabilities.mockReturnValue({ has: (flag: string) => flag !== "work_nodes" });
+    const { result } = renderHook(() => useVisibleNavSections());
+    expect(workbenchChildren(result.current.sections)).not.toContain("Work Nodes");
+  });
+
+  test("keeps Workbench and lands on Work Nodes when it is the only eligible child", () => {
+    grant("work_nodes:view");
+    const { result } = renderHook(() => useVisibleNavSections());
+    expect(workbenchChildren(result.current.sections)).toEqual(["Work Nodes"]);
+    expect(result.current.firstChildPath("Workbench")).toBe("/workbench/work-nodes");
+  });
+
+  test("keeps Workbench through an eligible sibling when Work Nodes is hidden", () => {
+    grant("notebooks:view", "environments:view");
+    const { result } = renderHook(() => useVisibleNavSections());
+    expect(workbenchChildren(result.current.sections)).toEqual(["Workbench Templates"]);
+    expect(result.current.firstChildPath("Workbench")).toBe("/environments");
+  });
+
+  test("drops Workbench entirely when no child is eligible", () => {
+    grant("notebooks:view");
+    const { result } = renderHook(() => useVisibleNavSections());
+    expect(workbenchChildren(result.current.sections)).toBeNull();
+    expect(result.current.firstChildPath("Workbench")).toBeNull();
+  });
+});
