@@ -512,10 +512,20 @@ def _lifecycle(ns: NotebookSession) -> dict:
     return dict((ns.provider_metadata or {}).get("lifecycle") or {})
 
 
-def _set_cleanup(ns: NotebookSession, cleanup: dict) -> None:
-    """Record resource-cleanup progress; the failure fields are left as they are."""
+def _set_cleanup(ns: NotebookSession, cleanup: dict, *, saved: bool = False) -> None:
+    """Record resource-cleanup progress; the failure fields are left as they are.
+
+    An owed save (``save_outputs``) is a separate fact from the latest cleanup outcome: it is kept
+    through blocked, deferred and failed outcomes and cleared only once a save is confirmed.
+    """
     lifecycle = _lifecycle(ns)
-    lifecycle["cleanup"] = {"updated_at": datetime.now(timezone.utc).isoformat(), **cleanup}
+    previous = lifecycle.get("cleanup") or {}
+    record = {"updated_at": datetime.now(timezone.utc).isoformat(), **cleanup}
+    if previous.get("save_outputs") and not saved:
+        record["save_outputs"] = True
+    if saved:
+        record.pop("save_outputs", None)
+    lifecycle["cleanup"] = record
     # Assign a new dict so SQLAlchemy writes the JSONB column.
     ns.provider_metadata = {**(ns.provider_metadata or {}), "lifecycle": lifecycle}
 
@@ -672,7 +682,11 @@ def record_release(ns: NotebookSession, result: TerminationResult) -> None:
     release = result.provider_details.get("release")
     if not release:
         return
-    _set_cleanup(ns, WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc)))
+    _set_cleanup(
+        ns,
+        WorkloadRelease.model_validate(release).as_cleanup(datetime.now(timezone.utc)),
+        saved=bool(result.provider_details.get("saved")),
+    )
 
 
 async def _reserve_workload(session: AsyncSession, adapter, ns: NotebookSession) -> bool:

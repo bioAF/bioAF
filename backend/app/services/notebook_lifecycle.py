@@ -208,6 +208,10 @@ async def _load(db: AsyncSession, session_id: int) -> NotebookSession | None:
 
 
 async def _record_cleanup(db, ns: NotebookSession, cleanup: dict) -> None:
+    # An owed save is never erased by a cleanup outcome; only a confirmed save clears it.
+    owed = (((ns.provider_metadata or {}).get("lifecycle") or {}).get("cleanup") or {}).get("save_outputs")
+    if owed:
+        cleanup = {**cleanup, "save_outputs": True}
     await transition_in(
         db,
         organization_id=ns.organization_id,

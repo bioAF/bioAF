@@ -52,14 +52,17 @@ class LaunchCore(FakeCore):
 
     def create_namespaced_pod(self, namespace, body, **_):
         self.calls.append(("create", "pod", body["metadata"]["name"]))
-        labels = body["metadata"]["labels"]
-        self.pods[POD] = notebook_pod(42, int(labels["bioaf.io/user"]), labels["bioaf.io/type"], phase="Pending")
+        # Keep exactly the labels launch submitted (organization included), as the API server would.
+        labels = dict(body["metadata"]["labels"])
+        self.pods[POD] = notebook_pod(
+            42, int(labels["bioaf.io/user"]), labels["bioaf.io/type"], phase="Pending", labels=labels
+        )
 
     def create_namespaced_service(self, namespace, body, **_):
         self.calls.append(("create", "service", body["metadata"]["name"]))
         if self.service_error:
             raise self.service_error
-        self.services[SVC] = notebook_service(42)
+        self.services[SVC] = notebook_service(42, labels=dict(body["metadata"]["labels"]))
 
 
 @pytest.mark.asyncio

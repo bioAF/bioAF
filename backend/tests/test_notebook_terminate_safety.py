@@ -538,3 +538,90 @@ async def test_stop_respects_the_organization_label_on_new_resources(
         assert not core.pods and not core.services and cleanup["state"] == "complete"
     else:
         assert execs == [] and core.deletes() == [] and cleanup["state"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_stop_never_erases_an_owed_save(
+    session, admin_user, db_engine, monkeypatch, mode_adapter_factory
+):
+    """Outage (save owed) -> conflicting organization label (blocked) -> label corrected -> save, then delete."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.services import notebook_service as svc_module
+    from tests.test_notebook_lifecycle_state import _k8s, _row, _seed
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ns = await _seed(session, admin_user, status="running")
+    ns.gcs_home_prefix = f"s3://bioaf-working/notebooks/{ns.id}/"
+    await session.commit()
+    pod_name = f"bioaf-notebook-{ns.id}"
+    pod = notebook_pod(ns.id, ns.user_id)
+    core = FakeCore(pods=[pod], services=[notebook_service(ns.id)], errors={("read", "pod", pod_name): 500})
+    core.delete_is_immediate = True
+    adapter = _k8s(mode_adapter_factory, monkeypatch, core)
+    monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: adapter)
+    order = []
+
+    def stream(fn, **kw):
+        command = " ".join(kw.get("command") or [])
+        order.append(("exec", command))
+        return _shell_output(command, 0)
+
+    original_delete = core.delete_namespaced_pod
+
+    def delete_pod(name, namespace, body=None, **kw):
+        order.append(("delete", name))
+        return original_delete(name, namespace, body=body, **kw)
+
+    core.delete_namespaced_pod = delete_pod
+
+    async def cleanup():
+        return (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_storage()),
+        patch("kubernetes.stream.stream", side_effect=stream),
+    ):
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+        assert (await cleanup())["save_outputs"] is True
+
+        core.errors.clear()
+        pod.metadata.labels = {**pod.metadata.labels, "bioaf.io/organization": str(admin_user.organization_id + 1)}
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+        state = await cleanup()
+        assert state["state"] == "blocked" and state["save_outputs"] is True
+        assert order == []
+
+        pod.metadata.labels = {**pod.metadata.labels, "bioaf.io/organization": str(admin_user.organization_id)}
+        await svc_module.NotebookService.stop_session(session, ns.id, ns.user_id)
+        await session.commit()
+
+    home_saves = [i for i, (kind, c) in enumerate(order) if kind == "exec" and "sync /home/jovyan" in c]
+    deletes = [i for i, (kind, _) in enumerate(order) if kind == "delete"]
+    assert home_saves and deletes and home_saves[0] < deletes[0]
+    final = await cleanup()
+    assert final["state"] == "complete" and "save_outputs" not in final
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_periodic_cleanup_never_erases_an_owed_save(session, admin_user, db_engine, monkeypatch):
+    """The pass's own records (blocked, deferred) keep the obligation too."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from tests.test_notebook_lifecycle_state import T0, _row, _seed
+    from tests.test_notebook_reconcile import FakeAdapter, _pass
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ns = await _seed(session, admin_user, status="stopped")
+    lifecycle = {**ns.provider_metadata["lifecycle"], "cluster": "a/b/old"}
+    lifecycle["cleanup"] = {"state": "pending", "save_outputs": True}
+    ns.provider_metadata = {**ns.provider_metadata, "lifecycle": lifecycle}
+    await session.commit()
+
+    adapter = FakeAdapter(cluster="a/b/new")  # the cluster changed: blocked
+    await _pass(factory, adapter, monkeypatch, now=T0 + timedelta(minutes=5))
+
+    cleanup = (await _row(factory, ns.id)).provider_metadata["lifecycle"]["cleanup"]
+    assert cleanup["state"] == "blocked" and cleanup["save_outputs"] is True

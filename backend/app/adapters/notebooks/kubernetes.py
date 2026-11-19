@@ -81,6 +81,7 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
             "stopped_at": d.get("stopped_at"),
             **({"release": d["release"]} if d.get("release") else {}),
             **({"save_failed": True} if d.get("save_failed") else {}),
+            **({"saved": True} if d.get("saved") else {}),
         },
     )
 
@@ -128,6 +129,21 @@ def require_clean_exit(output, what: str) -> None:
             status = line[len(EXIT_MARKER) :].strip()
     if status != "0":
         raise RuntimeError(f"{what} did not succeed (exit status {status if status is not None else 'unknown'})")
+
+
+def launch_workload(session_spec: dict, namespace: str) -> NotebookWorkload:
+    """The workload a launch creates, with the same identity its ownership labels carry."""
+    session_id = session_spec.get("session_id", 0)
+    org = session_spec.get("organization_id")
+    return NotebookWorkload(
+        session_id=int(session_id),
+        user_id=int(session_spec.get("user_id") or 0),
+        session_type=session_spec.get("session_type", "jupyter"),
+        namespace=namespace,
+        pod_name=notebook_pod_name(session_id),
+        service_name=notebook_service_name(session_id),
+        organization_id=int(org) if org is not None else None,
+    )
 
 
 def ownership_labels(session_spec: dict) -> dict[str, str]:
@@ -987,16 +1003,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             except Exception:
                 # The pod was accepted; release it rather than leave it holding a node.
                 logger.exception("Creating service %s failed; releasing pod %s", service_name, pod_name)
-                await self.release_session_resources(
-                    NotebookWorkload(
-                        session_id=int(session_id),
-                        user_id=int(session_spec.get("user_id") or 0),
-                        session_type=session_type,
-                        namespace=namespace,
-                        pod_name=pod_name,
-                        service_name=service_name,
-                    )
-                )
+                await self.release_session_resources(launch_workload(session_spec, namespace))
                 raise
             logger.info("Created service %s in %s", service_name, namespace)
 
@@ -1415,7 +1422,11 @@ class KubernetesNotebookProvider(NotebookProvider):
                 result["save_failed"] = True
                 return result
             release = await self.release_session_resources(workload)
-            return self._terminated(session_id, output_files, gcs_output_prefix, release)
+            result = self._terminated(session_id, output_files, gcs_output_prefix, release)
+            # Saved, or nothing left to save: the saves ran and succeeded, the session never
+            # ran, or its pod is already gone. Only now may an owed save be cleared.
+            result["saved"] = True
+            return result
 
         # Delete pod (headless runs and callers that do not name the owner)
         try:
