@@ -17,6 +17,7 @@ from app.models.pipeline_run_review import PipelineRunReview
 from app.models.sample import Sample
 from app.services.geo.checksum_manifest import generate_checksum_manifest
 from app.services.geo.excel_generator import generate_geo_workbook
+from app.services.geo.qc_filter import GeoQcFilter, parse_qc_filter
 from app.services.geo.readme_generator import generate_readme
 from app.services.geo.validation import ValidationReport, validate_experiment_for_geo
 
@@ -102,6 +103,7 @@ class GeoExportService:
         qc_status_filter: str,
     ) -> tuple[dict, list[dict], dict | None, dict | None]:
         """Gather all data needed for GEO export in efficient queries."""
+        qc_filter = parse_qc_filter(qc_status_filter)
         # 1. Experiment (with owner for Series_contributor, custom_fields for protocols)
         exp_result = await session.execute(
             select(Experiment)
@@ -121,7 +123,7 @@ class GeoExportService:
             .options(selectinload(Sample.sample_batch), selectinload(Sample.sequencing_batch))
             .where(Sample.experiment_id == experiment_id)
         )
-        if qc_status_filter == "exclude_failed":
+        if qc_filter is GeoQcFilter.EXCLUDE_FAILED:
             sample_query = sample_query.where((Sample.qc_status != "fail") | (Sample.qc_status.is_(None)))
         sample_result = await session.execute(sample_query)
         samples = list(sample_result.scalars().all())

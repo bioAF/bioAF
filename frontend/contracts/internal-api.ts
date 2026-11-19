@@ -11487,6 +11487,11 @@ export interface components {
             /** Expires At */
             expires_at?: string | null;
         };
+        /**
+         * GeoQcFilter
+         * @enum {string}
+         */
+        GeoQcFilter: "exclude_failed" | "include_all";
         /** GitCommit */
         GitCommit: {
             /** Author */
@@ -20558,7 +20563,7 @@ export interface operations {
         parameters: {
             query?: {
                 pipeline_run_id?: number | null;
-                qc_status_filter?: string;
+                qc_status_filter?: components["schemas"]["GeoQcFilter"];
                 validate_only?: boolean;
             };
             header?: never;
@@ -27065,7 +27070,7 @@ export interface operations {
     export_project_geo_api_projects__project_id__export_geo_post: {
         parameters: {
             query?: {
-                qc_status_filter?: string;
+                qc_status_filter?: components["schemas"]["GeoQcFilter"];
                 exclude_unclaimed?: boolean;
                 validate_only?: boolean;
             };

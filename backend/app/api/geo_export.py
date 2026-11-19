@@ -8,6 +8,7 @@ from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.audit_service import log_action
 from app.services.geo.geo_export_service import GeoExportService
+from app.services.geo.qc_filter import GeoQcFilter
 from app.services.geo.superseries_export_service import SuperSeriesExportService
 
 router = APIRouter(tags=["geo-export"])
@@ -17,7 +18,7 @@ router = APIRouter(tags=["geo-export"])
 async def export_geo(
     experiment_id: int,
     pipeline_run_id: int | None = None,
-    qc_status_filter: str = "exclude_failed",
+    qc_status_filter: GeoQcFilter = GeoQcFilter.EXCLUDE_FAILED,
     validate_only: bool = False,
     current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
@@ -78,7 +79,7 @@ async def export_geo(
 async def export_project_geo(
     project_id: int,
     pipeline_run_ids: dict[int, int] | None = None,
-    qc_status_filter: str = "exclude_failed",
+    qc_status_filter: GeoQcFilter = GeoQcFilter.EXCLUDE_FAILED,
     exclude_unclaimed: bool = True,
     validate_only: bool = False,
     current_user: dict = require_permission("files", "download"),

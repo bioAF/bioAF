@@ -14,6 +14,7 @@ from app.exceptions import NotFoundError, ValidationError
 from app.models.experiment import Experiment
 from app.models.project import Project
 from app.services.geo.geo_export_service import GeoExportService
+from app.services.geo.qc_filter import parse_qc_filter
 
 logger = logging.getLogger("bioaf.geo.superseries")
 
@@ -73,6 +74,8 @@ class SuperSeriesExportService:
         Returns:
             Tuple of (zip_bytes, filename).
         """
+        # Before any lookup, and before the per-experiment handler below could turn it into a partial archive.
+        qc_status_filter = parse_qc_filter(qc_status_filter)
         project = await SuperSeriesExportService._load_project(session, project_id, org_id)
         experiments = await SuperSeriesExportService._load_project_experiments(
             session, project_id, org_id, experiment_ids, exclude_unclaimed

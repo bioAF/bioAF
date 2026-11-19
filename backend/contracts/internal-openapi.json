@@ -8875,6 +8875,14 @@
         "title": "GenerateSetupCodeResponse",
         "type": "object"
       },
+      "GeoQcFilter": {
+        "enum": [
+          "exclude_failed",
+          "include_all"
+        ],
+        "title": "GeoQcFilter",
+        "type": "string"
+      },
       "GitCommit": {
         "properties": {
           "author": {
@@ -32007,9 +32015,8 @@
             "name": "qc_status_filter",
             "required": false,
             "schema": {
-              "default": "exclude_failed",
-              "title": "Qc Status Filter",
-              "type": "string"
+              "$ref": "#/components/schemas/GeoQcFilter",
+              "default": "exclude_failed"
             }
           },
           {
@@ -41845,9 +41852,8 @@
             "name": "qc_status_filter",
             "required": false,
             "schema": {
-              "default": "exclude_failed",
-              "title": "Qc Status Filter",
-              "type": "string"
+              "$ref": "#/components/schemas/GeoQcFilter",
+              "default": "exclude_failed"
             }
           },
           {
