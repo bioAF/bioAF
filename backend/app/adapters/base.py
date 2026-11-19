@@ -642,9 +642,18 @@ class NotebookProvider(ABC):
         """
         return None
 
+    @property
+    def manages_workloads(self) -> bool:
+        """Whether this backend's notebook sessions own provider resources bioAF must release."""
+        return False
+
+    def resolve_workload(self, ns) -> tuple[NotebookWorkload | None, str | None]:
+        """The workload a recorded session owns, or (None, why not)."""
+        return None, "not managed by this backend"
+
     def recorded_workload(self, ns) -> NotebookWorkload | None:
         """The workload a recorded session owns, or None when this backend manages none."""
-        return None
+        return self.resolve_workload(ns)[0]
 
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> names of the session-labelled resources that exist (empty when not managed)."""

@@ -75,6 +75,49 @@ def is_namespace(value: str | None) -> bool:
     return bool(value) and bool(_LABEL.match(value))  # type: ignore[arg-type]
 
 
+def agreed_value(values: list, what: str, *, valid) -> str | None:
+    """The single value the populated fields agree on, or None when none is populated.
+
+    Fallbacks fill absent values; populated values that disagree are refused, never resolved by
+    precedence (``conflicting_identity``), and an invalid name is refused (``invalid_identity``).
+    """
+    present = []
+    for value in values:
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str) or not valid(value):
+            raise ConnectionTargetInvalidError(
+                f"The recorded {what} for this analysis is not a valid Kubernetes name.", reason="invalid_identity"
+            )
+        present.append(value)
+    if len(set(present)) > 1:
+        raise ConnectionTargetInvalidError(
+            f"This analysis has conflicting recorded {what} values, so bioAF cannot tell which workload it is.",
+            reason="conflicting_identity",
+        )
+    return present[0] if present else None
+
+
+def recorded_namespace(record) -> str | None:
+    meta = record.provider_metadata or {}
+    return agreed_value([meta.get("namespace"), record.k8s_namespace], "namespace", valid=is_namespace)
+
+
+def recorded_notebook_identity(record) -> tuple[str | None, str | None]:
+    """(pod, namespace) a notebook session record names, under the shared recorded-identity rules.
+
+    Independent of the session's state: terminal access, stop, idle-stop and cleanup all use it.
+    Pod: ``compute_job_ref``, then ``provider_metadata.pod_name``, then ``k8s_pod_name``.
+    Namespace: ``provider_metadata.namespace``, then ``k8s_namespace``. A notebook's
+    ``slurm_job_id`` holds its session id, never a pod name.
+    """
+    meta = record.provider_metadata or {}
+    pod = agreed_value(
+        [record.compute_job_ref, meta.get("pod_name"), record.k8s_pod_name], "pod", valid=is_resource_name
+    )
+    return pod, recorded_namespace(record)
+
+
 def _invalid_identity(what: str) -> ConnectionTargetInvalidError:
     return ConnectionTargetInvalidError(
         f"The recorded {what} for this analysis is not a valid Kubernetes name.", reason="invalid_identity"

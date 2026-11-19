@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.models import ServiceState
+from app.adapters.models import ServiceState, SessionStatus
 from app.adapters.notebooks.readiness import INTERACTIVE_SESSION_TYPES, decide_launch, launch_started_at
 from app.adapters.registry import get_notebook_adapter
 from app.adapters.session_status import transition_in
@@ -37,7 +37,9 @@ def _pending_cleanup(now: datetime) -> dict:
     return {"cleanup": {"state": "pending", "updated_at": now.isoformat()}}
 
 
-async def observe_session(db: AsyncSession, ns: NotebookSession, *, now: datetime | None = None) -> bool:
+async def observe_session(
+    db: AsyncSession, ns: NotebookSession, *, now: datetime | None = None, record_observation: bool = False
+) -> bool:
     """Read ``ns``'s workload and apply the shared decision; True if the row changed.
 
     Writes go through the caller's transaction and only apply while the row is still in the
@@ -53,9 +55,10 @@ async def observe_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
             namespace=ns.provider_namespace or "bioaf-notebooks",
             session_type=ns.session_type,
         )
-    except Exception:
-        logger.debug("Session %s status read failed", ns.id, exc_info=True)
-        return False
+    except Exception as exc:
+        # Uncertainty, not failure: the overall startup deadline still applies.
+        logger.warning("Session %s status read failed (%s)", ns.id, type(exc).__name__)
+        observed = SessionStatus(session_id=str(ns.id), status=ServiceState.UNKNOWN)
 
     target = {"organization_id": ns.organization_id, "session_id": ns.id, "expected_job_ref": ns.compute_job_ref}
     details = observed.provider_details or {}
@@ -89,6 +92,10 @@ async def observe_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
                 lifecycle=_pending_cleanup(now),
                 **target,
             )
+        elif record_observation:
+            # The periodic pass rotates through starting sessions by this timestamp.
+            await transition_in(db, expected_statuses=STARTING, lifecycle={"observed_at": now.isoformat()}, **target)
+            return False
     elif ns.status in LIVE:
         if observed.status == ServiceState.ERROR:
             logger.warning("Notebook session %s's workload failed while running", ns.id)
@@ -111,7 +118,63 @@ async def observe_session(db: AsyncSession, ns: NotebookSession, *, now: datetim
     return applied
 
 
+# -- the one guard before any exec or deletion ----------------------------------------------------
+
+
+class Verdict:
+    """``ok`` (act on ``workload``), ``unmanaged`` (no lifecycle: act as before), or a ``cleanup``
+    record to store instead of acting: ``blocked`` (never automatically) or ``pending`` (later)."""
+
+    __slots__ = ("kind", "workload", "cleanup")
+
+    def __init__(self, kind: str, workload=None, cleanup: dict | None = None):
+        self.kind = kind
+        self.workload = workload
+        self.cleanup = cleanup
+
+
+async def verify_workload(adapter, ns: NotebookSession, *, now: datetime | None = None) -> Verdict:
+    """Resolve ``ns``'s workload under the shared identity rules and check it is on the recorded cluster.
+
+    Every path that execs into or deletes a session's resources (stop, both idle stops, periodic
+    cleanup) asks this first. A conflicting identity or a changed cluster blocks automatic action;
+    a cluster that cannot be confirmed right now defers it.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not getattr(adapter, "manages_workloads", False) or ns.session_type not in INTERACTIVE_SESSION_TYPES:
+        return Verdict("unmanaged")
+    workload, why = adapter.resolve_workload(ns)
+    if workload is None:
+        return Verdict("blocked", cleanup={"state": "blocked", "detail": why, "updated_at": now.isoformat()})
+    recorded = ((ns.provider_metadata or {}).get("lifecycle") or {}).get("cluster")
+    if recorded:
+        current = await adapter.workload_cluster()
+        if current is None:
+            logger.warning("Notebook session %s: cluster identity unavailable; acting on it later", ns.id)
+            return Verdict("deferred", cleanup={"state": "pending", "updated_at": now.isoformat()})
+        if current != recorded:
+            logger.warning(
+                "Notebook session %s was launched on %s but the cluster is now %s; not acting automatically",
+                ns.id,
+                recorded,
+                current,
+            )
+            return Verdict(
+                "blocked",
+                cleanup={
+                    "state": "blocked",
+                    "detail": f"cluster changed (launched on {recorded}, now {current})",
+                    "updated_at": now.isoformat(),
+                },
+            )
+    return Verdict("ok", workload=workload)
+
+
 # -- the periodic pass ---------------------------------------------------------------------------
+
+
+def _lifecycle_field(name: str):
+    return func.jsonb_extract_path_text(NotebookSession.provider_metadata, "lifecycle", name)
 
 
 def _cleanup_state():
@@ -145,46 +208,23 @@ async def _record_cleanup(db, ns: NotebookSession, cleanup: dict) -> None:
 async def cleanup_session(db: AsyncSession, ns: NotebookSession, *, now: datetime) -> None:
     """Release a finished session's resources, verified, and record the outcome."""
     adapter = get_notebook_adapter()
-    lifecycle = (ns.provider_metadata or {}).get("lifecycle") or {}
-    cleanup = lifecycle.get("cleanup") or {}
-
-    recorded_cluster = lifecycle.get("cluster")
-    if recorded_cluster:
-        current = await adapter.workload_cluster()
-        if current is None:
-            logger.warning("Notebook session %s: cluster identity unavailable; cleanup deferred", ns.id)
-            return
-        if current != recorded_cluster:
-            logger.warning(
-                "Notebook session %s was launched on %s but the cluster is now %s; not deleting automatically",
-                ns.id,
-                recorded_cluster,
-                current,
-            )
-            await _record_cleanup(
-                db,
-                ns,
-                {
-                    "state": "blocked",
-                    "detail": f"cluster changed (launched on {recorded_cluster}, now {current})",
-                    "updated_at": now.isoformat(),
-                },
-            )
-            return
+    cleanup = ((ns.provider_metadata or {}).get("lifecycle") or {}).get("cleanup") or {}
 
     if cleanup.get("save_outputs"):
+        # The shared stop path verifies first, saves what it can, then releases.
         from app.services.notebook_service import NotebookService
 
         await NotebookService.terminate_and_save_outputs(db, ns, ran=True, adapter=adapter)
         return
 
-    workload = adapter.recorded_workload(ns)
-    if workload is None:
-        await _record_cleanup(
-            db, ns, {"state": "blocked", "detail": "no usable recorded workload", "updated_at": now.isoformat()}
-        )
+    verdict = await verify_workload(adapter, ns, now=now)
+    if verdict.kind == "unmanaged":
         return
-    release = await asyncio.wait_for(adapter.release_session_resources(workload), timeout=ITEM_TIMEOUT_SECONDS)
+    if verdict.kind != "ok":
+        if verdict.kind == "blocked":
+            await _record_cleanup(db, ns, verdict.cleanup or {})
+        return
+    release = await asyncio.wait_for(adapter.release_session_resources(verdict.workload), timeout=ITEM_TIMEOUT_SECONDS)
     if release.blocked:
         logger.warning(
             "Notebook session %s: resources under its recorded names belong to something else; "
@@ -201,6 +241,8 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
     """
     now = now or datetime.now(timezone.utc)
     counts = {"observed": 0, "cleaned": 0, "errors": 0}
+    if not getattr(get_notebook_adapter(), "manages_workloads", False):
+        return counts
 
     starting = await _ids(
         factory,
@@ -210,7 +252,8 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
             NotebookSession.session_type.in_(INTERACTIVE_SESSION_TYPES),
             NotebookSession.compute_job_ref.isnot(None),
         )
-        .order_by(NotebookSession.id)
+        # Least recently observed first, so sessions that keep erroring cannot crowd out others.
+        .order_by(_lifecycle_field("observed_at").asc().nulls_first(), NotebookSession.id)
         .limit(OBSERVE_BATCH),
     )
     for session_id in starting:
@@ -218,7 +261,9 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
             async with factory() as db:
                 ns = await _load(db, session_id)
                 if ns is not None and ns.status in STARTING:
-                    await asyncio.wait_for(observe_session(db, ns, now=now), timeout=ITEM_TIMEOUT_SECONDS)
+                    await asyncio.wait_for(
+                        observe_session(db, ns, now=now, record_observation=True), timeout=ITEM_TIMEOUT_SECONDS
+                    )
                     await db.commit()
                     counts["observed"] += 1
         except Exception:
@@ -226,10 +271,11 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
             logger.exception("Observing notebook session %s failed", session_id)
 
     state = _cleanup_state()
+    # Every finished interactive session, including legacy records that name their workload only in
+    # older columns (or not at all: the launch naming rule then applies, and labels are verified).
     finished_rows = (
         NotebookSession.status.in_(FINISHED),
         NotebookSession.session_type.in_(INTERACTIVE_SESSION_TYPES),
-        NotebookSession.compute_job_ref.isnot(None),
     )
     # Two queues, so a backlog of never-inspected older sessions never delays a pending retry:
     # pending cleanup, least recently attempted first; then first inspections, oldest first.

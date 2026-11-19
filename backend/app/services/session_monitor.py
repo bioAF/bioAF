@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notebook_session import NotebookSession
-from app.services.notebook_service import mark_cleanup_pending, record_release
+from app.services.notebook_service import terminate_verified
 from app.services.event_bus import event_bus
 from app.services.event_types import SESSION_IDLE
 from app.runtime import spawn_event
@@ -67,21 +67,7 @@ class SessionMonitorService:
 
         logger.info("Terminating idle session %d (pod %s)", ns.id, ns.compute_job_ref)
 
-        try:
-            notebook_adapter = get_notebook_adapter()
-            result = await notebook_adapter.terminate_session(
-                session_id=ns.id,
-                pod_name=ns.compute_job_ref or "",
-                namespace=ns.provider_namespace or "bioaf-notebooks",
-                gcs_home_prefix=ns.gcs_home_prefix or "",
-                session_type=ns.session_type,
-                user_id=ns.user_id,
-            )
-            record_release(ns, result)
-        except Exception as e:
-            logger.warning("Failed to terminate idle session %d: %s", ns.id, e)
-            if (ns.provider_metadata or {}).get("lifecycle"):
-                mark_cleanup_pending(ns)
+        await terminate_verified(ns, get_notebook_adapter(), ran=True, session_id_arg=ns.id)
 
         now = datetime.now(timezone.utc)
         ns.status = "stopped"

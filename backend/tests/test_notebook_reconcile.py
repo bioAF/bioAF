@@ -85,13 +85,18 @@ class FakeAdapter:
         self.released: list[int] = []
         self.terminated: list[dict] = []
 
+    manages_workloads = True
+
+    def resolve_workload(self, ns):
+        return self.recorded_workload(ns), None
+
     def recorded_workload(self, ns):
         return NotebookWorkload(
             session_id=ns.id,
             user_id=ns.user_id,
             session_type=ns.session_type,
             namespace="bioaf-notebooks",
-            pod_name=ns.compute_job_ref,
+            pod_name=ns.compute_job_ref or f"bioaf-notebook-{ns.id}",
             service_name=f"bioaf-notebook-svc-{ns.id}",
         )
 

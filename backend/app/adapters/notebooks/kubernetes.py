@@ -997,31 +997,48 @@ class KubernetesNotebookProvider(NotebookProvider):
             service_name=notebook_service_name(session_id),
         )
 
-    def recorded_workload(self, ns) -> NotebookWorkload | None:
-        """The workload a recorded interactive session owns, from what launch recorded.
+    @property
+    def manages_workloads(self) -> bool:
+        return not self.is_local
 
-        The pod is the recorded ``compute_job_ref`` (never a historical ``slurm_job_id``); the
-        Service is the recorded name, else the launch naming rule for the session id.
+    def resolve_workload(self, ns) -> tuple[NotebookWorkload | None, str | None]:
+        """The workload a recorded interactive session owns, or (None, why not).
+
+        Uses the shared recorded-identity rules (``exec_access.recorded_notebook_identity``):
+        conflicting or invalid recorded values are refused, never resolved by precedence. Only
+        when no pod is recorded at all does the launch naming rule supply one; ownership is then
+        still verified against the live object's labels before anything is deleted.
         """
-        from app.adapters.kubernetes.exec_access import is_namespace, is_resource_name
+        from app.adapters.kubernetes.exec_access import is_resource_name, recorded_notebook_identity
+        from app.exceptions import ConnectionTargetInvalidError
 
         if self.is_local or ns.session_type not in INTERACTIVE_SESSION_TYPES:
-            return None
-        metadata = ns.provider_metadata or {}
-        pod_name = ns.compute_job_ref
-        namespace = metadata.get("namespace") or DEFAULT_NOTEBOOK_NAMESPACE
-        service_name = metadata.get("service_name") or notebook_service_name(ns.id)
-        if not (is_resource_name(pod_name) and is_resource_name(service_name) and is_namespace(namespace)):
-            logger.warning("Notebook session %s has no usable recorded workload identity", ns.id)
-            return None
-        return NotebookWorkload(
-            session_id=int(ns.id),
-            user_id=int(ns.user_id),
-            session_type=ns.session_type,
-            namespace=namespace,
-            pod_name=pod_name,
-            service_name=service_name,
+            return None, "not a managed interactive session"
+        try:
+            pod_name, namespace = recorded_notebook_identity(ns)
+        except ConnectionTargetInvalidError as exc:
+            detail = (
+                "conflicting recorded identity" if exc.reason == "conflicting_identity" else "invalid recorded identity"
+            )
+            logger.warning("Notebook session %s: %s; not acting on its resources", ns.id, detail)
+            return None, detail
+        service_name = (ns.provider_metadata or {}).get("service_name") or notebook_service_name(ns.id)
+        if not is_resource_name(service_name):
+            return None, "invalid recorded identity"
+        return (
+            NotebookWorkload(
+                session_id=int(ns.id),
+                user_id=int(ns.user_id),
+                session_type=ns.session_type,
+                namespace=namespace or DEFAULT_NOTEBOOK_NAMESPACE,
+                pod_name=pod_name or notebook_pod_name(ns.id),
+                service_name=service_name,
+            ),
+            None,
         )
+
+    def recorded_workload(self, ns) -> NotebookWorkload | None:
+        return self.resolve_workload(ns)[0]
 
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> pod and Service names carrying a ``bioaf.io/session`` label (raises on read errors)."""
