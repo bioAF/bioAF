@@ -30,10 +30,12 @@ from app.exceptions import ConnectionTargetInvalidError, ValidationError
 from app.adapters.models import (
     ConnectionDescription,
     ConnectionTarget,
+    NotebookWorkload,
     SessionInfo,
     SessionStatus,
     StoredObject,
     TerminationResult,
+    WorkloadRelease,
     to_service_state,
 )
 from app import runtime
@@ -87,6 +89,11 @@ DEFAULT_NOTEBOOK_NAMESPACE = "bioaf-notebooks"
 def notebook_pod_name(session_id) -> str:
     """The pod name launch gives a session: one ``bioaf-notebook-`` prefix on the bare id."""
     return f"bioaf-notebook-{session_id}"
+
+
+def notebook_service_name(session_id) -> str:
+    """The LoadBalancer Service name launch gives an interactive session."""
+    return f"bioaf-notebook-svc-{session_id}"
 
 
 HOME_DIR = "/home/jovyan"
@@ -888,7 +895,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         # the chpasswd command embedded in pod_manifest into pod_name, which
         # then trips py/clear-text-logging at every subsequent log call.
         pod_name = notebook_pod_name(session_id)
-        service_name = f"bioaf-notebook-svc-{session_id}"
+        service_name = notebook_service_name(session_id)
 
         session_type = session_spec.get("session_type", "jupyter")
         if session_type == "jupyter":
@@ -927,7 +934,22 @@ class KubernetesNotebookProvider(NotebookProvider):
                     "type": "LoadBalancer",
                 },
             }
-            core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
+            try:
+                core_client.create_namespaced_service(namespace=namespace, body=service_manifest)
+            except Exception:
+                # The pod was accepted; release it rather than leave it holding a node.
+                logger.exception("Creating service %s failed; releasing pod %s", service_name, pod_name)
+                await self.release_session_resources(
+                    NotebookWorkload(
+                        session_id=int(session_id),
+                        user_id=int(session_spec.get("user_id") or 0),
+                        session_type=session_type,
+                        namespace=namespace,
+                        pod_name=pod_name,
+                        service_name=service_name,
+                    )
+                )
+                raise
             logger.info("Created service %s in %s", service_name, namespace)
 
             # Launch background task to poll for pod readiness and LB IP,
@@ -940,6 +962,8 @@ class KubernetesNotebookProvider(NotebookProvider):
                     namespace,
                     container_port,
                     organization_id=session_spec.get("organization_id"),
+                    user_id=int(session_spec.get("user_id") or 0),
+                    session_type=session_type,
                 ),
                 role="notebook-readiness",
             )
@@ -962,8 +986,21 @@ class KubernetesNotebookProvider(NotebookProvider):
         container_port: int,
         *,
         organization_id: int | None = None,
+        user_id: int = 0,
+        session_type: str = "jupyter",
     ) -> None:
-        """Background: poll for pod readiness and LB IP, then update the DB."""
+        """Background: poll for pod readiness and LB IP, then update the DB.
+
+        A launch it marks failed is also released: its pod and Service are deleted.
+        """
+        workload = NotebookWorkload(
+            session_id=int(session_id),
+            user_id=int(user_id),
+            session_type=session_type,
+            namespace=namespace,
+            pod_name=pod_name,
+            service_name=service_name,
+        )
         try:
             core_client = self._get_k8s_core_client()
 
@@ -988,6 +1025,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                             failure_reason=reason,
                             failure_message=message,
                         )
+                        await self.release_session_resources(workload)
                         return
                 except Exception:
                     pass
@@ -1004,6 +1042,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                     failure_reason=reason,
                     failure_message=message,
                 )
+                await self.release_session_resources(workload)
                 return
 
             # Wait for LoadBalancer external IP (up to 3 minutes). The per-attempt
@@ -1045,6 +1084,17 @@ class KubernetesNotebookProvider(NotebookProvider):
                 failure_reason=FAILURE_REASON_UNKNOWN,
                 failure_message=f"Background poll raised: {e}",
             )
+            try:
+                await self.release_session_resources(workload)
+            except Exception:
+                logger.exception("Releasing session %s after a failed readiness check failed", session_id)
+
+    async def release_session_resources(self, workload: NotebookWorkload) -> WorkloadRelease:
+        """Delete the session's pod and Service, each verified and independently; see lifecycle."""
+        from app.adapters.notebooks.lifecycle import release_workload
+
+        core_client = self._get_k8s_core_client()
+        return await asyncio.to_thread(release_workload, core_client, workload)
 
     async def _classify_pod_failure_from_api(
         self,
