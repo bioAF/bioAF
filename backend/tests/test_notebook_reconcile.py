@@ -404,3 +404,19 @@ async def test_a_reserved_launch_that_never_created_its_pod_fails_at_the_deadlin
     row = await _row(factory, ns.id)
     assert (row.status, row.failure_reason) == ("failed", "startup_timeout")
     assert _cleanup(row)["state"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_a_backlog_of_old_sessions_never_delays_new_pending_cleanup(session, admin_user, factory, monkeypatch):
+    from app.services import notebook_lifecycle
+
+    monkeypatch.setattr(notebook_lifecycle, "CLEANUP_BATCH", 3)
+    for _ in range(5):
+        await _seed(session, admin_user, status="stopped")  # never inspected
+    fresh = await _seed(session, admin_user, status="failed", lifecycle={"cleanup": {"state": "pending"}})
+    adapter = FakeAdapter()
+
+    await _pass(factory, adapter, monkeypatch)
+
+    assert _cleanup(await _row(factory, fresh.id))["state"] == "complete"
+    assert fresh.id in adapter.released

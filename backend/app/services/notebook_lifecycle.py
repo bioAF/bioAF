@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.models import ServiceState
@@ -226,18 +226,28 @@ async def reconcile_pass(factory, *, now: datetime | None = None) -> dict:
             logger.exception("Observing notebook session %s failed", session_id)
 
     state = _cleanup_state()
-    finished = await _ids(
+    finished_rows = (
+        NotebookSession.status.in_(FINISHED),
+        NotebookSession.session_type.in_(INTERACTIVE_SESSION_TYPES),
+        NotebookSession.compute_job_ref.isnot(None),
+    )
+    # Two queues, so a backlog of never-inspected older sessions never delays a pending retry:
+    # pending cleanup, least recently attempted first; then first inspections, oldest first.
+    pending = await _ids(
         factory,
         select(NotebookSession.id)
-        .where(
-            NotebookSession.status.in_(FINISHED),
-            NotebookSession.session_type.in_(INTERACTIVE_SESSION_TYPES),
-            NotebookSession.compute_job_ref.isnot(None),
-            or_(state.is_(None), state == "pending"),
-        )
+        .where(*finished_rows, state == "pending")
         .order_by(_cleanup_updated().asc().nulls_first(), NotebookSession.id)
         .limit(CLEANUP_BATCH),
     )
+    uninspected = await _ids(
+        factory,
+        select(NotebookSession.id)
+        .where(*finished_rows, state.is_(None))
+        .order_by(NotebookSession.id)
+        .limit(CLEANUP_BATCH),
+    )
+    finished = pending + uninspected
     for session_id in finished:
         try:
             async with factory() as db:
