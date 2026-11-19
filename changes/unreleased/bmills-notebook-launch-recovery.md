@@ -14,3 +14,6 @@
   outputs fails, the session's pod is kept and the save is retried first. bioAF also checks that a pod belongs
   to the session before running any command in it, and refuses to start a session when it cannot confirm
   which cluster the session would run on.
+- Stopping a notebook session now saves its home directory. The save previously failed silently on every stop
+  because it ran in a container without storage access, so files outside the git repository were lost. The
+  restored home is owned by the notebook user, and retrying a stop no longer registers the same outputs twice.
