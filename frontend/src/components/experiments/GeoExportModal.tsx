@@ -4,6 +4,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useState, useEffect } from "react";
 import { api, ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Button } from "@/components/ui/Button";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import type {
   GeoValidationReport,
@@ -106,22 +107,13 @@ function FileAssociationFinding({
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
             {pending.map((s) => (
-              <button
-                key={s.sample_id}
-                onClick={() => onLink(s.sample_id)}
-                disabled={busy}
-                className="border border-gray-300 rounded-md px-3 py-1 text-xs hover:bg-white disabled:opacity-50"
-              >
+              <Button key={s.sample_id} variant="secondary" size="sm" onClick={() => onLink(s.sample_id)} disabled={busy}>
                 Link to {s.external_id}
-              </button>
+              </Button>
             ))}
-            <button
-              onClick={() => setKeeping(true)}
-              disabled={busy || keeping}
-              className="border border-gray-300 rounded-md px-3 py-1 text-xs hover:bg-white disabled:opacity-50"
-            >
+            <Button variant="secondary" size="sm" onClick={() => setKeeping(true)} disabled={busy || keeping}>
               Keep at experiment level
-            </button>
+            </Button>
           </div>
           {keeping && (
             <div className="space-y-2">
@@ -135,13 +127,9 @@ function FileAssociationFinding({
                 rows={2}
                 className="w-full border border-gray-300 rounded-md px-2 py-1 text-xs"
               />
-              <button
-                onClick={() => onKeep(reason.trim())}
-                disabled={busy || !reason.trim()}
-                className="bg-bioaf-600 text-white px-3 py-1 rounded-md text-xs disabled:opacity-50"
-              >
+              <Button size="sm" onClick={() => onKeep(reason.trim())} disabled={busy || !reason.trim()}>
                 Confirm
-              </button>
+              </Button>
             </div>
           )}
         </div>
