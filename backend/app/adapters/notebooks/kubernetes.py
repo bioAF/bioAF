@@ -102,6 +102,19 @@ def _config_text(value) -> str:
     return "" if text_value == "null" else text_value
 
 
+def ownership_labels(session_spec: dict) -> dict[str, str]:
+    """Labels every resource of a session carries, so its owner can be verified before any delete."""
+    labels = {
+        "bioaf.io/managed": "true",
+        "bioaf.io/session": str(session_spec.get("session_id", 0)),
+        "bioaf.io/user": str(session_spec.get("user_id", "")),
+        "bioaf.io/type": session_spec.get("session_type", "jupyter"),
+    }
+    if session_spec.get("organization_id") is not None:
+        labels["bioaf.io/organization"] = str(session_spec["organization_id"])
+    return labels
+
+
 def notebook_service_name(session_id) -> str:
     """The LoadBalancer Service name launch gives an interactive session."""
     return f"bioaf-notebook-svc-{session_id}"
@@ -851,9 +864,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             "name": pod_name,
             "namespace": namespace,
             "labels": {
-                "bioaf.io/session": str(session_id),
-                "bioaf.io/user": str(user_id),
-                "bioaf.io/type": session_type,
+                **ownership_labels(session_spec),
                 "bioaf.io/pool": node_pool,
             },
         }
@@ -929,9 +940,7 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "metadata": {
                     "name": service_name,
                     "namespace": namespace,
-                    "labels": {
-                        "bioaf.io/session": str(session_id),
-                    },
+                    "labels": ownership_labels(session_spec),
                 },
                 "spec": {
                     "selector": {"bioaf.io/session": str(session_id)},

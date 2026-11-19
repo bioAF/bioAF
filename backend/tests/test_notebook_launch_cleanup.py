@@ -87,3 +87,34 @@ async def test_a_pod_creation_error_deletes_nothing(adapter, monkeypatch):
     with pytest.raises(ApiException):
         await adapter._k8s_launch_session(_spec())
     assert core.deletes() == []
+
+
+@pytest.mark.asyncio
+async def test_new_resources_carry_consistent_ownership_labels(adapter, monkeypatch):
+    bodies = {}
+
+    class Capture(LaunchCore):
+        def create_namespaced_pod(self, namespace, body, **kw):
+            bodies["pod"] = body
+            return super().create_namespaced_pod(namespace, body, **kw)
+
+        def create_namespaced_service(self, namespace, body, **kw):
+            bodies["service"] = body
+            return super().create_namespaced_service(namespace, body, **kw)
+
+    core = Capture()
+    monkeypatch.setattr(adapter, "_get_k8s_core_client", lambda: core)
+    await adapter._k8s_launch_session(_spec())
+
+    expected = {
+        "bioaf.io/managed": "true",
+        "bioaf.io/organization": "1",
+        "bioaf.io/session": "42",
+        "bioaf.io/user": "7",
+        "bioaf.io/type": "jupyter",
+    }
+    for kind in ("pod", "service"):
+        labels = bodies[kind]["metadata"]["labels"]
+        assert {k: labels.get(k) for k in expected} == expected, kind
+    # The Service still selects its session's pod only.
+    assert bodies["service"]["spec"]["selector"] == {"bioaf.io/session": "42"}
