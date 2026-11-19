@@ -559,6 +559,17 @@ class FileService:
         return result
 
     @staticmethod
+    async def sample_in_org(session: AsyncSession, sample_id: int, org_id: int) -> bool:
+        row = await session.execute(
+            text(
+                "SELECT 1 FROM samples s JOIN experiments e ON e.id = s.experiment_id "
+                "WHERE s.id = :sample_id AND e.organization_id = :org_id"
+            ),
+            {"sample_id": sample_id, "org_id": org_id},
+        )
+        return row.first() is not None
+
+    @staticmethod
     async def link_file_to_sample(session: AsyncSession, file_id: int, sample_id: int) -> None:
         await session.execute(
             text(

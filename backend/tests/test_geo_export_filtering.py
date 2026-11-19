@@ -132,7 +132,9 @@ async def test_experiment_endpoint_refuses_unsupported_filters(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", INVALID_FILTERS)
 @pytest.mark.parametrize("validate_only", [True, False])
-async def test_project_endpoint_refuses_unsupported_filters(client, admin_token, session, admin_user, value, validate_only):
+async def test_project_endpoint_refuses_unsupported_filters(
+    client, admin_token, session, admin_user, value, validate_only
+):
     from app.models.project import Project
 
     # An empty project: an unvalidated filter would otherwise reach "No experiments found" or succeed.

@@ -1,17 +1,34 @@
 """GEO export API endpoint."""
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.services.audit_service import log_action
+from app.services.geo import association_acknowledgments
 from app.services.geo.geo_export_service import GeoExportService
 from app.services.geo.qc_filter import GeoQcFilter
 from app.services.geo.superseries_export_service import SuperSeriesExportService
 
 router = APIRouter(tags=["geo-export"])
+
+
+class GeoAssociationAcknowledgmentRequest(BaseModel):
+    """Quote one readiness finding: its file, every reported Sample, and its fingerprint."""
+
+    file_id: int
+    sample_ids: list[int] = Field(min_length=1, max_length=1000)
+    fingerprint: str = Field(min_length=64, max_length=64)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class GeoAssociationAcknowledgmentResponse(BaseModel):
+    status: str
+    file_id: int
+    sample_ids: list[int]
 
 
 @router.post("/api/experiments/{experiment_id}/export/geo")
@@ -126,4 +143,35 @@ async def export_project_geo(
         content=zip_bytes,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/api/experiments/{experiment_id}/export/geo/file-associations/acknowledgments",
+    response_model=GeoAssociationAcknowledgmentResponse,
+)
+async def acknowledge_geo_file_association(
+    experiment_id: int,
+    body: GeoAssociationAcknowledgmentRequest,
+    current_user: dict = require_permission("files", "edit"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Keep a reported file Experiment-level for the listed Samples (no Sample link is created).
+
+    Requires files:edit: download permission alone cannot change what a GEO export references.
+    """
+    await association_acknowledgments.acknowledge(
+        session,
+        org_id=int(current_user["org_id"]),
+        experiment_id=experiment_id,
+        user_id=int(current_user["sub"]),
+        file_id=body.file_id,
+        sample_ids=body.sample_ids,
+        fingerprint=body.fingerprint,
+        reason=body.reason.strip() or body.reason,
+        api_key_id=current_user.get("api_key_id"),
+    )
+    await session.commit()
+    return GeoAssociationAcknowledgmentResponse(
+        status="acknowledged", file_id=body.file_id, sample_ids=sorted(set(body.sample_ids))
     )

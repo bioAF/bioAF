@@ -1843,6 +1843,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/experiments/{experiment_id}/export/geo/file-associations/acknowledgments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Geo File Association
+         * @description Keep a reported file Experiment-level for the listed Samples (no Sample link is created).
+         *
+         *     Requires files:edit: download permission alone cannot change what a GEO export references.
+         */
+        post: operations["acknowledge_geo_file_association_api_experiments__experiment_id__export_geo_file_associations_acknowledgments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/experiments/{experiment_id}/files": {
         parameters: {
             query?: never;
@@ -11488,6 +11510,29 @@ export interface components {
             expires_at?: string | null;
         };
         /**
+         * GeoAssociationAcknowledgmentRequest
+         * @description Quote one readiness finding: its file, every reported Sample, and its fingerprint.
+         */
+        GeoAssociationAcknowledgmentRequest: {
+            /** File Id */
+            file_id: number;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Reason */
+            reason: string;
+            /** Sample Ids */
+            sample_ids: number[];
+        };
+        /** GeoAssociationAcknowledgmentResponse */
+        GeoAssociationAcknowledgmentResponse: {
+            /** File Id */
+            file_id: number;
+            /** Sample Ids */
+            sample_ids: number[];
+            /** Status */
+            status: string;
+        };
+        /**
          * GeoQcFilter
          * @enum {string}
          */
@@ -20581,6 +20626,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_geo_file_association_api_experiments__experiment_id__export_geo_file_associations_acknowledgments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoAssociationAcknowledgmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoAssociationAcknowledgmentResponse"];
                 };
             };
             /** @description Validation Error */

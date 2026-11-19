@@ -538,6 +538,9 @@ async def link_file(
             await UploadService._auto_update_experiment_status(session, body.experiment_id, org_id, user_id)
 
     if body.sample_id:
+        # The target Sample must be the caller's too: a link decides GEO file ownership.
+        if not await FileService.sample_in_org(session, body.sample_id, org_id):
+            raise HTTPException(404, "Sample not found")
         await FileService.link_file_to_sample(session, file_id, body.sample_id)
         from app.services.audit_service import log_action
 

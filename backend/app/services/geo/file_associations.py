@@ -13,14 +13,21 @@ is never an ownership rule.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.file import File
+from app.models.geo_file_association_acknowledgment import GeoFileAssociationAcknowledgment
 from app.models.sample import sample_files
+
+
+RAW_FILE_TYPES = ("fastq", "fastq.gz", "fq.gz")
 
 
 @dataclass
@@ -40,7 +47,7 @@ async def load_links(session: AsyncSession, file_ids: list[int]) -> dict[int, se
         rows = await session.execute(
             select(sample_files.c.file_id, sample_files.c.sample_id).where(sample_files.c.file_id.in_(file_ids))
         )
-        for file_id, sample_id in rows:
+        for file_id, sample_id in rows.tuples():
             links[file_id].add(sample_id)
     return links
 
@@ -59,3 +66,122 @@ def select_files(candidates: list[File], links: dict[int, set[int]], selected_sa
             for sid in owners:
                 selection.per_sample[sid].append(f)
     return selection
+
+
+# --- legacy association findings --------------------------------------------------------------------
+#
+# One detector for upgrade reporting, readiness, and experiment/SuperSeries download. A finding is an
+# unlinked candidate file whose name starts with the external ID of a currently selected Sample (the old
+# prefix rule): evidence of a possibly lost per-Sample reference, not proof of ownership. It is resolved
+# per file/Sample pair, by a link (the file then is no longer unlinked) or an acknowledgment whose
+# fingerprint still matches the current state under the current policy revision.
+
+POLICY_REVISION = 1
+"""Bump when the association rules change; every earlier acknowledgment then becomes stale."""
+
+
+def detect_findings(unlinked: list[File], selected_samples: list[Any]) -> list[tuple[File, list[Any]]]:
+    """Each unlinked file with the selected Samples whose external ID its filename starts with."""
+    found = []
+    for f in unlinked:
+        matched = sorted(
+            (s for s in selected_samples if s.external_id and f.filename.startswith(s.external_id)),
+            key=lambda s: (s.external_id, s.id),
+        )
+        if matched:
+            found.append((f, matched))
+    return found
+
+
+def _digest(payload: dict) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _file_state(f: File, linked_sample_ids: set[int]) -> dict:
+    return {"id": f.id, "filename": f.filename, "storage_uri": f.storage_uri, "links": sorted(linked_sample_ids)}
+
+
+def _sample_state(s: Any) -> list:
+    return [s.id, s.experiment_id, s.external_id]
+
+
+def pair_fingerprint(f: File, linked_sample_ids: set[int], sample: Any) -> str:
+    """The state one acknowledgment is valid for."""
+    return _digest(
+        {"policy": POLICY_REVISION, "file": _file_state(f, linked_sample_ids), "sample": _sample_state(sample)}
+    )
+
+
+def finding_fingerprint(f: File, linked_sample_ids: set[int], samples: list[Any]) -> str:
+    """The state a reported finding (all its pairs) was computed from; an acknowledgment must quote it."""
+    return _digest(
+        {
+            "policy": POLICY_REVISION,
+            "file": _file_state(f, linked_sample_ids),
+            "samples": sorted(_sample_state(s) for s in samples),
+        }
+    )
+
+
+@dataclass
+class AssociationFinding:
+    file: File
+    samples: list[Any]
+    acknowledged_sample_ids: set[int]
+    fingerprint: str
+
+    @property
+    def resolved(self) -> bool:
+        return all(s.id in self.acknowledged_sample_ids for s in self.samples)
+
+    def as_dict(self) -> dict:
+        return {
+            "file_id": self.file.id,
+            "filename": self.file.filename,
+            "file_kind": "raw" if self.file.file_type in RAW_FILE_TYPES else "processed",
+            "samples": [
+                {
+                    "sample_id": s.id,
+                    "external_id": s.external_id,
+                    "qc_status": s.qc_status,
+                    "acknowledged": s.id in self.acknowledged_sample_ids,
+                }
+                for s in self.samples
+            ],
+            "resolved": self.resolved,
+            "fingerprint": self.fingerprint,
+        }
+
+
+async def findings_for(
+    session: AsyncSession,
+    org_id: int,
+    experiment_id: int,
+    selection: FileSelection,
+    selected_samples: list[Any],
+) -> list[AssociationFinding]:
+    """Findings for this request's selection, with their current acknowledgment status.
+
+    Never swallows a failure: an exception here must stop the export, not read as "no findings".
+    """
+    detected = detect_findings(selection.unlinked, selected_samples)
+    if not detected:
+        return []
+    acks = await session.execute(
+        select(
+            GeoFileAssociationAcknowledgment.file_id,
+            GeoFileAssociationAcknowledgment.sample_id,
+            GeoFileAssociationAcknowledgment.fingerprint,
+        ).where(
+            GeoFileAssociationAcknowledgment.organization_id == org_id,
+            GeoFileAssociationAcknowledgment.experiment_id == experiment_id,
+            GeoFileAssociationAcknowledgment.policy_revision == POLICY_REVISION,
+            GeoFileAssociationAcknowledgment.file_id.in_([f.id for f, _ in detected]),
+        )
+    )
+    recorded = {(file_id, sample_id): fp for file_id, sample_id, fp in acks}
+    findings = []
+    for f, samples in detected:
+        acknowledged = {s.id for s in samples if recorded.get((f.id, s.id)) == pair_fingerprint(f, set(), s)}
+        findings.append(AssociationFinding(f, samples, acknowledged, finding_fingerprint(f, set(), samples)))
+    return findings

@@ -134,6 +134,22 @@ class ConflictError(DomainError):
     code = "conflict"
 
 
+class GeoFileAssociationsUnresolvedError(ConflictError):
+    """A GEO download would drop per-Sample references a legacy unlinked file used to supply.
+
+    ``details`` names the Experiment(s) and each unresolved file with its matched Samples, so the caller
+    can link or acknowledge them (see app/services/geo/file_associations.py) and retry.
+    """
+
+    code = "geo_file_associations_unresolved"
+
+
+class GeoAssociationAcknowledgmentStaleError(ConflictError):
+    """The acknowledged file/Sample pairs no longer match the current finding; run readiness again."""
+
+    code = "geo_association_acknowledgment_stale"
+
+
 class StateError(DomainError):
     """The entity is not in a state that permits the requested action."""
 

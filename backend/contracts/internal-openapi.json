@@ -8875,6 +8875,70 @@
         "title": "GenerateSetupCodeResponse",
         "type": "object"
       },
+      "GeoAssociationAcknowledgmentRequest": {
+        "description": "Quote one readiness finding: its file, every reported Sample, and its fingerprint.",
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "sample_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Sample Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "file_id",
+          "sample_ids",
+          "fingerprint",
+          "reason"
+        ],
+        "title": "GeoAssociationAcknowledgmentRequest",
+        "type": "object"
+      },
+      "GeoAssociationAcknowledgmentResponse": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "sample_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Sample Ids",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "file_id",
+          "sample_ids"
+        ],
+        "title": "GeoAssociationAcknowledgmentResponse",
+        "type": "object"
+      },
       "GeoQcFilter": {
         "enum": [
           "exclude_failed",
@@ -32051,6 +32115,59 @@
           }
         },
         "summary": "Export Geo",
+        "tags": [
+          "geo-export"
+        ]
+      }
+    },
+    "/api/experiments/{experiment_id}/export/geo/file-associations/acknowledgments": {
+      "post": {
+        "description": "Keep a reported file Experiment-level for the listed Samples (no Sample link is created).\n\nRequires files:edit: download permission alone cannot change what a GEO export references.",
+        "operationId": "acknowledge_geo_file_association_api_experiments__experiment_id__export_geo_file_associations_acknowledgments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeoAssociationAcknowledgmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoAssociationAcknowledgmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Geo File Association",
         "tags": [
           "geo-export"
         ]
