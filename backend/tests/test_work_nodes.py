@@ -19,6 +19,8 @@ from app.models.user import User
 from app.services import api_key_service, role_service, service_account_service
 from app.services.auth_service import AuthService
 from app.services.bootstrap_roles import seed_builtin_roles
+from app.services.event_bus import event_bus
+from app.services.event_types import WORK_NODE_STOPPED
 
 
 @pytest_asyncio.fixture
@@ -980,11 +982,22 @@ async def nodes(session, admin_user, comp_bio_user):
 
 @pytest.fixture
 def provider():
-    """The work node adapter, so a test can prove whether termination was reached."""
+    """The work node adapter and the event bus, so a test can prove whether termination was
+    reached and whether a stopped event went out."""
     adapter = MagicMock(name="work node adapter")
     adapter.terminate_vm = AsyncMock(return_value=TerminationResult())
-    with patch("app.services.work_node_service.get_work_node_adapter", return_value=adapter):
+    with (
+        patch("app.services.work_node_service.get_work_node_adapter", return_value=adapter),
+        patch.object(event_bus, "emit", AsyncMock()) as emit,
+    ):
+        adapter.emit = emit
         yield adapter
+
+
+def _stopped_events(provider, node_id: int) -> list:
+    return [
+        c for c in provider.emit.call_args_list if c.args[0] == WORK_NODE_STOPPED and c.args[1]["entity_id"] == node_id
+    ]
 
 
 async def _state(session, node_id: int) -> tuple[str, object]:
@@ -1011,6 +1024,7 @@ async def _assert_untouched(session, provider, node_id: int) -> None:
     assert await _state(session, node_id) == ("running", None)
     provider.terminate_vm.assert_not_called()
     assert await _stop_audits(session, node_id) == 0
+    assert _stopped_events(provider, node_id) == []
 
 
 async def _custom_role_user(session, org_id: int, email: str, grants: list[tuple[str, str]]) -> dict:
@@ -1098,6 +1112,7 @@ async def test_a_user_reads_and_stops_their_own_node(client, session, comp_bio_t
     assert stopped.json()["status"] == "stopped"
     assert provider.terminate_vm.call_args.args[0] == "comp-bio-instance"
     assert await _stop_audits(session, nodes.comp_bio) == 1
+    assert len(_stopped_events(provider, nodes.comp_bio)) == 1
 
 
 @pytest.mark.asyncio
