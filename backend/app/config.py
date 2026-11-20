@@ -194,6 +194,10 @@ class Settings(BaseSettings):
     # Set in the image (Dockerfile.backend): a dump in the container's writable layer would be lost
     # when Compose replaces the container, so there the backups directory must be a mount.
     upgrade_require_mounted_backups: bool = False
+    # The GEO file association advisory (app/services/geo/association_advisory.py) runs in the started
+    # backend after this delay, with one deadline for the whole scan. A timeout only marks the advisory.
+    geo_association_advisory_delay_seconds: float = 60
+    geo_association_advisory_timeout_seconds: float = 120
 
     # Bcrypt
     bcrypt_rounds: int = 12

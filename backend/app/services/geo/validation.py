@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -56,6 +56,30 @@ class ValidationSummary(BaseModel):
     missing_recommended: int
 
 
+class AssociationSample(BaseModel):
+    """A selected Sample a legacy unlinked file's name matches, and whether that pair is acknowledged."""
+
+    sample_id: int
+    external_id: str
+    qc_status: str | None
+    acknowledged: bool
+
+
+class FileAssociationFinding(BaseModel):
+    """An unlinked file that the old filename rule would have referenced on selected Sample rows.
+
+    Resolve it by linking the file to the Sample that owns it, or by acknowledging (quoting
+    ``fingerprint``) that it stays Experiment-level for the listed Samples.
+    """
+
+    file_id: int
+    filename: str
+    file_kind: Literal["raw", "processed"]
+    samples: list[AssociationSample]
+    resolved: bool
+    fingerprint: str
+
+
 class ValidationReport(BaseModel):
     """Complete validation report for a GEO export."""
 
@@ -66,6 +90,10 @@ class ValidationReport(BaseModel):
     protocol_fields: list[FieldValidation]
     file_manifest: FileManifestStatus
     summary: ValidationSummary
+    # Separate from the metadata summary: file association findings, and whether they block download.
+    file_association_findings: list[FileAssociationFinding] = []
+    download_blocked: bool = False
+    association_policy_revision: int | None = None
 
 
 def _load_template() -> dict:

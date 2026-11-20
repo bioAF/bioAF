@@ -2,6 +2,7 @@
 
 import logging
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import NotFoundError
+from app.exceptions import GeoFileAssociationsUnresolvedError, NotFoundError
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun
@@ -17,10 +18,42 @@ from app.models.pipeline_run_review import PipelineRunReview
 from app.models.sample import Sample
 from app.services.geo.checksum_manifest import generate_checksum_manifest
 from app.services.geo.excel_generator import generate_geo_workbook
+from app.services.geo import file_associations
+from app.services.geo.file_associations import (
+    POLICY_REVISION,
+    RAW_FILE_TYPES,
+    AssociationFinding,
+)
+from app.services.geo.qc_filter import GeoQcFilter, parse_qc_filter
 from app.services.geo.readme_generator import generate_readme
-from app.services.geo.validation import ValidationReport, validate_experiment_for_geo
+from app.services.geo.validation import FileAssociationFinding, ValidationReport, validate_experiment_for_geo
 
 logger = logging.getLogger("bioaf.geo.export")
+
+
+@dataclass
+class GeoExportData:
+    """Everything one experiment's readiness report or package is built from: one selection for both."""
+
+    experiment_id: int
+    experiment_data: dict
+    samples_data: list[dict]
+    pipeline_data: dict | None
+    files_data: dict | None
+    findings: list[AssociationFinding]
+
+    @property
+    def unresolved(self) -> list[AssociationFinding]:
+        return [f for f in self.findings if not f.resolved]
+
+    def report(self) -> ValidationReport:
+        report = validate_experiment_for_geo(
+            self.experiment_data, self.samples_data, self.pipeline_data, self.files_data
+        )
+        report.file_association_findings = [FileAssociationFinding(**f.as_dict()) for f in self.findings]
+        report.download_blocked = bool(self.unresolved)
+        report.association_policy_revision = POLICY_REVISION
+        return report
 
 
 class GeoExportService:
@@ -34,11 +67,9 @@ class GeoExportService:
         pipeline_run_id: int | None = None,
         qc_status_filter: str = "exclude_failed",
     ) -> ValidationReport:
-        """Run validation only, returning the report."""
-        experiment_data, samples_data, pipeline_data, files_data = await GeoExportService._gather_data(
-            session, experiment_id, org_id, pipeline_run_id, qc_status_filter
-        )
-        return validate_experiment_for_geo(experiment_data, samples_data, pipeline_data, files_data)
+        """Run validation only, returning the report (with any file association findings)."""
+        data = await GeoExportService.gather(session, experiment_id, org_id, pipeline_run_id, qc_status_filter)
+        return data.report()
 
     @staticmethod
     async def export(
@@ -50,15 +81,29 @@ class GeoExportService:
     ) -> tuple[bytes, str]:
         """Generate full GEO export package as ZIP bytes.
 
+        Findings are recomputed here, whether or not readiness ran; any unresolved one refuses the
+        download before the workbook or ZIP is built.
+
         Returns:
             Tuple of (zip_bytes, filename).
         """
-        experiment_data, samples_data, pipeline_data, files_data = await GeoExportService._gather_data(
-            session, experiment_id, org_id, pipeline_run_id, qc_status_filter
-        )
+        data = await GeoExportService.gather(session, experiment_id, org_id, pipeline_run_id, qc_status_filter)
+        if data.unresolved:
+            raise GeoFileAssociationsUnresolvedError(
+                "Some files may have lost their Sample references. Link each file to the Sample that owns it, "
+                "or confirm it stays Experiment-level, then download again.",
+                details={"experiment_id": experiment_id, "findings": [f.as_dict() for f in data.unresolved]},
+            )
+        return GeoExportService.build_package(data)
+
+    @staticmethod
+    def build_package(data: GeoExportData) -> tuple[bytes, str]:
+        """The ZIP for already-gathered, already-cleared data."""
+        experiment_data, samples_data = data.experiment_data, data.samples_data
+        pipeline_data, files_data = data.pipeline_data, data.files_data
 
         # Validation
-        validation_report = validate_experiment_for_geo(experiment_data, samples_data, pipeline_data, files_data)
+        validation_report = data.report()
 
         # Excel
         excel_bytes = generate_geo_workbook(experiment_data, samples_data, pipeline_data, files_data)
@@ -94,14 +139,15 @@ class GeoExportService:
         return zip_buffer.read(), zip_filename
 
     @staticmethod
-    async def _gather_data(
+    async def gather(
         session: AsyncSession,
         experiment_id: int,
         org_id: int,
         pipeline_run_id: int | None,
         qc_status_filter: str,
-    ) -> tuple[dict, list[dict], dict | None, dict | None]:
+    ) -> GeoExportData:
         """Gather all data needed for GEO export in efficient queries."""
+        qc_filter = parse_qc_filter(qc_status_filter)
         # 1. Experiment (with owner for Series_contributor, custom_fields for protocols)
         exp_result = await session.execute(
             select(Experiment)
@@ -121,7 +167,7 @@ class GeoExportService:
             .options(selectinload(Sample.sample_batch), selectinload(Sample.sequencing_batch))
             .where(Sample.experiment_id == experiment_id)
         )
-        if qc_status_filter == "exclude_failed":
+        if qc_filter is GeoQcFilter.EXCLUDE_FAILED:
             sample_query = sample_query.where((Sample.qc_status != "fail") | (Sample.qc_status.is_(None)))
         sample_result = await session.execute(sample_query)
         samples = list(sample_result.scalars().all())
@@ -139,12 +185,9 @@ class GeoExportService:
         else:
             pipeline_run = await GeoExportService._select_best_run(session, experiment_id)
 
-        # 4. Files linked to experiment
+        # 4. Candidate files: the Experiment's storage scope in this Organization (links filter it below)
         files_result = await session.execute(
-            select(File).where(
-                File.organization_id == org_id,
-                File.storage_uri.contains(f"/experiments/{experiment_id}/"),
-            )
+            select(File).where(file_associations.candidate_filter(org_id, experiment_id)).order_by(File.id)
         )
         files = list(files_result.scalars().all())
 
@@ -225,22 +268,22 @@ class GeoExportService:
                 "parameters_json": pipeline_run.parameters_json,
             }
 
-        raw_files = [f for f in files if f.file_type in ("fastq", "fastq.gz", "fq.gz")]
-        processed_files = [f for f in files if f.file_type not in ("fastq", "fastq.gz", "fq.gz")]
+        selection, findings = await file_associations.associate(session, org_id, experiment_id, files, samples)
 
-        # Build per-sample file data by matching filename prefix to sample external ID
         for sd in samples_data:
-            ext_id = sd["external_id"]
-            s_raw = [f for f in raw_files if f.filename.startswith(ext_id)]
-            s_proc = [f for f in processed_files if f.filename.startswith(ext_id)]
+            linked = selection.per_sample.get(sd["id"], [])
+            s_raw = [f for f in linked if _is_raw(f)]
+            s_proc = [f for f in linked if not _is_raw(f)]
             sd["files"] = {
                 "raw_filenames": ", ".join(f.filename for f in s_raw),
                 "processed_filenames": ", ".join(f.filename for f in s_proc),
                 "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in s_proc),
             }
 
+        raw_files = [f for f in selection.files if _is_raw(f)]
+        processed_files = [f for f in selection.files if not _is_raw(f)]
         files_data: dict | None = None
-        if files:
+        if selection.files:
             files_data = {
                 "raw_files": [
                     {"filename": f.filename, "md5_checksum": f.md5_checksum, "gcs_uri": f.storage_uri}
@@ -255,7 +298,7 @@ class GeoExportService:
                 "processed_gcs_uris": ", ".join(f.storage_uri or "" for f in processed_files),
             }
 
-        return experiment_data, samples_data, pipeline_data, files_data
+        return GeoExportData(experiment_id, experiment_data, samples_data, pipeline_data, files_data, findings)
 
     @staticmethod
     async def _select_best_run(session: AsyncSession, experiment_id: int) -> PipelineRun | None:
@@ -298,6 +341,10 @@ class GeoExportService:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+
+def _is_raw(f: File) -> bool:
+    return f.file_type in RAW_FILE_TYPES
 
 
 def _format_validation_report(report: ValidationReport) -> str:

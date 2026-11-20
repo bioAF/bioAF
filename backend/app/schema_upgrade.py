@@ -34,6 +34,7 @@ second database). Full restores are exercised in the test suite.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -41,7 +42,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -88,13 +91,63 @@ def read_status() -> dict[str, Any]:
         return {}
 
 
-def write_status(record: dict[str, Any]) -> None:
-    """Atomically replace the record (a reader never sees half a file)."""
+@contextmanager
+def _status_lock():
+    """Serialize every writer of the record, across threads and processes (lifecycle and backend)."""
     path = status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(record, indent=1, default=str))
-    os.replace(tmp, path)
+    with open(path.parent / ".schema-upgrade.lock", "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield path
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+RECORD_MODE = 0o644
+
+
+def _replace(path: Path, record: dict[str, Any]) -> None:
+    """Write a unique staging file, then rename it over the record (a reader never sees half a file).
+
+    The record keeps the mode and owner it had (0644 when new), so the host operator can still read
+    it after the backend, running as root, rewrites it.
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".schema-upgrade.", suffix=".tmp")
+    try:
+        try:
+            current = path.stat()
+        except FileNotFoundError:
+            current = None
+        os.fchmod(fd, (current.st_mode & 0o777) if current else RECORD_MODE)
+        if current is not None and os.geteuid() == 0:
+            os.fchown(fd, current.st_uid, current.st_gid)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(record, indent=1, default=str))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def write_status(record: dict[str, Any]) -> None:
+    """Atomically replace the record."""
+    with _status_lock() as path:
+        _replace(path, record)
+
+
+def update_advisory(key: str, value: dict[str, Any], revision: str) -> bool:
+    """Merge an advisory's status into the record, only beside the completed upgrade it belongs to.
+
+    Re-read under the lock, so it never overwrites a newer verdict: if the record is no longer the
+    completed upgrade to ``revision`` (an upgrade started, failed or moved on), nothing is written.
+    """
+    with _status_lock() as path:
+        record = read_status()
+        if record.get("status") != "completed" or record.get("target_revision") != revision:
+            return False
+        _replace(path, {**record, key: value})
+        return True
 
 
 def code_head() -> str:
@@ -327,7 +380,11 @@ def _validate(conn: Connection, destination: str) -> dict[str, Any]:
 
 
 def run(conn: Connection, url: str, destination: str | None, migrate: Callable[[Connection], None]) -> None:
-    """Lock, back up, migrate, validate, record. ``destination`` None means a read-only command."""
+    """Lock, back up, migrate, validate, record. ``destination`` None means a read-only command.
+
+    Nothing else runs here: advisory reports (app/services/geo/association_advisory.py) run in the
+    started backend, so they never delay the entrypoint's upgrade or the API's start.
+    """
     _lock(conn)
     try:
         if destination is None:

@@ -115,6 +115,10 @@ async def _start_workers(owner: TaskOwner, ctx: startup.StartupContext) -> None:
 
     owner.spawn(_verification_run_worker_loop(stop_event=owner.stopping), role="file-verification-worker", worker=True)
     owner.spawn(run_periodic(idempotency, stopping=owner.stopping), role=idempotency.role, worker=True)
+    # One-shot, after a delay: never part of the upgrade, so it cannot hold up the API (GEO export plan).
+    from app.services.geo.association_advisory import run_after_startup
+
+    owner.spawn(run_after_startup(ctx.engine, stopping=owner.stopping), role="geo-association-advisory", worker=True)
 
 
 async def _stop_owned_work(owner: TaskOwner) -> None:

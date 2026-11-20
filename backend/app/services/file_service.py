@@ -560,6 +560,16 @@ class FileService:
 
     @staticmethod
     async def link_file_to_sample(session: AsyncSession, file_id: int, sample_id: int) -> None:
+        """Link a file to a Sample of the file's own organization; any other Sample is "not found"."""
+        from app.exceptions import NotFoundError
+        from app.services.entity_references import verify_association_targets
+
+        org_id = (
+            await session.execute(text("SELECT organization_id FROM files WHERE id = :f"), {"f": file_id})
+        ).scalar()
+        if org_id is None:
+            raise NotFoundError("File not found", plain_body=True)
+        await verify_association_targets(session, org_id, sample_ids=[sample_id])
         await session.execute(
             text(
                 "INSERT INTO sample_files (sample_id, file_id) VALUES (:sample_id, :file_id) "

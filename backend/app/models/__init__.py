@@ -20,6 +20,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_process import PipelineProcess
 from app.models.file import File
 from app.models.file_verification import FileVerification
+from app.models.geo_file_association_acknowledgment import GeoFileAssociationAcknowledgment
 from app.models.document import Document
 from app.models.cellxgene_publication import CellxgenePublication
 from app.models.qc_dashboard import QCDashboard
@@ -153,6 +154,7 @@ __all__ = [
     "PipelineProcess",
     "File",
     "FileVerification",
+    "GeoFileAssociationAcknowledgment",
     "Document",
     "CellxgenePublication",
     "QCDashboard",

@@ -218,6 +218,23 @@ export interface GeoValidationSummary {
   missing_recommended: number;
 }
 
+export interface GeoAssociationSample {
+  sample_id: number;
+  external_id: string;
+  qc_status: string | null;
+  acknowledged: boolean;
+}
+
+/** An unlinked file whose name matches selected Samples: link it, or keep it at Experiment level. */
+export interface GeoFileAssociationFinding {
+  file_id: number;
+  filename: string;
+  file_kind: "raw" | "processed";
+  samples: GeoAssociationSample[];
+  resolved: boolean;
+  fingerprint: string;
+}
+
 export interface GeoValidationReport {
   experiment_id: number;
   pipeline_run_id: number | null;
@@ -225,4 +242,6 @@ export interface GeoValidationReport {
   sample_validations: GeoSampleValidation[];
   protocol_fields: GeoValidationField[];
   summary: GeoValidationSummary;
+  file_association_findings?: GeoFileAssociationFinding[];
+  download_blocked?: boolean;
 }

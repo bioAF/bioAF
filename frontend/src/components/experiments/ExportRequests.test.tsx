@@ -152,9 +152,25 @@ describe("the GEO export modal", () => {
 
     await waitFor(() => expect(saved).toEqual(["geo_4.zip"]));
     const post = requests.find((r) => r.url.includes("/export/geo"))!;
-    expect(post.url).toBe("https://api.lab.org/api/experiments/4/export/geo?pipeline_run_id=11&qc_status_filter=pass");
+    expect(post.url).toBe("https://api.lab.org/api/experiments/4/export/geo?pipeline_run_id=11&qc_status_filter=exclude_failed");
     expect(post.method).toBe("POST");
     expect(post.headers.Authorization).toBe("Bearer live.jwt");
+  });
+
+  test("an unchecked exclude-failed box downloads every sample", async () => {
+    const { requests } = fakeServer([
+      ["/api/pipeline-runs?experiment_id=4", { json: RUNS }],
+      ["/export/geo", { text: "zip", headers: { "Content-Disposition": 'attachment; filename="geo_4.zip"' } }],
+    ]);
+    render(<GeoExportModal experimentId={4} isOpen onClose={() => {}} userRole="admin" />);
+    const button = await screen.findByRole("button", { name: /Download Export/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(screen.getByLabelText("Exclude failed samples"));
+    fireEvent.click(button);
+
+    await waitFor(() => expect(saved).toEqual(["geo_4.zip"]));
+    const post = requests.find((r) => r.url.includes("/export/geo"))!;
+    expect(post.url).toBe("https://api.lab.org/api/experiments/4/export/geo?pipeline_run_id=11&qc_status_filter=include_all");
   });
 
   test("a refused export shows the backend's explanation", async () => {

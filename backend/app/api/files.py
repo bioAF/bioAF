@@ -21,6 +21,7 @@ from app.schemas.file import (
     FileUploadInitiate,
     FileUploadInitiateResponse,
 )
+from app.services import entity_references
 from app.services.data_search_service import unified_document_file_search
 from app.services.file_service import FileService
 from app.services.upload_service import UploadService
@@ -523,6 +524,14 @@ async def link_file(
     file = await FileService.get_file(session, file_id, org_id)
     if not file:
         raise HTTPException(404, "File not found")
+    # Every target is checked before anything changes: a refused link moves and writes nothing.
+    await entity_references.verify_association_targets(
+        session,
+        org_id,
+        project_id=body.project_id,
+        experiment_id=body.experiment_id,
+        sample_ids=[body.sample_id] if body.sample_id else [],
+    )
 
     if body.project_id is not None:
         file.project_id = body.project_id

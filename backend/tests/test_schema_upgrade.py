@@ -511,3 +511,93 @@ def test_the_dump_checksum_streams_the_file_instead_of_loading_it(tmp_path):
         tracemalloc.stop()
     assert digest == expected.hexdigest()
     assert peak < 8 * 1024 * 1024
+
+
+# --- GEO file association advisory is not part of the upgrade ------------------------------------------
+#
+# The advisory scan runs in the started backend (tests/test_geo_association_advisory.py). The upgrade only
+# creates the empty acknowledgment table; it neither scans, nor waits on the tables a scan reads, nor writes
+# the advisory into the record, so the entrypoint starts the API as soon as the migration is validated.
+
+ADVISORY = "geo_association_advisory"
+
+
+async def _populate_legacy_geo(case: CaseDatabase) -> dict:
+    conn = await case.connect()
+    try:
+        org = await conn.fetchval("SELECT id FROM organizations WHERE name = 'Lab'")
+        exp = await conn.fetchval("SELECT id FROM experiments WHERE organization_id = $1", org)
+
+        async def file(org_id, exp_id, name, kind):
+            uri = f"gs://raw/experiments/{exp_id}/{name}"
+            return await conn.fetchval(
+                "INSERT INTO files (organization_id, gcs_uri, storage_uri, filename, file_type) "
+                "VALUES ($1, $2, $2, $3, $4) RETURNING id",
+                org_id,
+                uri,
+                name,
+                kind,
+            )
+
+        await file(org, exp, "S-0_R1.fastq.gz", "fastq.gz")  # unlinked, named after S-0: a finding
+        linked = await file(org, exp, "lane.fastq.gz", "fastq.gz")
+        s1 = await conn.fetchval("SELECT id FROM samples WHERE experiment_id = $1 AND external_id = 'S-1'", exp)
+        await conn.execute("INSERT INTO sample_files (sample_id, file_id) VALUES ($1, $2)", s1, linked)
+        await file(org, exp, "matrix.h5", "h5")  # unlinked, named after nobody: an Experiment-level asset
+
+        other = await conn.fetchval("INSERT INTO organizations (name) VALUES ('Other lab') RETURNING id")
+        other_exp = await conn.fetchval(
+            "INSERT INTO experiments (organization_id, name, status) VALUES ($1, 'x', 'registered') RETURNING id", other
+        )
+        await conn.execute(
+            "INSERT INTO samples (experiment_id, external_id, status, qc_status) VALUES ($1, 'T-1', 'registered', 'fail')",
+            other_exp,
+        )
+        await file(other, other_exp, "T-1_counts.h5", "h5")  # matches only a failed Sample
+        return {"links": await conn.fetch("SELECT * FROM sample_files ORDER BY id")}
+    finally:
+        await conn.close()
+
+
+async def _geo_state(case: CaseDatabase) -> dict:
+    conn = await case.connect()
+    try:
+        return {
+            "links": await conn.fetch("SELECT * FROM sample_files ORDER BY id"),
+            "acks": await conn.fetchval("SELECT count(*) FROM geo_file_association_acknowledgments"),
+        }
+    finally:
+        await conn.close()
+
+
+def test_an_older_updaters_upgrade_commits_the_acknowledgment_table_and_scans_nothing(released):
+    case, _ = released
+    before = asyncio.run(_populate_legacy_geo(case))
+
+    done = case.run()  # an older updater's own `alembic upgrade head`
+    assert done.returncode == 0, done.stderr[-3000:]
+    record = _record(case)
+    assert record["status"] == "completed" and ADVISORY not in record
+    assert asyncio.run(_geo_state(case)) == {"links": before["links"], "acks": 0}
+    assert not list(case.backups.glob("bioaf_geo_association_advisory_*"))
+
+
+def test_the_entrypoint_upgrade_does_not_wait_on_tables_the_advisory_reads(released):
+    """With the scan's tables locked, the entrypoint's upgrade still finishes promptly and settles."""
+    case, _ = released
+    asyncio.run(_populate_legacy_geo(case))
+    assert case.run(*ENTRYPOINT_RUN).returncode == 0
+    first = _record(case)
+
+    async def _run_while_links_are_locked():
+        holder = await case.connect()
+        try:
+            async with holder.transaction():
+                await holder.execute("LOCK TABLE sample_files, files, samples IN ACCESS EXCLUSIVE MODE")
+                return await asyncio.wait_for(asyncio.to_thread(case.run, *ENTRYPOINT_RUN), 120)
+        finally:
+            await holder.close()
+
+    done = asyncio.run(_run_while_links_are_locked())
+    assert done.returncode == 0, done.stderr[-3000:]
+    assert _record(case) == first
