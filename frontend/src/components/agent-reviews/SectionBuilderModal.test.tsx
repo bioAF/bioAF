@@ -170,3 +170,10 @@ test("run checkboxes do not share an element id", async () => {
   await row(102);
   expect(document.querySelectorAll("#html-report")).toHaveLength(0);
 });
+
+test("each run checkbox is named by its run cell", async () => {
+  renderModal();
+  await row(102);
+  expect(screen.getByRole("checkbox", { name: "#101 rnaseq v1" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "#102 rnaseq v1" })).toBeChecked();
+});

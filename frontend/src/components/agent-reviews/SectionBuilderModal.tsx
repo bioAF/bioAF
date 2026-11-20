@@ -468,14 +468,17 @@ export function SectionBuilderModal({
                       <td className="py-2">
                         <input
                           type="checkbox"
+                          aria-labelledby={`review-run-${r.id}-name`}
                           checked={selectedRuns.has(r.id)}
                           disabled={isCurrent}
                           onChange={() => toggleRun(r.id)}
                         />
                       </td>
                       <td className="py-2">
-                        #{r.id} {r.pipeline_name}
-                        {r.pipeline_version ? ` v${r.pipeline_version}` : ""}
+                        <span id={`review-run-${r.id}-name`}>
+                          #{r.id} {r.pipeline_name}
+                          {r.pipeline_version ? ` v${r.pipeline_version}` : ""}
+                        </span>
                         {isCurrent && (
                           <span className="ml-2 text-xs text-gray-500">(current)</span>
                         )}
