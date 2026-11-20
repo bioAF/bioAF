@@ -223,6 +223,9 @@ class QCDashboardService:
                     file_type="png",
                     tags=["qc_plot", plot_type],
                     experiment_id=run.experiment_id,
+                    # A project-scoped run's plots belong to its project, as its outputs do
+                    # (PipelineOutputService's rule); an experiment run's carry the experiment.
+                    project_id=run.project_id if run.experiment_id is None else None,
                     source_type="qc_dashboard",
                     source_pipeline_run_id=run.id,
                 )

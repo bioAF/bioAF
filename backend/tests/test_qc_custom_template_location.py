@@ -134,14 +134,16 @@ async def test_a_project_scoped_custom_run_with_a_built_in_template_reads_its_ow
 
 
 @pytest.mark.asyncio
-async def test_plots_are_collected_from_a_project_scoped_runs_own_directory(session, admin_user, tmp_path):
+@pytest.mark.parametrize("scope", ["experiment", "project"])
+async def test_plots_are_collected_from_the_runs_own_directory_and_keep_its_scope(session, admin_user, tmp_path, scope):
+    from app.models.file import File
     from app.services.qc.templates import bulk_rnaseq
     from app.services.qc_dashboard_service import QCDashboardService
 
     session.add(PlatformConfig(key="results_bucket_name", value="res"))
     await session.flush()
     storage = NfsStorageProvider(root=str(tmp_path))
-    run = await _custom_run(session, admin_user, scope="project", qc_template="bulk_rnaseq")
+    run = await _custom_run(session, admin_user, scope=scope, qc_template="bulk_rnaseq")
     location = await RunOutputLocationService.authorized_uri(session, run, storage)
     png, title, plot_type = bulk_rnaseq.MULTIQC_PLOTS[0]
     await storage.write_bytes(f"{location}/multiqc/star_salmon/{png}", b"\x89PNG")
@@ -153,3 +155,12 @@ async def test_plots_are_collected_from_a_project_scoped_runs_own_directory(sess
             session, admin_user.organization_id, run, template_name="bulk_rnaseq"
         )
     assert [(p["plot_type"], p["title"]) for p in plots] == [(plot_type, title)]
+
+    # The plot's File carries the run's scope, as pipeline outputs do: an experiment run's under its
+    # experiment, a project run's under its project.
+    file = await session.get(File, plots[0]["file_id"])
+    assert file.storage_uri == f"{location}/multiqc/star_salmon/{png}"
+    assert file.source_pipeline_run_id == run.id
+    assert (file.experiment_id, file.project_id) == (
+        (run.experiment_id, None) if scope == "experiment" else (None, run.project_id)
+    )
