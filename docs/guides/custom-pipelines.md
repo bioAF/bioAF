@@ -107,7 +107,16 @@ Pipeline versions are immutable. Editing the script, command, variables, environ
 There are two version-creation paths:
 
 - **Manual save** -- the **New Version** button. The form pre-fills from the latest version so you only edit what changed.
-- **Environment cascade** -- a completed environment build can create the next integer-numbered version for pipelines whose latest active version uses that environment. The new version is tagged `version_trigger = environment_cascade` and pins the new environment build.
+- **Environment cascade** -- a completed environment build can create the next integer-numbered version for pipelines whose latest active version uses that environment. The new version is tagged `version_trigger = environment_cascade` and pins the new environment build. Everything else is copied from the source version: code, entrypoint, resources, log file path, variables (including each reference variable's category), and the QC template and QC config. Only pipelines in the environment's own organization cascade.
+
+Cascade versions created by earlier releases were stored without the QC template, QC config, and reference categories, so their runs used the default `custom` QC layout and reference pickers that offered every category. The **New Version** form pre-fills from such a version without those settings; re-enter them there to restore them for future runs. Operators can list the affected versions, their runs, and their QC dashboards without changing anything:
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T backend \
+  python -m app.cli.assess_cascade_qc --org-id <id>
+```
+
+The command is read-only. It pages with `--limit` and prints the `--after-id` to continue from; `--max-depth` bounds how far each version's provenance is followed and `--max-runs` bounds the runs listed per version. Existing QC dashboards keep the configuration they were generated with; regenerating one is a separate decision.
 
 To stop a version from being launchable without losing it from history, click **Deprecate** on the version row. Deprecated versions still display on past runs but are filtered out of launch dialogs.
 
