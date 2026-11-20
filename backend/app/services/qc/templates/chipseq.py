@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
-from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.extractors.gcs_helpers import run_output_directory
 from app.services.qc.template_helpers import first_number, mean, number, numbers, pick_raw_fastqc
 from app.services.qc.multiqc_registry import Roster, read_depth_and_samples
 from app.services.qc.roster import roster_for_run
@@ -390,30 +390,26 @@ async def extract(
     run: PipelineRun,
     *,
     skip_cache: bool = False,
-    results_bucket: str | None = None,
+    output_uri: str | None = None,
 ) -> dict[str, Any]:
     """Extract ChIP-seq QC metrics from GCS for the given run.
 
     Checks for a cached qc_metrics.json first; on miss, locates the run's
     multiqc_data.json anywhere under multiqc/ (nf-core/chipseq nests it under the
     peak-type dir, e.g. multiqc/narrowPeak/...), parses it, and writes the cache
-    back. results_bucket can be passed to let callers mock it out.
+    back. ``output_uri`` is the run's authorized output directory (the dashboard
+    passes it); when omitted it is resolved through RunOutputLocationService.
     """
-    if results_bucket is None:
-        results_bucket = await get_results_bucket(session)
-    if not results_bucket:
-        logger.warning("No results bucket configured, cannot extract metrics")
-        return dict(EMPTY_METRICS)
-
     try:
         from app.adapters.models import StorageObjectNotFound
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
-        prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-        base = adapter.build_uri(results_bucket, "")
+        run_dir = await run_output_directory(session, run, adapter, output_uri)
+        if run_dir is None:
+            return dict(EMPTY_METRICS)
 
-        cache_uri = f"{base}{prefix}qc_metrics.json"
+        cache_uri = f"{run_dir}qc_metrics.json"
         if not skip_cache:
             try:
                 cached = json.loads(await adapter.read_text(cache_uri))
@@ -424,13 +420,13 @@ async def extract(
 
         # nf-core/chipseq nests MultiQC under the peak-type dir
         # (multiqc/narrowPeak/... or broadPeak/...); locate it anywhere under multiqc/.
-        multiqc_objs = await adapter.list_objects(f"{base}{prefix}multiqc/")
+        multiqc_objs = await adapter.list_objects(f"{run_dir}multiqc/")
         json_uris = [o.storage_uri for o in multiqc_objs if o.storage_uri.endswith("multiqc_data.json")]
         multiqc_uri = json_uris[0] if json_uris else None
 
         metrics = dict(EMPTY_METRICS)
         if multiqc_uri:
-            logger.info("Found chipseq multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(base) :])
+            logger.info("Found chipseq multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(run_dir) :])
             text = await adapter.read_text(multiqc_uri)
             metrics = read_multiqc_metrics(text, run_roster=await roster_for_run(session, run))
             try:

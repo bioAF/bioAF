@@ -1,22 +1,32 @@
-"""Shared GCS helpers for QC template extractors."""
+"""Shared storage helpers for QC template extractors."""
 
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.platform.platform_config_service import PlatformConfigService
-from app.platform.run_output_layout import results_bucket_from_config
+from app.logging_config import get_app_logger
+from app.platform.run_output_layout import directory_prefix
+
+logger = get_app_logger(__name__)
 
 
-async def get_results_bucket(session: AsyncSession) -> str | None:
-    """Read results bucket name from platform_config.
+async def run_output_directory(session: AsyncSession | None, run, adapter, output_uri: str | None) -> str | None:
+    """The run's output directory URI with one trailing separator, for listing and reading under it.
 
-    Checks results_bucket_name first, then falls back to deriving it from
-    raw_bucket_name (bioaf-raw-X -> bioaf-results-X) since the raw bucket
-    is populated by Terraform before results_bucket_name.
+    ``output_uri`` is the run's authorized location when the caller already resolved it (the QC
+    dashboard does, once per run); otherwise it is resolved here. The location is the one the run
+    wrote to (``RunOutputLocationService``), never one rebuilt from a bucket and experiment id.
+    None, logged, when the location is refused: there is nothing this run may be read from.
     """
-    config = await PlatformConfigService.get_many(session, ["results_bucket_name", "raw_bucket_name"])
-    return results_bucket_from_config(config)
+    if output_uri is None:
+        from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
+
+        try:
+            output_uri = await RunOutputLocationService.authorized_uri(session, run, adapter)
+        except OutputLocationRefused as e:
+            logger.warning("QC for run %s has no output location to read: %s", run.id, e)
+            return None
+    return directory_prefix(output_uri)
 
 
-__all__ = ["get_results_bucket"]
+__all__ = ["run_output_directory"]

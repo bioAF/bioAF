@@ -17,7 +17,7 @@ from app.models.pipeline_run import PipelineRun
 from app.models.qc_dashboard import QCDashboard
 from app.services.audit_service import log_action
 from app.services.file_service import FileService
-from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.extractors.gcs_helpers import run_output_directory
 from app.services.qc.resolver import resolve_template_for_run
 from app.services.qc.templates import TEMPLATES, get_template, scrnaseq as scrnaseq_template
 
@@ -142,13 +142,18 @@ class QCDashboardService:
             empty = getattr(template, "EMPTY_METRICS", None)
             return dict(empty) if empty else {}
 
-        results_bucket = await QCDashboardService._get_results_bucket(session)
-        if not results_bucket:
-            logger.warning("No results bucket configured, cannot extract metrics")
+        # The run's one output location, where its outputs were written: the same directory the
+        # monitor collected from, for project- and experiment-scoped runs and whichever store
+        # (configured, derived or the adapter's own) holds results. A refused location has nothing
+        # this run may be read from.
+        from app.adapters.registry import get_storage_adapter
+
+        run_dir = await run_output_directory(session, run, get_storage_adapter(), None)
+        if run_dir is None:
             empty = getattr(template, "EMPTY_METRICS", None)
             return dict(empty) if empty else {}
 
-        return await extract_fn(session, run, skip_cache=skip_cache, results_bucket=results_bucket)
+        return await extract_fn(session, run, skip_cache=skip_cache, output_uri=run_dir)
 
     @staticmethod
     def _generate_summary(template_name: str, metrics: dict) -> str:
@@ -187,18 +192,15 @@ class QCDashboardService:
         if not expected_plots:
             return plots_meta
 
-        results_bucket = await get_results_bucket(session)
-        if not results_bucket:
-            return plots_meta
-
         try:
             from app.adapters.registry import get_storage_adapter
 
             adapter = get_storage_adapter()
-            prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-            plot_prefix = f"{prefix}multiqc/"
+            run_dir = await run_output_directory(session, run, adapter, None)
+            if run_dir is None:
+                return plots_meta
 
-            objs = await adapter.list_objects(adapter.build_uri(results_bucket, plot_prefix))
+            objs = await adapter.list_objects(f"{run_dir}multiqc/")
             available: dict[str, object] = {}
             for obj in objs:
                 if obj.storage_uri.endswith(".png"):
@@ -276,10 +278,6 @@ class QCDashboardService:
     @staticmethod
     def _generate_summary_legacy(metrics: dict) -> str:
         return scrnaseq_template.generate_summary(metrics)
-
-    @staticmethod
-    async def _get_results_bucket(session: AsyncSession) -> str | None:
-        return await get_results_bucket(session)
 
 
 _ = File  # keep import live for downstream services that import through here

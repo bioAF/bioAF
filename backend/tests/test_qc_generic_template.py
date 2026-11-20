@@ -9,6 +9,7 @@ produce real numbers or an honest nothing, never another type's shape.
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -174,7 +175,7 @@ async def test_finds_a_nested_multiqc_report(storage):
         {f"{PREFIX}multiqc/star_salmon/multiqc_report_data/multiqc_data.json": _fixture_text("bulk_rnaseq_run17.json")}
     )
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert metrics["total_sequences"] == 6_677_908
 
@@ -183,7 +184,7 @@ async def test_finds_a_nested_multiqc_report(storage):
 async def test_returns_empty_metrics_when_no_report_exists(storage):
     storage({f"{PREFIX}some_other_output.txt": "irrelevant"})
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert metrics == dict(generic.EMPTY_METRICS)
 
@@ -192,16 +193,22 @@ async def test_returns_empty_metrics_when_no_report_exists(storage):
 async def test_malformed_report_does_not_raise(storage):
     storage({f"{PREFIX}multiqc/multiqc_data/multiqc_data.json": "{not json"})
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert metrics["total_sequences"] is None
 
 
 @pytest.mark.asyncio
-async def test_missing_results_bucket_yields_empty_metrics(storage):
+async def test_a_refused_output_location_yields_empty_metrics(storage):
+    """A run with no output location it may be read from has no metrics (no bucket setting alone
+    is not that: the adapter's results store still names one)."""
+    from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
+
     storage({})
 
-    metrics = await generic.extract(None, RUN, results_bucket="")
+    refuse = AsyncMock(side_effect=OutputLocationRefused("no results store"))
+    with patch.object(RunOutputLocationService, "authorized_uri", refuse):
+        metrics = await generic.extract(None, RUN)
 
     assert metrics == dict(generic.EMPTY_METRICS)
 
@@ -226,7 +233,7 @@ async def test_merges_multiple_reports_preferring_the_wider_one(storage):
         }
     )
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert metrics["total_samples"] == 4
 
@@ -241,10 +248,10 @@ async def test_merge_is_independent_of_listing_order(storage):
     }
 
     storage(reports)
-    forward = await generic.extract(None, RUN, results_bucket=BUCKET, skip_cache=True)
+    forward = await generic.extract(None, RUN, output_uri=PREFIX, skip_cache=True)
 
     storage(dict(reversed(list(reports.items()))))
-    backward = await generic.extract(None, RUN, results_bucket=BUCKET, skip_cache=True)
+    backward = await generic.extract(None, RUN, output_uri=PREFIX, skip_cache=True)
 
     assert forward == backward
 
@@ -260,7 +267,7 @@ async def test_a_report_contributes_keys_the_other_lacks(storage):
         }
     )
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     # Only the rnaseq report has STAR.
     assert metrics["reads_mapped_genome_unique"] is not None
@@ -280,7 +287,7 @@ async def test_uses_the_cached_metrics_when_present(storage):
         }
     )
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert metrics["total_sequences"] == 123
     assert not adapter.writes
@@ -295,7 +302,7 @@ async def test_skip_cache_reparses_and_rewrites(storage):
         }
     )
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET, skip_cache=True)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX, skip_cache=True)
 
     assert metrics["total_sequences"] == 6_677_908
     assert f"{PREFIX}qc_metrics.json" in adapter.writes
@@ -306,7 +313,7 @@ async def test_nothing_parsed_is_not_cached(storage):
     """Caching an empty result would freeze a transient miss into the run."""
     adapter = storage({f"{PREFIX}multiqc/multiqc_data/multiqc_data.json": "{not json"})
 
-    await generic.extract(None, RUN, results_bucket=BUCKET)
+    await generic.extract(None, RUN, output_uri=PREFIX)
 
     assert not adapter.writes
 
@@ -322,7 +329,7 @@ async def test_produces_metrics_for_a_report_the_scrnaseq_parser_cannot_read(sto
     report. An unmapped pipeline type must do better than that."""
     storage({f"{PREFIX}multiqc/multiqc_data/multiqc_data.json": _fixture_text("scrnaseq_run11.json")})
 
-    metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
+    metrics = await generic.extract(None, RUN, output_uri=PREFIX)
 
     # One sample across four files (two lanes x two mates); depth is per sample.
     assert metrics["total_sequences"] == 66_601_887

@@ -1062,43 +1062,24 @@ async def test_a_local_emulator_with_no_bucket_uses_the_adapters_results_store(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["experiment", "project"])
-async def test_an_nfs_install_copies_outputs_into_the_runs_results_directory(
+async def test_an_nfs_install_refuses_the_launch_before_submission(
     session, admin_user, ready_env_version, project, experiment, tmp_path, scope
 ):
-    """NFS resolves ``file://results/<run-key>`` with no bucket setting. This proves the mapping and
-    the copy on a mounted filesystem, not that a Kubernetes job can reach the NFS store."""
+    """NFS names a results directory, but the Kubernetes job mounts no NFS, so nothing it copies
+    there is durable (a directory of that name may exist on the node's own disk). The launch is
+    refused like a missing results store, before anything is submitted."""
     from app.adapters.storage.nfs import NfsStorageProvider
-    from tests.test_storage_cli_callers import _mapped
+    from app.exceptions import ValidationError as BioafValidationError
 
     await _bucket_config(session)
     root = tmp_path / "nfs"
     root.mkdir()
     storage = NfsStorageProvider(root=str(root))
-    _, version = await _create_pipeline_with_version(
-        session, admin_user, ready_env_version.id, entrypoint_command="true"
-    )
-
+    _, version = await _create_pipeline_with_version(session, admin_user, ready_env_version.id, entrypoint_command="true")
     target = {"experiment": experiment} if scope == "experiment" else {"project": project}
-    run, _, captured = await _launch(session, admin_user, version, storage=storage, **target)
 
-    assert await _collection_uri(session, run, storage) == f"file://results/{_run_key(run)}"
-    outputs = tmp_path / "outputs"
-    (outputs / "nested").mkdir(parents=True)
-    (outputs / "nested" / "counts.tsv").write_text("n")
-    (outputs / ".hidden").write_text("h")
-    (outputs / "report.html").write_text("r")
-    import subprocess
-
-    script = _mapped(captured["job_spec"].command[2], tmp_path, "/outputs", "/secrets")
-    result = subprocess.run(["/bin/sh", "-c", script], capture_output=True, timeout=20)
-    assert result.returncode == 0, result.stderr
-
-    landed = root / "results" / _run_key(run)
-    assert sorted(str(p.relative_to(landed)) for p in landed.rglob("*") if p.is_file()) == [
-        ".hidden",
-        "nested/counts.tsv",
-        "report.html",
-    ]
+    with pytest.raises(BioafValidationError, match="NFS"):
+        _, adapter, _ = await _launch(session, admin_user, version, storage=storage, **target)
 
 
 @pytest.mark.asyncio

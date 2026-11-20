@@ -90,7 +90,6 @@ async def test_extract_metrics_dispatches_to_the_named_template(session, setup):
     _, run = setup
 
     with (
-        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(bulk_rnaseq, "extract", new=AsyncMock(return_value={"total_sequences": 7_000_000})) as bulk_ex,
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):
@@ -111,7 +110,6 @@ async def test_extract_metrics_dispatches_to_chipseq_template(session, setup):
     _, run = setup
 
     with (
-        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(chipseq, "extract", new=AsyncMock(return_value={"peak_count": 25_000})) as chip_ex,
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):
@@ -134,7 +132,6 @@ async def test_extract_metrics_unknown_template_returns_empty_not_scrnaseq(sessi
     _, run = setup
 
     with (
-        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):
         metrics = await QCDashboardService._extract_metrics(session, run, template_name="methylseq")
