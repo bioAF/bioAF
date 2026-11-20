@@ -20,6 +20,7 @@ from app.models.sample import Sample
 from app.services.audit_service import log_action
 from app.services.geo.file_associations import (
     POLICY_REVISION,
+    candidate_filter,
     detect_findings,
     finding_fingerprint,
     load_links,
@@ -44,13 +45,7 @@ async def acknowledge(
     )
     if experiment is None:
         raise NotFoundError("Experiment not found")
-    file = await session.scalar(
-        select(File).where(
-            File.id == file_id,
-            File.organization_id == org_id,
-            File.storage_uri.contains(f"/experiments/{experiment_id}/"),
-        )
-    )
+    file = await session.scalar(select(File).where(File.id == file_id, candidate_filter(org_id, experiment_id)))
     if file is None:
         raise NotFoundError("File not found")
     wanted = set(sample_ids)

@@ -35,6 +35,8 @@ Filenames are never used to decide ownership. Among the experiment's files:
 - Linked only to excluded Samples, or only to another experiment's Samples: left out.
 - Not linked to any Sample (for example a count matrix): kept as an experiment-level file, on no Sample row.
 
+Deleted files, and files whose stored data has been removed, are never included or listed for review.
+
 Shared and experiment-level files are listed whole; bioAF does not read their contents, so a shared count
 matrix may still contain measurements from failed Samples. The package lists files and checksums only.
 

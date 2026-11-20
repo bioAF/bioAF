@@ -14,6 +14,8 @@
   listed. Files linked to no sample, such as a count matrix, stay listed for
   the experiment but on no sample row. Each file is listed once, even when
   several samples share it.
+- GEO exports no longer list deleted files, or files whose stored data has
+  been removed.
 - Files without a sample link whose names match a sample (how older uploads
   were matched) are listed under **File Associations** in Check Readiness.
   Download waits until you either link each file to its sample or keep it at

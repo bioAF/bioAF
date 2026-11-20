@@ -52,10 +52,12 @@ logger = logging.getLogger("bioaf.geo.association_advisory")
 
 RECORD_KEY = "geo_association_advisory"
 
-# Unlinked candidates joined to their Experiment exactly as the export selects them (Organization and URI).
+# Unlinked candidates joined to their Experiment exactly as the export selects them
+# (file_associations.candidate_filter: Organization, storage URI, live and not storage-deleted).
 _CANDIDATES = (
     "FROM experiments e JOIN files f ON f.organization_id = e.organization_id "
     "AND strpos(f.storage_uri, '/experiments/' || e.id || '/') > 0 "
+    "AND f.deleted_at IS NULL AND NOT f.storage_deleted "
     "WHERE NOT EXISTS (SELECT 1 FROM sample_files sf WHERE sf.file_id = f.id)"
 )
 

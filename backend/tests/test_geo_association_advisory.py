@@ -354,3 +354,20 @@ async def test_a_root_writer_keeps_the_records_owner(dirs, monkeypatch):
     monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: chowned.append((uid, gid)))
     schema_upgrade.write_status(schema_upgrade.read_status())
     assert chowned == [owner]
+
+
+async def test_deleted_files_are_not_counted_by_the_advisory(db_engine, session, dirs, legacy):
+    """The advisory shares the export's candidate rule: deleted or storage-deleted records are not candidates."""
+    from datetime import datetime, timezone
+
+    await session.execute(
+        text("UPDATE files SET deleted_at = :t WHERE filename = 'S-0_R1.fastq.gz'"), {"t": datetime.now(timezone.utc)}
+    )
+    await session.execute(text("UPDATE files SET storage_deleted = true WHERE filename = 'T-1_counts.h5'"))
+    await session.commit()
+
+    await association_advisory.run_once(db_engine)
+    advisory = schema_upgrade.read_status()[KEY]
+    assert advisory["status"] == "completed"
+    assert advisory["unlinked_candidate_files"] == 1  # matrix.h5 only
+    assert advisory["unresolved"]["include_all"]["files"] == 0

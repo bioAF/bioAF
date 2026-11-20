@@ -210,3 +210,58 @@ async def test_new_uploads_carry_their_selected_sample_into_geo(
     pkg = read_package(download.content)
     assert pkg.samples == {"UP1": {"raw": ["reads.fastq.gz"], "processed": []}}
     assert sorted(pkg.readme) == ["UP1_matrix.h5", "reads.fastq.gz"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gone", ["deleted", "storage_deleted"])
+async def test_deleted_files_are_never_geo_candidates(client, comp_bio_token, admin_token, session, admin_user, gone):
+    """A file deleted from view, or whose stored bytes are gone, is not referenced, reported, or blocking."""
+    from datetime import datetime, timezone
+
+    from app.models.sample import Sample
+
+    org_id = admin_user.organization_id
+    resp = await client.post(
+        "/api/experiments",
+        json={"name": "GEO Deleted Files", "description": "Deleted records."},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    exp_id = resp.json()["id"]
+    s1 = Sample(experiment_id=exp_id, external_id="DEL1", organism="Homo sapiens", qc_status="pass")
+    session.add(s1)
+    await session.flush()
+    live = await _file(session, org_id, exp_id, "DEL1_live_R1.fastq.gz", "fastq.gz")
+    await _link(session, live, s1)
+    linked_gone = await _file(session, org_id, exp_id, "DEL1_gone_R1.fastq.gz", "fastq.gz")
+    await _link(session, linked_gone, s1)
+    unlinked_gone = await _file(session, org_id, exp_id, "DEL1_legacy.h5", "h5")  # would be a finding if live
+    for f in (linked_gone, unlinked_gone):
+        if gone == "deleted":
+            f.deleted_at = datetime.now(timezone.utc)
+        else:
+            f.storage_deleted = True
+    await session.commit()
+
+    auth = {"Authorization": f"Bearer {comp_bio_token}"}
+    readiness = await client.post(f"/api/experiments/{exp_id}/export/geo?validate_only=true", headers=auth)
+    assert readiness.status_code == 200, readiness.text
+    assert readiness.json()["file_association_findings"] == []
+    assert readiness.json()["download_blocked"] is False
+    assert [f["filename"] for f in readiness.json()["file_manifest"]["files"]] == ["DEL1_live_R1.fastq.gz"]
+
+    download = await client.post(f"/api/experiments/{exp_id}/export/geo", headers=auth)
+    assert download.status_code == 200, download.text
+    pkg = read_package(download.content)
+    assert pkg.samples == {"DEL1": {"raw": ["DEL1_live_R1.fastq.gz"], "processed": []}}
+    assert pkg.checksums == ["DEL1_live_R1.fastq.gz"]
+    assert pkg.manifest == ["DEL1_live_R1.fastq.gz"]
+    assert pkg.readme == ["DEL1_live_R1.fastq.gz"]
+    assert pkg.supplementary == []
+
+    # Nor can a deleted file be acknowledged: it is outside the candidate scope.
+    ack = await client.post(
+        f"/api/experiments/{exp_id}/export/geo/file-associations/acknowledgments",
+        json={"file_id": unlinked_gone.id, "sample_ids": [s1.id], "fingerprint": "0" * 64, "reason": "gone"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert ack.status_code == 404, ack.text

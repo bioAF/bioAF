@@ -20,7 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import GeoAssociationCheckUnavailableError
@@ -32,6 +32,21 @@ from app.models.sample import sample_files
 logger = logging.getLogger("bioaf.geo.file_associations")
 
 RAW_FILE_TYPES = ("fastq", "fastq.gz", "fq.gz")
+
+
+def candidate_filter(org_id: int, experiment_id: int) -> ColumnElement[bool]:
+    """The export's candidate files: live records of this Organization stored under the Experiment.
+
+    A record deleted from view (``deleted_at``) or whose stored bytes are gone (``storage_deleted``) is
+    never a candidate, so it is neither referenced, nor reported as a finding, nor acknowledgeable.
+    Shared by gathering and acknowledgment; the advisory's SQL mirrors it (association_advisory).
+    """
+    return and_(
+        File.organization_id == org_id,
+        File.storage_uri.contains(f"/experiments/{experiment_id}/"),
+        File.deleted_at.is_(None),
+        File.storage_deleted.is_(False),
+    )
 
 
 @dataclass

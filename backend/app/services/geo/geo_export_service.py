@@ -187,12 +187,7 @@ class GeoExportService:
 
         # 4. Candidate files: the Experiment's storage scope in this Organization (links filter it below)
         files_result = await session.execute(
-            select(File)
-            .where(
-                File.organization_id == org_id,
-                File.storage_uri.contains(f"/experiments/{experiment_id}/"),
-            )
-            .order_by(File.id)
+            select(File).where(file_associations.candidate_filter(org_id, experiment_id)).order_by(File.id)
         )
         files = list(files_result.scalars().all())
 
