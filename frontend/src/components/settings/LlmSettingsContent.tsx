@@ -11,12 +11,10 @@ import { literature } from "@/lib/literature";
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
 
 const HOSTED: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
-// Gemma is intentionally omitted: the self-hosted orchestrator integration
-// is stubbed in v1 (a Gemma-active review sits in 'pending' forever), so we
-// hide the option from the Settings page until that lands. The backend
-// "gemma" support remains; type and label below stay so the active-provider
-// banner still renders correctly for any org that activated Gemma before
-// this hide landed.
+// Gemma is intentionally omitted: it has no review execution path (the backend
+// refuses Gemma reviews at admission), so the option is hidden from Settings.
+// The type and label below stay so the active-provider banner still renders
+// correctly for any org that activated Gemma before this hide landed.
 const ALL_PROVIDERS: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
 
 // Providers whose clients support native tool-calling, which the action-taking AI Assistant
@@ -24,6 +22,10 @@ const ALL_PROVIDERS: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google
 // Anthropic/OpenAI/Google yes, self-hosted Gemma no. Used to warn an admin whose active provider
 // cannot power the assistant.
 const TOOL_CAPABLE: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
+
+// Providers with an Agent Review execution path. Mirrors the backend SUPPORTS_REVIEW_EXECUTION
+// capability, which is separate from tool calling: Gemma has neither.
+const REVIEW_CAPABLE: ReadonlyArray<ProviderId> = ["openai", "anthropic", "google"];
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   openai: "OpenAI",
@@ -229,8 +231,9 @@ export function LlmSettingsContent() {
           className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-900"
           data-testid="active-not-tool-capable"
         >
-          The active provider does not support the AI Assistant. Switch to
-          Anthropic, OpenAI, or Google to enable it. (Agent Review still works.)
+          {REVIEW_CAPABLE.includes(data.active_provider)
+            ? "The active provider does not support the AI Assistant. Switch to Anthropic, OpenAI, or Google to enable it. (Agent Review still works.)"
+            : "The active provider does not support Agent Review or the AI Assistant. Switch to Anthropic, OpenAI, or Google to enable them."}
         </div>
       )}
 
