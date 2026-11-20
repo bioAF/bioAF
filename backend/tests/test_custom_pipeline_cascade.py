@@ -1,16 +1,19 @@
 """Tests for the environment-build cascade that creates new pipeline versions (ADR-046)."""
 
+import copy
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload
 
 from app.models.audit_log import AuditLog
 from app.models.custom_pipeline_variable import CustomPipelineVariable
 from app.models.custom_pipeline_version import CustomPipelineVersion
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
+from app.models.pipeline_run import PipelineRun
 from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
     CustomPipelineVariableDefinition,
@@ -20,6 +23,7 @@ from app.services.custom_pipeline_service import CustomPipelineService
 from app.services.environment_build_service import EnvironmentBuildService
 from app.services.event_bus import event_bus
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
+from app.services.qc.resolver import resolve_template_for_run
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -61,6 +65,8 @@ async def _create_active_pipeline_version(
     env_version_id: int,
     pipeline_name: str,
     variables: list[CustomPipelineVariableDefinition] | None = None,
+    qc_template: str | None = None,
+    qc_config_json: dict | None = None,
 ):
     pipeline = await CustomPipelineService.create_pipeline(
         session,
@@ -82,6 +88,8 @@ async def _create_active_pipeline_version(
             memory_request="4Gi",
             log_file_path="/outputs/run.log",
             variables=variables or [],
+            qc_template=qc_template,
+            qc_config_json=qc_config_json,
         ),
     )
     await session.commit()
@@ -480,3 +488,225 @@ async def test_event_not_emitted_on_build_failure(session, admin_user):
         await session.commit()
 
     assert received == []
+
+
+# --- QC definition and reference scope survive a cascade ---
+
+
+async def _add_env_version(session, admin_user, env, version_number: int) -> EnvironmentVersion:
+    ev = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=version_number,
+        status="ready",
+        definition_format="conda",
+        definition_content=f"name: pipeline\ndependencies: [python=3.{10 + version_number}]\n",
+        image_uri=f"projects/test/global/images/pipeline-v{version_number}",
+        created_by_user_id=admin_user.id,
+    )
+    session.add(ev)
+    await session.flush()
+    await session.commit()
+    return ev
+
+
+async def _reload_version(session, version_id: int) -> CustomPipelineVersion:
+    """Read a version back from the database. Callers capture ids first: this expires every loaded object."""
+    session.expire_all()
+    return (
+        await session.execute(
+            select(CustomPipelineVersion)
+            .where(CustomPipelineVersion.id == version_id)
+            .options(selectinload(CustomPipelineVersion.variables))
+        )
+    ).scalar_one()
+
+
+NESTED_QC_CONFIG = {
+    "template": "bulk_rnaseq",
+    "sections": [{"id": "alignment", "metrics": ["mapped_pct", "dup_rate"]}],
+    "metrics": {"mapped_pct": {"label": "Mapped", "format": "percent", "thresholds": {"warn": 70, "fail": 50}}},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("qc_template", "qc_config_json"),
+    [
+        ("bulk_rnaseq", NESTED_QC_CONFIG),
+        ("custom", {}),
+        ("scrnaseq", None),
+        (None, None),
+    ],
+    ids=["nested", "empty-config", "null-config", "no-qc"],
+)
+async def test_cascade_preserves_qc_definition_exactly(session, admin_user, pipeline_env, qc_template, qc_config_json):
+    env, v1 = pipeline_env
+    _, source = await _create_active_pipeline_version(
+        session,
+        admin_user,
+        v1.id,
+        f"QC Pipeline {qc_template}-{qc_config_json is None}",
+        qc_template=qc_template,
+        qc_config_json=copy.deepcopy(qc_config_json),
+    )
+    source_id = source.id
+    v2 = await _add_env_version(session, admin_user, env, 2)
+
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2.id
+    )
+    await session.commit()
+    assert len(created) == 1
+
+    cascade = await _reload_version(session, created[0].id)
+    assert cascade.qc_template == qc_template
+    assert cascade.qc_config_json == qc_config_json
+    if qc_config_json is None:
+        assert cascade.qc_config_json is None
+
+    reloaded_source = await _reload_version(session, source_id)
+    assert reloaded_source.qc_template == qc_template
+    assert reloaded_source.qc_config_json == qc_config_json
+
+
+@pytest.mark.asyncio
+async def test_cascade_qc_config_is_independent_of_the_source_in_memory(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    _, source = await _create_active_pipeline_version(
+        session,
+        admin_user,
+        v1.id,
+        "Independent QC",
+        qc_template="bulk_rnaseq",
+        qc_config_json=copy.deepcopy(NESTED_QC_CONFIG),
+    )
+    source_id = source.id
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    v2_id = v2.id
+    source = await _reload_version(session, source_id)
+
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=source.environment_version.environment_id, environment_version_id=v2_id
+    )
+    cascade = created[0]
+
+    cascade.qc_config_json["metrics"]["mapped_pct"]["thresholds"]["warn"] = 99
+    cascade.qc_config_json["sections"][0]["metrics"].append("injected")
+
+    assert source.qc_config_json == NESTED_QC_CONFIG
+
+
+@pytest.mark.asyncio
+async def test_qc_definition_survives_consecutive_cascades(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    pipeline, _ = await _create_active_pipeline_version(
+        session,
+        admin_user,
+        v1.id,
+        "Twice Rebuilt",
+        qc_template="bulk_rnaseq",
+        qc_config_json=copy.deepcopy(NESTED_QC_CONFIG),
+        variables=[
+            CustomPipelineVariableDefinition(
+                variable_name="genome", variable_type="reference", reference_category="genome"
+            )
+        ],
+    )
+
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    first = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2.id
+    )
+    await session.commit()
+    v3 = await _add_env_version(session, admin_user, env, 3)
+    second = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v3.id
+    )
+    await session.commit()
+
+    assert len(first) == 1 and len(second) == 1
+    pipeline_id, v3_id = pipeline.id, v3.id
+    latest = await _reload_version(session, second[0].id)
+    assert latest.custom_pipeline_id == pipeline_id
+    assert latest.version_number == 3
+    assert latest.environment_version_id == v3_id
+    assert latest.qc_template == "bulk_rnaseq"
+    assert latest.qc_config_json == NESTED_QC_CONFIG
+    assert [(v.variable_name, v.reference_category) for v in latest.variables] == [("genome", "genome")]
+
+
+@pytest.mark.asyncio
+async def test_cascade_preserves_reference_picker_scope(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    _, source = await _create_active_pipeline_version(
+        session,
+        admin_user,
+        v1.id,
+        "Reference Pipeline",
+        variables=[
+            CustomPipelineVariableDefinition(
+                variable_name="annotation_gtf",
+                variable_type="reference",
+                reference_category="annotation",
+                is_required=True,
+            ),
+            CustomPipelineVariableDefinition(
+                variable_name="any_reference", variable_type="reference", reference_category="any"
+            ),
+            CustomPipelineVariableDefinition(variable_name="threads", default_value="4", variable_type="number"),
+        ],
+    )
+    source_id = source.id
+    v2 = await _add_env_version(session, admin_user, env, 2)
+
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2.id
+    )
+    await session.commit()
+    cascade_id = created[0].id
+
+    expected = {
+        "annotation_gtf": ("reference", "annotation", True, None),
+        "any_reference": ("reference", "any", False, None),
+        "threads": ("number", None, False, "4"),
+    }
+    cascade = await _reload_version(session, cascade_id)
+    assert {
+        v.variable_name: (v.variable_type, v.reference_category, v.is_required, v.default_value)
+        for v in cascade.variables
+    } == expected
+    cascade_variable_ids = {v.id for v in cascade.variables}
+
+    reloaded_source = await _reload_version(session, source_id)
+    assert {
+        v.variable_name: (v.variable_type, v.reference_category, v.is_required, v.default_value)
+        for v in reloaded_source.variables
+    } == expected
+    assert {v.id for v in reloaded_source.variables}.isdisjoint(cascade_variable_ids)
+
+
+@pytest.mark.asyncio
+async def test_run_on_cascade_version_resolves_the_source_qc_configuration(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    _, source = await _create_active_pipeline_version(
+        session,
+        admin_user,
+        v1.id,
+        "Resolver Pipeline",
+        qc_template="bulk_rnaseq",
+        qc_config_json=copy.deepcopy(NESTED_QC_CONFIG),
+    )
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2.id
+    )
+    await session.commit()
+
+    source_run = PipelineRun(organization_id=admin_user.organization_id, custom_pipeline_version_id=source.id)
+    cascade_run = PipelineRun(organization_id=admin_user.organization_id, custom_pipeline_version_id=created[0].id)
+
+    source_resolved = await resolve_template_for_run(session, source_run)
+    cascade_resolved = await resolve_template_for_run(session, cascade_run)
+
+    assert source_resolved[0] == "bulk_rnaseq"
+    assert cascade_resolved == source_resolved

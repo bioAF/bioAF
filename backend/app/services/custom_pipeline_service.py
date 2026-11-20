@@ -1,3 +1,4 @@
+import copy
 import json
 import posixpath
 import logging
@@ -486,6 +487,8 @@ class CustomPipelineService:
                 version_trigger="environment_cascade",
                 status="active",
                 created_by_user_id=cascade_user_id,
+                qc_template=source.qc_template,
+                qc_config_json=copy.deepcopy(source.qc_config_json),
             )
             session.add(cascade_version)
             await session.flush()
@@ -497,6 +500,7 @@ class CustomPipelineService:
                         variable_name=var.variable_name,
                         default_value=var.default_value,
                         variable_type=var.variable_type,
+                        reference_category=var.reference_category,
                         is_required=var.is_required,
                     )
                 )
