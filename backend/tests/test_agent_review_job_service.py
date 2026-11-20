@@ -129,6 +129,96 @@ async def test_create_raises_when_no_active_provider(db_engine, admin_user):
             )
 
 
+async def _job_and_review_counts(session: AsyncSession) -> tuple[int, int]:
+    from sqlalchemy import func
+
+    jobs = (await session.execute(select(func.count(AgentReviewJob.id)))).scalar_one()
+    reviews = (await session.execute(select(func.count(AgentReview.id)))).scalar_one()
+    return jobs, reviews
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_provider_without_review_execution(db_engine, admin_user, monkeypatch):
+    """Gemma has no review executor, so create refuses it before writing anything, with a
+    precondition error distinct from "no provider configured". No provider is called."""
+    from app.services.llm_provider_clients import gemma_client
+
+    async def must_not_submit(**kwargs):
+        raise AssertionError("an unsupported provider must never be called")
+
+    monkeypatch.setattr(gemma_client, "submit", must_not_submit)
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id, provider="gemma")
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(job_service.UnsupportedReviewExecution) as excinfo:
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+            )
+        # Same precondition family the endpoint maps to 412, with its own explanation.
+        assert isinstance(excinfo.value, job_service.NoActiveProvider)
+        message = str(excinfo.value)
+        assert "Agent Review" in message
+        assert "no active" not in message.lower()
+        await session.rollback()
+
+    async with _factory(db_engine)() as session:
+        assert await _job_and_review_counts(session) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_create_rejection_leaves_stale_in_flight_job_untouched(db_engine, admin_user):
+    """Admission is checked before the stale-job reaper: a rejected request mutates nothing."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.agent_review_prompt_builder import template_name_for_scope
+
+    review_type = template_name_for_scope(False)
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id, provider="gemma")
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        stale = AgentReviewJob(
+            organization_id=admin_user.organization_id,
+            triggered_by_user_id=admin_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            review_type=review_type,
+            provider="openai",
+            model="openai-test-model",
+            prompt_template_version=review_type,
+            status="pending",
+            prompt_text="stub",
+            created_at=datetime.now(UTC) - timedelta(minutes=30),
+        )
+        session.add(stale)
+        await session.commit()
+        stale_id = stale.id
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(job_service.UnsupportedReviewExecution):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+            )
+        await session.rollback()
+
+    async with _factory(db_engine)() as session:
+        loaded = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == stale_id))).scalar_one()
+        assert loaded.status == "pending"
+        assert loaded.error_class is None
+        assert await _job_and_review_counts(session) == (1, 0)
+
+
 @pytest.mark.asyncio
 async def test_debounce_raises_job_already_running(db_engine, admin_user):
     async with _factory(db_engine)() as session:
@@ -258,23 +348,68 @@ async def test_mark_orphaned_transitions_inflight_hosted_to_failed(db_engine, ad
         assert loaded_review.status == "failed"
 
 
+async def _seed_legacy_gemma_job(
+    session: AsyncSession,
+    *,
+    org_id: int,
+    user_id: int,
+    run_id: int,
+    status: str = "pending",
+    with_review: bool = True,
+    review_status: str | None = None,
+) -> tuple[int, int | None]:
+    """Seed the job (and linked review) rows an earlier release left for a Gemma review.
+
+    create() now refuses Gemma, so legacy rows are written directly, mirroring what create
+    used to produce."""
+    from app.services.agent_review_prompt_builder import template_name_for_scope
+
+    review_type = template_name_for_scope(False)
+    job = AgentReviewJob(
+        organization_id=org_id,
+        triggered_by_user_id=user_id,
+        entity_type="pipeline_run",
+        entity_id=run_id,
+        review_type=review_type,
+        provider="gemma",
+        model="gemma-test-model",
+        prompt_template_version=review_type,
+        status=status,
+        prompt_text="legacy prompt",
+        artifact_gcs_paths=["gs://bucket/legacy/artifact.json"],
+    )
+    session.add(job)
+    await session.flush()
+    review_id: int | None = None
+    if with_review:
+        review = AgentReview(
+            organization_id=org_id,
+            triggered_by_user_id=user_id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            review_type=review_type,
+            provider="gemma",
+            model="gemma-test-model",
+            prompt_template_version=review_type,
+            status=review_status or ("pending" if status in job_service.IN_FLIGHT_STATUSES else status),
+            agent_review_job_id=job.id,
+            prompt_text="legacy prompt",
+        )
+        session.add(review)
+        await session.flush()
+        job.agent_review_id = review.id
+        review_id = review.id
+    await session.commit()
+    return job.id, review_id
+
+
 @pytest.mark.asyncio
 async def test_mark_orphaned_leaves_gemma_alone(db_engine, admin_user):
     async with _factory(db_engine)() as session:
-        await _configure_active_provider(session, admin_user.organization_id, admin_user.id, provider="gemma")
         run_id = await _make_pipeline_run(session, admin_user.organization_id)
-        job, _ = await job_service.create(
-            session,
-            org_id=admin_user.organization_id,
-            user_id=admin_user.id,
-            entity_type="pipeline_run",
-            entity_id=run_id,
-            selected_sub_item_ids=["qc.metric_review"],
+        job_id, _ = await _seed_legacy_gemma_job(
+            session, org_id=admin_user.organization_id, user_id=admin_user.id, run_id=run_id, status="submitted"
         )
-        await session.commit()
-        job.status = "submitted"
-        await session.commit()
-        job_id = job.id
 
     async with _factory(db_engine)() as session:
         count = await job_service.mark_orphaned_on_startup(session)

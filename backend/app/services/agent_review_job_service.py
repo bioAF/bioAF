@@ -37,7 +37,7 @@ from app.services.agent_review_prompts import (
     get_template,
 )
 from app.services.agent_review_response_parser import parse as parse_response
-from app.services.llm_provider_clients import ProviderError, get_client
+from app.services.llm_provider_clients import ProviderError, get_client, supports_review_execution
 
 logger = logging.getLogger("bioaf.agent_review_job")
 
@@ -74,6 +74,24 @@ class JobAlreadyRunning(Exception):
 
 class NoActiveProvider(Exception):
     """Raised when an org has no active LLM provider configured."""
+
+
+UNSUPPORTED_REVIEW_EXECUTION_MESSAGE = (
+    "The active LLM provider cannot run Agent Review. An administrator can switch to "
+    "Anthropic, OpenAI, or Google in Settings."
+)
+
+
+class UnsupportedReviewExecution(NoActiveProvider):
+    """Raised when the org's active provider has no implemented review execution path.
+
+    A precondition failure in the same family as NoActiveProvider (the endpoint maps both to
+    412), with its own explanation: the provider is configured, but accepting the review would
+    create work nothing can run."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(UNSUPPORTED_REVIEW_EXECUTION_MESSAGE)
+        self.provider = provider
 
 
 async def _get_inflight(
@@ -162,6 +180,11 @@ async def create(
         raise NoActiveProvider("no active LLM provider configured for this org")
     if not active.model:
         raise NoActiveProvider("active provider has no model configured")
+    # Admission: refuse a provider with no review executor before reaping or writing anything, so
+    # every caller (the run endpoint, the assistant tool) shares one rule and no row is left
+    # pending for work that can never run. Never fall back to another provider (ADR-054).
+    if not supports_review_execution(active.provider):
+        raise UnsupportedReviewExecution(active.provider)
 
     # Reap a stale in-flight job for this entity before inserting, so a review
     # that never reached a terminal state cannot block new reviews forever with a

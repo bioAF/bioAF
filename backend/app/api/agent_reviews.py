@@ -210,6 +210,7 @@ async def _create_and_start(
         )
         await session.commit()
     except NoActiveProvider as exc:
+        # Includes UnsupportedReviewExecution: a configured provider with no review executor.
         raise HTTPException(412, str(exc))
     except JobAlreadyRunning as exc:
         raise HTTPException(
@@ -221,13 +222,8 @@ async def _create_and_start(
             },
         )
 
-    if job.provider == "gemma":
-        # Gemma path is dispatched through the pipeline orchestrator.
-        # v1 stubs the dispatch by leaving the job in 'pending'; the
-        # orchestrator integration lands as part of the work-nodes roadmap.
-        # The card surfaces as pending until the orchestrator wakes it up.
-        return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
-
+    # job_service.create admits only providers with a review execution path, so every
+    # accepted job runs on the hosted executor.
     ticket.start(job_service.execute_hosted(async_session_factory, job_id=job.id))
     return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
 
