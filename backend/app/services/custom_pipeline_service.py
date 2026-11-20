@@ -23,7 +23,6 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.pipeline_run import PipelineRun
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.project import Project
-from app.platform.platform_config_service import PlatformConfigService
 from app.platform.shell_args import absolute_path, safe_relative_path, shell_word
 from app.schemas.custom_pipeline import (
     CustomPipelineCreateRequest,
@@ -717,13 +716,6 @@ class CustomPipelineService:
         else:
             raise ValidationError(f"Unknown code_source_type: {version.code_source_type}")
 
-        # 10. Output prefix and entrypoint wrapper (run_id substituted after creation)
-        results_bucket = await CustomPipelineService._read_platform_config(session, "results_bucket_name")
-        if data.experiment_id is not None:
-            output_prefix = f"experiments/{data.experiment_id}"
-        else:
-            output_prefix = f"projects/{data.project_id}"
-
         # 11. Build PARAM_* env vars
         extra_env = tuple(
             EnvVar(name=f"PARAM_{PARAM_NAME_SANITIZER.sub('_', name.upper())}", value=str(value))
@@ -752,6 +744,19 @@ class CustomPipelineService:
         session.add(run)
         await session.flush()
 
+        # The run's one output location, the same one the monitor collects from and registration
+        # reads (nothing the caller supplied names it). A cloud install with no results store, or a
+        # store the job cannot reach (NFS), is refused here, before submission: the caller does not
+        # commit, so no run is recorded.
+        from app.adapters.registry import get_storage_adapter
+        from app.services.run_output_location_service import RunOutputLocationService
+
+        storage = get_storage_adapter()
+        output_uri = await RunOutputLocationService.authorized_uri(session, run, storage)
+        refusal = storage.compute_job_upload_refusal()
+        if refusal:
+            raise ValidationError(refusal)
+
         # 14. Link input files
         for f in input_files:
             session.add(PipelineRunInputFile(pipeline_run_id=run.id, file_id=f.id))
@@ -764,9 +769,7 @@ class CustomPipelineService:
 
         wrapped_command = CustomPipelineService._build_entrypoint_wrapper(
             entrypoint_command=version.entrypoint_command,
-            results_bucket=results_bucket,
-            output_prefix=output_prefix,
-            run_id=run.id,
+            output_uri=output_uri,
         )
 
         # 15. Build job spec and submit
@@ -1125,33 +1128,26 @@ class CustomPipelineService:
         )
 
     @staticmethod
-    def _build_entrypoint_wrapper(
-        entrypoint_command: str,
-        results_bucket: str,
-        output_prefix: str,
-        run_id: int,
-    ) -> str:
-        if results_bucket:
-            from app.adapters.registry import get_storage_adapter
+    def _build_entrypoint_wrapper(entrypoint_command: str, output_uri: str) -> str:
+        """The entrypoint under an EXIT trap that copies ``/outputs`` to the run's output location.
 
-            adapter = get_storage_adapter()
-            sync_target = adapter.build_uri(results_bucket, f"{output_prefix}/pipeline-runs/{run_id}/")
-            # Stage outputs back via the backend's CLI (auth + recursive copy live
-            # on the adapter). A pipeline that failed keeps its own exit status; one
-            # that succeeded but whose outputs never reached storage exits 1, so the
-            # run is not reported complete without them.
-            auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
-            copy_out = adapter.cli_copy_out_contents("/outputs", sync_target)
-            sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
-            failed = shell_word(f"bioAF: pipeline outputs could not be copied to {sync_target}")
-            body = (
-                f"status=$?; {{ {sync_cmd}; }} || {{ echo {failed} >&2; "
-                '[ "$status" -ne 0 ] || status=1; }; exit "$status"'
-            )
-            # The trap body is one quoted word: the copy's own quoting cannot end it early.
-            trap = f"trap {shell_word(body)} EXIT"
-        else:
-            trap = "trap 'true' EXIT"
+        ``output_uri`` is ``RunOutputLocationService.authorized_uri`` for the run, passed through as
+        is: the adapter owns auth, URI parsing and the recursive contents copy. A pipeline that failed
+        keeps its own exit status; one that succeeded but whose outputs never reached storage exits
+        1, so the run is not reported complete without them. There is no branch that skips the copy.
+        """
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
+        copy_out = adapter.cli_copy_out_contents("/outputs", output_uri)
+        sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
+        failed = shell_word(f"bioAF: pipeline outputs could not be copied to {output_uri}")
+        body = (
+            f'status=$?; {{ {sync_cmd}; }} || {{ echo {failed} >&2; [ "$status" -ne 0 ] || status=1; }}; exit "$status"'
+        )
+        # The trap body is one quoted word: the copy's own quoting cannot end it early.
+        trap = f"trap {shell_word(body)} EXIT"
         return "#!/bin/sh\nset -e\n" + trap + "\n" + entrypoint_command
 
     @staticmethod
@@ -1165,11 +1161,3 @@ class CustomPipelineService:
                 "launching a github_repo pipeline."
             )
         return cred.ssh_private_key
-
-    @staticmethod
-    async def _read_platform_config(session: AsyncSession, key: str) -> str:
-        raw = await PlatformConfigService.get(session, key)
-        val = (raw or "").strip()
-        if val and val != "null":
-            return val
-        return ""

@@ -826,3 +826,63 @@ async def test_launch_refuses_a_version_from_a_different_pipeline(
     assert response.status_code == 400
     assert adapter.submit_job.await_count == 0
     assert (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["gcs", "s3"])
+async def test_a_launch_with_no_results_store_records_nothing(
+    client, session, admin_token, ready_env_version, experiment, input_files, mode_adapter_factory, provider
+):
+    """A cloud install that cannot name the run's output location refuses the launch before
+    submission. The request does not commit, so no run, input link, launch audit entry or launch
+    event survives it: this is a validation refusal, not a `submission_failed` run."""
+    from sqlalchemy import func, select
+
+    from app.adapters.storage.gcs import GcsStorageProvider
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.models.audit_log import AuditLog
+    from app.models.pipeline_run import PipelineRun
+    from app.models.pipeline_run_input_file import PipelineRunInputFile
+    from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
+    from app.services.post_commit_events import wait_for_deferred_events
+    from app.settings_contract import ComputeMode
+
+    await session.execute(
+        sa_text("DELETE FROM platform_config WHERE key IN ('results_bucket_name', 'raw_bucket_name')")
+    )
+    if provider == "s3":
+        input_files[0].storage_uri = "s3://bioaf-raw-test/uploads/api_R1.fastq.gz"
+    await session.commit()
+    cls = GcsStorageProvider if provider == "gcs" else S3StorageProvider
+    storage = mode_adapter_factory(cls, org_slug="t", mode=ComputeMode.KUBERNETES)
+    storage._bucket_config = {}
+
+    seen: list = []
+
+    async def record(payload):
+        seen.append(payload)
+
+    for event_type in (PIPELINE_STARTED, PIPELINE_FAILED):
+        event_bus.subscribe(event_type, record)
+
+    pipeline_id, version_id = await _pipeline_with_version(client, admin_token, "NoStore", ready_env_version.id)
+    adapter = _mock_compute_adapter()
+    with (
+        patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter),
+        patch("app.adapters.registry.get_storage_adapter", return_value=storage),
+    ):
+        response = await client.post(
+            f"/api/v1/custom-pipelines/{pipeline_id}/launch",
+            json={"version_id": version_id, "experiment_id": experiment.id, "input_file_ids": [input_files[0].id]},
+            headers=_bearer(admin_token),
+        )
+    await wait_for_deferred_events()
+
+    assert response.status_code == 400, response.text
+    assert "results store" in response.json()["detail"]
+    assert adapter.submit_job.await_count == 0
+    assert (await session.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 0
+    assert (await session.execute(select(func.count()).select_from(PipelineRunInputFile))).scalar_one() == 0
+    launches = select(func.count()).select_from(AuditLog).where(AuditLog.entity_type == "pipeline_run")
+    assert (await session.execute(launches)).scalar_one() == 0
+    assert seen == []

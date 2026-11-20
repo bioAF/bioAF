@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
-from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.extractors.gcs_helpers import run_output_directory
 from app.services.qc.multiqc_registry import EMPTY_METRICS as _REGISTRY_EMPTY
 from app.services.qc.multiqc_registry import parse_multiqc_metrics
 from app.services.qc.roster import roster_for_run
@@ -171,24 +171,19 @@ async def extract(
     run: PipelineRun,
     *,
     skip_cache: bool = False,
-    results_bucket: str | None = None,
+    output_uri: str | None = None,
 ) -> dict[str, Any]:
     """Extract QC metrics for ``run`` from whatever MultiQC report it wrote."""
-    if results_bucket is None:
-        results_bucket = await get_results_bucket(session)
-    if not results_bucket:
-        logger.warning("No results bucket configured, cannot extract metrics")
-        return dict(EMPTY_METRICS)
-
     try:
         from app.adapters.models import StorageObjectNotFound
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
-        base = adapter.build_uri(results_bucket, "")
-        prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
+        run_dir = await run_output_directory(session, run, adapter, output_uri)
+        if run_dir is None:
+            return dict(EMPTY_METRICS)
 
-        cache_uri = f"{base}{prefix}qc_metrics.json"
+        cache_uri = f"{run_dir}qc_metrics.json"
         if not skip_cache:
             try:
                 cached = json.loads(await adapter.read_text(cache_uri))
@@ -197,7 +192,7 @@ async def extract(
             except StorageObjectNotFound:
                 pass
 
-        objects = await adapter.list_objects(f"{base}{prefix}multiqc/")
+        objects = await adapter.list_objects(f"{run_dir}multiqc/")
         report_uris = sorted(o.storage_uri for o in objects if o.storage_uri.endswith("multiqc_data.json"))
         if not report_uris:
             logger.info("No multiqc_data.json found under multiqc/ for run %d", run.id)

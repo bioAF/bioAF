@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.qc_dashboard_service import QCDashboardService
+from app.services.run_output_location_service import OutputLocationRefused, RunOutputLocationService
 
 
 STARSOLO_SUMMARY = """Number of Reads,66601887
@@ -126,9 +127,9 @@ async def test_extract_metrics_reads_cached_json():
     with (
         patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
         patch.object(
-            QCDashboardService,
-            "_get_results_bucket",
-            return_value="my-results-bucket",
+            RunOutputLocationService,
+            "authorized_uri",
+            AsyncMock(return_value="gs://my-results-bucket/experiments/1/pipeline-runs/1"),
         ),
     ):
         metrics = await QCDashboardService._extract_metrics(mock_session, run)
@@ -139,15 +140,15 @@ async def test_extract_metrics_reads_cached_json():
 
 
 @pytest.mark.asyncio
-async def test_extract_metrics_returns_empty_when_no_results_bucket():
-    """Returns empty metrics when results bucket is not configured."""
+async def test_extract_metrics_returns_empty_when_the_output_location_is_refused():
+    """Returns empty metrics when the run has no output location it may be read from."""
     mock_session = AsyncMock()
     run = _make_run(["filtered.h5ad"])
 
     with patch.object(
-        QCDashboardService,
-        "_get_results_bucket",
-        return_value=None,
+        RunOutputLocationService,
+        "authorized_uri",
+        AsyncMock(side_effect=OutputLocationRefused("no results store")),
     ):
         metrics = await QCDashboardService._extract_metrics(mock_session, run)
 

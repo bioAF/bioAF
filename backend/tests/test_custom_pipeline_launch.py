@@ -849,9 +849,7 @@ def test_output_sync_survives_a_cluster_with_no_mounted_key():
     activation on a cluster with no key would fail the output copy, and with it the run."""
     wrapped = CustomPipelineService._build_entrypoint_wrapper(
         entrypoint_command="echo hi",
-        results_bucket="bioaf-results",
-        output_prefix="experiments/1",
-        run_id=7,
+        output_uri="gs://bioaf-results/experiments/1/pipeline-runs/7",
     )
     assert "if [ -f" in wrapped
     assert "/outputs" in wrapped
@@ -863,3 +861,257 @@ def test_the_guard_keeps_the_activation_for_a_cluster_that_does_mount_a_key():
     script = _stage_script(_SPEC)
     assert "gcloud auth activate-service-account" in script
     assert "--key-file=/secrets/gcp/key.json" in script
+
+
+# --- One output location: the custom wrapper uploads where the monitor collects ---
+#
+# The autouse fixture above sets an explicit results bucket, which hid the defect: launch read only
+# `results_bucket_name` and, when it was unset, installed an EXIT trap that copied nothing while the
+# monitor looked in the derived or adapter-mapped location. These tests set the configuration
+# themselves, run the generated wrapper under /bin/sh with recording cloud CLIs, and compare where it
+# actually copied with the monitor's authorized collection URI for the same run.
+
+
+_ABSENT = object()
+
+
+async def _bucket_config(session, *, results=_ABSENT, raw=_ABSENT):
+    """Replace the bucket settings. ``_ABSENT`` deletes the row; any string is stored as given."""
+    await session.execute(
+        sa_text("DELETE FROM platform_config WHERE key IN ('results_bucket_name', 'raw_bucket_name')")
+    )
+    for key, value in (("results_bucket_name", results), ("raw_bucket_name", raw)):
+        if value is not _ABSENT:
+            await session.execute(
+                sa_text("INSERT INTO platform_config (key, value) VALUES (:k, :v)"), {"k": key, "v": value}
+            )
+    await session.commit()
+
+
+def _adapter_config(results=_ABSENT, raw=_ABSENT) -> dict:
+    """The same settings as the adapter's own cached bucket map (it reads them with its own session)."""
+    cfg: dict = {}
+    if results is not _ABSENT:
+        cfg["results_bucket_name"] = results
+    if raw is not _ABSENT:
+        cfg["raw_bucket_name"] = raw
+    return cfg
+
+
+def _cloud_storage(factory, provider: str, **config):
+    from app.adapters.storage.gcs import GcsStorageProvider
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.settings_contract import ComputeMode
+
+    cls = GcsStorageProvider if provider == "gcs" else S3StorageProvider
+    storage = factory(cls, org_slug="t", mode=ComputeMode.KUBERNETES)
+    storage._bucket_config = _adapter_config(**config)
+    return storage
+
+
+async def _launch(session, admin_user, version, *, storage=None, experiment=None, project=None, variables=()):
+    adapter, captured = _mock_compute_adapter()
+    storage_patch = (
+        patch("app.adapters.registry.get_storage_adapter", return_value=storage) if storage is not None else None
+    )
+    with (
+        patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter),
+        patch("app.services.experiment_service.ExperimentService.update_status", AsyncMock()),
+    ):
+        if storage_patch:
+            storage_patch.start()
+        try:
+            run = await CustomPipelineService.launch_run(
+                session,
+                admin_user.organization_id,
+                admin_user.id,
+                CustomPipelineLaunchRequest(
+                    version_id=version.id,
+                    experiment_id=experiment.id if experiment else None,
+                    project_id=project.id if project else None,
+                    input_file_ids=[],
+                    variables=list(variables),
+                ),
+            )
+        finally:
+            if storage_patch:
+                storage_patch.stop()
+    return run, adapter, captured
+
+
+def _copied_to(job_spec, tmp_path) -> str:
+    """Run the job's wrapper with recording cloud CLIs and return the one output copy's destination."""
+    from tests.test_storage_cli_callers import _mapped
+    from tests.test_storage_cli_commands import Shell
+
+    (tmp_path / "outputs").mkdir(exist_ok=True)
+    sh = Shell(tmp_path)
+    result = sh.run(_mapped(job_spec.command[2], tmp_path, "/outputs", "/secrets"), check=False)
+    assert result.returncode == 0, result.stderr
+    copies = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
+    assert len(copies) == 1, f"expected one output copy, got {sh.calls()}"
+    return copies[0][-1]
+
+
+def _same_directory(a: str, b: str) -> bool:
+    from app.platform.run_output_layout import directory_prefix
+
+    return directory_prefix(a) == directory_prefix(b)
+
+
+async def _collection_uri(session, run, storage):
+    from app.services.run_output_location_service import RunOutputLocationService
+
+    return await RunOutputLocationService.authorized_uri(session, run, storage)
+
+
+def _run_key(run) -> str:
+    if run.experiment_id is not None:
+        return f"experiments/{run.experiment_id}/pipeline-runs/{run.id}"
+    return f"projects/{run.project_id}/pipeline-runs/{run.id}"
+
+
+_CLOUD_BUCKET_CASES = [
+    pytest.param({"results": "res", "raw": "bioaf-raw-acme"}, "res", id="explicit-wins-over-raw"),
+    pytest.param({"raw": "bioaf-raw-acme"}, "bioaf-results-acme", id="derived-results-absent"),
+    pytest.param({"results": "", "raw": "bioaf-raw-acme"}, "bioaf-results-acme", id="derived-results-empty"),
+    pytest.param({"results": "null", "raw": "bioaf-raw-acme"}, "bioaf-results-acme", id="derived-results-null"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["gcs", "s3"])
+@pytest.mark.parametrize("scope", ["experiment", "project"])
+@pytest.mark.parametrize("config,bucket", _CLOUD_BUCKET_CASES)
+async def test_a_cloud_custom_run_uploads_where_the_monitor_collects(
+    session, admin_user, ready_env_version, project, experiment, mode_adapter_factory, tmp_path,
+    provider, scope, config, bucket,
+):  # fmt: skip
+    await _bucket_config(session, **config)
+    storage = _cloud_storage(mode_adapter_factory, provider, **config)
+    _, version = await _create_pipeline_with_version(
+        session, admin_user, ready_env_version.id, entrypoint_command="true"
+    )
+
+    target = {"experiment": experiment} if scope == "experiment" else {"project": project}
+    run, _, captured = await _launch(session, admin_user, version, storage=storage, **target)
+
+    expected = storage.build_uri(bucket, _run_key(run))
+    destination = _copied_to(captured["job_spec"], tmp_path)
+    assert _same_directory(destination, expected)
+    assert _same_directory(destination, await _collection_uri(session, run, storage))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["gcs", "s3"])
+@pytest.mark.parametrize("results", [_ABSENT, "", "null"], ids=["results-absent", "results-empty", "results-null"])
+@pytest.mark.parametrize("raw", [_ABSENT, "", "my-raw-bucket"], ids=["raw-absent", "raw-empty", "raw-not-derivable"])
+async def test_a_cloud_install_with_no_results_store_refuses_the_launch_before_submission(
+    session, admin_user, ready_env_version, experiment, mode_adapter_factory, provider, results, raw
+):
+    from app.services.run_output_location_service import OutputLocationRefused
+
+    await _bucket_config(session, results=results, raw=raw)
+    storage = _cloud_storage(mode_adapter_factory, provider, results=results, raw=raw)
+    _, version = await _create_pipeline_with_version(
+        session, admin_user, ready_env_version.id, entrypoint_command="true"
+    )
+
+    adapter, _ = _mock_compute_adapter()
+    with (
+        patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter),
+        patch("app.adapters.registry.get_storage_adapter", return_value=storage),
+        pytest.raises(OutputLocationRefused),
+    ):
+        await CustomPipelineService.launch_run(
+            session,
+            admin_user.organization_id,
+            admin_user.id,
+            CustomPipelineLaunchRequest(version_id=version.id, experiment_id=experiment.id, input_file_ids=[]),
+        )
+    assert adapter.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["gcs", "s3"])
+@pytest.mark.parametrize("scope", ["experiment", "project"])
+async def test_a_local_emulator_with_no_bucket_uses_the_adapters_results_store(
+    session, admin_user, ready_env_version, project, experiment, mode_adapter_factory, tmp_path, provider, scope
+):
+    from app.adapters.models import StorageStore
+    from app.adapters.storage.gcs import GcsStorageProvider
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.settings_contract import ComputeMode
+
+    await _bucket_config(session)
+    cls = GcsStorageProvider if provider == "gcs" else S3StorageProvider
+    storage = mode_adapter_factory(cls, org_slug="t", mode=ComputeMode.LOCAL)
+    _, version = await _create_pipeline_with_version(
+        session, admin_user, ready_env_version.id, entrypoint_command="true"
+    )
+
+    target = {"experiment": experiment} if scope == "experiment" else {"project": project}
+    run, adapter, captured = await _launch(session, admin_user, version, storage=storage, **target)
+
+    assert adapter.submit_job.await_count == 1
+    expected = await storage.resolve_uri(StorageStore.RESULTS, _run_key(run))
+    destination = _copied_to(captured["job_spec"], tmp_path)
+    assert _same_directory(destination, expected)
+    assert _same_directory(destination, await _collection_uri(session, run, storage))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["experiment", "project"])
+async def test_an_nfs_install_refuses_the_launch_before_submission(
+    session, admin_user, ready_env_version, project, experiment, tmp_path, scope
+):
+    """NFS names a results directory, but the Kubernetes job mounts no NFS, so nothing it copies
+    there is durable (a directory of that name may exist on the node's own disk). The launch is
+    refused like a missing results store, before anything is submitted."""
+    from app.adapters.storage.nfs import NfsStorageProvider
+    from app.exceptions import ValidationError as BioafValidationError
+
+    await _bucket_config(session)
+    root = tmp_path / "nfs"
+    root.mkdir()
+    storage = NfsStorageProvider(root=str(root))
+    _, version = await _create_pipeline_with_version(
+        session, admin_user, ready_env_version.id, entrypoint_command="true"
+    )
+    target = {"experiment": experiment} if scope == "experiment" else {"project": project}
+
+    with pytest.raises(BioafValidationError, match="NFS"):
+        _, adapter, _ = await _launch(session, admin_user, version, storage=storage, **target)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["experiment", "project"])
+async def test_a_custom_variable_named_outdir_does_not_move_the_upload(
+    session, admin_user, ready_env_version, project, experiment, tmp_path, scope
+):
+    from app.adapters.registry import get_storage_adapter
+
+    _, version = await _create_pipeline_with_version(
+        session,
+        admin_user,
+        ready_env_version.id,
+        entrypoint_command="true",
+        variables=[
+            CustomPipelineVariableDefinition(
+                variable_name="outdir", variable_type="string", default_value="gs://elsewhere/x"
+            )
+        ],
+    )
+    target = {"experiment": experiment} if scope == "experiment" else {"project": project}
+    run, _, captured = await _launch(
+        session,
+        admin_user,
+        version,
+        variables=[CustomPipelineVariableValue(variable_name="outdir", variable_value="gs://other-org/run-1")],
+        **target,
+    )
+
+    assert run.parameters_json["outdir"] == "gs://other-org/run-1"
+    destination = _copied_to(captured["job_spec"], tmp_path)
+    assert _same_directory(destination, f"gs://bioaf-results-test/{_run_key(run)}")
+    assert _same_directory(destination, await _collection_uri(session, run, get_storage_adapter()))

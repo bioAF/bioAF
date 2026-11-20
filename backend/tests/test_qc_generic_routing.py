@@ -174,7 +174,6 @@ async def test_generic_template_dispatches_to_the_generic_extractor(session, adm
     run = await _run_for(session, admin_user, experiment, "nf-core/methylseq", None)
 
     with (
-        patch.object(QCDashboardService, "_get_results_bucket", new=AsyncMock(return_value="bkt")),
         patch.object(generic, "extract", new=AsyncMock(return_value={"total_sequences": 42})) as generic_ex,
         patch.object(scrnaseq, "extract", new=AsyncMock(return_value={"cell_count": 1})) as scrna_ex,
     ):

@@ -68,6 +68,14 @@ class NfsStorageProvider(StorageProvider):
         """A filesystem cannot mint signed URLs and has no storage tiers."""
         return ProviderCapabilities(signed_url_upload=False, storage_tier_metrics=False)
 
+    def compute_job_upload_refusal(self) -> str | None:
+        # Kubernetes is the only compute backend that runs pipeline jobs, and it mounts no NFS
+        # volume. A directory existing inside the job proves nothing: it may be the node's own disk.
+        return (
+            "Pipeline outputs cannot be saved to NFS storage: NFS is not mounted into pipeline jobs, "
+            "so the outputs would be lost when the job ends."
+        )
+
     # -- URI <-> path mapping (traversal-confined) ----------------------------
 
     @staticmethod
@@ -185,10 +193,14 @@ class NfsStorageProvider(StorageProvider):
         return f"mkdir -p {shell_word(parent)} && " + shell_join(["cp", absolute_path(local_path), dest])
 
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
-        # `DIR/.` is the directory's contents (dotfiles included), not a glob.
+        # `DIR/.` is the directory's contents (dotfiles included), not a glob. A root this machine
+        # cannot see fails the copy rather than `mkdir -p` creating it on local disk, where the
+        # outputs would be reported saved and then lost. A plain failing test, not `exit`, so a
+        # caller's `||` still runs and its own exit status rules.
         dest = self._operand(uri).rstrip("/")
         source = shell_word(absolute_path(local_dir).rstrip("/") or "/")
-        return f"mkdir -p {shell_word(dest)} && cp -r {source}/. {shell_word(dest)}/"
+        root = shell_word(os.path.realpath(self._root))
+        return f"[ -d {root} ] && mkdir -p {shell_word(dest)} && cp -r {source}/. {shell_word(dest)}/"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # A missing prefix (nothing saved yet) is tolerated; an unmounted root is not, because

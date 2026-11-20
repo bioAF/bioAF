@@ -337,11 +337,6 @@ async def test_qc_plot_collection_announces_registration_and_readiness(
     session.add(run)
     await session.commit()
 
-    async def bucket(_session):
-        return "bioaf-results-t"
-
-    monkeypatch.setattr("app.services.qc_dashboard_service.get_results_bucket", bucket)
-
     class Template:
         MULTIQC_PLOTS = [("plot.png", "A plot", "fastqc")]
 
