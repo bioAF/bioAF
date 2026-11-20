@@ -116,7 +116,7 @@ docker compose -f docker/docker-compose.yml --env-file docker/.env exec -T backe
   python -m app.cli.assess_cascade_qc --org-id <id>
 ```
 
-The command is read-only. It pages with `--limit` and prints the `--after-id` to continue from; `--max-depth` bounds how far each version's provenance is followed and `--max-runs` bounds the runs listed per version. Existing QC dashboards keep the configuration they were generated with; regenerating one is a separate decision.
+The command is read-only. It pages with `--limit` and prints the `--after-id` to continue from; `--max-depth` bounds how far each version's provenance is followed and `--max-runs` bounds the runs listed per version. A version with more runs prints a `--version-id` and `--runs-after-id` pair that lists its next runs. Existing QC dashboards keep the configuration they were generated with; regenerating one is a separate decision.
 
 To stop a version from being launchable without losing it from history, click **Deprecate** on the version row. Deprecated versions still display on past runs but are filtered out of launch dialogs.
 
