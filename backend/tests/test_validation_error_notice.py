@@ -13,7 +13,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import app.database as _database
+from app.models.validation_study import ValidationStudy
+from app.services.event_bus import event_bus
 from app.services.event_types import EVENT_SEVERITY, USER_CONFIGURABLE_EVENT_TYPES, VALIDATION_STUDY_ERROR
+from app.services.post_commit_events import wait_for_deferred_events
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_study_service import (
     VALIDATION_FETCH_RETENTION_DAYS,
@@ -40,7 +44,7 @@ class TestTheStoppedStudyAnnouncesItself:
         study = await _study(session, admin_user, "running")
         emit = AsyncMock()
 
-        with patch("app.services.validation_study_service.event_bus.emit", emit):
+        with patch("app.services.event_bus.event_bus.emit", emit):
             await ValidationStudyService.transition(
                 session,
                 study.id,
@@ -49,6 +53,8 @@ class TestTheStoppedStudyAnnouncesItself:
                 "error",
                 failure_reason="analysis run failed",
             )
+            await session.commit()  # announced once the stopped state is committed
+            await wait_for_deferred_events()
 
         payloads = _emitted(emit, VALIDATION_STUDY_ERROR)
         assert len(payloads) == 1
@@ -66,8 +72,10 @@ class TestTheStoppedStudyAnnouncesItself:
         study = await _study(session, admin_user, "running")
         emit = AsyncMock()
 
-        with patch("app.services.validation_study_service.event_bus.emit", emit):
+        with patch("app.services.event_bus.event_bus.emit", emit):
             await ValidationDriverService._mark_error(session, study.id, "kubernetes went away")
+            await session.commit()
+            await wait_for_deferred_events()
 
         payloads = _emitted(emit, VALIDATION_STUDY_ERROR)
         assert len(payloads) == 1
@@ -79,10 +87,12 @@ class TestTheStoppedStudyAnnouncesItself:
         study = await _study(session, admin_user, "setup")
         emit = AsyncMock()
 
-        with patch("app.services.validation_study_service.event_bus.emit", emit):
+        with patch("app.services.event_bus.event_bus.emit", emit):
             await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "running"
             )
+            await session.commit()
+            await wait_for_deferred_events()
 
         assert _emitted(emit, VALIDATION_STUDY_ERROR) == []
 
@@ -91,15 +101,22 @@ class TestTheStoppedStudyAnnouncesItself:
         """Recording that a study stopped is the point; telling someone is best-effort on top of it."""
         study = await _study(session, admin_user, "running")
 
-        with patch(
-            "app.services.validation_study_service.event_bus.emit",
-            AsyncMock(side_effect=RuntimeError("bell is down")),
-        ):
+        async def bell_is_down(payload):
+            raise RuntimeError("bell is down")
+
+        event_bus.subscribe(VALIDATION_STUDY_ERROR, bell_is_down)
+        try:
             updated = await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
+            await session.commit()
+            await wait_for_deferred_events()
+        finally:
+            event_bus.unsubscribe(VALIDATION_STUDY_ERROR, bell_is_down)
 
         assert updated.state == "error"
+        async with _database.async_session_factory() as s:
+            assert (await s.get(ValidationStudy, study.id)).state == "error"
 
 
 class TestTheDataHasADeadline:
@@ -108,7 +125,7 @@ class TestTheDataHasADeadline:
         study = await _study(session, admin_user, "running")
         before = datetime.now(timezone.utc)
 
-        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+        with patch("app.services.event_bus.event_bus.emit", AsyncMock()):
             updated = await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
@@ -126,7 +143,7 @@ class TestTheDataHasADeadline:
         study.evidence_json = {"computed_metrics": {"percent_aligned": 91.2}}
         await session.flush()
 
-        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+        with patch("app.services.event_bus.event_bus.emit", AsyncMock()):
             updated = await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
@@ -140,7 +157,7 @@ class TestTheDataHasADeadline:
         countdown that a later, unrelated stop would not refresh."""
         study = await _study(session, admin_user, "running")
 
-        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+        with patch("app.services.event_bus.event_bus.emit", AsyncMock()):
             await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
@@ -170,7 +187,7 @@ class TestARetryCannotQuietlyPayTwice:
     async def test_a_retry_with_nothing_fetched_says_it_is_waiting_on_a_person(self, session, admin_user):
         study = await _study(session, admin_user, "running")
 
-        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+        with patch("app.services.event_bus.event_bus.emit", AsyncMock()):
             await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
@@ -183,7 +200,7 @@ class TestARetryCannotQuietlyPayTwice:
     async def test_approving_clears_it_because_the_person_has_now_decided(self, session, admin_user):
         study = await _study(session, admin_user, "running")
 
-        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+        with patch("app.services.event_bus.event_bus.emit", AsyncMock()):
             await ValidationStudyService.transition(
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )

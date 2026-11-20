@@ -18,7 +18,7 @@ from app.models.validation_study import (
     next_states,
 )
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import VALIDATION_STUDY_ERROR
 from app.services.pipeline_mapper import deposit_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -41,7 +41,7 @@ def _study_label(study: ValidationStudy) -> str:
     return study.source_doi or study.source_accession or f"Study #{study.id}"
 
 
-async def record_study_error(study: ValidationStudy) -> None:
+def record_study_error(session: AsyncSession, study: ValidationStudy) -> None:
     """Stamp a study that has just stopped, and tell the person who asked for it.
 
     Two things a stopped study owes a human. **When it stopped**, which is what dates the retry
@@ -51,6 +51,7 @@ async def record_study_error(study: ValidationStudy) -> None:
     had open.
 
     The notification is best-effort: recording the failure is the point, announcing it is on top.
+    It is deferred on ``session``, so it goes out only once the stopped state is committed.
     """
     now = datetime.now(timezone.utc)
     evidence = dict(study.evidence_json or {})
@@ -62,28 +63,26 @@ async def record_study_error(study: ValidationStudy) -> None:
 
     label = _study_label(study)
     reason = study.failure_reason or "the reproduction could not be completed"
-    try:
-        await event_bus.emit(
-            VALIDATION_STUDY_ERROR,
-            {
-                "event_type": VALIDATION_STUDY_ERROR,
-                "org_id": study.organization_id,
-                "user_id": study.requested_by_user_id,
-                "target_user_id": study.requested_by_user_id,
-                "entity_type": "validation_study",
-                "entity_id": study.id,
-                "title": "A validation study stopped on a technical failure",
-                "message": (
-                    f"{label} stopped: {reason}. This is not a result about the paper. Retry it within "
-                    f"{VALIDATION_FETCH_RETENTION_DAYS} days and the data already downloaded is reused; "
-                    "after that the data is deleted and a retry downloads it again."
-                ),
-                "severity": "warning",
-                "summary": f"Validation study {study.id} stopped: {reason}",
-            },
-        )
-    except Exception:
-        logger.exception("validation study %d: could not announce the error", study.id)
+    defer_event(
+        session,
+        VALIDATION_STUDY_ERROR,
+        {
+            "event_type": VALIDATION_STUDY_ERROR,
+            "org_id": study.organization_id,
+            "user_id": study.requested_by_user_id,
+            "target_user_id": study.requested_by_user_id,
+            "entity_type": "validation_study",
+            "entity_id": study.id,
+            "title": "A validation study stopped on a technical failure",
+            "message": (
+                f"{label} stopped: {reason}. This is not a result about the paper. Retry it within "
+                f"{VALIDATION_FETCH_RETENTION_DAYS} days and the data already downloaded is reused; "
+                "after that the data is deleted and a retry downloads it again."
+            ),
+            "severity": "warning",
+            "summary": f"Validation study {study.id} stopped: {reason}",
+        },
+    )
 
 
 async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None) -> bool:
@@ -274,7 +273,7 @@ class ValidationStudyService:
         old_state = study.state
         study.state = new_state
         if new_state == "error":
-            await record_study_error(study)
+            record_study_error(session, study)
         await session.flush()
 
         await log_action(
