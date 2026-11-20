@@ -558,6 +558,20 @@ async def test_availability_false_with_gemma(client, admin_auth, gemma_active):
 
 
 @pytest.mark.asyncio
+async def test_availability_follows_shared_review_execution_capability(
+    client, admin_auth, configured_run, monkeypatch
+):
+    """Availability is the same capability check admission uses, not a provider-name list:
+    an otherwise configured provider whose client lacks review execution reports disabled."""
+    from app.services.llm_provider_clients import openai_client
+
+    monkeypatch.setattr(openai_client, "SUPPORTS_REVIEW_EXECUTION", False, raising=False)
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
 async def test_availability_visible_to_viewer_without_llm_use(client, viewer_auth, configured_run):
     resp = await client.get("/api/agent_reviews/availability", headers=viewer_auth)
     assert resp.status_code == 200, resp.text
