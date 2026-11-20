@@ -6,13 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
 from app.models.file import File
-from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
 from app.services.sequencing_enrichment import enrich_from_header
 from app.services.entity_references import verify_association_targets
 from app.services.file_service import FileService
-from app.runtime import spawn_event
+from app.services.post_commit_events import defer_event
 
 logger = logging.getLogger("bioaf.upload_service")
 
@@ -276,19 +275,18 @@ class UploadService:
         if experiment_id and file_type == "fastq":
             await UploadService._auto_update_experiment_status(session, experiment_id, org_id, pending["user_id"])
 
-        spawn_event(
-            event_bus.emit(
-                DATA_UPLOADED,
-                UploadService._data_uploaded_event(
-                    org_id=org_id,
-                    user_id=pending["user_id"],
-                    file_id=file.id,
-                    filename=filename,
-                    file_type=file_type,
-                    experiment_id=experiment_id,
-                ),
+        # Announced once the caller commits the file; dropped if it never does.
+        defer_event(
+            session,
+            DATA_UPLOADED,
+            UploadService._data_uploaded_event(
+                org_id=org_id,
+                user_id=pending["user_id"],
+                file_id=file.id,
+                filename=filename,
+                file_type=file_type,
+                experiment_id=experiment_id,
             ),
-            event_type=DATA_UPLOADED,
         )
 
         return file

@@ -253,7 +253,6 @@ class AutoRunService:
         from app.models.budget_config import BudgetConfig
         from app.schemas.pipeline_run import PipelineRunLaunchRequest
         from app.services.cost_service import CostService
-        from app.services.event_bus import event_bus
         from app.services.event_types import AUTO_RUN_BUDGET_DISABLED, AUTO_RUN_LAUNCHED
         from app.services.pipeline_run_service import PipelineRunService
         from app.services.post_commit_events import defer_event
@@ -311,7 +310,8 @@ class AutoRunService:
                     )
                     await session.flush()
 
-                    await event_bus.emit(
+                    defer_event(
+                        session,
                         AUTO_RUN_BUDGET_DISABLED,
                         {
                             "event_type": AUTO_RUN_BUDGET_DISABLED,

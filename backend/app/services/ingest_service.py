@@ -18,7 +18,7 @@ from app.models.sample import Sample
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.auto_ingest_gate import check_gate
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import (
     DUPLICATE_FILE,
     FILES_CATALOGED,
@@ -29,7 +29,6 @@ from app.services.file_type_utils import detect_file_type
 from app.services.naming_profile_parser import match_filename, resolve_entities
 from app.services.naming_profile_service import NamingProfileService
 from app.services.sample_service import SampleService
-from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.ingest_service")
 
@@ -324,20 +323,18 @@ async def process_ingest_event(
         )
         db.add(event)
         await db.flush()
-        spawn_event(
-            event_bus.emit(
-                DUPLICATE_FILE,
-                {
-                    "event_type": DUPLICATE_FILE,
-                    "org_id": org_id,
-                    "entity_type": "file",
-                    "entity_id": existing_file.id,
-                    "title": f"Duplicate file detected: {filename}",
-                    "message": f"File '{filename}' matches existing file #{existing_file.id}",
-                    "severity": "info",
-                },
-            ),
-            event_type=DUPLICATE_FILE,
+        defer_event(
+            db,
+            DUPLICATE_FILE,
+            {
+                "event_type": DUPLICATE_FILE,
+                "org_id": org_id,
+                "entity_type": "file",
+                "entity_id": existing_file.id,
+                "title": f"Duplicate file detected: {filename}",
+                "message": f"File '{filename}' matches existing file #{existing_file.id}",
+                "severity": "info",
+            },
         )
         return event
 
@@ -492,60 +489,55 @@ async def process_ingest_event(
             experiment.status = "fastq_uploaded"
             await db.flush()
 
-    # Step 9: Emit events for notifications and pipeline triggers
+    # Step 9: Announce the outcome once the caller commits these records; dropped if it never does.
     if ingest_status == "cataloged":
-        spawn_event(
-            event_bus.emit(
-                FILES_CATALOGED,
-                {
-                    "event_type": FILES_CATALOGED,
-                    "org_id": org_id,
-                    "entity_type": "ingest_event",
-                    "entity_id": event.id,
-                    "title": f"File cataloged: {filename}",
-                    "message": f"File '{filename}' successfully cataloged as {file_type}",
-                    "severity": "info",
-                    "metadata": {"file_id": file_record.id, "file_type": file_type},
-                },
-            ),
-            event_type=FILES_CATALOGED,
+        defer_event(
+            db,
+            FILES_CATALOGED,
+            {
+                "event_type": FILES_CATALOGED,
+                "org_id": org_id,
+                "entity_type": "ingest_event",
+                "entity_id": event.id,
+                "title": f"File cataloged: {filename}",
+                "message": f"File '{filename}' successfully cataloged as {file_type}",
+                "severity": "info",
+                "metadata": {"file_id": file_record.id, "file_type": file_type},
+            },
         )
     elif ingest_status == "unmatched":
-        spawn_event(
-            event_bus.emit(
-                UNMATCHED_FILE,
-                {
-                    "event_type": UNMATCHED_FILE,
-                    "org_id": org_id,
-                    "entity_type": "file",
-                    "entity_id": file_record.id,
-                    "title": f"Unmatched file: {filename}",
-                    "message": f"File '{filename}' did not match any naming profile",
-                    "severity": "warning",
-                },
-            ),
-            event_type=UNMATCHED_FILE,
+        defer_event(
+            db,
+            UNMATCHED_FILE,
+            {
+                "event_type": UNMATCHED_FILE,
+                "org_id": org_id,
+                "entity_type": "file",
+                "entity_id": file_record.id,
+                "title": f"Unmatched file: {filename}",
+                "message": f"File '{filename}' did not match any naming profile",
+                "severity": "warning",
+            },
         )
 
     # Emit unclaimed entity notifications
     if auto_created["projects"] or auto_created["experiments"] or auto_created["samples"]:
-        spawn_event(
-            event_bus.emit(
-                UNCLAIMED_ENTITY,
-                {
-                    "event_type": UNCLAIMED_ENTITY,
-                    "org_id": org_id,
-                    "entity_type": "ingest_event",
-                    "entity_id": event.id,
-                    "title": "Unclaimed entities created",
-                    "message": f"Auto-created: {len(auto_created['projects'])} projects, "
-                    f"{len(auto_created['experiments'])} experiments, "
-                    f"{len(auto_created['samples'])} samples",
-                    "severity": "warning",
-                    "metadata": auto_created,
-                },
-            ),
-            event_type=UNCLAIMED_ENTITY,
+        defer_event(
+            db,
+            UNCLAIMED_ENTITY,
+            {
+                "event_type": UNCLAIMED_ENTITY,
+                "org_id": org_id,
+                "entity_type": "ingest_event",
+                "entity_id": event.id,
+                "title": "Unclaimed entities created",
+                "message": f"Auto-created: {len(auto_created['projects'])} projects, "
+                f"{len(auto_created['experiments'])} experiments, "
+                f"{len(auto_created['samples'])} samples",
+                "severity": "warning",
+                # A snapshot: the event's own dict is returned to the caller and may change before commit.
+                "metadata": {kind: list(ids) for kind, ids in auto_created.items()},
+            },
         )
 
     await log_action(

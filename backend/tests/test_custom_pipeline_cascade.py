@@ -23,6 +23,7 @@ from app.services.custom_pipeline_service import CustomPipelineService
 from app.services.environment_build_service import EnvironmentBuildService
 from app.services.event_bus import event_bus
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
+from app.services.post_commit_events import wait_for_deferred_events
 from app.services.qc.resolver import resolve_template_for_run
 
 
@@ -430,6 +431,7 @@ async def test_event_emitted_when_build_transitions_to_ready(session, admin_user
     ):
         changed = await EnvironmentBuildService.poll_in_progress_builds(session)
         await session.commit()
+    await wait_for_deferred_events()  # published after the commit
 
     assert changed == 1
     assert len(received) == 1

@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.models.notebook_session import ComputeSession
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import (
     WORK_NODE_LAUNCHED,
     WORK_NODE_STOPPED,
@@ -27,7 +27,6 @@ from app.adapters.models import TerminationResult
 from app.adapters.registry import get_work_node_adapter
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.services.launch_scope import owned_environment_version, resolve_launch_scope
-from app.runtime import spawn_event
 from app import runtime
 
 logger = logging.getLogger("bioaf.work_nodes")
@@ -305,22 +304,20 @@ class WorkNodeService:
             },
         )
 
-        spawn_event(
-            event_bus.emit(
-                WORK_NODE_LAUNCHED,
-                {
-                    "event_type": WORK_NODE_LAUNCHED,
-                    "org_id": org_id,
-                    "user_id": user_id,
-                    "target_user_id": user_id,
-                    "entity_type": "work_node",
-                    "entity_id": compute_session.id,
-                    "title": "Work node launched",
-                    "message": f"Work node launched with {machine_type}",
-                    "summary": f"Work node {compute_session.id} launched",
-                },
-            ),
-            event_type=WORK_NODE_LAUNCHED,
+        defer_event(
+            session,
+            WORK_NODE_LAUNCHED,
+            {
+                "event_type": WORK_NODE_LAUNCHED,
+                "org_id": org_id,
+                "user_id": user_id,
+                "target_user_id": user_id,
+                "entity_type": "work_node",
+                "entity_id": compute_session.id,
+                "title": "Work node launched",
+                "message": f"Work node launched with {machine_type}",
+                "summary": f"Work node {compute_session.id} launched",
+            },
         )
 
         return compute_session
@@ -425,22 +422,20 @@ class WorkNodeService:
             previous_value={"status": old_status},
         )
 
-        spawn_event(
-            event_bus.emit(
-                WORK_NODE_STOPPED,
-                {
-                    "event_type": WORK_NODE_STOPPED,
-                    "org_id": compute_session.organization_id,
-                    "user_id": user_id,
-                    "target_user_id": compute_session.user_id,
-                    "entity_type": "work_node",
-                    "entity_id": compute_session.id,
-                    "title": "Work node stopped",
-                    "message": f"Work node {compute_session.id} stopped",
-                    "summary": f"Work node {compute_session.id} stopped",
-                },
-            ),
-            event_type=WORK_NODE_STOPPED,
+        defer_event(
+            session,
+            WORK_NODE_STOPPED,
+            {
+                "event_type": WORK_NODE_STOPPED,
+                "org_id": compute_session.organization_id,
+                "user_id": user_id,
+                "target_user_id": compute_session.user_id,
+                "entity_type": "work_node",
+                "entity_id": compute_session.id,
+                "title": "Work node stopped",
+                "message": f"Work node {compute_session.id} stopped",
+                "summary": f"Work node {compute_session.id} stopped",
+            },
         )
 
         return compute_session
@@ -588,24 +583,20 @@ class WorkNodeService:
                     node.status = "stopped"
                     node.stopped_at = now
 
-                    spawn_event(
-                        event_bus.emit(
-                            WORK_NODE_HEARTBEAT_TIMEOUT,
-                            {
-                                "event_type": WORK_NODE_HEARTBEAT_TIMEOUT,
-                                "org_id": node.organization_id,
-                                "user_id": node.user_id,
-                                "target_user_id": node.user_id,
-                                "entity_type": "work_node",
-                                "entity_id": node.id,
-                                "title": "Work node auto-stopped (no heartbeat)",
-                                "message": (
-                                    f"Work node {node.id} was stopped after {idle_hours:.1f}h without a heartbeat"
-                                ),
-                                "summary": f"Work node {node.id} heartbeat timeout",
-                            },
-                        ),
-                        event_type=WORK_NODE_HEARTBEAT_TIMEOUT,
+                    defer_event(
+                        session,
+                        WORK_NODE_HEARTBEAT_TIMEOUT,
+                        {
+                            "event_type": WORK_NODE_HEARTBEAT_TIMEOUT,
+                            "org_id": node.organization_id,
+                            "user_id": node.user_id,
+                            "target_user_id": node.user_id,
+                            "entity_type": "work_node",
+                            "entity_id": node.id,
+                            "title": "Work node auto-stopped (no heartbeat)",
+                            "message": (f"Work node {node.id} was stopped after {idle_hours:.1f}h without a heartbeat"),
+                            "summary": f"Work node {node.id} heartbeat timeout",
+                        },
                     )
 
             await session.flush()

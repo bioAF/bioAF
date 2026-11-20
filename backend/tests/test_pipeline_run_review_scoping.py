@@ -121,16 +121,19 @@ async def world(session, admin_user):
 
 
 @pytest.fixture
-def spawned(monkeypatch):
-    """Record review events instead of scheduling them."""
+def spawned():
+    """Record the review events published (after commit) on the event bus."""
+    from app.services.event_bus import event_bus
+    from app.services.event_types import PIPELINE_RUN_REVIEWED
+
     calls: list = []
 
-    def _record(coro, **kwargs):
-        calls.append(kwargs)
-        coro.close()
+    async def _record(payload):
+        calls.append(payload)
 
-    monkeypatch.setattr("app.services.pipeline_review_service.spawn_event", _record)
-    return calls
+    event_bus.subscribe(PIPELINE_RUN_REVIEWED, _record)
+    yield calls
+    event_bus.unsubscribe(PIPELINE_RUN_REVIEWED, _record)
 
 
 async def _snapshot(session, world) -> dict:

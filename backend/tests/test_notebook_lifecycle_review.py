@@ -204,7 +204,6 @@ async def test_the_other_idle_check_also_keeps_the_obligation(session, admin_use
     failing = FakeAdapter()
     failing.terminate_session = AsyncMock(side_effect=RuntimeError("temporary failure"))
     monkeypatch.setattr(svc_module, "get_notebook_adapter", lambda: failing)
-    monkeypatch.setattr(svc_module, "spawn_event", lambda coro, **kw: coro.close())
 
     await svc_module.NotebookService.check_idle_sessions(session, idle_timeout_hours=4)
 

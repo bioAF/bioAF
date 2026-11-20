@@ -22,7 +22,7 @@ from app.exceptions import NotFoundError, StateError, ValidationError
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import ENVIRONMENT_BUILD_COMPLETED
 from app.adapters.image_build.gcp import authorized_request as _authorized_request
 from app.platform.cloud_provider import get_cloud_provider
@@ -935,7 +935,8 @@ class EnvironmentBuildService:
             env = env_result.scalar_one_or_none()
             if env is None:
                 continue
-            await event_bus.emit(
+            defer_event(
+                session,
                 ENVIRONMENT_BUILD_COMPLETED,
                 {
                     "environment_id": env.id,

@@ -8,10 +8,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.user_quota import UserQuota
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
 from app.services.event_types import QUOTA_WARNING
 from app.services.post_commit_events import defer_event
-from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.quotas")
 
@@ -59,8 +57,9 @@ class QuotaService:
         A denial is audited (``quota_exceeded``) and announced (QUOTA_WARNING). With
         ``isolate_denial`` the audit is committed on a session of its own and the warning follows
         that commit, so the record survives the caller rolling its request back; nothing pending on
-        ``session`` is committed. Pipeline launches use it. Without it the audit joins the caller's
-        transaction, which a caller that raises on denial rolls back.
+        ``session`` is committed. Launches that refuse on denial use it. Without it the audit and
+        the warning join the caller's transaction: both are published by its commit and both are
+        dropped by its rollback.
         """
         result = await session.execute(select(UserQuota).where(UserQuota.user_id == user_id))
         quota = result.scalar_one_or_none()
@@ -103,7 +102,8 @@ class QuotaService:
             if isolate_denial:
                 await QuotaService._record_denial_isolated(user_id, quota.id, audit_details, warning)
             else:
-                spawn_event(event_bus.emit(QUOTA_WARNING, warning), event_type=QUOTA_WARNING)
+                # Announced with the audit it describes: both commit with the caller or neither does.
+                defer_event(session, QUOTA_WARNING, warning)
                 await log_action(
                     session,
                     user_id=user_id,

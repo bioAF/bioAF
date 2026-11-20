@@ -1047,5 +1047,5 @@ class ValidationDriverService:
             # Same stamp and same announcement as the guarded path: this one sets the state directly
             # because the handler that raised may have left an illegal transition behind, but it is
             # still a study stopping and a human still has to hear about it.
-            await record_study_error(study)
+            record_study_error(session, study)
             await session.flush()

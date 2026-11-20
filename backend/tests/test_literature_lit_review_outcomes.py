@@ -1477,3 +1477,49 @@ async def test_unreadable_pubmed_metadata_makes_review_partial_not_complete(h, m
     assert run.error_message == "some_literature_sources_failed: pubmed 1/1 attempts failed"
     audit = [a for a in await h.audits(run.id) if a.action == "complete"]
     assert audit[0].details_json["sources"]["pubmed"]["failure_categories"] == ["ParseError"]
+
+
+# ---------------------------------------------------------------------------
+# Every announcement follows the commit of the outcome it names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failed", "partial", "scheduled_picks"])
+async def test_every_announcement_finds_its_outcome_already_committed(h, monkeypatch, outcome):
+    """A subscriber reading on its own session at delivery time sees the terminal status and the
+    accepted recommendations: _persist_terminal commits before any of these events is emitted."""
+    observed: list[tuple[str, str, int]] = []
+
+    async def observing_emit(event_type, payload):
+        run_id = payload.get("run_id") or payload.get("entity_id")
+        async with _database.async_session_factory() as s:
+            run = (await s.execute(select(LiteratureReviewRun).where(LiteratureReviewRun.id == run_id))).scalar_one()
+            recs = len(
+                (
+                    await s.execute(
+                        select(LiteratureRecommendation).where(LiteratureRecommendation.review_run_id == run_id)
+                    )
+                ).all()
+            )
+        observed.append((event_type, run.status, recs))
+
+    monkeypatch.setattr(event_bus, "emit", observing_emit)
+    if outcome == "failed":
+        all_sources(h, fail())
+        h.script_llm("q1\nq2")
+        await h.run()
+        assert observed == [(LITERATURE_REVIEW_RUN_FAILED, "failed", 0)]
+    elif outcome == "partial":
+        h.source("pubmed", fail())
+        h.script_llm("q1\nq2")
+        await h.run()
+        assert observed == [(LITERATURE_REVIEW_RUN_COMPLETED, "partial", 0)]
+    else:
+        h.source("pubmed", always([paper(1), paper(2)]))
+        h.script_llm("q1", scores((0, 0.9), (1, 0.8)))
+        await h.run(trigger=TRIGGER_SCHEDULED)
+        assert observed == [
+            (LITERATURE_REVIEW_RUN_COMPLETED, "complete", 2),
+            (LITERATURE_AUTO_REVIEW_RECOMMENDATIONS, "complete", 2),
+        ]

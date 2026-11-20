@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.notebook_session import NotebookSession
 from app.services.notebook_service import terminate_verified
 from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import SESSION_IDLE
 from app.runtime import spawn_event
 
@@ -74,22 +75,20 @@ class SessionMonitorService:
         ns.stopped_at = now
 
         try:
-            spawn_event(
-                event_bus.emit(
-                    SESSION_IDLE,
-                    {
-                        "event_type": SESSION_IDLE,
-                        "org_id": ns.organization_id,
-                        "user_id": ns.user_id,
-                        "target_user_id": ns.user_id,
-                        "entity_type": "notebook_session",
-                        "entity_id": ns.id,
-                        "title": "Notebook session auto-stopped due to inactivity",
-                        "message": (f"Your {ns.session_type} session was stopped after exceeding the idle timeout"),
-                        "summary": f"Notebook session {ns.id} auto-stopped",
-                    },
-                ),
-                event_type=SESSION_IDLE,
+            defer_event(
+                session,
+                SESSION_IDLE,
+                {
+                    "event_type": SESSION_IDLE,
+                    "org_id": ns.organization_id,
+                    "user_id": ns.user_id,
+                    "target_user_id": ns.user_id,
+                    "entity_type": "notebook_session",
+                    "entity_id": ns.id,
+                    "title": "Notebook session auto-stopped due to inactivity",
+                    "message": (f"Your {ns.session_type} session was stopped after exceeding the idle timeout"),
+                    "summary": f"Notebook session {ns.id} auto-stopped",
+                },
             )
         except Exception as e:
             logger.warning("Failed to emit idle session event: %s", e)
