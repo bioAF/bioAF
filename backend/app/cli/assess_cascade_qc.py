@@ -340,8 +340,8 @@ async def _runs_for(
         .where(QCDashboard.pipeline_run_id.in_(run_ids), QCDashboard.organization_id == org_id)
         .order_by(QCDashboard.id)
     )
-    for dashboard_id, dashboard_run_id, status, snapshot in dash_rows.all():
-        dashboards[int(dashboard_run_id)].append(DashboardFinding(dashboard_id, status, bool(snapshot)))
+    for row in dash_rows.all():
+        dashboards[row.pipeline_run_id].append(DashboardFinding(row.id, row.status, bool(row.qc_config_json)))
 
     runs = [
         RunFinding(
