@@ -344,7 +344,8 @@ export interface paths {
         /**
          * Get Availability
          * @description Whether AI Review can run for this org: an active provider exists, has a
-         *     model, and is not the stubbed gemma. Readable by View Results so the QC
+         *     model, and has an implemented review execution path (the same capability
+         *     check review admission enforces). Readable by View Results so the QC
          *     report can decide whether to surface the AI Review trigger without needing
          *     the admin-only providers endpoint. Returns a boolean only (no secrets).
          *     Declared before /{review_id} so the static path is not shadowed.
