@@ -68,6 +68,14 @@ class NfsStorageProvider(StorageProvider):
         """A filesystem cannot mint signed URLs and has no storage tiers."""
         return ProviderCapabilities(signed_url_upload=False, storage_tier_metrics=False)
 
+    def compute_job_upload_refusal(self) -> str | None:
+        # Kubernetes is the only compute backend that runs pipeline jobs, and it mounts no NFS
+        # volume. A directory existing inside the job proves nothing: it may be the node's own disk.
+        return (
+            "Pipeline outputs cannot be saved to NFS storage: NFS is not mounted into pipeline jobs, "
+            "so the outputs would be lost when the job ends."
+        )
+
     # -- URI <-> path mapping (traversal-confined) ----------------------------
 
     @staticmethod

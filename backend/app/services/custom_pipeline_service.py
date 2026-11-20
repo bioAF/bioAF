@@ -745,12 +745,17 @@ class CustomPipelineService:
         await session.flush()
 
         # The run's one output location, the same one the monitor collects from and registration
-        # reads (nothing the caller supplied names it). A cloud install with no results store is
-        # refused here, before submission: the caller does not commit, so no run is recorded.
+        # reads (nothing the caller supplied names it). A cloud install with no results store, or a
+        # store the job cannot reach (NFS), is refused here, before submission: the caller does not
+        # commit, so no run is recorded.
         from app.adapters.registry import get_storage_adapter
         from app.services.run_output_location_service import RunOutputLocationService
 
-        output_uri = await RunOutputLocationService.authorized_uri(session, run, get_storage_adapter())
+        storage = get_storage_adapter()
+        output_uri = await RunOutputLocationService.authorized_uri(session, run, storage)
+        refusal = storage.compute_job_upload_refusal()
+        if refusal:
+            raise ValidationError(refusal)
 
         # 14. Link input files
         for f in input_files:

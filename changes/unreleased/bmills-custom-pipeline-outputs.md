@@ -13,4 +13,10 @@
 - If a run's outputs cannot be uploaded, the run fails with "pipeline outputs
   could not be copied to ..." rather than completing without them. A pipeline
   that had already failed keeps its own exit status.
-- The custom QC dashboard now finds `qc_metrics.json` for project-scoped runs.
+- On an install whose storage is NFS, a custom pipeline launch is refused before
+  anything is submitted. Pipeline jobs do not have NFS mounted, so their outputs
+  could not be saved.
+- QC dashboards now read metrics and plots from the run's own output location.
+  Project-scoped custom runs get their QC metrics and plots, whichever QC
+  template they use, and installs with no results bucket setting no longer show
+  an empty QC dashboard for runs whose outputs were saved.

@@ -214,6 +214,15 @@ class StorageProvider(ABC):
         """Declare what this backend can do. Default: nothing (see ComputeProvider)."""
         return ProviderCapabilities()
 
+    def compute_job_upload_refusal(self) -> str | None:
+        """Why a pipeline job cannot save outputs to this store, or None when it can.
+
+        An object store is reached over the network by the adapter's CLI commands from inside any
+        job. A store that needs a filesystem mount is reachable only when the compute backend mounts
+        it, and a job that copies to an unmounted path writes to its own disk and loses the data.
+        """
+        return None
+
     @abstractmethod
     async def collect_outputs(self, output_uri: str, pipeline_run: dict) -> list[StoredObject]:
         """List the objects under a run's output directory URI (discovery; nothing is copied).

@@ -1075,7 +1075,9 @@ async def test_an_nfs_install_refuses_the_launch_before_submission(
     root = tmp_path / "nfs"
     root.mkdir()
     storage = NfsStorageProvider(root=str(root))
-    _, version = await _create_pipeline_with_version(session, admin_user, ready_env_version.id, entrypoint_command="true")
+    _, version = await _create_pipeline_with_version(
+        session, admin_user, ready_env_version.id, entrypoint_command="true"
+    )
     target = {"experiment": experiment} if scope == "experiment" else {"project": project}
 
     with pytest.raises(BioafValidationError, match="NFS"):
