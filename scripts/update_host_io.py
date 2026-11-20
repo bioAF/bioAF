@@ -33,7 +33,7 @@ STATUS_DIR = "update-status"
 STATE_DIR = "host-state"
 STATUS_FILE = "current.json"
 AGENT_CODE = "agent-code"
-AGENT_SOURCES = ("scripts/update-agent.sh", "scripts/update_host_io.py")
+AGENT_SOURCES = ("scripts/update-agent.sh", "scripts/update_host_io.py", "installer/host_prereqs.sh")
 
 TRIGGER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.json", re.ASCII)
 VERSION = re.compile(r"v?[0-9]+\.[0-9]+\.[0-9]+", re.ASCII)
