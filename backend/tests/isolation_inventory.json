@@ -699,12 +699,13 @@
    "route": "committed_reset_candidate"
   },
   "test_cost_billing_dates.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "wait_for_deferred_events"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_costs.py": {
    "category": "real_commit",
@@ -768,12 +769,13 @@
    "route": "none"
   },
   "test_custom_pipeline_cascade.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "wait_for_deferred_events"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_custom_pipeline_launch.py": {
    "category": "single_connection",
@@ -2606,12 +2608,13 @@
    "route": "rollback_candidate"
   },
   "test_pipeline_monitor_oom.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "wait_for_deferred_events"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_pipeline_monitor_preemption.py": {
    "category": "single_connection",
@@ -4239,12 +4242,14 @@
    "route": "rollback_candidate"
   },
   "test_validation_error_notice.py": {
-   "category": "single_connection",
+   "category": "real_commit",
    "evidence": [
     "fixture:db_engine",
-    "fixture:session"
+    "fixture:session",
+    "async_session_factory",
+    "wait_for_deferred_events"
    ],
-   "route": "rollback_candidate"
+   "route": "committed_reset_candidate"
   },
   "test_validation_extraction.py": {
    "category": "single_connection",
