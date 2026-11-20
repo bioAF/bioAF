@@ -12,7 +12,7 @@
     "contracts:check": "openapi-typescript ../backend/contracts/internal-openapi.json --output contracts/internal-api.ts --check"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^2.0.4",
+    "@dagrejs/dagre": "^3.1.3",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "next": "^15.5.29",
