@@ -40,9 +40,9 @@ sys.stdout.write("ok %d.%d.%d\n" % tuple(sys.version_info[:3]))
 '
 
 # The interpreter's version once host_python_check succeeds; callers print it.
-# shellcheck disable=SC2034
 HOST_PYTHON_VERSION=""
 
+# shellcheck disable=SC2034  # HOST_PYTHON_VERSION is read by the caller
 host_python_check() {
     # Succeeds when python3 on PATH runs, is at least BIOAF_HOST_PYTHON_MIN and has the standard-library
     # capabilities host operations use; sets HOST_PYTHON_VERSION. Otherwise prints why, and how to

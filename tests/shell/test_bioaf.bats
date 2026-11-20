@@ -994,6 +994,7 @@ old_update_env() {
     update_env "$tmp" v1.0.0
     sed -i.bak "s|source '$BIOAF_SCRIPT'|source '$OLD_BIOAF'|" "$tmp/harness.sh"
     cp "$BATS_TEST_DIRNAME/../../install.sh" "$tmp/install.sh"
+    mkdir -p "$tmp/installer"; cp "$BATS_TEST_DIRNAME/../../installer/host_prereqs.sh" "$tmp/installer/"
     cat > "$tmp/bioaf" <<'STUB'
 #!/usr/bin/env bash
 echo "target-bioaf $*" >> "$FAKE_LOG"
@@ -1117,6 +1118,7 @@ agent_env() {
     cp "$REPO_ROOT/docker/bioaf-update-agent.service" "$tmp/repo/docker/"
     cp "$REPO_ROOT/scripts/update-agent.sh" "$REPO_ROOT/scripts/update_host_io.py" "$tmp/repo/scripts/"
     cp -R "$REPO_ROOT/installer/update-agent-legacy" "$tmp/repo/installer/"
+    cp "$REPO_ROOT/installer/host_prereqs.sh" "$tmp/repo/installer/"
     printf '#!/bin/sh\n"$@"\n' > "$tmp/bin/sudo"
     cat > "$tmp/bin/systemctl" <<'STUB'
 #!/usr/bin/env bash
@@ -1862,4 +1864,193 @@ PY
     chmod +x "$tmp/fake-dc"
     run bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc'; cmd_register_outputs"
     [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Version guidance: releases are calendar versions, YYYY.M.N (tags add a leading v).
+# ---------------------------------------------------------------------------
+
+@test "help shows calendar-version usage and examples" {
+    run bash "$BIOAF_SCRIPT" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"setup [--version YYYY.M.N]"* ]]
+    [[ "$output" == *"./bioaf setup --version 2026.11.21"* ]]
+    [[ "$output" == *"./bioaf update 2026.11.21"* ]]
+    [[ "$output" != *"X.Y.Z"* ]]
+    [[ "$output" != *"0.8.1"* ]]
+    [[ "$output" != *"0.7.0"* ]]
+}
+
+@test "setup --version without a value gives a calendar-version example" {
+    run bash "$BIOAF_SCRIPT" setup --version </dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--version requires a value"* ]]
+    [[ "$output" == *"2026.11.21"* ]]
+    [[ "$output" != *"0.8.1"* ]]
+}
+
+@test "update rejects a malformed version with the calendar-version format" {
+    for bad in 2026.11 latest 2026.11.21-rc1 'v' '1.2.3.4'; do
+        run bash -c "source '$BIOAF_SCRIPT' >/dev/null; get_running_version() { echo 2026.11.20; }
+            deploy_begin() { echo DEPLOY-BEGIN; return 1; }; cmd_update '$bad' --yes" </dev/null
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"Invalid version format"* ]]
+        [[ "$output" == *"YYYY.M.N"* ]]
+        [[ "$output" != *"X.Y.Z"* ]]
+        [[ "$output" != *"DEPLOY-BEGIN"* ]]
+    done
+}
+
+@test "update accepts calendar versions and legacy three-number pins, with or without v" {
+    for pin in 2026.11.21 v2026.11.21 0.8.1 v0.8.1; do
+        want="${pin#v}"
+        run bash -c "source '$BIOAF_SCRIPT' >/dev/null; get_running_version() { echo '$want'; }
+            db_upgrade_settled() { return 0; }; deploy_operation_unfinished() { return 1; }; cmd_update '$pin' --yes" </dev/null
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"Already running version $want"* ]]
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Host python3 prerequisite. Commands that run python3 on the host check it before changing anything;
+# commands that only reach the backend container, and help, work without it.
+# ---------------------------------------------------------------------------
+
+load host_python
+
+# host_checkout <tmp>: a checkout at <tmp>/repo and logging stand-ins in <tmp>/stubs for every host
+# tool these commands reach (docker, sudo, systemctl, systemd-run, sg, curl, git, a Linux uname).
+#   FAKE_GCE=1           curl answers the GCE metadata server (otherwise every curl fails)
+#   FAKE_DOCKER_INFO=1   `docker info` fails (the socket is not accessible to this user)
+host_checkout() {
+    local tmp="$1" tool
+    mkdir -p "$tmp/repo/installer" "$tmp/repo/scripts" "$tmp/repo/docker/certs" "$tmp/stubs" "$tmp/home"
+    cp "$BIOAF_SCRIPT" "$tmp/repo/bioaf"
+    cp "$REPO_ROOT/installer/output.sh" "$REPO_ROOT/installer/deployments.sh" "$REPO_ROOT/installer/managed_file.sh" \
+        "$REPO_ROOT/installer/host_prereqs.sh" "$tmp/repo/installer/"
+    cp "$REPO_ROOT/scripts/update_host_io.py" "$REPO_ROOT/scripts/update-agent.sh" \
+        "$REPO_ROOT/scripts/update-agent-activate.sh" "$tmp/repo/scripts/"
+    cp "$REPO_ROOT/docker/bioaf-update-agent.service" "$tmp/repo/docker/"
+    printf '#!/bin/sh\necho "install.sh $*" >> "%s/calls"\n' "$tmp" > "$tmp/repo/install.sh"
+    chmod +x "$tmp/repo/install.sh"
+    for tool in docker sudo systemctl systemd-run sg git; do
+        printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n[ "%s $1" = "docker info" ] && [ "${FAKE_DOCKER_INFO:-0}" = 1 ] && exit 1\nexit 0\n' \
+            "$tool" "$tmp" "$tool" > "$tmp/stubs/$tool"
+    done
+    printf '#!/bin/sh\necho "curl $*" >> "%s/calls"\n[ "${FAKE_GCE:-0}" = 1 ] && exit 0\nexit 7\n' "$tmp" > "$tmp/stubs/curl"
+    printf '#!/bin/sh\necho Linux\n' > "$tmp/stubs/uname"
+    chmod +x "$tmp/stubs/"*
+}
+
+# in_checkout <tmp> <python kind> <command...>: run <command> in the checkout with only that python3.
+in_checkout() {
+    local tmp="$1" kind="$2"; shift 2
+    run env PATH="$tmp/stubs:$(host_python_path "$BATS_FILE_TMPDIR/py" "$kind")" HOME="$tmp/home" "$@" </dev/null
+}
+
+# The diagnostic every refused command gives.
+refused_for_python() {
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    [[ "$output" == *"3.10"* ]]
+}
+
+# Nothing but the prerequisite check ran: no host tool, no file or directory created or changed.
+nothing_changed() {
+    local tmp="$1"
+    [ ! -s "$tmp/calls" ] || { echo "host tools ran:"; cat "$tmp/calls"; return 1; }
+    [ "$(cd "$tmp/repo" && find . -newer "$tmp/marker" | grep -v '^\.$' || true)" = "" ] || {
+        echo "changed:"; (cd "$tmp/repo" && find . -newer "$tmp/marker"); return 1; }
+    [ ! -e "$tmp/home/.bioaf" ]
+}
+
+mark_unchanged() { sleep 1; touch "$1/marker"; sleep 1; }
+
+@test "help, unknown commands, status, stop and logs work without host python3" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" help
+    [ "$status" -eq 0 ]; [[ "$output" == *"Usage:"* ]]
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" notarealcommand
+    [ "$status" -eq 1 ]; [[ "$output" == *"Unknown command"* ]]; [[ "$output" != *"python3"* ]]
+    for cmd in status stop "logs backend"; do
+        : > "$tmp/calls"
+        in_checkout "$tmp" none bash "$tmp/repo/bioaf" $cmd
+        [ "$status" -eq 0 ]
+        grep -q '^docker compose' "$tmp/calls"
+    done
+}
+
+@test "start, restart, build and update refuse to run without a usable python3 and change nothing" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    printf 'POSTGRES_PASSWORD=keep\n' > "$tmp/repo/docker/.env"
+    mark_unchanged "$tmp"
+    for kind in none broken old nocap; do
+        for cmd in start restart build "build backend" update "update 2026.11.21"; do
+            in_checkout "$tmp" "$kind" bash "$tmp/repo/bioaf" $cmd
+            refused_for_python
+            nothing_changed "$tmp"
+        done
+    done
+}
+
+@test "start with a working python3 still starts the services" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    printf 'BIOAF_IMAGE_TAG=v2026.11.21\n' > "$tmp/repo/docker/.env"
+    in_checkout "$tmp" real env BIOAF_ENV_FILE="$tmp/repo/docker/.env" bash -c "source '$tmp/repo/bioaf' >/dev/null; sleep() { :; }; cmd_start"
+    [ "$status" -eq 0 ]
+    grep -q '^docker compose .* up -d db' "$tmp/calls"
+    grep -q '^docker compose .* up -d nginx' "$tmp/calls"
+}
+
+@test "setup without python3 stops before the install log, docker-group recovery or installation" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    mark_unchanged "$tmp"
+    in_checkout "$tmp" none env FAKE_DOCKER_INFO=1 bash "$tmp/repo/bioaf" setup
+    refused_for_python
+    nothing_changed "$tmp"
+}
+
+@test "a repeat setup without python3 leaves the existing env and certificates alone" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    printf 'POSTGRES_PASSWORD=keep\n' > "$tmp/repo/docker/.env"; : > "$tmp/repo/docker/certs/tls.crt"
+    mark_unchanged "$tmp"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" setup --version 2026.11.21
+    refused_for_python
+    nothing_changed "$tmp"
+}
+
+@test "setup without python3 still reports bad arguments and unsupported operating systems first" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" setup --version
+    [ "$status" -eq 1 ]; [[ "$output" == *"--version requires a value"* ]]
+    printf '#!/bin/sh\necho Darwin\n' > "$tmp/stubs/uname"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" setup
+    [ "$status" -eq 1 ]; [[ "$output" == *"cannot be installed on macOS"* ]]
+    [ ! -e "$tmp/home/.bioaf" ]
+}
+
+@test "the cloud logging hook needs python3 only on GCE, and changes nothing without it there" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" ensure-cloud-logging
+    [ "$status" -eq 0 ]
+    mark_unchanged "$tmp"; : > "$tmp/calls"
+    in_checkout "$tmp" none env FAKE_GCE=1 bash "$tmp/repo/bioaf" ensure-cloud-logging
+    refused_for_python
+    ! grep -qvE '^curl ' "$tmp/calls"
+}
+
+@test "the update agent hook without python3 changes nothing" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    mark_unchanged "$tmp"
+    in_checkout "$tmp" none bash "$tmp/repo/bioaf" ensure-update-agent
+    refused_for_python
+    nothing_changed "$tmp"
+}
+
+@test "the update agent activation waiter without python3 exits at once and changes nothing" {
+    tmp="$(mktemp -d)"; host_checkout "$tmp"
+    mark_unchanged "$tmp"
+    in_checkout "$tmp" none env UPDATE_AGENT_WAIT_LIMIT=4 bash "$tmp/repo/scripts/update-agent-activate.sh"
+    refused_for_python
+    nothing_changed "$tmp"
 }

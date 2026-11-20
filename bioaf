@@ -45,9 +45,26 @@ if [ -f "$SCRIPT_DIR/installer/managed_file.sh" ]; then
     # shellcheck source=installer/managed_file.sh
     source "$SCRIPT_DIR/installer/managed_file.sh"
 fi
+# The host python3 check. Sourced now, like the host I/O program below, so an update that checks out another
+# release keeps using the code this process started with.
+if [ -f "$SCRIPT_DIR/installer/host_prereqs.sh" ]; then
+    # shellcheck source=installer/host_prereqs.sh
+    source "$SCRIPT_DIR/installer/host_prereqs.sh"
+fi
 # The host I/O program shared with the update agent, read now so an update that checks out another
 # release keeps using the code this process started with.
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
+
+host_python_require() {
+    # The host python3 check (installer/host_prereqs.sh). Every command that runs python3 on the host calls
+    # this before it changes anything; commands that only reach the backend container (its own
+    # interpreter), and help, never do. Fails with a diagnostic on stderr.
+    if ! declare -F host_python_check >/dev/null; then
+        red "ERROR: installer/host_prereqs.sh is missing from this checkout, so python3 could not be checked." >&2
+        return 1
+    fi
+    host_python_check
+}
 
 wait_for_db() {
     echo "Waiting for database to be ready..."
@@ -192,6 +209,7 @@ ensure_cloud_logging() {
     if ! is_gce; then
         return 0
     fi
+    host_python_require || return 1
 
     # One centralized path (plan 22, D1). Direct delivery ships from the backend itself, so the host
     # must not also collect its stdout: install and reconcile nothing, and refuse an agent that
@@ -438,6 +456,7 @@ update_agent_reconcile_held() (
     # during another's hold. In a subshell whose cleanup is in place before anything is stopped:
     # the agent is resumed on every way out (return, error, SIGTERM/INT/HUP), and the lock is
     # released when the subshell's fd 8 closes, after that.
+    host_python_require || exit 1
     UPDATE_AGENT_HELD=""
     trap update_agent_release EXIT
     trap 'exit 143' TERM INT HUP
@@ -480,6 +499,7 @@ ensure_update_agent() {
     if ! command -v systemctl &>/dev/null; then
         return 0
     fi
+    host_python_require || return 1
     mkdir -p "$SCRIPT_DIR/update-requests"
     [ -d "$SCRIPT_DIR/update-status" ] || mkdir -m 755 "$SCRIPT_DIR/update-status"
     update_agent_identity || return 1
@@ -542,7 +562,7 @@ cmd_setup() {
             --version)
                 setup_version="${2:-}"
                 if [ -z "$setup_version" ]; then
-                    red "ERROR: --version requires a value (e.g., --version 0.8.1)"
+                    red "ERROR: --version requires a value, a release in YYYY.M.N form (e.g., --version 2026.11.21)"
                     exit 1
                 fi
                 setup_version="${setup_version#v}"
@@ -577,11 +597,6 @@ cmd_setup() {
                 ;;
         esac
     done
-    export BIOAF_VERBOSE="${BIOAF_VERBOSE:-0}"
-    export BIOAF_INSTALL_LOG="${HOME}/.bioaf/install.log"
-    if declare -F io_init >/dev/null 2>&1; then
-        io_init
-    fi
 
     # OS gate -- catch macOS/Windows before anything else
     local os
@@ -610,6 +625,16 @@ cmd_setup() {
             exit 1
             ;;
     esac
+
+    # Every later step runs python3 on the host; check it before the install log, docker-group recovery
+    # (sudo usermod, re-exec) or installation.
+    host_python_require || exit 1
+
+    export BIOAF_VERBOSE="${BIOAF_VERBOSE:-0}"
+    export BIOAF_INSTALL_LOG="${HOME}/.bioaf/install.log"
+    if declare -F io_init >/dev/null 2>&1; then
+        io_init
+    fi
 
     # If Docker is installed but the socket is inaccessible, try to auto-recover.
     # Two cases:
@@ -824,6 +849,7 @@ print(json.dumps(result))
 }
 
 cmd_start() {
+    host_python_require || exit 1
     bold "=== Starting Services ==="
     # Use whatever version is pinned in docker/.env. Never derive the image
     # tag from the worktree -- a `git pull` followed by `bioaf restart` must
@@ -884,6 +910,7 @@ cmd_stop() {
 }
 
 cmd_restart() {
+    host_python_require || exit 1
     cmd_stop
     echo ""
     cmd_start
@@ -1259,7 +1286,7 @@ resolve_and_pull_images() {
     #
     # Usage:
     #   resolve_and_pull_images              # auto-detect from latest release
-    #   resolve_and_pull_images "0.7.5"      # try a specific version
+    #   resolve_and_pull_images "2026.11.21" # try a specific release
     local explicit_version="${1:-}"
 
     if [ -n "$explicit_version" ]; then
@@ -1389,6 +1416,7 @@ update_settings_preflight() {
 }
 
 cmd_update() {
+    host_python_require || exit 1
     local target_version="${1:-}"
     local current_version
     # Use the running container's image tag, NOT the on-disk pyproject.toml.
@@ -1406,9 +1434,9 @@ cmd_update() {
     # Strip leading 'v' if the user passed one
     target_version="${target_version#v}"
 
-    # Validate version format (semver: X.Y.Z)
+    # Releases are calendar versions, YYYY.M.N; the same three-number form still accepts older releases' pins.
     if ! echo "$target_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        red "ERROR: Invalid version format '$target_version'. Expected format: X.Y.Z"
+        red "ERROR: Invalid version format '$target_version'. Expected a release in YYYY.M.N form (e.g., 2026.11.21)."
         exit 1
     fi
 
@@ -1618,6 +1646,7 @@ cmd_build() {
     # The tag is pinned only after the build succeeded: a failed build leaves the deployed pin alone. The new
     # images become the current generation when they run (start, restart).
     local tag service="${1:-}"
+    host_python_require || return 1
     tag="v$(get_current_version)"
     deploy_begin build "$tag" || return $?
     deploy_retention_before_staging || { red "ERROR: Not enough free disk space to build. Free space on the host, then build again."; return 1; }
@@ -1741,7 +1770,7 @@ cmd_help() {
     echo "Usage: ./bioaf <command> [args]"
     echo ""
     bold "First-Run:"
-    echo "  setup [--version X.Y.Z] [--prefill FILE] [--local-build] [--verbose]"
+    echo "  setup [--version YYYY.M.N] [--prefill FILE] [--local-build] [--verbose]"
     echo "                      Pull images and generate a setup code for the web wizard."
     echo "                      --local-build builds images from the local source tree and"
     echo "                      applies any prefill found on this host (~/.bioaf-prefill.yaml)."
@@ -1784,7 +1813,7 @@ cmd_help() {
     echo ""
     bold "Examples:"
     echo "  ./bioaf setup               # First-time setup (latest version)"
-    echo "  ./bioaf setup --version 0.8.1  # Install a specific version"
+    echo "  ./bioaf setup --version 2026.11.21  # Install a specific release"
     echo "  ./bioaf build               # Build all container images"
     echo "  ./bioaf start               # Start services"
     echo "  ./bioaf logs backend        # Tail backend logs (last 100 lines)"
@@ -1795,7 +1824,7 @@ cmd_help() {
     echo "  ./bioaf dbshell             # Open psql session"
     echo "  ./bioaf backup              # Create database backup"
     echo "  ./bioaf update              # Update to the latest version"
-    echo "  ./bioaf update 0.7.0        # Update to a specific version"
+    echo "  ./bioaf update 2026.11.21   # Update to a specific release"
     echo ""
 }
 
