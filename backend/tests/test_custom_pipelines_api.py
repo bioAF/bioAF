@@ -886,3 +886,83 @@ async def test_a_launch_with_no_results_store_records_nothing(
     launches = select(func.count()).select_from(AuditLog).where(AuditLog.entity_type == "pipeline_run")
     assert (await session.execute(launches)).scalar_one() == 0
     assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_create_version_with_another_organizations_environment_matches_a_nonexistent_id(
+    client, admin_token, session
+):
+    from sqlalchemy import select
+
+    from app.models.audit_log import AuditLog
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    org = Organization(name="Foreign API Org", setup_complete=True)
+    session.add(org)
+    await session.flush()
+    role_map = await seed_builtin_roles(session, org.id)
+    foreign_user = User(
+        email="foreign-api@other.com",
+        password_hash=AuthService.hash_password("foreignpass"),
+        role_id=role_map["admin"],
+        organization_id=org.id,
+        status="active",
+    )
+    session.add(foreign_user)
+    await session.flush()
+    foreign_env = Environment(
+        name="Foreign API Env",
+        organization_id=org.id,
+        created_by_user_id=foreign_user.id,
+        environment_type="pipeline",
+    )
+    session.add(foreign_env)
+    await session.flush()
+    foreign_version = EnvironmentVersion(
+        environment_id=foreign_env.id,
+        version_number=1,
+        status="ready",
+        definition_format="conda",
+        definition_content="name: foreign\n",
+        image_uri="us-central1-docker.pkg.dev/foreign/bioaf/pipeline:v1",
+        created_by_user_id=foreign_user.id,
+    )
+    session.add(foreign_version)
+    await session.flush()
+    await session.commit()
+    foreign_version_id = foreign_version.id
+
+    create_resp = await client.post(
+        "/api/v1/custom-pipelines", json={"name": "Foreign Env API"}, headers=_bearer(admin_token)
+    )
+    pipeline_id = create_resp.json()["id"]
+
+    def body(env_version_id: int) -> dict:
+        return {
+            "code_source_type": "inline",
+            "code_content": "print('hi')",
+            "entrypoint_command": "python script.py",
+            "environment_version_id": env_version_id,
+        }
+
+    foreign_resp = await client.post(
+        f"/api/v1/custom-pipelines/{pipeline_id}/versions", json=body(foreign_version_id), headers=_bearer(admin_token)
+    )
+    missing_resp = await client.post(
+        f"/api/v1/custom-pipelines/{pipeline_id}/versions", json=body(999999), headers=_bearer(admin_token)
+    )
+
+    assert foreign_resp.status_code == 400
+    assert (foreign_resp.status_code, foreign_resp.json()) == (missing_resp.status_code, missing_resp.json())
+
+    detail = await client.get(f"/api/v1/custom-pipelines/{pipeline_id}", headers=_bearer(admin_token))
+    assert detail.json()["versions"] == []
+    session.expire_all()
+    audits = (
+        (await session.execute(select(AuditLog).where(AuditLog.entity_type == "custom_pipeline_version")))
+        .scalars()
+        .all()
+    )
+    assert audits == []

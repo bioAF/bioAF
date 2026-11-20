@@ -61,3 +61,14 @@ The frontend uses this field plus `environment_version_id` comparison to label e
 - The event bus pattern is already used for `PIPELINE_COMPLETED`, `PIPELINE_OOM`, etc. This is consistent.
 - Version history may grow with cascade entries. The `version_trigger` field and UI labeling make this transparent.
 - Variables are simple, typed, and follow a proven in-app pattern. They do not support complex structures (arrays, objects), which is intentional for v1.
+
+---
+
+## Amendment (2026-11-19): the cascade copies the whole definition, within one organization
+
+This ADR predates the QC fields on `CustomPipelineVersion` and the `reference_category` on variables. The cascade did not copy them, so cascade versions silently fell back to the default `custom` QC layout and unscoped reference pickers. Losing them was never intended.
+
+- **Copied definition:** a cascade version also copies `qc_template`, an independent deep copy of `qc_config_json` (null and empty stay as they were), and each variable's `reference_category`. Identity, version number, status, creator and audit data are not copied.
+- **Organization boundary:** the cascade uses persisted ownership, never the event payload. The target environment version must belong to the rebuilt environment, and only pipelines in that environment's organization cascade. Malformed targets and legacy cross-organization links are skipped with an id-and-reason log line and create no version or audit. Ordinary version creation likewise resolves `environment_version_id` through its environment scoped to the pipeline's organization; a foreign id is rejected exactly like a nonexistent one.
+- **Unchanged:** the source is still the highest-numbered active version, numbering and repeated-event handling are as before, and the `cascade_create` audit still records `source_version_id` and `environment_version_id`.
+- **Historical versions:** existing cascade versions are not rewritten. `python -m app.cli.assess_cascade_qc` reports, read-only, which ones lost fields, by following their `cascade_create` audits, and which runs and QC dashboards used them. Any repair is a separate, explicitly approved operation.

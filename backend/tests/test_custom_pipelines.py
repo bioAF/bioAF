@@ -685,3 +685,100 @@ async def test_deprecate_version(session, admin_user, ready_env_version):
         )
     ).scalar_one()
     assert audit.user_id == admin_user.id
+
+
+# --- Organization boundary on the environment reference ---
+
+
+async def _foreign_env_version(session, status: str = "ready") -> EnvironmentVersion:
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    org = Organization(name="Foreign Org", setup_complete=True)
+    session.add(org)
+    await session.flush()
+    role_map = await seed_builtin_roles(session, org.id)
+    user = User(
+        email=f"foreign-{status}@other.com",
+        password_hash=AuthService.hash_password("foreignpass"),
+        role_id=role_map["admin"],
+        organization_id=org.id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    env = Environment(
+        name="Foreign Env",
+        organization_id=org.id,
+        created_by_user_id=user.id,
+        environment_type="pipeline",
+    )
+    session.add(env)
+    await session.flush()
+    version = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=1,
+        status=status,
+        definition_format="conda",
+        definition_content="name: foreign\n",
+        image_uri="projects/foreign/global/images/foreign-v1",
+        created_by_user_id=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    await session.commit()
+    return version
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["ready", "building"])
+async def test_create_version_rejects_another_organizations_environment(session, admin_user, status):
+    foreign = await _foreign_env_version(session, status=status)
+    pipeline = await CustomPipelineService.create_pipeline(
+        session,
+        admin_user.organization_id,
+        admin_user.id,
+        CustomPipelineCreateRequest(name="Foreign Env Pipeline"),
+    )
+    await session.commit()
+    pipeline_id = pipeline.id
+
+    with pytest.raises(ValidationError, match="^environment_version_id is not valid$"):
+        await CustomPipelineService.create_version(
+            session,
+            admin_user.organization_id,
+            admin_user.id,
+            pipeline_id,
+            CustomPipelineVersionCreateRequest(
+                code_source_type="inline",
+                code_content="print()",
+                entrypoint_command="python run.py",
+                environment_version_id=foreign.id,
+            ),
+        )
+    await session.rollback()
+
+    versions = (
+        (
+            await session.execute(
+                select(CustomPipelineVersion).where(CustomPipelineVersion.custom_pipeline_id == pipeline_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert versions == []
+    audits = (
+        (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "custom_pipeline_version",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert audits == []
