@@ -248,9 +248,24 @@ export default function PipelineEnvironmentsPage() {
     if (!buildConfirm) return;
     const { kind, envId, versionId } = buildConfirm;
     setBuildConfirm(null);
-    const path = kind === "rebuild" ? "rebuild" : "build";
     try {
-      await api.post(`/api/v1/environments/${envId}/versions/${versionId}/${path}`);
+      if (kind === "rebuild") {
+        // The rebuild call only creates a new draft build of this version; start building it,
+        // as the dialog promises.
+        const rebuild = await api.post<EnvironmentVersionResponse>(
+          `/api/v1/environments/${envId}/versions/${versionId}/rebuild`,
+        );
+        try {
+          await api.post(`/api/v1/environments/${envId}/versions/${rebuild.id}/build`);
+        } catch (err) {
+          logError("starting the build of a new rebuild", err);
+          toast.error(
+            "The rebuild was created, but its build did not start. Use Build on the new draft to try again.",
+          );
+        }
+      } else {
+        await api.post(`/api/v1/environments/${envId}/versions/${versionId}/build`);
+      }
       await selectEnvironment(envId);
       await loadEnvironments();
     } catch (err) {

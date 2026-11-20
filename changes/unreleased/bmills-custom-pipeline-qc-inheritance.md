@@ -15,3 +15,7 @@
   organization: it is rejected like an environment that does not exist. An
   environment rebuild now creates new versions only for pipelines in its own
   organization.
+- **Rebuild** on the Pipeline Templates page now starts building the new image,
+  as its confirmation says. Before, it only added a draft build that also had
+  to be built by hand. If the build cannot start, the draft is kept and you
+  are told to use **Build** on it.
