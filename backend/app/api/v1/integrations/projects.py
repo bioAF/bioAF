@@ -26,7 +26,7 @@ from app.schemas.integrations.project import (
 from app.services import idempotency_service
 from app.services.audit_service import log_action
 from app.services.code_service import CodeService
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import (
     INTEGRATION_PROJECT_CREATED,
     INTEGRATION_PROJECT_UPDATED,
@@ -152,7 +152,9 @@ async def create_project(
     )
     project = result.scalar_one()
     out = _project_out(project)
-    await event_bus.emit(
+    # Announced once the project (and any idempotency record) commits; dropped if it never does.
+    defer_event(
+        session,
         INTEGRATION_PROJECT_CREATED,
         {
             "organization_id": org_id,
@@ -302,7 +304,8 @@ async def patch_project(
         action="updated",
         details=updates,
     )
-    await event_bus.emit(
+    defer_event(
+        session,
         INTEGRATION_PROJECT_UPDATED,
         {
             "organization_id": org_id,
