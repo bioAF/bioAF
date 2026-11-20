@@ -548,3 +548,214 @@ async def test_assessment_writes_nothing(session, org):
     assert await counts() == before
     snapshot = (await session.execute(select(QCDashboard.qc_config_json))).scalar_one()
     assert snapshot is None
+
+
+# --- Every intermediate version is validated before a version counts as repairable ---
+
+
+@pytest.mark.asyncio
+async def test_intermediate_that_differs_is_flagged_even_when_candidate_matches_root(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq", variables=[("g", "genome")])
+    middle = await org.version(
+        2, trigger="environment_cascade", env_index=1, qc_template="bulk_rnaseq", variables=[("g", "annotation")]
+    )
+    latest = await org.version(
+        3, trigger="environment_cascade", env_index=2, qc_template="scrnaseq", variables=[("g", "genome")]
+    )
+    await org.audit(middle, root, org.env_versions[1].id)
+    await org.audit(latest, middle, org.env_versions[2].id)
+
+    finding = _by_version(await _assess(session))[latest]
+
+    assert finding.outcome == "conflicting"
+    assert "intermediate_differs:qc_template" in finding.reasons
+    assert "intermediate_differs:reference_category:g" in finding.reasons
+
+
+@pytest.mark.asyncio
+async def test_value_reappearing_after_an_intermediate_lost_it_is_flagged(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq", qc_config_json=QC_CONFIG)
+    middle = await org.version(2, trigger="environment_cascade", env_index=1)
+    latest = await org.version(
+        3, trigger="environment_cascade", env_index=2, qc_template="scrnaseq", qc_config_json=QC_CONFIG
+    )
+    await org.audit(middle, root, org.env_versions[1].id)
+    await org.audit(latest, middle, org.env_versions[2].id)
+
+    finding = _by_version(await _assess(session))[latest]
+
+    assert finding.outcome == "conflicting"
+    assert "value_differs:qc_template" in finding.reasons
+    assert "value_differs:qc_config_json" in finding.reasons
+
+
+@pytest.mark.asyncio
+async def test_intermediate_with_duplicate_variable_names_is_unresolved(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq", variables=[("g", "genome")])
+    middle = await org.version(2, trigger="environment_cascade", env_index=1, variables=[("g", None), ("g", "atlas")])
+    latest = await org.version(3, trigger="environment_cascade", env_index=2, variables=[("g", None)])
+    await org.audit(middle, root, org.env_versions[1].id)
+    await org.audit(latest, middle, org.env_versions[2].id)
+
+    finding = _by_version(await _assess(session))[latest]
+
+    assert finding.outcome == "unresolved"
+    assert finding.reasons == ["ambiguous_variable_name"]
+    assert finding.lost_fields == []
+
+
+@pytest.mark.asyncio
+async def test_intermediate_variable_set_change_is_flagged(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq", variables=[("g", "genome")])
+    middle = await org.version(2, trigger="environment_cascade", env_index=1, variables=[("g", None), ("extra", None)])
+    latest = await org.version(3, trigger="environment_cascade", env_index=2, variables=[("g", None)])
+    await org.audit(middle, root, org.env_versions[1].id)
+    await org.audit(latest, middle, org.env_versions[2].id)
+
+    finding = _by_version(await _assess(session))[latest]
+
+    assert finding.outcome == "conflicting"
+    assert "intermediate_variable_set_mismatch" in finding.reasons
+
+
+@pytest.mark.asyncio
+async def test_consistent_loss_through_a_chain_stays_affected(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq", variables=[("g", "genome")])
+    middle = await org.version(2, trigger="environment_cascade", env_index=1, variables=[("g", None)])
+    latest = await org.version(3, trigger="environment_cascade", env_index=2, variables=[("g", None)])
+    await org.audit(middle, root, org.env_versions[1].id)
+    await org.audit(latest, middle, org.env_versions[2].id)
+
+    finding = _by_version(await _assess(session))[latest]
+
+    assert finding.outcome == "affected"
+    assert finding.reasons == []
+    assert finding.lost_fields == ["qc_template", "reference_category:g"]
+
+
+# --- Malformed audit data marks one version unresolved and the report continues ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"source_version_id": [1, 2]},
+        {"source_version_id": {"id": 1}},
+        {"source_version_id": "1"},
+        {"source_version_id": True},
+        {"source_version_id": 2**40},
+        {"source_version_id": -1},
+        {"source_version_id": None},
+        ["not", "an", "object"],
+        "text",
+        None,
+        "env_list",
+    ],
+)
+async def test_malformed_audit_marks_only_that_version_unresolved(session, org, details):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq")
+    bad = await org.version(2, trigger="environment_cascade", env_index=1)
+    good = await org.version(3, trigger="environment_cascade", env_index=1)
+    if details == "env_list":
+        details = {"source_version_id": root, "environment_version_id": [org.env_versions[1].id]}
+    elif isinstance(details, dict):
+        details = {**details, "environment_version_id": org.env_versions[1].id}
+    session.add(
+        AuditLog(
+            user_id=org.user.id,
+            entity_type="custom_pipeline_version",
+            entity_id=bad,
+            action="cascade_create",
+            details_json=details,
+        )
+    )
+    await session.flush()
+    await org.audit(good, root, org.env_versions[1].id)
+
+    findings = _by_version(await _assess(session))
+
+    assert findings[bad].outcome == "unresolved"
+    assert findings[bad].reasons == ["malformed_audit"]
+    assert findings[good].outcome == "affected"
+
+
+@pytest.mark.asyncio
+async def test_one_malformed_audit_among_several_is_malformed_not_conflicting(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq")
+    cascade = await org.version(2, trigger="environment_cascade", env_index=1)
+    await org.audit(cascade, root, org.env_versions[1].id)
+    session.add(
+        AuditLog(
+            user_id=org.user.id,
+            entity_type="custom_pipeline_version",
+            entity_id=cascade,
+            action="cascade_create",
+            details_json={"source_version_id": [root], "environment_version_id": org.env_versions[1].id},
+        )
+    )
+    await session.flush()
+
+    (finding,) = (await _assess(session)).findings
+
+    assert finding.reasons == ["malformed_audit"]
+
+
+# --- Run inventory pages within one version ---
+
+
+@pytest.mark.asyncio
+async def test_run_inventory_pages_through_every_run_of_one_version(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq")
+    cascade = await org.version(2, trigger="environment_cascade", env_index=1)
+    await org.audit(cascade, root, org.env_versions[1].id)
+    run_ids = [await org.run(cascade) for _ in range(5)]
+
+    seen: list[int] = []
+    runs_after_id = 0
+    pages = 0
+    while True:
+        page = await _assess(session, version_id=cascade, runs_after_id=runs_after_id, max_runs=2)
+        pages += 1
+        (finding,) = page.findings
+        assert len(finding.runs) <= 2
+        seen.extend(r.run_id for r in finding.runs)
+        if finding.next_runs_after_id is None:
+            assert finding.runs_truncated is False
+            break
+        assert finding.runs_truncated is True
+        runs_after_id = finding.next_runs_after_id
+
+    assert seen == run_ids
+    assert pages == 3
+
+
+@pytest.mark.asyncio
+async def test_report_prints_the_run_continuation_command(session, org):
+    root = await org.version(1, trigger="user", qc_template="scrnaseq")
+    cascade = await org.version(2, trigger="environment_cascade", env_index=1)
+    await org.audit(cascade, root, org.env_versions[1].id)
+    run_ids = [await org.run(cascade) for _ in range(3)]
+
+    report = format_report(await _assess(session, max_runs=2))
+
+    assert f"--version-id {cascade} --runs-after-id {run_ids[1]}" in report
+
+
+@pytest.mark.asyncio
+async def test_single_version_respects_scope(session, org):
+    other = await _make_org(session, "Elsewhere")
+    root = await other.version(1, trigger="user")
+    cascade = await other.version(2, trigger="environment_cascade", env_index=1)
+    await other.audit(cascade, root, other.env_versions[1].id)
+    user_version = await org.version(1, trigger="user")
+
+    assert (await _assess(session, org_id=org.user.organization_id, version_id=cascade)).findings == []
+    assert (await _assess(session, version_id=user_version)).findings == []
+    assert [f.version_id for f in (await _assess(session, version_id=cascade)).findings] == [cascade]
+
+
+@pytest.mark.asyncio
+async def test_runs_after_id_requires_a_single_version(session):
+    with pytest.raises(ValueError):
+        await assess_cascade_versions(session, runs_after_id=5)

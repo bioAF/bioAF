@@ -17,9 +17,11 @@ QC settings, template names or other scientific content.
 
 Usage:
     python -m app.cli.assess_cascade_qc [--org-id 1] [--after-id 0] [--limit 200]
-        [--max-depth 20] [--max-runs 50]
+        [--max-depth 20] [--max-runs 50] [--version-id N --runs-after-id M]
 
 Re-run with ``--after-id`` set to the printed continuation id until none is printed.
+A version with more runs than ``--max-runs`` prints a ``--version-id``/``--runs-after-id``
+pair that lists its next runs.
 """
 
 from __future__ import annotations
@@ -49,6 +51,8 @@ CASCADE_TRIGGER = "environment_cascade"
 MAX_LIMIT = 1000
 MAX_DEPTH = 100
 MAX_RUNS = 1000
+# Version and run ids are Postgres integers; anything outside is malformed, not a lookup.
+_MAX_ID = 2**31 - 1
 
 
 @dataclass
@@ -85,6 +89,8 @@ class VersionFinding:
     reasons: list[str] = field(default_factory=list)
     runs: list[RunFinding] = field(default_factory=list)
     runs_truncated: bool = False
+    # Pass with --version-id as --runs-after-id to list the next runs; None when all were listed.
+    next_runs_after_id: int | None = None
 
 
 @dataclass
@@ -118,11 +124,19 @@ async def assess_cascade_versions(
     limit: int = 200,
     max_depth: int = 20,
     max_runs: int = 50,
+    version_id: int | None = None,
+    runs_after_id: int = 0,
 ) -> Assessment:
-    """Assess up to ``limit`` cascade versions with id greater than ``after_id``."""
+    """Assess up to ``limit`` cascade versions with id greater than ``after_id``.
+
+    With ``version_id``, assess only that cascade version (still within ``org_id``),
+    listing its runs with id greater than ``runs_after_id``.
+    """
     _check_bound("limit", limit, MAX_LIMIT)
     _check_bound("max_depth", max_depth, MAX_DEPTH)
     _check_bound("max_runs", max_runs, MAX_RUNS)
+    if runs_after_id and version_id is None:
+        raise ValueError("runs_after_id needs version_id: run pages continue within one version")
 
     query = (
         select(CustomPipelineVersion, CustomPipeline.organization_id)
@@ -133,18 +147,25 @@ async def assess_cascade_versions(
     )
     if org_id is not None:
         query = query.where(CustomPipeline.organization_id == org_id)
+    if version_id is not None:
+        query = query.where(CustomPipelineVersion.id == version_id)
     candidates = list((await session.execute(query)).all())
 
     findings = []
     for version, version_org_id in candidates:
-        findings.append(await _assess_one(session, version, version_org_id, max_depth, max_runs))
+        findings.append(await _assess_one(session, version, version_org_id, max_depth, max_runs, runs_after_id))
 
     next_after_id = candidates[-1][0].id if len(candidates) == limit else None
     return Assessment(org_id, after_id, limit, max_depth, max_runs, findings, next_after_id)
 
 
 async def _assess_one(
-    session: AsyncSession, candidate: CustomPipelineVersion, org_id: int, max_depth: int, max_runs: int
+    session: AsyncSession,
+    candidate: CustomPipelineVersion,
+    org_id: int,
+    max_depth: int,
+    max_runs: int,
+    runs_after_id: int,
 ) -> VersionFinding:
     finding = VersionFinding(
         version_id=candidate.id,
@@ -164,7 +185,10 @@ async def _assess_one(
         _compare(finding, chain)
 
     if finding.outcome != "unaffected":
-        finding.runs, finding.runs_truncated = await _runs_for(session, candidate.id, org_id, max_runs)
+        finding.runs, finding.next_runs_after_id = await _runs_for(
+            session, candidate.id, org_id, max_runs, runs_after_id
+        )
+        finding.runs_truncated = finding.next_runs_after_id is not None
     return finding
 
 
@@ -197,16 +221,28 @@ async def _audited_source(session: AsyncSession, version: CustomPipelineVersion)
     details = [d for (d,) in result.all()]
     if not details:
         raise _Unresolved("missing_audit")
-    sources = {d.get("source_version_id") if isinstance(d, dict) else None for d in details}
+    # Validate every record before comparing any: audit JSON is untrusted shape.
+    sources: set[int] = set()
+    env_ids: set[int | None] = set()
+    for d in details:
+        if not isinstance(d, dict):
+            raise _Unresolved("malformed_audit")
+        source_id = d.get("source_version_id")
+        env_id = d.get("environment_version_id")
+        if not _is_db_id(source_id) or not (env_id is None or _is_db_id(env_id)):
+            raise _Unresolved("malformed_audit")
+        sources.add(source_id)
+        env_ids.add(env_id)
     if len(sources) > 1:
         raise _Unresolved("conflicting_audit")
-    (source_id,) = sources
-    if not isinstance(source_id, int) or isinstance(source_id, bool):
-        raise _Unresolved("malformed_audit")
-    env_ids = {d.get("environment_version_id") for d in details}
     if env_ids != {version.environment_version_id}:
         raise _Unresolved("audit_environment_mismatch")
-    return source_id
+    (source,) = sources
+    return source
+
+
+def _is_db_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= _MAX_ID
 
 
 async def _walk_to_root(
@@ -254,48 +290,55 @@ def _effective_qc(version: CustomPipelineVersion) -> tuple[str, dict[str, Any]]:
     return template, build_config_for_template(template, version.qc_config_json)
 
 
-def _compare(finding: VersionFinding, chain: list[CustomPipelineVersion]) -> None:
-    candidate, root, intermediates = chain[0], chain[-1], chain[1:-1]
-    reasons: list[str] = []
-    lost: list[str] = []
+def _chain_values(chain: list[CustomPipelineVersion], read) -> list[Any]:
+    """One field's values from root to candidate."""
+    return [read(v) for v in reversed(chain)]
 
-    for name in ("qc_template", "qc_config_json"):
-        root_value = getattr(root, name)
-        value = getattr(candidate, name)
-        if value == root_value:
+
+def _check_transitions(values: list[Any], field_name: str, reasons: list[str]) -> None:
+    """Walking from the root toward the candidate, each version must keep its source's
+    value or (the old cascade's loss) drop it to NULL. Anything else is a conflict."""
+    last = len(values) - 1
+    for step in range(1, len(values)):
+        previous, value = values[step - 1], values[step]
+        if value == previous or value is None:
             continue
-        if value is None:
-            lost.append(name)
-        else:
-            reasons.append(f"value_differs:{name}")
-        for step in intermediates:
-            step_value = getattr(step, name)
-            if step_value is not None and step_value != root_value:
-                reasons.append(f"intermediate_differs:{name}")
-                break
+        where = "value_differs" if step == last else "intermediate_differs"
+        reason = f"{where}:{field_name}"
+        if reason not in reasons:
+            reasons.append(reason)
 
-    root_categories = _categories(root)
-    candidate_categories = _categories(candidate)
-    if root_categories is None or candidate_categories is None:
+
+def _compare(finding: VersionFinding, chain: list[CustomPipelineVersion]) -> None:
+    """Classify a resolved chain [candidate, ..., root], validating every version in it."""
+    candidate, root = chain[0], chain[-1]
+    categories = [_categories(v) for v in chain]
+    if any(c is None for c in categories):
         finding.outcome = "unresolved"
         finding.reasons = ["ambiguous_variable_name"]
         return
-    if set(root_categories) != set(candidate_categories):
+    by_version = [c for c in categories if c is not None]
+    root_names = set(by_version[-1])
+    reasons: list[str] = []
+    if any(set(c) != root_names for c in by_version[1:-1]):
+        reasons.append("intermediate_variable_set_mismatch")
+    if set(by_version[0]) != root_names:
         reasons.append("variable_set_mismatch")
-    for name in sorted(set(root_categories) & set(candidate_categories)):
-        root_value = root_categories[name]
-        value = candidate_categories[name]
-        if value == root_value:
-            continue
-        if value is None:
-            lost.append(f"reference_category:{name}")
-        else:
-            reasons.append(f"value_differs:reference_category:{name}")
-        for step in intermediates:
-            step_value = (_categories(step) or {}).get(name)
-            if step_value is not None and step_value != root_value:
-                reasons.append(f"intermediate_differs:reference_category:{name}")
-                break
+
+    lost: list[str] = []
+    for name in ("qc_template", "qc_config_json"):
+        values = _chain_values(chain, lambda v, n=name: getattr(v, n))
+        _check_transitions(values, name, reasons)
+        if values[-1] is None and values[0] is not None:
+            lost.append(name)
+
+    shared = root_names & set(by_version[0])
+    for var in sorted(shared):
+        field_name = f"reference_category:{var}"
+        values = [c.get(var) for c in reversed(by_version)]
+        _check_transitions(values, field_name, reasons)
+        if values[-1] is None and values[0] is not None:
+            lost.append(field_name)
 
     finding.lost_fields = lost
     finding.qc_render_changed = _effective_qc(candidate) != _effective_qc(root)
@@ -309,19 +352,25 @@ def _compare(finding: VersionFinding, chain: list[CustomPipelineVersion]) -> Non
 
 
 async def _runs_for(
-    session: AsyncSession, version_id: int, org_id: int, max_runs: int
-) -> tuple[list[RunFinding], bool]:
+    session: AsyncSession, version_id: int, org_id: int, max_runs: int, runs_after_id: int
+) -> tuple[list[RunFinding], int | None]:
+    """Up to ``max_runs`` runs with id > ``runs_after_id``, and the id to continue after."""
     result = await session.execute(
         select(PipelineRun.id, PipelineRun.status)
-        .where(PipelineRun.custom_pipeline_version_id == version_id, PipelineRun.organization_id == org_id)
+        .where(
+            PipelineRun.custom_pipeline_version_id == version_id,
+            PipelineRun.organization_id == org_id,
+            PipelineRun.id > runs_after_id,
+        )
         .order_by(PipelineRun.id)
         .limit(max_runs + 1)
     )
     rows = list(result.all())
-    truncated = len(rows) > max_runs
+    more = len(rows) > max_runs
     rows = rows[:max_runs]
+    next_runs_after_id = rows[-1][0] if more else None
     if not rows:
-        return [], truncated
+        return [], None
     run_ids = [run_id for run_id, _ in rows]
 
     file_counts: dict[tuple[int, bool], int] = {}
@@ -353,7 +402,7 @@ async def _runs_for(
         )
         for run_id, status in rows
     ]
-    return runs, truncated
+    return runs, next_runs_after_id
 
 
 def format_report(assessment: Assessment) -> str:
@@ -393,8 +442,10 @@ def format_report(assessment: Assessment) -> str:
                 f"    run {r.run_id} ({r.status}): output files live={r.live_output_files} "
                 f"deleted={r.deleted_output_files}; {dash}"
             )
-        if f.runs_truncated:
-            lines.append(f"    more runs exist beyond {assessment.max_runs}; rerun with a higher --max-runs")
+        if f.next_runs_after_id is not None:
+            lines.append(
+                f"    more runs: rerun with --version-id {f.version_id} --runs-after-id {f.next_runs_after_id}"
+            )
     if assessment.next_after_id is not None:
         lines.append(f"More cascade versions remain: rerun with --after-id {assessment.next_after_id}")
     else:
@@ -421,6 +472,8 @@ async def _main(args: argparse.Namespace) -> None:
                     limit=args.limit,
                     max_depth=args.max_depth,
                     max_runs=args.max_runs,
+                    version_id=args.version_id,
+                    runs_after_id=args.runs_after_id,
                 )
             finally:
                 await session.rollback()
@@ -441,6 +494,10 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=200, help=f"Versions per page (1-{MAX_LIMIT})")
     parser.add_argument("--max-depth", type=int, default=20, help=f"Provenance hops per version (1-{MAX_DEPTH})")
     parser.add_argument("--max-runs", type=int, default=50, help=f"Runs listed per version (1-{MAX_RUNS})")
+    parser.add_argument("--version-id", type=int, default=None, help="Assess only this cascade version")
+    parser.add_argument(
+        "--runs-after-id", type=int, default=0, help="With --version-id: list that version's runs after this run id"
+    )
     asyncio.run(_main(parser.parse_args()))
 
 
