@@ -443,7 +443,7 @@ export function SectionBuilderModal({
                   <th scope="col" className="py-1">Run</th>
                   <th scope="col" className="py-1">Status</th>
                   <th scope="col" className="py-1 w-28">
-                    <label htmlFor="html-report" className="inline-flex items-center gap-1">
+                    <label className="inline-flex items-center gap-1">
                       <input
                         type="checkbox"
                         aria-label="Include HTML report for all runs"
@@ -466,7 +466,7 @@ export function SectionBuilderModal({
                   return (
                     <tr key={r.id} className="border-b">
                       <td className="py-2">
-                        <input id="html-report"
+                        <input
                           type="checkbox"
                           checked={selectedRuns.has(r.id)}
                           disabled={isCurrent}
