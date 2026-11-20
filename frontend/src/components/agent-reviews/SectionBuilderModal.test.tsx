@@ -149,3 +149,31 @@ test("save and run sends HTML report ids within the included runs", async () => 
 function onlyRunCalls() {
   return mockPost.mock.calls.filter(([url]) => url === "/api/agent_reviews/run");
 }
+
+test("clicking the HTML report header text toggles HTML reports, not run inclusion", async () => {
+  renderModal();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Run review" })).toBeEnabled());
+  const r101 = await row(101);
+  const r102 = await row(102);
+  expect(r101.runBox).toBeChecked();
+
+  fireEvent.click(screen.getByText("HTML report"));
+
+  expect(r101.runBox).toBeChecked();
+  expect(r101.htmlBox).toBeChecked();
+  expect(r102.htmlBox).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Include HTML report for all runs" })).toBeChecked();
+});
+
+test("run checkboxes do not share an element id", async () => {
+  renderModal();
+  await row(102);
+  expect(document.querySelectorAll("#html-report")).toHaveLength(0);
+});
+
+test("each run checkbox is named by its run cell", async () => {
+  renderModal();
+  await row(102);
+  expect(screen.getByRole("checkbox", { name: "#101 rnaseq v1" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "#102 rnaseq v1" })).toBeChecked();
+});
