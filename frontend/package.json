@@ -16,11 +16,11 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "next": "^15.5.29",
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "^6.5.438",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.1.0",
-    "recharts": "^3.8.0",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
