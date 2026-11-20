@@ -293,6 +293,69 @@ def test_a_failed_output_copy_fails_the_run(sh, tmp_path, storage, exit_code, ex
     assert b"could not be copied" in result.stderr
 
 
+_HOSTILE_KEY = 'projects/4/pipeline-runs/9/it\'s a $(touch PWNED) `touch PWNED` "q"; touch PWNED'
+
+
+@pytest.mark.parametrize("storage", [GcsStorageProvider(), S3StorageProvider()], ids=["gcs", "s3"])
+def test_custom_pipeline_exit_trap_keeps_a_hostile_output_uri_one_literal_argument(sh, tmp_path, storage):
+    """Quotes, spaces and shell metacharacters in the destination stay data: the copy receives the
+    URI unchanged, nothing runs, and the failure diagnostic echoes it without evaluating it."""
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    (tmp_path / "outputs").mkdir()
+    uri = storage.build_uri("res", _HOSTILE_KEY)
+    with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
+        wrapper = CustomPipelineService._build_entrypoint_wrapper("exit 0", uri)
+    sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"))
+    (call,) = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
+    assert call[-1] == (uri + "/" if isinstance(storage, GcsStorageProvider) else uri)
+    assert not (tmp_path / "PWNED").exists()
+
+    for tool in ("gcloud", "aws"):
+        (sh.bin / tool).write_text("#!/bin/sh\nexit 1\n")
+    result = sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"), check=False)
+    assert result.returncode == 1
+    assert uri.encode() in result.stderr
+    assert not (tmp_path / "PWNED").exists()
+
+
+@pytest.mark.parametrize("exit_code,expected", [(0, 0), (3, 3)])
+def test_custom_pipeline_exit_trap_lands_nested_files_and_dotfiles_at_the_run_prefix(tmp_path, exit_code, expected):
+    """A real recursive copy (NFS: plain `cp`) of /outputs' contents to the canonical URI with no
+    trailing separator: nested files and dotfiles arrive directly under the run's directory, with
+    no extra `outputs/` level, and a failed pipeline still has its outputs preserved."""
+    import subprocess
+
+    from app.adapters.storage.nfs import NfsStorageProvider
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    root = tmp_path / "nfs"
+    root.mkdir()
+    storage = NfsStorageProvider(root=str(root))
+    outputs = tmp_path / "outputs"
+    (outputs / "deep" / "er").mkdir(parents=True)
+    (outputs / "deep" / "er" / "x.bam").write_text("x")
+    (outputs / ".nextflow.log").write_text("log")
+    (outputs / "a b.csv").write_text("c")
+    with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
+        wrapper = CustomPipelineService._build_entrypoint_wrapper(
+            f"exit {exit_code}", "file://results/projects/4/pipeline-runs/9"
+        )
+    result = subprocess.run(
+        ["/bin/sh", "-c", _mapped(wrapper, tmp_path, "/outputs", "/secrets")], capture_output=True, timeout=20
+    )
+    assert result.returncode == expected, result.stderr
+
+    run_dir = root / "results" / "projects" / "4" / "pipeline-runs" / "9"
+    assert sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file()) == [
+        ".nextflow.log",
+        "a b.csv",
+        "deep/er/x.bam",
+    ]
+    # Nothing landed beside the run directory (no stray sibling such as `9outputs`).
+    assert [p.name for p in run_dir.parent.iterdir()] == ["9"]
+
+
 # --- environment build template -------------------------------------------------------------
 
 

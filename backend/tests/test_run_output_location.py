@@ -163,3 +163,87 @@ async def test_a_project_scoped_run_lives_under_its_project(session, admin_user,
     run = await _run(session, admin_user, experiment, experiment_id=None, project_id=project.id)
     uri = await RunOutputLocationService.authorized_uri(session, run, storage)
     assert uri == f"gs://res/projects/{project.id}/pipeline-runs/{run.id}"
+
+
+# --- The adapter/mode combinations the custom launch also relies on ---
+
+
+def _cloud(factory, provider: str, cfg: dict):
+    from app.adapters.storage.s3 import S3StorageProvider
+
+    cls = GcsStorageProvider if provider == "gcs" else S3StorageProvider
+    storage = factory(cls, org_slug="t", mode=ComputeMode.KUBERNETES)
+    storage._bucket_config = cfg
+    return storage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider,scheme", [("gcs", "gs"), ("s3", "s3")])
+@pytest.mark.parametrize(
+    "cfg,bucket",
+    [
+        ({"results_bucket_name": "res", "raw_bucket_name": "bioaf-raw-acme"}, "res"),
+        ({"raw_bucket_name": "bioaf-raw-acme"}, "bioaf-results-acme"),
+        ({"results_bucket_name": "", "raw_bucket_name": "bioaf-raw-acme"}, "bioaf-results-acme"),
+        ({"results_bucket_name": "null", "raw_bucket_name": "bioaf-raw-acme"}, "bioaf-results-acme"),
+    ],
+    ids=["explicit", "derived-absent", "derived-empty", "derived-null"],
+)
+async def test_a_cloud_install_resolves_its_configured_or_derived_bucket(
+    mode_adapter_factory, session, admin_user, experiment, provider, scheme, cfg, bucket
+):
+    await _config(session, **cfg)
+    run = await _run(session, admin_user, experiment)
+    uri = await RunOutputLocationService.authorized_uri(session, run, _cloud(mode_adapter_factory, provider, cfg))
+    assert uri == f"{scheme}://{bucket}/experiments/{experiment.id}/pipeline-runs/{run.id}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["gcs", "s3"])
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        {},
+        {"results_bucket_name": ""},
+        {"results_bucket_name": "null"},
+        {"results_bucket_name": "null", "raw_bucket_name": "lab-raw"},
+        {"raw_bucket_name": ""},
+    ],
+    ids=["absent", "empty", "null", "null-raw-not-derivable", "raw-empty"],
+)
+async def test_a_cloud_install_with_no_derivable_results_bucket_is_refused(
+    mode_adapter_factory, session, admin_user, experiment, provider, cfg
+):
+    await _config(session, **cfg)
+    run = await _run(session, admin_user, experiment)
+    with pytest.raises(OutputLocationRefused):
+        await RunOutputLocationService.authorized_uri(session, run, _cloud(mode_adapter_factory, provider, cfg))
+
+
+@pytest.mark.asyncio
+async def test_the_s3_local_emulator_names_its_results_store(mode_adapter_factory, session, admin_user, experiment):
+    from app.adapters.storage.s3 import S3StorageProvider
+
+    storage = mode_adapter_factory(S3StorageProvider, org_slug="t", mode=ComputeMode.LOCAL)
+    run = await _run(session, admin_user, experiment)
+    uri = await RunOutputLocationService.authorized_uri(session, run, storage)
+    assert uri == f"s3://bioaf-results-t/experiments/{experiment.id}/pipeline-runs/{run.id}"
+
+
+@pytest.mark.asyncio
+async def test_nfs_with_no_bucket_resolves_its_results_directory(session, admin_user, experiment, tmp_path):
+    """Resolution only: it does not show a Kubernetes job can write there (no NFS mount today)."""
+    from app.adapters.storage.nfs import NfsStorageProvider
+
+    project = Project(organization_id=admin_user.organization_id, name="P", owner_user_id=admin_user.id)
+    session.add(project)
+    await session.flush()
+    storage = NfsStorageProvider(root=str(tmp_path))
+    exp_run = await _run(session, admin_user, experiment)
+    proj_run = await _run(session, admin_user, experiment, experiment_id=None, project_id=project.id)
+    assert await RunOutputLocationService.authorized_uri(session, exp_run, storage) == (
+        f"file://results/experiments/{experiment.id}/pipeline-runs/{exp_run.id}"
+    )
+    assert await RunOutputLocationService.authorized_uri(session, proj_run, storage) == (
+        f"file://results/projects/{project.id}/pipeline-runs/{proj_run.id}"
+    )
