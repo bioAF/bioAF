@@ -535,7 +535,8 @@ async def process_ingest_event(
                 f"{len(auto_created['experiments'])} experiments, "
                 f"{len(auto_created['samples'])} samples",
                 "severity": "warning",
-                "metadata": auto_created,
+                # A snapshot: the event's own dict is returned to the caller and may change before commit.
+                "metadata": {kind: list(ids) for kind, ids in auto_created.items()},
             },
         )
 
