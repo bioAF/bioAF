@@ -74,6 +74,16 @@ usage() {
     echo ""
 }
 
+# The host python3 check (installer/host_prereqs.sh), loaded when a command needs it.
+host_python_require() {
+    # shellcheck source=installer/host_prereqs.sh
+    if ! source "$SCRIPT_DIR/installer/host_prereqs.sh" 2>/dev/null; then
+        red "ERROR: installer/host_prereqs.sh is missing from $SCRIPT_DIR; this checkout is incomplete." >&2
+        return 1
+    fi
+    host_python_check
+}
+
 # Read a value from the existing .env file, or return empty string.
 read_env_value() {
     local key="$1"
@@ -122,6 +132,14 @@ check_prereqs() {
         green "  openssl ........ $(openssl version 2>/dev/null | head -1)"
     else
         red "  openssl ........ NOT FOUND"
+        missing=1
+    fi
+
+    # python3 on the host: ./bioaf and the update agent run it (not the backend container's).
+    if host_python_require; then
+        green "  python3 ........ Python $HOST_PYTHON_VERSION"
+    else
+        red "  python3 ........ NOT USABLE (see above)"
         missing=1
     fi
 
@@ -221,6 +239,12 @@ generate_env() {
         esac
     done
 
+    # Replacing secrets ends with a python3-backed check for the old database volume; check python3
+    # first, so a host without it keeps its secrets instead of losing that warning.
+    if [ "$force" = true ]; then
+        host_python_require || return 1
+    fi
+
     mkdir -p "$(dirname "$ENV_FILE")"
 
     # Read existing values (empty string if not set)
@@ -238,10 +262,10 @@ generate_env() {
 
     # Fernet key = urlsafe-base64(32 random bytes). Same primitive as
     # cryptography.Fernet.generate_key(), implemented with openssl so the
-    # installer has no implicit dependency on the host having python3 or
-    # python3-cryptography. openssl is preinstalled in every Linux base
-    # image; pulling in 50MB of Python deps just to call urandom(32) at
-    # install time is asymmetric.
+    # installer needs no third-party Python package (python3-cryptography or
+    # any other). The host python3 itself is a prerequisite (check_prereqs,
+    # installer/host_prereqs.sh): ./bioaf and the update agent use it, and
+    # --force uses it for the stale-volume warning below.
     local fernet_gen='openssl rand -base64 32 | tr "+/" "-_" | tr -d "\n"'
 
     if [ "$force" = true ]; then
@@ -557,6 +581,10 @@ case "$command" in
         ;;
     ensure-encryption-key)
         shift
+        # The ./bioaf host hooks below run python3; check it before the env file changes.
+        if [ -f "$SCRIPT_DIR/bioaf" ]; then
+            host_python_require || exit 1
+        fi
         ensure_encryption_key_in_env "$@"
         prepare_host_log_collection
         prepare_update_agent

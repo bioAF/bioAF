@@ -10,6 +10,8 @@ setup() {
     mkdir -p "$BIOAF_ROOT/docker"
     # Copy install script into the fake root
     cp "$INSTALL_SCRIPT" "$BIOAF_ROOT/install.sh"
+    mkdir -p "$BIOAF_ROOT/installer"
+    cp "$BATS_TEST_DIRNAME/../../installer/host_prereqs.sh" "$BIOAF_ROOT/installer/"
     # Create a minimal .env.example so the script has something to copy
     cat > "$BIOAF_ROOT/.env.example" <<'EOF'
 POSTGRES_USER=bioaf
@@ -258,4 +260,134 @@ EOF
     # is "not applicable", not an error.
     [ "$status" -eq 0 ]
     [ ! -f "$BIOAF_ROOT/docker/.env" ]
+}
+
+# ---------------------------------------------------------------------------
+# Host Python prerequisite. ./bioaf, the update agent and parts of this installer run python3 on the
+# host (not the backend container's interpreter), so installation checks it before changing anything.
+# ---------------------------------------------------------------------------
+
+load host_python
+
+# host_stubs: a Linux uname and a docker that answers the prerequisite probes, each logging its calls,
+# in $TEST_DIR/stubs. PATH order puts them ahead of everything host_python_path links.
+host_stubs() {
+    mkdir -p "$TEST_DIR/stubs"
+    printf '#!/bin/sh\necho Linux\n' > "$TEST_DIR/stubs/uname"
+    cat > "$TEST_DIR/stubs/docker" <<'STUB'
+#!/bin/sh
+echo "docker $*" >> "$TEST_DIR/calls"
+case "$1" in
+    --version) echo "Docker version 27.0.0" ;;
+    compose) echo "Docker Compose version v2.29.0" ;;
+esac
+exit 0
+STUB
+    printf '#!/bin/sh\necho "sudo $*" >> "$TEST_DIR/calls"\nexit 0\n' > "$TEST_DIR/stubs/sudo"
+    chmod +x "$TEST_DIR/stubs/"*
+    export TEST_DIR
+}
+
+# with_python <kind> <command...>: run <command> with only a <kind> python3 (see host_python.bash).
+with_python() {
+    local kind="$1"; shift
+    run env PATH="$TEST_DIR/stubs:$(host_python_path "$TEST_DIR/py" "$kind")" "$@" </dev/null
+}
+
+@test "check-prereqs fails, naming python3 and its minimum, when no python3 is installed" {
+    host_stubs
+    with_python none bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    [[ "$output" == *"3.10"* ]]
+    [[ "$output" == *"apt-get install"* ]]
+}
+
+@test "check-prereqs fails when python3 cannot run" {
+    host_stubs
+    with_python broken bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    [[ "$output" == *"could not run"* ]]
+}
+
+@test "check-prereqs fails when python3 is older than the supported minimum" {
+    host_stubs
+    with_python old bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"3.8"* ]]
+    [[ "$output" == *"3.10"* ]]
+}
+
+@test "check-prereqs fails when python3 lacks a standard-library capability host operations use" {
+    host_stubs
+    with_python nocap bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"fcntl"* ]]
+}
+
+@test "check-prereqs accepts a working python3 and still checks the other tools" {
+    host_stubs
+    with_python real bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"python3"* ]]
+    [[ "$output" == *"docker"* ]]
+    [[ "$output" == *"git"* ]]
+    [[ "$output" == *"openssl"* ]]
+}
+
+@test "a missing python3 is reported together with other missing tools" {
+    host_stubs
+    rm "$TEST_DIR/stubs/docker"
+    printf '#!/bin/sh\nexit 1\n' > "$TEST_DIR/stubs/docker"; chmod +x "$TEST_DIR/stubs/docker"
+    with_python none bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"docker compose . NOT FOUND"* ]]
+    [[ "$output" == *"python3"* ]]
+}
+
+@test "a full install without python3 stops before writing secrets, certificates or host changes" {
+    host_stubs
+    with_python none bash "$BIOAF_ROOT/install.sh" --non-interactive
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    [ ! -e "$BIOAF_ROOT/docker/.env" ]
+    [ ! -e "$BIOAF_ROOT/docker/certs" ]
+    ! grep -q '^sudo' "$TEST_DIR/calls" 2>/dev/null
+}
+
+@test "generate-env --force without python3 leaves the existing secrets in place" {
+    host_stubs
+    printf 'POSTGRES_PASSWORD=keep_me\nSECRET_KEY=keep_me_too\n' > "$BIOAF_ROOT/docker/.env"
+    cp "$BIOAF_ROOT/docker/.env" "$TEST_DIR/env.before"
+    with_python none bash "$BIOAF_ROOT/install.sh" generate-env --non-interactive --force
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    cmp "$TEST_DIR/env.before" "$BIOAF_ROOT/docker/.env"
+}
+
+@test "generate-env, generate-certs and ensure-encryption-key need no python3 on their own" {
+    host_stubs
+    with_python none bash "$BIOAF_ROOT/install.sh" generate-env --non-interactive
+    [ "$status" -eq 0 ]
+    grep -q '^SECRET_KEY=' "$BIOAF_ROOT/docker/.env"
+    with_python none bash "$BIOAF_ROOT/install.sh" generate-certs
+    [ "$status" -eq 0 ]
+    [ -f "$BIOAF_ROOT/docker/certs/tls.crt" ]
+    sed -i.bak '/^BIOAF_ENCRYPTION_KEYS=/d' "$BIOAF_ROOT/docker/.env"
+    with_python none bash "$BIOAF_ROOT/install.sh" ensure-encryption-key
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_ENCRYPTION_KEYS=.' "$BIOAF_ROOT/docker/.env"
+}
+
+@test "ensure-encryption-key without python3 changes nothing when its ./bioaf host hooks would run" {
+    host_stubs
+    printf '#!/bin/sh\necho "bioaf $*" >> "$TEST_DIR/calls"\n' > "$BIOAF_ROOT/bioaf"
+    printf 'POSTGRES_PASSWORD=keep_me\n' > "$BIOAF_ROOT/docker/.env"
+    cp "$BIOAF_ROOT/docker/.env" "$TEST_DIR/env.before"
+    with_python none bash "$BIOAF_ROOT/install.sh" ensure-encryption-key
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"python3"* ]]
+    cmp "$TEST_DIR/env.before" "$BIOAF_ROOT/docker/.env"
+    ! grep -q '^bioaf' "$TEST_DIR/calls" 2>/dev/null
 }
