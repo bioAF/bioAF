@@ -671,16 +671,23 @@ async def _execute_hosted_inner(
         await session.commit()
 
 
+def _providers_with_review_execution() -> list[str]:
+    from app.services.llm_provider_clients import CLIENTS
+
+    return [provider for provider in CLIENTS if supports_review_execution(provider)]
+
+
 async def mark_orphaned_on_startup(session: AsyncSession) -> int:
     """Transition any in-flight hosted-path jobs to failed with reason process_restart.
 
-    Gemma jobs are not touched: the orchestrator owns them and will resolve
-    them when the underlying pipeline run reaches a terminal state.
+    Only providers with a review executor are restart orphans. Jobs for a provider without one
+    (Gemma) never had anything running; fail_unsupported_on_startup reconciles them with their
+    own reason.
     """
     result = await session.execute(
         select(AgentReviewJob).where(
             AgentReviewJob.status.in_(IN_FLIGHT_STATUSES),
-            AgentReviewJob.provider != "gemma",
+            AgentReviewJob.provider.in_(_providers_with_review_execution()),
         )
     )
     affected = list(result.scalars().all())
@@ -715,6 +722,80 @@ async def mark_orphaned_on_startup(session: AsyncSession) -> int:
                 "agent_review_id": job.agent_review_id,
                 "error_class": "process_restart",
                 "error_text": "API process restarted while job was in flight.",
+            },
+        )
+    await session.flush()
+    return len(affected)
+
+
+UNSUPPORTED_EXECUTION_ERROR_CLASS = "unsupported_review_execution"
+UNSUPPORTED_EXECUTION_ERROR_TEXT = (
+    "This review was accepted for a provider that cannot run Agent Review, so it never ran. "
+    "Switch to Anthropic, OpenAI, or Google in Settings and run the review again."
+)
+_TERMINAL_REVIEW_STATUSES = ("succeeded", "failed")
+
+
+async def fail_unsupported_on_startup(session: AsyncSession) -> int:
+    """Fail every in-flight job whose provider has no review execution path, with its review.
+
+    Earlier releases accepted Gemma reviews without any executor, leaving the job and its card
+    pending and holding the in-flight uniqueness block. No Gemma executor or completion hook
+    exists, so every such in-flight row (pending, building_artifacts, or submitted) is stranded
+    and is failed at once, without waiting for the stale threshold. A future executor must
+    revise this ownership when it enables review execution for its provider.
+
+    Each job is failed with its linked review (if that review is not already terminal) and one
+    llm_review_failed audit row, all in the caller's transaction. Terminal rows are not
+    selected, so a rerun changes nothing. The configured provider and artifact references are
+    kept; nothing is sent to another provider. Runs only from the startup owner, across all
+    organizations; it is not a user-reachable route.
+    """
+    result = await session.execute(
+        select(AgentReviewJob).where(
+            AgentReviewJob.status.in_(IN_FLIGHT_STATUSES),
+            AgentReviewJob.provider.not_in(_providers_with_review_execution()),
+        )
+    )
+    affected = list(result.scalars().all())
+    for job in affected:
+        await _write_job_terminal(
+            session,
+            job.id,
+            status="failed",
+            error_text=UNSUPPORTED_EXECUTION_ERROR_TEXT,
+            error_class=UNSUPPORTED_EXECUTION_ERROR_CLASS,
+        )
+        review = None
+        if job.agent_review_id is not None:
+            review = (
+                await session.execute(select(AgentReview).where(AgentReview.id == job.agent_review_id))
+            ).scalar_one_or_none()
+        if review is not None and review.status not in _TERMINAL_REVIEW_STATUSES:
+            await _write_review_terminal(
+                session,
+                review.id,
+                status="failed",
+                severity=None,
+                headline="Review could not run",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text=UNSUPPORTED_EXECUTION_ERROR_TEXT,
+                artifact_gcs_paths=list(review.artifact_gcs_paths or []),
+            )
+        await audit_service.log_action(
+            session,
+            user_id=job.triggered_by_user_id,
+            entity_type="agent_review_job",
+            entity_id=job.id,
+            action="llm_review_failed",
+            details={
+                "agent_review_job_id": job.id,
+                "agent_review_id": job.agent_review_id,
+                "provider": job.provider,
+                "error_class": UNSUPPORTED_EXECUTION_ERROR_CLASS,
+                "error_text": UNSUPPORTED_EXECUTION_ERROR_TEXT,
             },
         )
     await session.flush()
