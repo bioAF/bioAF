@@ -299,7 +299,7 @@ wheels = [
 
 [[package]]
 name = "bioaf-backend"
-version = "2026.11.33"
+version = "2026.11.34"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
