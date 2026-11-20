@@ -391,3 +391,34 @@ with_python() {
     cmp "$TEST_DIR/env.before" "$BIOAF_ROOT/docker/.env"
     ! grep -q '^bioaf' "$TEST_DIR/calls" 2>/dev/null
 }
+
+# Recovery guidance must fit the failure: installing the distribution's default python3 fixes a missing
+# interpreter, but on a release whose default is older than 3.10 it changes nothing, so that case says how
+# to provide a newer interpreter where both ./bioaf and the update agent's service will find it.
+
+@test "a missing python3 is answered with the distribution package to install" {
+    host_stubs
+    with_python none bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [[ "$output" == *"sudo apt-get install -y python3"* ]]
+    [[ "$output" == *"sudo dnf install -y python3"* ]]
+}
+
+@test "an outdated python3 is answered with how to provide a newer one to commands and the agent service" {
+    host_stubs
+    with_python old bash "$BIOAF_ROOT/install.sh" check-prereqs
+    [[ "$output" == *"too old"* ]]
+    [[ "$output" != *"apt-get install -y python3"$'\n'* ]]
+    [[ "$output" == *"python3.11"* ]]
+    [[ "$output" == *"/usr/local/bin/python3"* ]]
+    [[ "$output" == *"bioaf-update-agent"* ]]
+    [[ "$output" == *"python3 --version"* ]]
+}
+
+@test "a python3 that cannot run or lacks its standard library is answered with a full interpreter" {
+    host_stubs
+    for kind in broken nocap; do
+        with_python "$kind" bash "$BIOAF_ROOT/install.sh" check-prereqs
+        [[ "$output" == *"/usr/local/bin/python3"* ]]
+        [[ "$output" == *"bioaf-update-agent"* ]]
+    done
+}

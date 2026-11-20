@@ -17,7 +17,11 @@
 
 ### Upgrade notes
 
-- Servers whose `python3` is older than 3.10 (for example Ubuntu 20.04 or
-  Debian 11) must install Python 3.10 or newer before updating. On such a
+- Servers whose `python3` is older than 3.10 (for example Ubuntu 20.04,
+  Debian 11, RHEL 9 or Amazon Linux 2023) need Python 3.10 or newer before
+  updating. Installing the distribution's `python3` package does not raise
+  it there: install a newer interpreter (for example `python3.11`) and link
+  it as `/usr/local/bin/python3`, then restart the update agent. On such a
   server the update stops before the services change and reports
-  "encryption key bootstrap failed"; the update log names the Python problem.
+  "encryption key bootstrap failed"; the update log names the Python problem
+  and these steps.

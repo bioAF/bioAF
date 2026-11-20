@@ -11,7 +11,11 @@ The application services run in Docker. Host management also uses the host's `py
 container's interpreter does not count): `./install.sh`, `./bioaf setup`, `start`, `restart`, `build`,
 `update` and the update agent check it before changing anything and stop with installation guidance if it
 is missing, older than 3.10 or incomplete. `help`, `status`, `stop`, `logs` and commands that only run in
-the backend container work without it. Managed Linux installs use
+the backend container work without it. If the distribution's own `python3` is older than 3.10 (for example
+Ubuntu 20.04, Debian 11, RHEL 9 or Amazon Linux 2023), installing its `python3` package does not help:
+install a newer interpreter beside it (for example `python3.11`) and link it as `/usr/local/bin/python3`,
+which comes before `/usr/bin` on the default PATH of both login shells and systemd services, so `./bioaf`
+and the update agent both use it. The error message prints these steps. Managed Linux installs use
 systemd for the update agent and, on GCE, the Ops Agent. Cloud provisioning scripts run on your local
 machine and can install the cloud CLI. See [Configuration](configuration.md) for settings sources and
 [Current Architecture](architecture.md) for workload boundaries.
