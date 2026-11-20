@@ -160,6 +160,121 @@ async def test_run_returns_412_when_no_active_provider(client, admin_auth, db_en
     assert resp.status_code == 412
 
 
+async def _activate_gemma_committed(db_engine, admin_user) -> None:
+    """Make Gemma the org's active provider and commit it (switching off any active provider)."""
+    async with _factory(db_engine)() as session:
+        await llm_provider_config_service.upsert(
+            session,
+            org_id=admin_user.organization_id,
+            provider="gemma",
+            api_key=None,
+            model="gemma-2-9b",
+            actor_user_id=admin_user.id,
+        )
+        await llm_provider_config_service.set_active(
+            session,
+            org_id=admin_user.organization_id,
+            provider="gemma",
+            actor_user_id=admin_user.id,
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_run_returns_412_when_provider_cannot_run_reviews(
+    client, admin_auth, configured_run, admin_user, db_engine, monkeypatch
+):
+    """An org whose active provider has no review executor (Gemma) is refused before any work
+    is accepted: 412 with an actionable explanation, no job or review rows, nothing dispatched,
+    and the runtime admission reservation released."""
+    from sqlalchemy import func, select
+
+    from app import runtime
+    from app.models.agent_review import AgentReview
+    from app.models.agent_review_job import AgentReviewJob
+    from app.runtime import TaskOwner
+
+    dispatched: list[object] = []
+
+    async def record(*args, **kwargs):
+        dispatched.append(kwargs)
+
+    monkeypatch.setattr("app.api.agent_reviews.job_service.execute_hosted", record)
+    await _activate_gemma_committed(db_engine, admin_user)
+
+    owner = TaskOwner()
+    with runtime.bound(owner):
+        resp = await client.post(
+            "/api/agent_reviews/run",
+            json={
+                "entity_type": "pipeline_run",
+                "entity_id": configured_run["run_id"],
+                "selected_sub_item_ids": ["qc.metric_review"],
+            },
+            headers=admin_auth,
+        )
+    assert resp.status_code == 412, resp.text
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert "Agent Review" in detail
+    assert dispatched == []
+    assert owner.busy() == []
+
+    async with _factory(db_engine)() as session:
+        assert (await session.execute(select(func.count(AgentReviewJob.id)))).scalar_one() == 0
+        assert (await session.execute(select(func.count(AgentReview.id)))).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_run_returns_404_for_another_orgs_run(client, admin_auth, configured_run, db_engine, monkeypatch):
+    """A run in another organization is not found: no review is accepted or dispatched."""
+    from sqlalchemy import func, select
+
+    from app.models.agent_review_job import AgentReviewJob
+    from app.models.organization import Organization
+
+    dispatched: list[object] = []
+
+    async def record(*args, **kwargs):
+        dispatched.append(kwargs)
+
+    monkeypatch.setattr("app.api.agent_reviews.job_service.execute_hosted", record)
+    async with _factory(db_engine)() as session:
+        org = Organization(name="Other Org", setup_complete=True)
+        session.add(org)
+        await session.flush()
+        exp = Experiment(name="Foreign", organization_id=org.id, status="processing")
+        session.add(exp)
+        await session.flush()
+        run = PipelineRun(
+            organization_id=org.id,
+            experiment_id=exp.id,
+            pipeline_name="rnaseq",
+            pipeline_version="3.14",
+            parameters_json={"secret": "foreign"},
+            output_files_json={"counts": "x"},
+            status="complete",
+        )
+        session.add(run)
+        await session.commit()
+        foreign_run_id = run.id
+        foreign_exp_id = exp.id
+
+    for payload in (
+        {"entity_type": "pipeline_run", "entity_id": foreign_run_id},
+        {"entity_type": "experiment", "entity_id": foreign_exp_id, "included_run_ids": []},
+    ):
+        resp = await client.post(
+            "/api/agent_reviews/run",
+            json={**payload, "selected_sub_item_ids": ["qc.metric_review"]},
+            headers=admin_auth,
+        )
+        assert resp.status_code == 404, resp.text
+    assert dispatched == []
+    async with _factory(db_engine)() as session:
+        assert (await session.execute(select(func.count(AgentReviewJob.id)))).scalar_one() == 0
+
+
 @pytest.mark.asyncio
 async def test_run_returns_409_on_debounce(client, admin_auth, configured_run):
     payload = {
@@ -552,6 +667,29 @@ async def test_availability_false_without_provider(client, admin_auth, admin_use
 
 @pytest.mark.asyncio
 async def test_availability_false_with_gemma(client, admin_auth, gemma_active):
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_availability_false_when_committed_gemma_is_active(
+    client, admin_auth, configured_run, admin_user, db_engine
+):
+    """Gemma active with a model (replacing a working hosted provider) reports disabled."""
+    await _activate_gemma_committed(db_engine, admin_user)
+    resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_availability_follows_shared_review_execution_capability(client, admin_auth, configured_run, monkeypatch):
+    """Availability is the same capability check admission uses, not a provider-name list:
+    an otherwise configured provider whose client lacks review execution reports disabled."""
+    from app.services.llm_provider_clients import openai_client
+
+    monkeypatch.setattr(openai_client, "SUPPORTS_REVIEW_EXECUTION", False, raising=False)
     resp = await client.get("/api/agent_reviews/availability", headers=admin_auth)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"enabled": False}

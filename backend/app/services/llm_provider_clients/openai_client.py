@@ -37,6 +37,9 @@ logger = logging.getLogger("bioaf.llm.openai")
 # Native tool/function calling is available on this provider (assistant, L4).
 SUPPORTS_TOOLS = True
 
+# Agent Review runs synchronously through this client's submit (agent_review_job_service.execute_hosted).
+SUPPORTS_REVIEW_EXECUTION = True
+
 _BASE_URL = "https://api.openai.com/v1"
 # 300s read budget covers large prompts on GPT. The default httpx 60s
 # routinely timed out experiment-scope reviews. Connect stays at 10s.

@@ -395,8 +395,11 @@ async def pending_upgrades(ctx: StartupContext) -> None:
 
 async def hosted_review_orphans(ctx: StartupContext) -> None:
     # Mark any in-flight hosted LLM review jobs as failed with reason
-    # process_restart (ADR-055). Gemma jobs are owned by the orchestrator
-    # and are left in place.
+    # process_restart (ADR-055). Then, in its own transaction, fail review jobs
+    # whose provider has no review executor (Gemma): nothing runs them, so no
+    # orchestrator will ever finish them. A failure there propagates to this
+    # optional step's log without undoing the committed hosted recovery, and
+    # the next startup retries it.
     from app.database import async_session_factory
     from app.services import agent_review_job_service
 
@@ -405,6 +408,12 @@ async def hosted_review_orphans(ctx: StartupContext) -> None:
         await session.commit()
         if count:
             logger.info("Marked %d orphaned LLM review jobs as failed on startup", count)
+
+    async with async_session_factory() as session:
+        count = await agent_review_job_service.fail_unsupported_on_startup(session)
+        await session.commit()
+        if count:
+            logger.info("Failed %d LLM review jobs whose provider cannot run reviews on startup", count)
 
 
 async def glossary_orphans(ctx: StartupContext) -> None:

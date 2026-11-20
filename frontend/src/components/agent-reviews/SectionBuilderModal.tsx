@@ -183,15 +183,25 @@ export function SectionBuilderModal({
 
   function toggleRun(id: number) {
     if (runId !== undefined && id === runId) return; // current run always included
+    const excluding = selectedRuns.has(id);
     setSelectedRuns((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    // HTML reports are only for included runs (the server refuses others).
+    if (excluding) {
+      setHtmlReportRuns((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }
 
   function toggleHtmlReport(id: number) {
+    if (!selectedRuns.has(id)) return;
     setHtmlReportRuns((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -204,29 +214,41 @@ export function SectionBuilderModal({
     if (!otherRuns) return;
     const allOn = otherRuns.every((r) => selectedRuns.has(r.id));
     if (allOn) {
-      // Deselect every run except the locked current run, if any.
-      setSelectedRuns(runId !== undefined ? new Set([runId]) : new Set());
+      // Deselect every run except the locked current run, if any, and drop
+      // HTML reports for the runs no longer included.
+      const kept = runId !== undefined ? new Set([runId]) : new Set<number>();
+      setSelectedRuns(kept);
+      setHtmlReportRuns((prev) => new Set(Array.from(prev).filter((id) => kept.has(id))));
     } else {
       setSelectedRuns(new Set(otherRuns.map((r) => r.id)));
     }
   }
 
+  // HTML reports can only be requested for runs the review includes.
+  const includedRuns = otherRuns ? otherRuns.filter((r) => selectedRuns.has(r.id)) : [];
+
   function toggleAllHtmlReports() {
-    if (!otherRuns) return;
-    const allOn = otherRuns.every((r) => htmlReportRuns.has(r.id));
+    if (includedRuns.length === 0) return;
+    const allOn = includedRuns.every((r) => htmlReportRuns.has(r.id));
     if (allOn) {
       setHtmlReportRuns(new Set());
     } else {
-      setHtmlReportRuns(new Set(otherRuns.map((r) => r.id)));
+      setHtmlReportRuns(new Set(includedRuns.map((r) => r.id)));
     }
+  }
+
+  // The run scope both submit paths send: HTML-report ids limited to included runs.
+  function experimentRunScope() {
+    return {
+      included_run_ids: Array.from(selectedRuns),
+      include_html_report_run_ids: Array.from(htmlReportRuns).filter((id) => selectedRuns.has(id)),
+    };
   }
 
   const allRunsSelected =
     !!otherRuns && otherRuns.length > 0 && otherRuns.every((r) => selectedRuns.has(r.id));
   const allHtmlReportsSelected =
-    !!otherRuns &&
-    otherRuns.length > 0 &&
-    otherRuns.every((r) => htmlReportRuns.has(r.id));
+    includedRuns.length > 0 && includedRuns.every((r) => htmlReportRuns.has(r.id));
 
   const usingCustom = typeof mode === "object" && "customSavedId" in mode;
   const activeCustom = usingCustom
@@ -266,12 +288,7 @@ export function SectionBuilderModal({
       const base = {
         entity_type: entityType,
         entity_id: isExperiment ? experimentId! : runId!,
-        ...(isExperiment
-          ? {
-              included_run_ids: Array.from(selectedRuns),
-              include_html_report_run_ids: Array.from(htmlReportRuns),
-            }
-          : {}),
+        ...(isExperiment ? experimentRunScope() : {}),
       };
       let promptBody: Record<string, unknown> = {};
       if (overrideBody !== null) {
@@ -469,6 +486,7 @@ export function SectionBuilderModal({
                           <input
                             type="checkbox"
                             checked={htmlReportRuns.has(r.id)}
+                            disabled={!selectedRuns.has(r.id)}
                             onChange={() => toggleHtmlReport(r.id)}
                           />
                           <span className="text-xs text-gray-600">include</span>
@@ -529,12 +547,7 @@ export function SectionBuilderModal({
               const base = {
                 entity_type: entityType,
                 entity_id: isExperiment ? experimentId! : runId!,
-                ...(isExperiment
-                  ? {
-                      included_run_ids: Array.from(selectedRuns),
-                      include_html_report_run_ids: Array.from(htmlReportRuns),
-                    }
-                  : {}),
+                ...(isExperiment ? experimentRunScope() : {}),
                 custom_prompt_id: saved.id,
               };
               await api.post("/api/agent_reviews/run", base);

@@ -75,3 +75,14 @@ def supports_tools(provider: str) -> bool:
     than attempting a tool-calling request a client cannot make."""
     client = CLIENTS.get(provider)
     return bool(getattr(client, "SUPPORTS_TOOLS", False))
+
+
+def supports_review_execution(provider: str) -> bool:
+    """Whether a provider has an implemented Agent Review execution path.
+
+    Separate from tool calling: a review is a single prompt/response exchange the job service
+    runs to completion. Unknown providers, and clients that do not declare the capability,
+    default to False so review admission fails closed rather than accepting work that can never
+    run."""
+    client = CLIENTS.get(provider)
+    return bool(getattr(client, "SUPPORTS_REVIEW_EXECUTION", False))

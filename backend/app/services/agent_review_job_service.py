@@ -1,7 +1,9 @@
 """Agent review job dispatch and lifecycle (ADR-055, spec-llm-integration-jobs).
 
-One service module wraps both execution paths (hosted HTTP and Gemma pipeline)
-behind a uniform `create` + `execute_hosted` interface. Debounce is enforced
+`create` admits a review only when the active provider has a review execution
+path (llm_provider_clients.supports_review_execution); `execute_hosted` runs it.
+Gemma has no executor, so it is refused at admission and any Gemma job an earlier
+release accepted is failed by `fail_unsupported_on_startup`. Debounce is enforced
 by the partial unique index on agent_review_jobs at the DB layer; the service
 catches the unique-violation and raises a typed error so the endpoint can
 return 409 with the existing job id.
@@ -16,10 +18,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import ValidationError
+from app.exceptions import NotFoundError, ValidationError
 from app.models.agent_review import AgentReview
 from app.models.agent_review_job import AgentReviewJob
+from app.models.experiment import Experiment
 from app.models.llm_provider_config import LlmProviderConfig
+from app.models.pipeline_run import PipelineRun
 from app.services import audit_service, llm_provider_config_service
 from app.services.agent_review_artifact_builder import (
     ArtifactBuildError,
@@ -37,7 +41,7 @@ from app.services.agent_review_prompts import (
     get_template,
 )
 from app.services.agent_review_response_parser import parse as parse_response
-from app.services.llm_provider_clients import ProviderError, get_client
+from app.services.llm_provider_clients import ProviderError, get_client, supports_review_execution
 
 logger = logging.getLogger("bioaf.agent_review_job")
 
@@ -76,11 +80,90 @@ class NoActiveProvider(Exception):
     """Raised when an org has no active LLM provider configured."""
 
 
+UNSUPPORTED_REVIEW_EXECUTION_MESSAGE = (
+    "The active LLM provider cannot run Agent Review. An administrator can switch to "
+    "Anthropic, OpenAI, or Google in Settings."
+)
+
+
+class UnsupportedReviewExecution(NoActiveProvider):
+    """Raised when the org's active provider has no implemented review execution path.
+
+    A precondition failure in the same family as NoActiveProvider (the endpoint maps both to
+    412), with its own explanation: the provider is configured, but accepting the review would
+    create work nothing can run."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(UNSUPPORTED_REVIEW_EXECUTION_MESSAGE)
+        self.provider = provider
+
+
+async def _check_review_scope(
+    session: AsyncSession,
+    *,
+    org_id: int,
+    entity_type: str,
+    entity_id: int,
+    included_run_ids: list[int] | None,
+    include_html_report_run_ids: list[int] | None,
+) -> None:
+    """Enforce the organization boundary on everything a review would read.
+
+    The reviewed run or experiment must belong to the org (otherwise it is not found, without
+    revealing whether it exists elsewhere). A single-run review covers only that run. An
+    experiment review may include only that experiment's runs, and HTML reports only from runs it
+    includes. The artifact builder loads by id, so this is the gate that keeps another
+    organization's research out of the prompt."""
+    if entity_type == "pipeline_run":
+        owned = (
+            await session.execute(
+                select(PipelineRun.id).where(PipelineRun.id == entity_id, PipelineRun.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise NotFoundError(f"pipeline run {entity_id} not found")
+        allowed = {entity_id}
+        if any(rid not in allowed for rid in (included_run_ids or [])):
+            raise ValidationError("a pipeline run review can include only that run")
+    else:
+        owned = (
+            await session.execute(
+                select(Experiment.id).where(Experiment.id == entity_id, Experiment.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise NotFoundError(f"experiment {entity_id} not found")
+        requested = set(included_run_ids or [])
+        members = (
+            set(
+                (
+                    await session.execute(
+                        select(PipelineRun.id).where(
+                            PipelineRun.id.in_(requested),
+                            PipelineRun.experiment_id == entity_id,
+                            PipelineRun.organization_id == org_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if requested
+            else set()
+        )
+        if requested - members:
+            raise ValidationError("included runs must belong to this experiment")
+        allowed = requested
+    if any(rid not in allowed for rid in (include_html_report_run_ids or [])):
+        raise ValidationError("HTML reports can be included only for runs in this review")
+
+
 async def _get_inflight(
-    session: AsyncSession, entity_type: str, entity_id: int, review_type: str
+    session: AsyncSession, org_id: int, entity_type: str, entity_id: int, review_type: str
 ) -> AgentReviewJob | None:
     result = await session.execute(
         select(AgentReviewJob).where(
+            AgentReviewJob.organization_id == org_id,
             AgentReviewJob.entity_type == entity_type,
             AgentReviewJob.entity_id == entity_id,
             AgentReviewJob.review_type == review_type,
@@ -162,16 +245,26 @@ async def create(
         raise NoActiveProvider("no active LLM provider configured for this org")
     if not active.model:
         raise NoActiveProvider("active provider has no model configured")
+    # Admission: refuse a provider with no review executor before reaping or writing anything, so
+    # every caller (the run endpoint, the assistant tool) shares one rule and no row is left
+    # pending for work that can never run. Never fall back to another provider (ADR-054).
+    if not supports_review_execution(active.provider):
+        raise UnsupportedReviewExecution(active.provider)
+    await _check_review_scope(
+        session,
+        org_id=org_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        included_run_ids=included_run_ids,
+        include_html_report_run_ids=include_html_report_run_ids,
+    )
 
     # Reap a stale in-flight job for this entity before inserting, so a review
     # that never reached a terminal state cannot block new reviews forever with a
-    # 409. This deliberately includes Gemma jobs: Gemma review dispatch is stubbed
-    # in v1, so a Gemma review sits in 'pending' forever and is skipped by
-    # mark_orphaned_on_startup (which leaves Gemma for its orchestrator). At
-    # create time the only thing that matters is that a *stale* in-flight job is
-    # blocking a new review; a Gemma job past the threshold is a dead zombie and
-    # must be cleared or it permanently locks every review for this entity.
-    existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+    # 409. This applies to any provider, including a legacy Gemma job that startup
+    # reconciliation (fail_unsupported_on_startup) has not reached yet: a stale
+    # in-flight job blocking a new review must be cleared.
+    existing = await _get_inflight(session, org_id, entity_type, entity_id, resolved_review_type)
     if existing is not None and _is_stale_in_flight(existing):
         await _write_job_terminal(
             session,
@@ -218,7 +311,7 @@ async def create(
     except IntegrityError as exc:
         await session.rollback()
         # Re-query in a fresh transaction to find the existing in-flight job.
-        existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+        existing = await _get_inflight(session, org_id, entity_type, entity_id, resolved_review_type)
         existing_review_id = existing.agent_review_id if existing else None
         raise JobAlreadyRunning(
             existing_job_id=existing.id if existing else -1,
@@ -648,16 +741,23 @@ async def _execute_hosted_inner(
         await session.commit()
 
 
+def _providers_with_review_execution() -> list[str]:
+    from app.services.llm_provider_clients import CLIENTS
+
+    return [provider for provider in CLIENTS if supports_review_execution(provider)]
+
+
 async def mark_orphaned_on_startup(session: AsyncSession) -> int:
     """Transition any in-flight hosted-path jobs to failed with reason process_restart.
 
-    Gemma jobs are not touched: the orchestrator owns them and will resolve
-    them when the underlying pipeline run reaches a terminal state.
+    Only providers with a review executor are restart orphans. Jobs for a provider without one
+    (Gemma) never had anything running; fail_unsupported_on_startup reconciles them with their
+    own reason.
     """
     result = await session.execute(
         select(AgentReviewJob).where(
             AgentReviewJob.status.in_(IN_FLIGHT_STATUSES),
-            AgentReviewJob.provider != "gemma",
+            AgentReviewJob.provider.in_(_providers_with_review_execution()),
         )
     )
     affected = list(result.scalars().all())
@@ -692,6 +792,80 @@ async def mark_orphaned_on_startup(session: AsyncSession) -> int:
                 "agent_review_id": job.agent_review_id,
                 "error_class": "process_restart",
                 "error_text": "API process restarted while job was in flight.",
+            },
+        )
+    await session.flush()
+    return len(affected)
+
+
+UNSUPPORTED_EXECUTION_ERROR_CLASS = "unsupported_review_execution"
+UNSUPPORTED_EXECUTION_ERROR_TEXT = (
+    "This review was accepted for a provider that cannot run Agent Review, so it never ran. "
+    "Switch to Anthropic, OpenAI, or Google in Settings and run the review again."
+)
+_TERMINAL_REVIEW_STATUSES = ("succeeded", "failed")
+
+
+async def fail_unsupported_on_startup(session: AsyncSession) -> int:
+    """Fail every in-flight job whose provider has no review execution path, with its review.
+
+    Earlier releases accepted Gemma reviews without any executor, leaving the job and its card
+    pending and holding the in-flight uniqueness block. No Gemma executor or completion hook
+    exists, so every such in-flight row (pending, building_artifacts, or submitted) is stranded
+    and is failed at once, without waiting for the stale threshold. A future executor must
+    revise this ownership when it enables review execution for its provider.
+
+    Each job is failed with its linked review (if that review is not already terminal) and one
+    llm_review_failed audit row, all in the caller's transaction. Terminal rows are not
+    selected, so a rerun changes nothing. The configured provider and artifact references are
+    kept; nothing is sent to another provider. Runs only from the startup owner, across all
+    organizations; it is not a user-reachable route.
+    """
+    result = await session.execute(
+        select(AgentReviewJob).where(
+            AgentReviewJob.status.in_(IN_FLIGHT_STATUSES),
+            AgentReviewJob.provider.not_in(_providers_with_review_execution()),
+        )
+    )
+    affected = list(result.scalars().all())
+    for job in affected:
+        await _write_job_terminal(
+            session,
+            job.id,
+            status="failed",
+            error_text=UNSUPPORTED_EXECUTION_ERROR_TEXT,
+            error_class=UNSUPPORTED_EXECUTION_ERROR_CLASS,
+        )
+        review = None
+        if job.agent_review_id is not None:
+            review = (
+                await session.execute(select(AgentReview).where(AgentReview.id == job.agent_review_id))
+            ).scalar_one_or_none()
+        if review is not None and review.status not in _TERMINAL_REVIEW_STATUSES:
+            await _write_review_terminal(
+                session,
+                review.id,
+                status="failed",
+                severity=None,
+                headline="Review could not run",
+                flags=None,
+                evidence=None,
+                body=None,
+                error_text=UNSUPPORTED_EXECUTION_ERROR_TEXT,
+                artifact_gcs_paths=list(review.artifact_gcs_paths or []),
+            )
+        await audit_service.log_action(
+            session,
+            user_id=job.triggered_by_user_id,
+            entity_type="agent_review_job",
+            entity_id=job.id,
+            action="llm_review_failed",
+            details={
+                "agent_review_job_id": job.id,
+                "agent_review_id": job.agent_review_id,
+                "provider": job.provider,
+                "error_class": UNSUPPORTED_EXECUTION_ERROR_CLASS,
+                "error_text": UNSUPPORTED_EXECUTION_ERROR_TEXT,
             },
         )
     await session.flush()

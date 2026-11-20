@@ -39,6 +39,7 @@ from app.services.agent_review_section_catalog import (
     SECTIONS,
     default_sub_item_ids,
 )
+from app.services.llm_provider_clients import supports_review_execution
 from app import runtime
 
 router = APIRouter(prefix="/api/agent_reviews", tags=["agent-reviews"])
@@ -209,6 +210,7 @@ async def _create_and_start(
         )
         await session.commit()
     except NoActiveProvider as exc:
+        # Includes UnsupportedReviewExecution: a configured provider with no review executor.
         raise HTTPException(412, str(exc))
     except JobAlreadyRunning as exc:
         raise HTTPException(
@@ -220,13 +222,8 @@ async def _create_and_start(
             },
         )
 
-    if job.provider == "gemma":
-        # Gemma path is dispatched through the pipeline orchestrator.
-        # v1 stubs the dispatch by leaving the job in 'pending'; the
-        # orchestrator integration lands as part of the work-nodes roadmap.
-        # The card surfaces as pending until the orchestrator wakes it up.
-        return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
-
+    # job_service.create admits only providers with a review execution path, so every
+    # accepted job runs on the hosted executor.
     ticket.start(job_service.execute_hosted(async_session_factory, job_id=job.id))
     return RunReviewResponse(job_id=job.id, agent_review_id=review.id)
 
@@ -384,13 +381,14 @@ async def get_availability(
     session: AsyncSession = Depends(get_session),
 ):
     """Whether AI Review can run for this org: an active provider exists, has a
-    model, and is not the stubbed gemma. Readable by View Results so the QC
+    model, and has an implemented review execution path (the same capability
+    check review admission enforces). Readable by View Results so the QC
     report can decide whether to surface the AI Review trigger without needing
     the admin-only providers endpoint. Returns a boolean only (no secrets).
     Declared before /{review_id} so the static path is not shadowed."""
     org_id = int(current_user["org_id"])
     active = await llm_provider_config_service.get_active(session, org_id)
-    enabled = active is not None and bool(active.model) and active.provider != "gemma"
+    enabled = active is not None and bool(active.model) and supports_review_execution(active.provider)
     return AvailabilityResponse(enabled=enabled)
 
 

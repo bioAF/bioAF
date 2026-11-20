@@ -66,3 +66,13 @@ test("no not-tool-capable warning when the active provider is tool-capable", asy
   await screen.findByTestId("assistant-model-guidance");
   expect(screen.queryByTestId("active-not-tool-capable")).not.toBeInTheDocument();
 });
+
+test("tells an admin a provider without review execution (Gemma) cannot run Agent Review either", async () => {
+  mockGet.mockResolvedValue(providers({ active_provider: "gemma" }));
+  render(<LlmSettingsContent />);
+  const warning = await screen.findByTestId("active-not-tool-capable");
+  expect(warning).toHaveTextContent(
+    "The active provider does not support Agent Review or the AI Assistant. Switch to Anthropic, OpenAI, or Google to enable them.",
+  );
+  expect(warning).not.toHaveTextContent(/still works/i);
+});
