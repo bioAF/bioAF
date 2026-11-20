@@ -19,4 +19,5 @@
 - QC dashboards now read metrics and plots from the run's own output location.
   Project-scoped custom runs get their QC metrics and plots, whichever QC
   template they use, and installs with no results bucket setting no longer show
-  an empty QC dashboard for runs whose outputs were saved.
+  an empty QC dashboard for runs whose outputs were saved. A project-scoped
+  run's QC plot files are now listed under its project.
