@@ -16,6 +16,7 @@ from app.exceptions import ConflictError, NotFoundError, StateError, ValidationE
 from app.models.custom_pipeline import CustomPipeline
 from app.models.custom_pipeline_variable import CustomPipelineVariable
 from app.models.custom_pipeline_version import CustomPipelineVersion
+from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.models.experiment import Experiment
 from app.models.file import File
@@ -300,8 +301,14 @@ class CustomPipelineService:
             if not data.code_content:
                 raise ValidationError(f"code_content is required when code_source_type is '{data.code_source_type}'")
 
+        # Foreign and nonexistent ids get the same answer, before any write.
         env_version_result = await session.execute(
-            select(EnvironmentVersion).where(EnvironmentVersion.id == data.environment_version_id)
+            select(EnvironmentVersion)
+            .join(Environment, EnvironmentVersion.environment_id == Environment.id)
+            .where(
+                EnvironmentVersion.id == data.environment_version_id,
+                Environment.organization_id == pipeline.organization_id,
+            )
         )
         env_version = env_version_result.scalar_one_or_none()
         if env_version is None:
