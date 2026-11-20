@@ -253,6 +253,54 @@ async def test_run_results_review_persists_and_returns_verdict(session, admin_us
     assert rev.status == "succeeded"
 
 
+async def test_run_results_review_refused_when_provider_cannot_run_reviews(session, admin_user):
+    # Direct/internal invocation with an active provider that has no review executor (Gemma): the
+    # shared service admission refuses it, the tool reports a safe failure through the existing
+    # boundary, and no review is created, committed, or dispatched.
+    from app.models.agent_review_job import AgentReviewJob
+
+    await llm_provider_config_service.upsert(
+        session,
+        org_id=admin_user.organization_id,
+        provider="gemma",
+        api_key=None,
+        model="gemma-x",
+        actor_user_id=admin_user.id,
+    )
+    await llm_provider_config_service.set_active(
+        session, org_id=admin_user.organization_id, provider="gemma", actor_user_id=admin_user.id
+    )
+    await session.commit()
+    run = PipelineRun(organization_id=admin_user.organization_id, pipeline_name="nf-core/rnaseq", status="completed")
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    conv = await _conversation(session, admin_user)
+
+    execute = AsyncMock()
+    with patch("app.services.agent_review_job_service.execute_hosted", new=execute):
+        result = await AssistantToolService.invoke(
+            session,
+            conversation=conv,
+            role_id=admin_user.role_id,
+            tool_name="run_results_review",
+            arguments={"run_id": run.id},
+        )
+
+    assert result.status == "failed"
+    assert "Agent Review" in result.error
+    execute.assert_not_awaited()
+    assert (await session.execute(select(func.count()).select_from(AgentReview))).scalar_one() == 0
+    assert (await session.execute(select(func.count()).select_from(AgentReviewJob))).scalar_one() == 0
+    # The failed tool call itself is still recorded and audited by the wrapper.
+    invocation = (
+        await session.execute(
+            select(AssistantToolInvocation).where(AssistantToolInvocation.tool_name == "run_results_review")
+        )
+    ).scalar_one()
+    assert invocation.status == "failed"
+
+
 async def test_run_results_review_denied_without_ai_review_permission(session, admin_user):
     # A bench user (assistant:use but NOT llm_integration:use) is declined at the wrapper, and no
     # review is created - the assistant never runs an action the user's role forbids.

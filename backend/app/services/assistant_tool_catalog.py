@@ -216,6 +216,9 @@ async def _run_results_review_handler(session, *, org_id, user_id, arguments):
     run = await PipelineRunService.get_run(session, run_id, org_id)
     if run is None:
         raise LookupError(f"pipeline run {run_id} not found in org {org_id}")
+    # create() enforces review admission: a provider with no review executor raises before any
+    # row is written, and the tool wrapper reports that failure, so commit/dispatch below never
+    # runs for it.
     try:
         job, review = await agent_review_job_service.create(
             session,
