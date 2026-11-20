@@ -1096,7 +1096,11 @@ async def test_a_custom_variable_named_outdir_does_not_move_the_upload(
         admin_user,
         ready_env_version.id,
         entrypoint_command="true",
-        variables=[CustomPipelineVariableDefinition(variable_name="outdir", default_value="gs://elsewhere/x")],
+        variables=[
+            CustomPipelineVariableDefinition(
+                variable_name="outdir", variable_type="string", default_value="gs://elsewhere/x"
+            )
+        ],
     )
     target = {"experiment": experiment} if scope == "experiment" else {"project": project}
     run, _, captured = await _launch(
