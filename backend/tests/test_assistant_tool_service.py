@@ -288,7 +288,7 @@ async def test_run_results_review_refused_when_provider_cannot_run_reviews(sessi
         )
 
     assert result.status == "failed"
-    assert "Agent Review" in result.error
+    assert result.error is not None and "Agent Review" in result.error
     execute.assert_not_awaited()
     assert (await session.execute(select(func.count()).select_from(AgentReview))).scalar_one() == 0
     assert (await session.execute(select(func.count()).select_from(AgentReviewJob))).scalar_one() == 0
