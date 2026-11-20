@@ -240,6 +240,13 @@ def test_custom_pipeline_stage_refuses_an_escaping_relative_path():
             CustomPipelineService._build_stage_commands([{"relative_path": "../x", "gcs_uri": "gs://raw/x"}])
 
 
+# A run's output location as RunOutputLocationService.authorized_uri returns it: no trailing separator.
+_OUTPUT_URI = {
+    GcsStorageProvider: "gs://res/projects/4/pipeline-runs/9",
+    S3StorageProvider: "s3://res/projects/4/pipeline-runs/9",
+}
+
+
 @pytest.mark.parametrize("storage", [GcsStorageProvider(), S3StorageProvider()], ids=["gcs", "s3"])
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_custom_pipeline_exit_trap_copies_outputs_and_keeps_the_exit_status(sh, tmp_path, storage, exit_code):
@@ -250,10 +257,11 @@ def test_custom_pipeline_exit_trap_copies_outputs_and_keeps_the_exit_status(sh, 
     for n in ["r.csv", "a b.csv", "$(touch PWNED).csv", "-rf", "g[1].csv"]:
         (outputs / n).write_text(n)
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
-        wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", "res", "projects/4", 9)
+        wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", _OUTPUT_URI[storage.__class__])
     result = sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"), check=False)
     assert result.returncode == exit_code
-    target = storage.build_uri("res", "projects/4/pipeline-runs/9/")
+    # The canonical location has no trailing separator; the GCS rsync names the directory with one.
+    target = _OUTPUT_URI[storage.__class__] + ("/" if isinstance(storage, GcsStorageProvider) else "")
     (call,) = [c for c in sh.calls() if c[:2] in (["storage", "rsync"], ["s3", "cp"])]
     if isinstance(storage, GcsStorageProvider):
         assert call == [
@@ -279,7 +287,7 @@ def test_a_failed_output_copy_fails_the_run(sh, tmp_path, storage, exit_code, ex
     for tool in ("gcloud", "aws"):
         (sh.bin / tool).write_text("#!/bin/sh\necho 'storage unreachable' >&2\nexit 1\n")
     with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
-        wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", "res", "projects/4", 9)
+        wrapper = CustomPipelineService._build_entrypoint_wrapper(f"exit {exit_code}", _OUTPUT_URI[storage.__class__])
     result = sh.run(_mapped(wrapper, tmp_path, "/outputs", "/secrets"), check=False)
     assert result.returncode == expected
     assert b"could not be copied" in result.stderr
