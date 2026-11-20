@@ -11,6 +11,14 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.37
+
+### Fixes
+
+- In the experiment Agent Review form, clicking the "HTML report" column
+  heading now toggles HTML reports for all included runs instead of
+  deselecting the first run.
+
 ## v2026.11.36
 
 ### Fixes
