@@ -13,9 +13,8 @@ from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.models.budget_config import BudgetConfig
 from app.models.cost_record import CostRecord
 from app.services.billing_period import BillingPeriod, billing_period
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import BUDGET_THRESHOLD_50, BUDGET_THRESHOLD_80, BUDGET_THRESHOLD_100
-from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.cost_service")
 
@@ -454,7 +453,11 @@ class CostService:
 
     @staticmethod
     async def check_budget_thresholds(session: AsyncSession, org_id: int, period: BillingPeriod | None = None) -> None:
-        """Compare the UTC usage month's spend to budget, emit events for crossed thresholds."""
+        """Compare the UTC usage month's spend to budget; announce a crossed threshold once ``session`` commits.
+
+        The spend can include cost rows synced earlier in the same transaction, so a rolled-back sync
+        must not have announced anything.
+        """
         config = await CostService.get_budget_config(session, org_id)
         if not config or not config.monthly_budget:
             return
@@ -463,47 +466,41 @@ class CostService:
         usage_pct = float(current_spend) / float(config.monthly_budget) * 100
 
         if usage_pct >= 100 and config.threshold_100_enabled:
-            spawn_event(
-                event_bus.emit(
-                    BUDGET_THRESHOLD_100,
-                    {
-                        "event_type": BUDGET_THRESHOLD_100,
-                        "org_id": org_id,
-                        "title": "Budget limit reached (100%)",
-                        "message": f"Spend ${current_spend:.2f} has reached the ${config.monthly_budget:.2f} monthly budget",
-                        "severity": "critical",
-                        "summary": f"Monthly budget 100% reached: ${current_spend:.2f}/${config.monthly_budget:.2f}",
-                    },
-                ),
-                event_type=BUDGET_THRESHOLD_100,
+            defer_event(
+                session,
+                BUDGET_THRESHOLD_100,
+                {
+                    "event_type": BUDGET_THRESHOLD_100,
+                    "org_id": org_id,
+                    "title": "Budget limit reached (100%)",
+                    "message": f"Spend ${current_spend:.2f} has reached the ${config.monthly_budget:.2f} monthly budget",
+                    "severity": "critical",
+                    "summary": f"Monthly budget 100% reached: ${current_spend:.2f}/${config.monthly_budget:.2f}",
+                },
             )
         elif usage_pct >= 80 and config.threshold_80_enabled:
-            spawn_event(
-                event_bus.emit(
-                    BUDGET_THRESHOLD_80,
-                    {
-                        "event_type": BUDGET_THRESHOLD_80,
-                        "org_id": org_id,
-                        "title": f"Budget at {usage_pct:.0f}%",
-                        "message": f"Spend ${current_spend:.2f} of ${config.monthly_budget:.2f} monthly budget",
-                        "severity": "warning",
-                        "summary": f"Monthly budget at {usage_pct:.0f}%",
-                    },
-                ),
-                event_type=BUDGET_THRESHOLD_80,
+            defer_event(
+                session,
+                BUDGET_THRESHOLD_80,
+                {
+                    "event_type": BUDGET_THRESHOLD_80,
+                    "org_id": org_id,
+                    "title": f"Budget at {usage_pct:.0f}%",
+                    "message": f"Spend ${current_spend:.2f} of ${config.monthly_budget:.2f} monthly budget",
+                    "severity": "warning",
+                    "summary": f"Monthly budget at {usage_pct:.0f}%",
+                },
             )
         elif usage_pct >= 50 and config.threshold_50_enabled:
-            spawn_event(
-                event_bus.emit(
-                    BUDGET_THRESHOLD_50,
-                    {
-                        "event_type": BUDGET_THRESHOLD_50,
-                        "org_id": org_id,
-                        "title": f"Budget at {usage_pct:.0f}%",
-                        "message": f"Spend ${current_spend:.2f} of ${config.monthly_budget:.2f} monthly budget",
-                        "severity": "info",
-                        "summary": f"Monthly budget at {usage_pct:.0f}%",
-                    },
-                ),
-                event_type=BUDGET_THRESHOLD_50,
+            defer_event(
+                session,
+                BUDGET_THRESHOLD_50,
+                {
+                    "event_type": BUDGET_THRESHOLD_50,
+                    "org_id": org_id,
+                    "title": f"Budget at {usage_pct:.0f}%",
+                    "message": f"Spend ${current_spend:.2f} of ${config.monthly_budget:.2f} monthly budget",
+                    "severity": "info",
+                    "summary": f"Monthly budget at {usage_pct:.0f}%",
+                },
             )

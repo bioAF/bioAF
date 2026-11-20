@@ -28,6 +28,7 @@ from sqlalchemy import select, text
 from app.models.budget_config import BudgetConfig
 from app.models.cost_record import CostRecord
 from app.services.event_bus import event_bus
+from app.services.post_commit_events import wait_for_deferred_events
 from app.services.event_types import BUDGET_THRESHOLD_80
 from tests.support.billing_clock import HOST_TIMEZONES
 from tests.support.billing_export_table import BillingExportTable, ExportRow
@@ -584,6 +585,8 @@ async def test_an_understated_split_day_now_reaches_its_threshold(
 
     await _sync(session, org_id)
     await CostService.check_budget_thresholds(session, org_id)
+    await session.commit()  # thresholds are announced once the sync transaction commits
+    await wait_for_deferred_events()
     for _ in range(5):
         await asyncio.sleep(0)
 

@@ -67,7 +67,7 @@ class NotebookExecutionService:
         if not template.is_builtin:
             raise ValidationError("Headless execution is restricted to curated platform templates")
 
-        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0, isolate_denial=True)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
 

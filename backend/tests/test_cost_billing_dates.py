@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.models.budget_config import BudgetConfig
 from app.models.cost_record import CostRecord
 from app.services.event_bus import event_bus
+from app.services.post_commit_events import wait_for_deferred_events
 from app.services.event_types import BUDGET_THRESHOLD_50, BUDGET_THRESHOLD_80, BUDGET_THRESHOLD_100
 from tests.support.billing_clock import HOST_TIMEZONES
 
@@ -112,6 +113,8 @@ async def test_thresholds_count_only_the_utc_usage_month(billing_clock, host_tz,
     await session.commit()
 
     await CostService.check_budget_thresholds(session, org_id)
+    await session.commit()  # thresholds are announced once the checking transaction commits
+    await wait_for_deferred_events()
     await _drain_tasks()
 
     # 11.00 of 20.00 is 55%.

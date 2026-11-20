@@ -5,7 +5,6 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
-from app.runtime import spawn_event
 from app import runtime
 
 if TYPE_CHECKING:
@@ -36,7 +35,7 @@ from app.schemas.reference_dataset import (
     ReferenceUploadInitRequest,
 )
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import REFERENCE_DEPRECATED
 
 logger = logging.getLogger("bioaf.reference_data")
@@ -234,27 +233,25 @@ class ReferenceDataService:
                 previous_value=previous,
             )
 
-            # Fire-and-forget notification
-            spawn_event(
-                event_bus.emit(
-                    REFERENCE_DEPRECATED,
-                    {
-                        "event_type": REFERENCE_DEPRECATED,
-                        "org_id": org_id,
-                        "user_id": user_id,
-                        "entity_type": "reference_dataset",
-                        "entity_id": dataset.id,
-                        "title": f"Reference deprecated: {dataset.name} {dataset.version}",
-                        "message": request.deprecation_note,
-                        "metadata": {
-                            "reference_id": dataset.id,
-                            "name": dataset.name,
-                            "version": dataset.version,
-                            "scope": dataset.scope,
-                        },
+            # Announced once the caller commits the deprecation; dropped if it never does.
+            defer_event(
+                session,
+                REFERENCE_DEPRECATED,
+                {
+                    "event_type": REFERENCE_DEPRECATED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "entity_type": "reference_dataset",
+                    "entity_id": dataset.id,
+                    "title": f"Reference deprecated: {dataset.name} {dataset.version}",
+                    "message": request.deprecation_note,
+                    "metadata": {
+                        "reference_id": dataset.id,
+                        "name": dataset.name,
+                        "version": dataset.version,
+                        "scope": dataset.scope,
                     },
-                ),
-                event_type=REFERENCE_DEPRECATED,
+                },
             )
         else:
             # Public: requires admin approval
@@ -307,26 +304,24 @@ class ReferenceDataService:
             previous_value=previous,
         )
 
-        spawn_event(
-            event_bus.emit(
-                REFERENCE_DEPRECATED,
-                {
-                    "event_type": REFERENCE_DEPRECATED,
-                    "org_id": org_id,
-                    "user_id": user_id,
-                    "entity_type": "reference_dataset",
-                    "entity_id": dataset.id,
-                    "title": f"Reference deprecation approved: {dataset.name} {dataset.version}",
-                    "message": dataset.deprecation_note or "",
-                    "metadata": {
-                        "reference_id": dataset.id,
-                        "name": dataset.name,
-                        "version": dataset.version,
-                        "scope": dataset.scope,
-                    },
+        defer_event(
+            session,
+            REFERENCE_DEPRECATED,
+            {
+                "event_type": REFERENCE_DEPRECATED,
+                "org_id": org_id,
+                "user_id": user_id,
+                "entity_type": "reference_dataset",
+                "entity_id": dataset.id,
+                "title": f"Reference deprecation approved: {dataset.name} {dataset.version}",
+                "message": dataset.deprecation_note or "",
+                "metadata": {
+                    "reference_id": dataset.id,
+                    "name": dataset.name,
+                    "version": dataset.version,
+                    "scope": dataset.scope,
                 },
-            ),
-            event_type=REFERENCE_DEPRECATED,
+            },
         )
 
         return dataset

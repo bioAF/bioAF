@@ -105,7 +105,7 @@ class NotebookService:
     ) -> NotebookSession:
         # Check quota
         runtime.require_admission("notebook launch")
-        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0, isolate_denial=True)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
 
