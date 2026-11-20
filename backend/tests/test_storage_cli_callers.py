@@ -356,6 +356,32 @@ def test_custom_pipeline_exit_trap_lands_nested_files_and_dotfiles_at_the_run_pr
     assert [p.name for p in run_dir.parent.iterdir()] == ["9"]
 
 
+@pytest.mark.parametrize("exit_code,expected", [(0, 1), (3, 3)])
+def test_custom_pipeline_exit_trap_fails_when_the_nfs_root_is_not_mounted(tmp_path, exit_code, expected):
+    """A job that cannot see the NFS root must not copy into its own ephemeral disk and report
+    the outputs saved: the upload fails like any other, and a failed pipeline keeps its status."""
+    import subprocess
+
+    from app.adapters.storage.nfs import NfsStorageProvider
+    from app.services.custom_pipeline_service import CustomPipelineService
+
+    root = tmp_path / "not-mounted"
+    storage = NfsStorageProvider(root=str(root))
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "r.csv").write_text("r")
+    with patch("app.adapters.registry.get_storage_adapter", return_value=storage):
+        wrapper = CustomPipelineService._build_entrypoint_wrapper(
+            f"exit {exit_code}", "file://results/projects/4/pipeline-runs/9"
+        )
+    result = subprocess.run(
+        ["/bin/sh", "-c", _mapped(wrapper, tmp_path, "/outputs", "/secrets")], capture_output=True, timeout=20
+    )
+    assert result.returncode == expected
+    assert b"could not be copied" in result.stderr
+    assert not root.exists()
+
+
 # --- environment build template -------------------------------------------------------------
 
 

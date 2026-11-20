@@ -66,7 +66,8 @@ def test_cli_copy_commands_use_plain_cp(nfs):
     assert copy_in.startswith("cp ") and copy_in.endswith(" /data/b.txt")
     # A directory's contents are copied with the explicit contents operation (plan 17, F13).
     copy_out = nfs.cli_copy_out_contents("/outputs", "file://working/runs/1/")
-    assert copy_out.startswith("mkdir -p ") and " && cp -r /outputs/. " in copy_out
+    # It first checks the root is visible, so an unmounted root fails instead of filling local disk.
+    assert copy_out.startswith("[ -d ") and " && mkdir -p " in copy_out and " && cp -r /outputs/. " in copy_out
 
 
 def test_image_storage_pip_packages_empty_for_nfs(nfs):

@@ -185,10 +185,14 @@ class NfsStorageProvider(StorageProvider):
         return f"mkdir -p {shell_word(parent)} && " + shell_join(["cp", absolute_path(local_path), dest])
 
     def cli_copy_out_contents(self, local_dir: str, uri: str) -> str:
-        # `DIR/.` is the directory's contents (dotfiles included), not a glob.
+        # `DIR/.` is the directory's contents (dotfiles included), not a glob. A root this machine
+        # cannot see fails the copy rather than `mkdir -p` creating it on local disk, where the
+        # outputs would be reported saved and then lost. A plain failing test, not `exit`, so a
+        # caller's `||` still runs and its own exit status rules.
         dest = self._operand(uri).rstrip("/")
         source = shell_word(absolute_path(local_dir).rstrip("/") or "/")
-        return f"mkdir -p {shell_word(dest)} && cp -r {source}/. {shell_word(dest)}/"
+        root = shell_word(os.path.realpath(self._root))
+        return f"[ -d {root} ] && mkdir -p {shell_word(dest)} && cp -r {source}/. {shell_word(dest)}/"
 
     def sync_in_command(self, remote_prefix: str, local_dir: str) -> list[str]:
         # A missing prefix (nothing saved yet) is tolerated; an unmounted root is not, because
