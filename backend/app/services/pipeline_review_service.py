@@ -13,9 +13,8 @@ from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_review import PipelineRunReview
 from app.models.sample import Sample
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import PIPELINE_RUN_REVIEWED
-from app.runtime import spawn_event
 
 logger = logging.getLogger("bioaf.pipeline_review")
 
@@ -217,28 +216,26 @@ class PipelineReviewService:
                     },
                 )
 
-        # 6. Emit notification event (fire-and-forget after commit)
+        # 6. Announce the review once the caller commits it; dropped if it never does.
         if run.experiment:
-            spawn_event(
-                event_bus.emit(
-                    PIPELINE_RUN_REVIEWED,
-                    {
-                        "event_type": PIPELINE_RUN_REVIEWED,
-                        "org_id": run.organization_id,
-                        "user_id": reviewer_user_id,
-                        "entity_type": "pipeline_run_review",
-                        "entity_id": review.id,
-                        "title": f"Pipeline run reviewed: {verdict}",
-                        "message": notes or "",
-                        "summary": f"Pipeline run {pipeline_run_id} reviewed as '{verdict}'",
-                        "metadata": {
-                            "pipeline_run_id": pipeline_run_id,
-                            "experiment_id": run.experiment_id,
-                            "verdict": verdict,
-                        },
+            defer_event(
+                session,
+                PIPELINE_RUN_REVIEWED,
+                {
+                    "event_type": PIPELINE_RUN_REVIEWED,
+                    "org_id": run.organization_id,
+                    "user_id": reviewer_user_id,
+                    "entity_type": "pipeline_run_review",
+                    "entity_id": review.id,
+                    "title": f"Pipeline run reviewed: {verdict}",
+                    "message": notes or "",
+                    "summary": f"Pipeline run {pipeline_run_id} reviewed as '{verdict}'",
+                    "metadata": {
+                        "pipeline_run_id": pipeline_run_id,
+                        "experiment_id": run.experiment_id,
+                        "verdict": verdict,
                     },
-                ),
-                event_type=PIPELINE_RUN_REVIEWED,
+                },
             )
 
         return review

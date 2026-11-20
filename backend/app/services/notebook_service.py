@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from app.runtime import spawn_event
 from app import runtime
 
 if TYPE_CHECKING:
@@ -17,7 +16,7 @@ from app.exceptions import ConflictError, DomainError, NotFoundError, Validation
 from app.models.notebook_session import NotebookSession
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import SESSION_IDLE
 from app.services.quota_service import QuotaService
 from app.services.machine_types import machine_type_capacity
@@ -480,22 +479,20 @@ class NotebookService:
                     idle_duration = (now - ns.idle_since).total_seconds() / 3600
                     if idle_duration >= idle_timeout_hours:
                         logger.info("Auto-stopping idle session %d (idle %.1fh)", ns.id, idle_duration)
-                        spawn_event(
-                            event_bus.emit(
-                                SESSION_IDLE,
-                                {
-                                    "event_type": SESSION_IDLE,
-                                    "org_id": ns.organization_id,
-                                    "user_id": ns.user_id,
-                                    "target_user_id": ns.user_id,
-                                    "entity_type": "notebook_session",
-                                    "entity_id": ns.id,
-                                    "title": f"Idle session auto-stopped after {idle_duration:.1f}h",
-                                    "message": f"Your {ns.session_type} session was stopped due to inactivity",
-                                    "summary": f"Notebook session {ns.id} auto-stopped (idle {idle_duration:.1f}h)",
-                                },
-                            ),
-                            event_type=SESSION_IDLE,
+                        defer_event(
+                            session,
+                            SESSION_IDLE,
+                            {
+                                "event_type": SESSION_IDLE,
+                                "org_id": ns.organization_id,
+                                "user_id": ns.user_id,
+                                "target_user_id": ns.user_id,
+                                "entity_type": "notebook_session",
+                                "entity_id": ns.id,
+                                "title": f"Idle session auto-stopped after {idle_duration:.1f}h",
+                                "message": f"Your {ns.session_type} session was stopped due to inactivity",
+                                "summary": f"Notebook session {ns.id} auto-stopped (idle {idle_duration:.1f}h)",
+                            },
                         )
                         ns.status = "stopped"
                         ns.stopped_at = now

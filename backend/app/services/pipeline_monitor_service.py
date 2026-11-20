@@ -14,12 +14,11 @@ from app.models.pipeline_process import PipelineProcess
 from app.models.pipeline_run import PipelineRun
 from app.services.audit_service import log_action
 from app.services.run_output_location_service import RunOutputLocationService
-from app.services.event_bus import event_bus
+from app.services.post_commit_events import defer_event
 from app.services.event_types import PIPELINE_COMPLETED, PIPELINE_FAILED, PIPELINE_OOM
 from app.adapters.models import ProcessInfo, StorageObjectNotFound, StoredObject
 from app.adapters.registry import get_compute_adapter, get_storage_adapter
 from app.pipeline import nextflow_trace
-from app.runtime import spawn_event
 
 if TYPE_CHECKING:
     from app.adapters.base import ComputeProvider
@@ -477,31 +476,29 @@ class PipelineMonitorService:
                 exp_result = await session.execute(select(Experiment.name).where(Experiment.id == run.experiment_id))
                 experiment_name = exp_result.scalar_one_or_none() or ""
 
-            spawn_event(
-                event_bus.emit(
-                    PIPELINE_OOM,
-                    {
-                        "event_type": PIPELINE_OOM,
-                        "org_id": run.organization_id,
-                        "user_id": run.submitted_by_user_id,
-                        "target_user_id": run.submitted_by_user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "run_id": run.id,
-                        "pipeline_name": run.pipeline_name,
-                        "experiment_name": experiment_name,
-                        "machine_type": machine_type,
-                        "title": "Pipeline failed: out of memory",
-                        "message": (
-                            f"{run.pipeline_name} on experiment {experiment_name} failed because "
-                            f"a process exceeded the memory capacity of the current node size "
-                            f"({machine_type})."
-                        ),
-                        "severity": "critical",
-                        "summary": (f"Pipeline '{run.pipeline_name}' run {run.id} failed: out of memory"),
-                    },
-                ),
-                event_type=PIPELINE_OOM,
+            defer_event(
+                session,
+                PIPELINE_OOM,
+                {
+                    "event_type": PIPELINE_OOM,
+                    "org_id": run.organization_id,
+                    "user_id": run.submitted_by_user_id,
+                    "target_user_id": run.submitted_by_user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "run_id": run.id,
+                    "pipeline_name": run.pipeline_name,
+                    "experiment_name": experiment_name,
+                    "machine_type": machine_type,
+                    "title": "Pipeline failed: out of memory",
+                    "message": (
+                        f"{run.pipeline_name} on experiment {experiment_name} failed because "
+                        f"a process exceeded the memory capacity of the current node size "
+                        f"({machine_type})."
+                    ),
+                    "severity": "critical",
+                    "summary": (f"Pipeline '{run.pipeline_name}' run {run.id} failed: out of memory"),
+                },
             )
             return
 
@@ -752,41 +749,37 @@ class PipelineMonitorService:
         # Emit event for activity feed / notifications
 
         if run.status == "completed":
-            spawn_event(
-                event_bus.emit(
-                    PIPELINE_COMPLETED,
-                    {
-                        "event_type": PIPELINE_COMPLETED,
-                        "org_id": run.organization_id,
-                        "user_id": run.submitted_by_user_id,
-                        "target_user_id": run.submitted_by_user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{run.pipeline_name}' completed",
-                        "message": f"Run {run.id} finished successfully",
-                        "summary": f"Pipeline '{run.pipeline_name}' run {run.id} completed",
-                    },
-                ),
-                event_type=PIPELINE_COMPLETED,
+            defer_event(
+                session,
+                PIPELINE_COMPLETED,
+                {
+                    "event_type": PIPELINE_COMPLETED,
+                    "org_id": run.organization_id,
+                    "user_id": run.submitted_by_user_id,
+                    "target_user_id": run.submitted_by_user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{run.pipeline_name}' completed",
+                    "message": f"Run {run.id} finished successfully",
+                    "summary": f"Pipeline '{run.pipeline_name}' run {run.id} completed",
+                },
             )
         else:
-            spawn_event(
-                event_bus.emit(
-                    PIPELINE_FAILED,
-                    {
-                        "event_type": PIPELINE_FAILED,
-                        "org_id": run.organization_id,
-                        "user_id": run.submitted_by_user_id,
-                        "target_user_id": run.submitted_by_user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{run.pipeline_name}' failed",
-                        "message": run.error_message or "Run failed",
-                        "severity": "critical",
-                        "summary": f"Pipeline '{run.pipeline_name}' run {run.id} failed",
-                    },
-                ),
-                event_type=PIPELINE_FAILED,
+            defer_event(
+                session,
+                PIPELINE_FAILED,
+                {
+                    "event_type": PIPELINE_FAILED,
+                    "org_id": run.organization_id,
+                    "user_id": run.submitted_by_user_id,
+                    "target_user_id": run.submitted_by_user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{run.pipeline_name}' failed",
+                    "message": run.error_message or "Run failed",
+                    "severity": "critical",
+                    "summary": f"Pipeline '{run.pipeline_name}' run {run.id} failed",
+                },
             )
 
         # Auto-generate QC dashboard if component is enabled and run succeeded

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.models.pipeline_run import PipelineRun
 from app.services.pipeline_monitor_service import PipelineMonitorService
+from app.services.post_commit_events import wait_for_deferred_events
 
 
 @pytest_asyncio.fixture
@@ -123,9 +124,10 @@ async def test_oom_detection_emits_pipeline_oom_event(session, k8s_failed_oom_ru
         patch("app.services.pipeline_monitor_service.get_compute_adapter", return_value=mock_compute),
         patch("app.services.pipeline_monitor_service.get_storage_adapter", return_value=mock_storage),
         patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
-        patch("app.services.pipeline_monitor_service.event_bus.emit", side_effect=capture_emit),
+        patch("app.services.event_bus.event_bus.emit", side_effect=capture_emit),
     ):
-        await PipelineMonitorService.sync_run_statuses(session)
+        await PipelineMonitorService.sync_run_statuses(session)  # commits
+        await wait_for_deferred_events()
 
     from app.services.event_types import PIPELINE_OOM
 
