@@ -226,6 +226,181 @@ async def test_create_rejection_leaves_stale_in_flight_job_untouched(db_engine, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target", ["foreign_run", "foreign_experiment", "foreign_included_run", "nonmember_included_run"]
+)
+async def test_create_refuses_entities_outside_the_org_or_experiment(db_engine, admin_user, target):
+    """Review admission enforces the organization boundary before any write: a foreign run or
+    experiment is not found, and an experiment review may include only that experiment's own
+    runs. Nothing is reaped, written, or sent to a provider."""
+    from app.exceptions import NotFoundError, ValidationError
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        foreign_user = await _second_org_user(session)
+        foreign_run_id = await _make_pipeline_run(session, foreign_user.organization_id)
+        foreign_run = await session.get(PipelineRun, foreign_run_id)
+        foreign_exp_id = foreign_run.experiment_id
+        own_run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        own_exp_id = (await session.get(PipelineRun, own_run_id)).experiment_id
+        other_own_run_id = await _make_pipeline_run(session, admin_user.organization_id)
+
+    if target == "foreign_run":
+        kwargs = {"entity_type": "pipeline_run", "entity_id": foreign_run_id}
+        expected = NotFoundError
+    elif target == "foreign_experiment":
+        kwargs = {"entity_type": "experiment", "entity_id": foreign_exp_id, "included_run_ids": []}
+        expected = NotFoundError
+    elif target == "foreign_included_run":
+        kwargs = {"entity_type": "experiment", "entity_id": own_exp_id, "included_run_ids": [foreign_run_id]}
+        expected = ValidationError
+    else:
+        kwargs = {"entity_type": "experiment", "entity_id": own_exp_id, "included_run_ids": [other_own_run_id]}
+        expected = ValidationError
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(expected):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                selected_sub_item_ids=["qc.metric_review"],
+                **kwargs,
+            )
+        await session.rollback()
+
+    async with _factory(db_engine)() as session:
+        assert await _job_and_review_counts(session) == (0, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["included_run_ids", "include_html_report_run_ids"])
+async def test_create_run_review_accepts_only_its_own_run_ids(db_engine, admin_user, field):
+    """A single-run review covers only that run: any other run id (even an owned one) is refused."""
+    from app.exceptions import ValidationError
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        other_run_id = await _make_pipeline_run(session, admin_user.organization_id)
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(ValidationError):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+                **{field: [other_run_id]},
+            )
+        await session.rollback()
+    async with _factory(db_engine)() as session:
+        assert await _job_and_review_counts(session) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_create_experiment_html_report_runs_must_be_included_runs(db_engine, admin_user):
+    from app.exceptions import ValidationError
+
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        foreign_user = await _second_org_user(session)
+        foreign_run_id = await _make_pipeline_run(session, foreign_user.organization_id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        exp_id = (await session.get(PipelineRun, run_id)).experiment_id
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(ValidationError):
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="experiment",
+                entity_id=exp_id,
+                included_run_ids=[run_id],
+                include_html_report_run_ids=[foreign_run_id],
+                selected_sub_item_ids=["qc.metric_review"],
+            )
+        await session.rollback()
+    async with _factory(db_engine)() as session:
+        assert await _job_and_review_counts(session) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_create_owned_experiment_review_with_member_runs_succeeds(db_engine, admin_user):
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        exp_id = (await session.get(PipelineRun, run_id)).experiment_id
+
+    async with _factory(db_engine)() as session:
+        job, _ = await job_service.create(
+            session,
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            entity_type="experiment",
+            entity_id=exp_id,
+            included_run_ids=[run_id],
+            include_html_report_run_ids=[run_id],
+            selected_sub_item_ids=["qc.metric_review"],
+        )
+        await session.commit()
+        assert job.included_run_ids == [run_id]
+
+
+@pytest.mark.asyncio
+async def test_create_never_touches_or_reveals_another_orgs_in_flight_job(db_engine, admin_user):
+    """The in-flight lookup is organization-scoped: a stale in-flight row owned by another
+    organization (here pointing at this org's run, as a corrupt/legacy row would) is neither
+    reaped nor reported back by id."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.agent_review_prompt_builder import template_name_for_scope
+
+    review_type = template_name_for_scope(False)
+    async with _factory(db_engine)() as session:
+        await _configure_active_provider(session, admin_user.organization_id, admin_user.id)
+        foreign_user = await _second_org_user(session)
+        run_id = await _make_pipeline_run(session, admin_user.organization_id)
+        foreign_job = AgentReviewJob(
+            organization_id=foreign_user.organization_id,
+            triggered_by_user_id=foreign_user.id,
+            entity_type="pipeline_run",
+            entity_id=run_id,
+            review_type=review_type,
+            provider="openai",
+            model="openai-test-model",
+            prompt_template_version=review_type,
+            status="pending",
+            prompt_text="foreign",
+            created_at=datetime.now(UTC) - timedelta(minutes=30),
+        )
+        session.add(foreign_job)
+        await session.commit()
+        foreign_job_id = foreign_job.id
+
+    async with _factory(db_engine)() as session:
+        with pytest.raises(job_service.JobAlreadyRunning) as excinfo:
+            await job_service.create(
+                session,
+                org_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                entity_type="pipeline_run",
+                entity_id=run_id,
+                selected_sub_item_ids=["qc.metric_review"],
+            )
+        assert excinfo.value.existing_job_id != foreign_job_id
+        await session.rollback()
+
+    async with _factory(db_engine)() as session:
+        loaded = (await session.execute(select(AgentReviewJob).where(AgentReviewJob.id == foreign_job_id))).scalar_one()
+        assert loaded.status == "pending"
+        assert loaded.error_class is None
+
+
+@pytest.mark.asyncio
 async def test_debounce_raises_job_already_running(db_engine, admin_user):
     async with _factory(db_engine)() as session:
         await _configure_active_provider(session, admin_user.organization_id, admin_user.id)

@@ -18,10 +18,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import ValidationError
+from app.exceptions import NotFoundError, ValidationError
 from app.models.agent_review import AgentReview
 from app.models.agent_review_job import AgentReviewJob
+from app.models.experiment import Experiment
 from app.models.llm_provider_config import LlmProviderConfig
+from app.models.pipeline_run import PipelineRun
 from app.services import audit_service, llm_provider_config_service
 from app.services.agent_review_artifact_builder import (
     ArtifactBuildError,
@@ -96,11 +98,72 @@ class UnsupportedReviewExecution(NoActiveProvider):
         self.provider = provider
 
 
+async def _check_review_scope(
+    session: AsyncSession,
+    *,
+    org_id: int,
+    entity_type: str,
+    entity_id: int,
+    included_run_ids: list[int] | None,
+    include_html_report_run_ids: list[int] | None,
+) -> None:
+    """Enforce the organization boundary on everything a review would read.
+
+    The reviewed run or experiment must belong to the org (otherwise it is not found, without
+    revealing whether it exists elsewhere). A single-run review covers only that run. An
+    experiment review may include only that experiment's runs, and HTML reports only from runs it
+    includes. The artifact builder loads by id, so this is the gate that keeps another
+    organization's research out of the prompt."""
+    if entity_type == "pipeline_run":
+        owned = (
+            await session.execute(
+                select(PipelineRun.id).where(PipelineRun.id == entity_id, PipelineRun.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise NotFoundError(f"pipeline run {entity_id} not found")
+        allowed = {entity_id}
+        if any(rid not in allowed for rid in (included_run_ids or [])):
+            raise ValidationError("a pipeline run review can include only that run")
+    else:
+        owned = (
+            await session.execute(
+                select(Experiment.id).where(Experiment.id == entity_id, Experiment.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise NotFoundError(f"experiment {entity_id} not found")
+        requested = set(included_run_ids or [])
+        members = (
+            set(
+                (
+                    await session.execute(
+                        select(PipelineRun.id).where(
+                            PipelineRun.id.in_(requested),
+                            PipelineRun.experiment_id == entity_id,
+                            PipelineRun.organization_id == org_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if requested
+            else set()
+        )
+        if requested - members:
+            raise ValidationError("included runs must belong to this experiment")
+        allowed = requested
+    if any(rid not in allowed for rid in (include_html_report_run_ids or [])):
+        raise ValidationError("HTML reports can be included only for runs in this review")
+
+
 async def _get_inflight(
-    session: AsyncSession, entity_type: str, entity_id: int, review_type: str
+    session: AsyncSession, org_id: int, entity_type: str, entity_id: int, review_type: str
 ) -> AgentReviewJob | None:
     result = await session.execute(
         select(AgentReviewJob).where(
+            AgentReviewJob.organization_id == org_id,
             AgentReviewJob.entity_type == entity_type,
             AgentReviewJob.entity_id == entity_id,
             AgentReviewJob.review_type == review_type,
@@ -187,13 +250,21 @@ async def create(
     # pending for work that can never run. Never fall back to another provider (ADR-054).
     if not supports_review_execution(active.provider):
         raise UnsupportedReviewExecution(active.provider)
+    await _check_review_scope(
+        session,
+        org_id=org_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        included_run_ids=included_run_ids,
+        include_html_report_run_ids=include_html_report_run_ids,
+    )
 
     # Reap a stale in-flight job for this entity before inserting, so a review
     # that never reached a terminal state cannot block new reviews forever with a
     # 409. This applies to any provider, including a legacy Gemma job that startup
     # reconciliation (fail_unsupported_on_startup) has not reached yet: a stale
     # in-flight job blocking a new review must be cleared.
-    existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+    existing = await _get_inflight(session, org_id, entity_type, entity_id, resolved_review_type)
     if existing is not None and _is_stale_in_flight(existing):
         await _write_job_terminal(
             session,
@@ -240,7 +311,7 @@ async def create(
     except IntegrityError as exc:
         await session.rollback()
         # Re-query in a fresh transaction to find the existing in-flight job.
-        existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
+        existing = await _get_inflight(session, org_id, entity_type, entity_id, resolved_review_type)
         existing_review_id = existing.agent_review_id if existing else None
         raise JobAlreadyRunning(
             existing_job_id=existing.id if existing else -1,

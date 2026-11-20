@@ -8,3 +8,6 @@
   so their cards show a clear failure and new reviews are no longer blocked.
 - LLM settings no longer claim Agent Review still works when Gemma is the
   active provider.
+- Agent Review requests now accept only the requesting organization's own runs
+  and experiments, and an experiment review can include only that
+  experiment's runs.

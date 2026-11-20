@@ -226,6 +226,56 @@ async def test_run_returns_412_when_provider_cannot_run_reviews(
 
 
 @pytest.mark.asyncio
+async def test_run_returns_404_for_another_orgs_run(client, admin_auth, configured_run, db_engine, monkeypatch):
+    """A run in another organization is not found: no review is accepted or dispatched."""
+    from sqlalchemy import func, select
+
+    from app.models.agent_review_job import AgentReviewJob
+    from app.models.organization import Organization
+
+    dispatched: list[object] = []
+
+    async def record(*args, **kwargs):
+        dispatched.append(kwargs)
+
+    monkeypatch.setattr("app.api.agent_reviews.job_service.execute_hosted", record)
+    async with _factory(db_engine)() as session:
+        org = Organization(name="Other Org", setup_complete=True)
+        session.add(org)
+        await session.flush()
+        exp = Experiment(name="Foreign", organization_id=org.id, status="processing")
+        session.add(exp)
+        await session.flush()
+        run = PipelineRun(
+            organization_id=org.id,
+            experiment_id=exp.id,
+            pipeline_name="rnaseq",
+            pipeline_version="3.14",
+            parameters_json={"secret": "foreign"},
+            output_files_json={"counts": "x"},
+            status="complete",
+        )
+        session.add(run)
+        await session.commit()
+        foreign_run_id = run.id
+        foreign_exp_id = exp.id
+
+    for payload in (
+        {"entity_type": "pipeline_run", "entity_id": foreign_run_id},
+        {"entity_type": "experiment", "entity_id": foreign_exp_id, "included_run_ids": []},
+    ):
+        resp = await client.post(
+            "/api/agent_reviews/run",
+            json={**payload, "selected_sub_item_ids": ["qc.metric_review"]},
+            headers=admin_auth,
+        )
+        assert resp.status_code == 404, resp.text
+    assert dispatched == []
+    async with _factory(db_engine)() as session:
+        assert (await session.execute(select(func.count(AgentReviewJob.id)))).scalar_one() == 0
+
+
+@pytest.mark.asyncio
 async def test_run_returns_409_on_debounce(client, admin_auth, configured_run):
     payload = {
         "entity_type": "pipeline_run",
