@@ -1,7 +1,9 @@
 """Agent review job dispatch and lifecycle (ADR-055, spec-llm-integration-jobs).
 
-One service module wraps both execution paths (hosted HTTP and Gemma pipeline)
-behind a uniform `create` + `execute_hosted` interface. Debounce is enforced
+`create` admits a review only when the active provider has a review execution
+path (llm_provider_clients.supports_review_execution); `execute_hosted` runs it.
+Gemma has no executor, so it is refused at admission and any Gemma job an earlier
+release accepted is failed by `fail_unsupported_on_startup`. Debounce is enforced
 by the partial unique index on agent_review_jobs at the DB layer; the service
 catches the unique-violation and raises a typed error so the endpoint can
 return 409 with the existing job id.
@@ -188,12 +190,9 @@ async def create(
 
     # Reap a stale in-flight job for this entity before inserting, so a review
     # that never reached a terminal state cannot block new reviews forever with a
-    # 409. This deliberately includes Gemma jobs: Gemma review dispatch is stubbed
-    # in v1, so a Gemma review sits in 'pending' forever and is skipped by
-    # mark_orphaned_on_startup (which leaves Gemma for its orchestrator). At
-    # create time the only thing that matters is that a *stale* in-flight job is
-    # blocking a new review; a Gemma job past the threshold is a dead zombie and
-    # must be cleared or it permanently locks every review for this entity.
+    # 409. This applies to any provider, including a legacy Gemma job that startup
+    # reconciliation (fail_unsupported_on_startup) has not reached yet: a stale
+    # in-flight job blocking a new review must be cleared.
     existing = await _get_inflight(session, entity_type, entity_id, resolved_review_type)
     if existing is not None and _is_stale_in_flight(existing):
         await _write_job_terminal(
