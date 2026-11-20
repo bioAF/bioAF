@@ -5,9 +5,13 @@
 - **Docker** and **Docker Compose** (v2 plugin)
 - **Git**
 - **openssl** (for secret generation during install)
-- **Python 3** (host management helpers)
+- **Python 3.10 or newer** on the host, with its standard library (host management helpers)
 
-The application services run in Docker. Host management also uses Python 3; managed Linux installs use
+The application services run in Docker. Host management also uses the host's `python3` (the backend
+container's interpreter does not count): `./install.sh`, `./bioaf setup`, `start`, `restart`, `build`,
+`update` and the update agent check it before changing anything and stop with installation guidance if it
+is missing, older than 3.10 or incomplete. `help`, `status`, `stop`, `logs` and commands that only run in
+the backend container work without it. Managed Linux installs use
 systemd for the update agent and, on GCE, the Ops Agent. Cloud provisioning scripts run on your local
 machine and can install the cloud CLI. See [Configuration](configuration.md) for settings sources and
 [Current Architecture](architecture.md) for workload boundaries.
@@ -108,7 +112,7 @@ successful EC2 host install does not prove each workload path works. Review
 ## Quick Deploy (Existing Server)
 
 If you already have a Linux server, install Docker, the Compose v2 plugin, Git, openssl and Python 3
-before using the host management script. Verify Python 3 explicitly:
+(3.10 or newer) before using the host management script. Verify Python 3 explicitly:
 
 ```bash
 python3 --version
@@ -119,7 +123,7 @@ cd bioAF
 
 `setup` handles everything automatically:
 
-1. Checks prerequisites (Docker, Docker Compose, Git, openssl)
+1. Checks prerequisites (Docker, Docker Compose, Git, openssl, Python 3.10+)
 2. Generates `docker/.env` with secure random credentials
 3. Generates self-signed TLS certificates
 4. Removes any stale database volumes from a previous install
@@ -361,6 +365,10 @@ update. Only `./bioaf update <version>` is ever run.
   safely (wrong owner, permissions, or a link), they log to the service
   output instead: `sudo journalctl -u bioaf-update-agent`. The older
   `update-status/agent.log` is no longer written; you can delete it.
+- **Python.** The agent checks the host's `python3` when it starts. Without a
+  usable one (3.10 or newer) it exits before touching triggers, status or its
+  log, and says why in `sudo journalctl -u bioaf-update-agent`; systemd keeps
+  retrying it. Install `python3`, then `sudo systemctl restart bioaf-update-agent`.
 - **Unit.** `./bioaf setup` (after any `--version` checkout), `./bioaf
   start` and every update reconcile `/etc/systemd/system/bioaf-update-agent.service`
   with the release's template, rendered with the checkout path and account.
