@@ -15,7 +15,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
-from app.services.qc.extractors.gcs_helpers import get_results_bucket
 
 logger = logging.getLogger("bioaf.qc.custom")
 
@@ -53,21 +52,21 @@ async def extract(
     skip_cache: bool = False,
     results_bucket: str | None = None,
 ) -> dict[str, Any]:
-    """Custom pipelines emit qc_metrics.json directly into the run output prefix;
-    this reads it back as-is (no parsing -- the pipeline owns the metric shape)."""
-    if results_bucket is None:
-        results_bucket = await get_results_bucket(session)
-    if not results_bucket:
-        logger.warning("No results bucket configured, cannot extract metrics")
-        return {}
+    """Custom pipelines emit qc_metrics.json directly into the run's output directory;
+    this reads it back as-is (no parsing -- the pipeline owns the metric shape).
 
+    The directory is ``RunOutputLocationService.authorized_uri``, the one the run's wrapper
+    uploaded to, so a project-scoped run is read under its project. ``results_bucket`` is
+    accepted for the dispatcher's uniform call and not used to build the location.
+    """
     try:
         from app.adapters.models import StorageObjectNotFound
         from app.adapters.registry import get_storage_adapter
+        from app.services.run_output_location_service import RunOutputLocationService
 
         adapter = get_storage_adapter()
-        prefix = f"experiments/{run.experiment_id}/pipeline-runs/{run.id}/"
-        uri = adapter.build_uri(results_bucket, f"{prefix}qc_metrics.json")
+        location = await RunOutputLocationService.authorized_uri(session, run, adapter)
+        uri = f"{location}/qc_metrics.json"
         try:
             return json.loads(await adapter.read_text(uri))
         except StorageObjectNotFound:
