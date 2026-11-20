@@ -590,8 +590,10 @@ async def test_cascade_qc_config_is_independent_of_the_source_in_memory(session,
     )
     cascade = created[0]
 
-    cascade.qc_config_json["metrics"]["mapped_pct"]["thresholds"]["warn"] = 99
-    cascade.qc_config_json["sections"][0]["metrics"].append("injected")
+    cascade_config = cascade.qc_config_json
+    assert cascade_config is not None
+    cascade_config["metrics"]["mapped_pct"]["thresholds"]["warn"] = 99
+    cascade_config["sections"][0]["metrics"].append("injected")
 
     assert source.qc_config_json == NESTED_QC_CONFIG
 
@@ -710,3 +712,273 @@ async def test_run_on_cascade_version_resolves_the_source_qc_configuration(sessi
 
     assert source_resolved[0] == "bulk_rnaseq"
     assert cascade_resolved == source_resolved
+
+
+# --- Organization isolation and preserved cascade policy ---
+
+
+async def _cascade_audits(session) -> list[AuditLog]:
+    session.expire_all()
+    return list(
+        (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.entity_type == "custom_pipeline_version",
+                    AuditLog.action == "cascade_create",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _details(audit: AuditLog) -> dict:
+    assert audit.details_json is not None
+    return audit.details_json
+
+
+async def _versions_of(session, pipeline_id: int) -> list[CustomPipelineVersion]:
+    session.expire_all()
+    return list(
+        (
+            await session.execute(
+                select(CustomPipelineVersion)
+                .where(CustomPipelineVersion.custom_pipeline_id == pipeline_id)
+                .order_by(CustomPipelineVersion.version_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _foreign_org_user(session, email: str = "cascade-foreign@other.com"):
+    from app.models.organization import Organization
+    from app.models.user import User
+    from app.services.auth_service import AuthService
+    from app.services.bootstrap_roles import seed_builtin_roles
+
+    org = Organization(name="Cascade Foreign Org", setup_complete=True)
+    session.add(org)
+    await session.flush()
+    role_map = await seed_builtin_roles(session, org.id)
+    user = User(
+        email=email,
+        password_hash=AuthService.hash_password("foreignpass"),
+        role_id=role_map["admin"],
+        organization_id=org.id,
+        status="active",
+    )
+    session.add(user)
+    await session.flush()
+    await session.commit()
+    return user
+
+
+@pytest.mark.asyncio
+async def test_cascade_skips_a_legacy_link_from_another_organization(session, admin_user, pipeline_env, caplog):
+    env, v1 = pipeline_env
+    own_pipeline, own_source = await _create_active_pipeline_version(session, admin_user, v1.id, "Own Pipeline")
+
+    # Seeded directly: the repaired create_version path refuses this link.
+    foreign_user = await _foreign_org_user(session)
+    foreign_pipeline = await CustomPipelineService.create_pipeline(
+        session, foreign_user.organization_id, foreign_user.id, CustomPipelineCreateRequest(name="Foreign Pipeline")
+    )
+    foreign_source = CustomPipelineVersion(
+        custom_pipeline_id=foreign_pipeline.id,
+        version_number=1,
+        code_source_type="inline",
+        code_content="print('foreign')",
+        entrypoint_command="python foreign.py",
+        environment_version_id=v1.id,
+        created_by_user_id=foreign_user.id,
+        qc_template="custom",
+        qc_config_json={"metrics": {"secret_metric": {"label": "Secret"}}},
+    )
+    session.add(foreign_source)
+    await session.flush()
+    await session.commit()
+    own_pipeline_id, own_source_id = own_pipeline.id, own_source.id
+    foreign_pipeline_id, foreign_source_id = foreign_pipeline.id, foreign_source.id
+
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    v2_id = v2.id
+    with caplog.at_level("WARNING", logger="bioaf.custom_pipeline"):
+        created = await CustomPipelineService.cascade_pipeline_versions(
+            session, environment_id=env.id, environment_version_id=v2_id
+        )
+    await session.commit()
+
+    assert [v.custom_pipeline_id for v in created] == [own_pipeline_id]
+    assert [v.id for v in await _versions_of(session, foreign_pipeline_id)] == [foreign_source_id]
+    audits = await _cascade_audits(session)
+    assert len(audits) == 1
+    assert _details(audits[0])["source_version_id"] == own_source_id
+    assert _details(audits[0])["environment_version_id"] == v2_id
+
+    skip_logs = [r.getMessage() for r in caplog.records if "organization_mismatch" in r.getMessage()]
+    assert len(skip_logs) == 1
+    assert str(foreign_source_id) in skip_logs[0]
+    assert "secret_metric" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cascade_creates_nothing_when_the_target_belongs_to_another_environment(
+    session, admin_user, pipeline_env, caplog
+):
+    env, v1 = pipeline_env
+    pipeline, _ = await _create_active_pipeline_version(session, admin_user, v1.id, "Mismatched Target")
+    pipeline_id = pipeline.id
+
+    other_env = Environment(
+        name="Unrelated Env",
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        environment_type="pipeline",
+    )
+    session.add(other_env)
+    await session.flush()
+    other_v2 = await _add_env_version(session, admin_user, other_env, 2)
+
+    with caplog.at_level("WARNING", logger="bioaf.custom_pipeline"):
+        created = await CustomPipelineService.cascade_pipeline_versions(
+            session, environment_id=env.id, environment_version_id=other_v2.id
+        )
+    await session.commit()
+
+    assert created == []
+    assert len(await _versions_of(session, pipeline_id)) == 1
+    assert await _cascade_audits(session) == []
+    assert "target_not_in_environment" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cascade_creates_nothing_for_a_nonexistent_target(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    pipeline, _ = await _create_active_pipeline_version(session, admin_user, v1.id, "Missing Target")
+    pipeline_id = pipeline.id
+
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=999999
+    )
+    await session.commit()
+
+    assert created == []
+    assert len(await _versions_of(session, pipeline_id)) == 1
+    assert await _cascade_audits(session) == []
+
+
+@pytest.mark.asyncio
+async def test_cascade_skips_a_pipeline_whose_latest_active_version_moved_to_another_environment(
+    session, admin_user, pipeline_env
+):
+    env, v1 = pipeline_env
+    pipeline, _ = await _create_active_pipeline_version(session, admin_user, v1.id, "Moved Pipeline")
+    pipeline_id = pipeline.id
+
+    other_env = Environment(
+        name="Moved To Env",
+        organization_id=admin_user.organization_id,
+        created_by_user_id=admin_user.id,
+        environment_type="pipeline",
+    )
+    session.add(other_env)
+    await session.flush()
+    other_v1 = await _add_env_version(session, admin_user, other_env, 1)
+    await CustomPipelineService.create_version(
+        session,
+        admin_user.organization_id,
+        admin_user.id,
+        pipeline_id,
+        CustomPipelineVersionCreateRequest(
+            code_source_type="inline",
+            code_content="print('moved')",
+            entrypoint_command="python moved.py",
+            environment_version_id=other_v1.id,
+        ),
+    )
+    await session.commit()
+
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2.id
+    )
+    await session.commit()
+
+    assert created == []
+    assert [v.version_number for v in await _versions_of(session, pipeline_id)] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_repeated_build_notification_cascades_once(session, admin_user, pipeline_env):
+    env, v1 = pipeline_env
+    pipeline, source = await _create_active_pipeline_version(session, admin_user, v1.id, "Repeated Event")
+    pipeline_id, source_id, v1_id = pipeline.id, source.id, v1.id
+    v2 = await _add_env_version(session, admin_user, env, 2)
+    env_id, v2_id = env.id, v2.id
+
+    first = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env_id, environment_version_id=v2_id
+    )
+    await session.commit()
+    second = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env_id, environment_version_id=v2_id
+    )
+    await session.commit()
+
+    assert len(first) == 1
+    assert second == []
+    versions = await _versions_of(session, pipeline_id)
+    assert [(v.version_number, v.environment_version_id) for v in versions] == [(1, v1_id), (2, v2_id)]
+    audits = await _cascade_audits(session)
+    assert [(_details(a)["source_version_id"], _details(a)["environment_version_id"]) for a in audits] == [
+        (source_id, v2_id)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cascade_attributes_the_version_to_the_environment_builder(session, admin_user, pipeline_env):
+    from app.models.user import User
+
+    env, v1 = pipeline_env
+    pipeline, source = await _create_active_pipeline_version(session, admin_user, v1.id, "Attribution")
+    builder = User(
+        email="builder@test.com",
+        password_hash="x",
+        role_id=admin_user._test_role_map["comp_bio"],
+        organization_id=admin_user.organization_id,
+        status="active",
+    )
+    session.add(builder)
+    await session.flush()
+    v2 = EnvironmentVersion(
+        environment_id=env.id,
+        version_number=2,
+        status="ready",
+        definition_format="conda",
+        definition_content="name: pipeline\n",
+        created_by_user_id=builder.id,
+    )
+    session.add(v2)
+    await session.flush()
+    await session.commit()
+    builder_id, source_id, source_number, v2_id = builder.id, source.id, source.version_number, v2.id
+    pipeline_id = pipeline.id
+
+    created = await CustomPipelineService.cascade_pipeline_versions(
+        session, environment_id=env.id, environment_version_id=v2_id
+    )
+    await session.commit()
+    cascade_id = created[0].id
+
+    cascade = await _reload_version(session, cascade_id)
+    assert cascade.created_by_user_id == builder_id
+    assert cascade.version_number == source_number + 1
+    (audit,) = await _cascade_audits(session)
+    assert audit.user_id == builder_id
+    assert audit.entity_id == cascade_id
+    assert _details(audit)["source_version_id"] == source_id
+    assert _details(audit)["environment_version_id"] == v2_id
+    assert _details(audit)["custom_pipeline_id"] == pipeline_id

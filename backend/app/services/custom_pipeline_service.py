@@ -46,6 +46,8 @@ logger = logging.getLogger("bioaf.custom_pipeline")
 
 VALID_CODE_SOURCE_TYPES = ("github_repo", "code_blob", "inline")
 PARAM_NAME_SANITIZER = re.compile(r"[^A-Z0-9]")
+# Upper bound on ids named in one cascade diagnostic line.
+_CASCADE_SKIP_LOG_LIMIT = 20
 
 
 def _slugify(name: str) -> str:
@@ -422,8 +424,34 @@ class CustomPipelineService:
     ) -> list[CustomPipelineVersion]:
         """Create cascade versions of all pipelines whose latest active version uses this environment.
 
+        Only pipelines in the environment's own organization cascade, and only when the
+        target environment version belongs to ``environment_id``. Ownership comes from
+        persisted rows, never from the event payload.
+
         Returns the list of newly created cascade versions.
         """
+        target_result = await session.execute(
+            select(EnvironmentVersion, Environment.organization_id)
+            .join(Environment, EnvironmentVersion.environment_id == Environment.id)
+            .where(EnvironmentVersion.id == environment_version_id)
+        )
+        target_row = target_result.one_or_none()
+        if target_row is None:
+            logger.warning(
+                "Cascade skipped: reason=target_missing environment_id=%d environment_version_id=%d",
+                environment_id,
+                environment_version_id,
+            )
+            return []
+        new_env_version, organization_id = target_row
+        if new_env_version.environment_id != environment_id:
+            logger.warning(
+                "Cascade skipped: reason=target_not_in_environment environment_id=%d environment_version_id=%d",
+                environment_id,
+                environment_version_id,
+            )
+            return []
+
         max_active_subq = (
             select(
                 CustomPipelineVersion.custom_pipeline_id.label("pipeline_id"),
@@ -435,7 +463,8 @@ class CustomPipelineService:
         )
 
         affected_result = await session.execute(
-            select(CustomPipelineVersion)
+            select(CustomPipelineVersion, CustomPipeline.organization_id)
+            .join(CustomPipeline, CustomPipelineVersion.custom_pipeline_id == CustomPipeline.id)
             .join(EnvironmentVersion, CustomPipelineVersion.environment_version_id == EnvironmentVersion.id)
             .join(
                 max_active_subq,
@@ -450,21 +479,22 @@ class CustomPipelineService:
             )
             .options(selectinload(CustomPipelineVersion.variables))
         )
-        affected_versions = list(affected_result.scalars().unique().all())
-
-        if not affected_versions:
-            return []
-
-        new_env_version_result = await session.execute(
-            select(EnvironmentVersion).where(EnvironmentVersion.id == environment_version_id)
-        )
-        new_env_version = new_env_version_result.scalar_one_or_none()
-        if new_env_version is None:
+        affected_versions: list[CustomPipelineVersion] = []
+        foreign_version_ids: list[int] = []
+        for version, pipeline_org_id in affected_result.unique().all():
+            if pipeline_org_id == organization_id:
+                affected_versions.append(version)
+            else:
+                foreign_version_ids.append(version.id)
+        if foreign_version_ids:
             logger.warning(
-                "Cascade skipped: environment_version_id=%d not found",
+                "Cascade skipped %d pipeline version(s): reason=organization_mismatch environment_id=%d "
+                "environment_version_id=%d source_version_ids=%s",
+                len(foreign_version_ids),
+                environment_id,
                 environment_version_id,
+                sorted(foreign_version_ids)[:_CASCADE_SKIP_LOG_LIMIT],
             )
-            return []
 
         cascade_user_id = new_env_version.created_by_user_id
 
