@@ -450,6 +450,41 @@ describe("storage destroy outcomes (M7, M11)", () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/v1/infrastructure/storage/writes/allow", {}));
   });
 
+  test("a refusal for settling uploads says when to try again", async () => {
+    await openOutcome(
+      op({
+        ...refused,
+        id: 66,
+        message:
+          "bioAF could not confirm that every upload had finished, so nothing was deleted. New uploads stay paused until you allow them or run Destroy Storage again.",
+        partial_effects: { uploads: [], retry_after: "2026-11-21T16:45:00Z", unconfirmed: [] },
+      }),
+    );
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
+    expect(popup).toHaveTextContent(/Try again after \d{1,2}:\d{2}/);
+  });
+
+  test("uploads storage could not confirm can be released from the refusal", async () => {
+    await openOutcome(
+      op({
+        ...refused,
+        id: 67,
+        partial_effects: {
+          uploads: [],
+          retry_after: null,
+          unconfirmed: [
+            { upload_id: "u-9", reference: "UPL-ABC123", filename: "a.fastq.gz", user_id: 5, name: "Priya", started_at: "2026-11-21T15:58:00Z" },
+          ],
+        },
+      }),
+    );
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
+    expect(popup).toHaveTextContent("Storage could not confirm these uploads stopped:");
+    expect(popup).toHaveTextContent("a.fastq.gz · Priya · UPL-ABC123");
+    fireEvent.click(within(popup).getByRole("button", { name: "Release" }));
+    expect(await screen.findByRole("dialog", { name: "Release this upload?" })).toBeInTheDocument();
+  });
+
   test("a refused bucket offers Allow uploads too (M7)", async () => {
     const failed = op({
       id: 65,

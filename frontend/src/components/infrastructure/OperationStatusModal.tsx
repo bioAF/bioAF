@@ -17,6 +17,7 @@ import {
 import { Modal } from "@/components/shared/Modal";
 import { Alert } from "@/components/shared/Alert";
 import { Button } from "@/components/ui/Button";
+import { ReleaseUploadDialog } from "@/components/files/ReleaseUploadDialog";
 
 const POLL_MS = 3_000;
 
@@ -113,6 +114,61 @@ interface UploadInProgress {
   experiment?: string | null;
   files: number;
   started_at: string;
+}
+
+interface UnconfirmedUpload {
+  upload_id: string;
+  reference?: string | null;
+  filename: string;
+  name?: string | null;
+}
+
+interface UploadsRefusal {
+  uploads?: UploadInProgress[];
+  retry_after?: string | null;
+  unconfirmed?: UnconfirmedUpload[];
+}
+
+/** When to try destroy again, and the uploads storage could not confirm (11G). */
+function UploadsRefusalDetail({ effects, canRelease }: { effects: UploadsRefusal; canRelease: boolean }) {
+  const [releasing, setReleasing] = useState<UnconfirmedUpload | null>(null);
+  const [released, setReleased] = useState<string[]>([]);
+  const unconfirmed = (effects.unconfirmed ?? []).filter((u) => !released.includes(u.upload_id));
+  return (
+    <>
+      {effects.retry_after && (
+        <p className="mt-3 text-sm text-gray-700">Try again after {shortTime(effects.retry_after)}.</p>
+      )}
+      {unconfirmed.length > 0 && (
+        <div className="mt-3 text-sm text-gray-700">
+          <p>Storage could not confirm these uploads stopped:</p>
+          <ul className="mt-1 space-y-1">
+            {unconfirmed.map((u) => (
+              <li key={u.upload_id} className="flex items-center justify-between gap-3">
+                <span>{[u.filename, u.name, u.reference].filter(Boolean).join(" · ")}</span>
+                {canRelease && (
+                  <Button size="sm" variant="secondary" onClick={() => setReleasing(u)}>
+                    Release
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {releasing && (
+        <ReleaseUploadDialog
+          uploadId={releasing.upload_id}
+          filename={releasing.filename}
+          onClose={() => setReleasing(null)}
+          onReleased={() => {
+            setReleased((prev) => [...prev, releasing.upload_id]);
+            setReleasing(null);
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 /** Reopen uploads after a refused or failed storage destroy, without destroying anything (M7, M11). */
@@ -348,6 +404,12 @@ export function OperationStatusModal({
                 ))}
               </ul>
             )}
+          {op.action === "storage_destroy" && op.error_category === "uploads_in_progress" && (
+            <UploadsRefusalDetail
+              effects={(op.partial_effects as UploadsRefusal | null) ?? {}}
+              canRelease={configure.allowed("configure")}
+            />
+          )}
           {op.action === "storage_destroy" && op.status === "failed" && configure.allowed("configure") && (
             <AllowUploads />
           )}
