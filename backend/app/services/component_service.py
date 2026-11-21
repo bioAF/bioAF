@@ -299,13 +299,7 @@ class ComponentService:
         Flushes state and audit; the caller owns the commit. A failed image build
         does not refuse the toggle: the component is enabled as ``build_failed``.
         """
-        # Block toggling kubernetes_cluster directly (use stack teardown)
-        if component_key == "kubernetes_cluster":
-            raise ValidationError("Cannot toggle kubernetes_cluster directly. Use stack deploy/teardown.")
-
-        comp_def = next((c for c in KUBERNETES_COMPONENTS if c["key"] == component_key), None)
-        if comp_def is None:
-            raise NotFoundError(f"Component '{component_key}' not found")
+        comp_def = ComponentService.stack_component(component_key)
 
         # A component change must not run under another infrastructure action (approved M3/M6):
         # refuse with the running action named, before anything changes.
@@ -355,6 +349,17 @@ class ComponentService:
             },
         )
         return ComponentToggleResult(component_key=component_key, enabled=new_enabled, status=new_status)
+
+    @staticmethod
+    def stack_component(component_key: str) -> dict:
+        """The stack component a toggle names; raises before anything is admitted or changed."""
+        # Block toggling kubernetes_cluster directly (use stack teardown)
+        if component_key == "kubernetes_cluster":
+            raise ValidationError("Cannot toggle kubernetes_cluster directly. Use stack deploy/teardown.")
+        comp_def = next((c for c in KUBERNETES_COMPONENTS if c["key"] == component_key), None)
+        if comp_def is None:
+            raise NotFoundError(f"Component '{component_key}' not found")
+        return comp_def
 
     @staticmethod
     async def _require_dependencies(session: AsyncSession, dependencies: list[str]) -> None:

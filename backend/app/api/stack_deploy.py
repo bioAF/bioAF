@@ -704,20 +704,40 @@ async def stack_component_toggle(
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
-    """Toggle a component's enabled state with dependency enforcement."""
+    """Toggle a component's enabled state with dependency enforcement.
+
+    The whole change is one infrastructure operation: it holds the shared lock from before the
+    state is read until it commits, so no other action can start in between (M3/M6). An image
+    build it starts belongs to it, and the lock is kept until the provider reports that build.
+    """
+    user_id = int(current_user["sub"])
     try:
-        result = await ComponentService.toggle_stack_component(
-            session,
-            component_key,
-            user_id=int(current_user["sub"]),
-            force_rebuild=force_rebuild,
-        )
+        ComponentService.stack_component(component_key)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    await session.commit()
+    operation_id, _ = await ops.accept(
+        action="component_change",
+        principal=ops.Principal(user_id),
+        inputs={"component_key": component_key, "force_rebuild": force_rebuild},
+    )
+    try:
+        async with ops.owned(operation_id):
+            result = await ComponentService.toggle_stack_component(
+                session,
+                component_key,
+                user_id=user_id,
+                force_rebuild=force_rebuild,
+            )
+            await session.commit()
+    except ValidationError as exc:
+        # owned() recorded the failed outcome; the caller gets the reason.
+        raise HTTPException(status_code=400, detail=str(exc))
+    await ops.finish(
+        operation_id, ops.succeeded(f"{result.component_key} {'enabled' if result.enabled else 'disabled'}.")
+    )
 
     return ComponentToggleResponse(
         component_key=result.component_key,
