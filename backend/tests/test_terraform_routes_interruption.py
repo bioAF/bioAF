@@ -263,7 +263,8 @@ async def test_background_drain_commits_interruption_on_cancellation(
         while not created:
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.05)
-        teardown = next(t for t in asyncio.all_tasks() if "_run_teardown" in repr(t.get_coro()))
+        # The teardown runs as its accepted infrastructure operation (storage lifecycle 11D).
+        teardown = next(t for t in asyncio.all_tasks() if "run_operation" in repr(t.get_coro()))
         teardown.cancel()
         with pytest.raises(asyncio.CancelledError):
             await teardown

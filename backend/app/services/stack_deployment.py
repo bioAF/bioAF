@@ -1018,10 +1018,11 @@ async def destroy_storage(
             count = await _empty_gcs_bucket(session, bucket_name)
             logger.info("Emptied bucket %s (%d objects deleted)", bucket_name, count)
         except Exception as exc:
-            logger.error("Failed to empty bucket %s: %s", bucket_name, exc)
+            # The provider's error text can carry signed or internal URLs: log its type only.
+            logger.error("Failed to empty bucket %s (error_type=%s)", bucket_name, type(exc).__name__)
             yield TerraformProgressEvent(
                 event_type="stack_error",
-                message=f"Failed to empty bucket {bucket_name}: {exc}",
+                message=f"bioAF could not empty {bucket_name}. Nothing else was changed.",
             )
             return
 

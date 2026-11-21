@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -396,13 +397,7 @@ async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awa
     handle = OperationHandle(operation_id)
     token = _current.set(operation_id)
     try:
-
-        def start(op: InfrastructureOperation) -> None:
-            op.status = "running"
-            op.started_at = _now()
-            op.runner = current_runner()
-
-        await handle._update(start)
+        await _start(handle)
         try:
             result = await body(handle)
         except ProcessNotSettled:
@@ -430,7 +425,7 @@ async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awa
             )
         await finish(operation_id, result)
     finally:
-        _current.reset(token)
+        _reset(token)
 
 
 class _shielded:
@@ -442,6 +437,115 @@ class _shielded:
 
     def __exit__(self, *exc):
         return self._scope.__exit__(*exc)
+
+
+async def _start(handle: OperationHandle) -> None:
+    def start(op: InfrastructureOperation) -> None:
+        op.status = "running"
+        op.started_at = op.started_at or _now()
+        op.runner = op.runner or current_runner()
+
+    await handle._update(start)
+
+
+def _reset(token) -> None:
+    try:
+        _current.reset(token)
+    except ValueError:
+        # An async generator closed from another context: the variable dies with that context.
+        pass
+
+
+@asynccontextmanager
+async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
+    """Run request-scoped work as the operation's owner.
+
+    A failure records a failed outcome (a DomainError keeps its safe message) and propagates;
+    a normal exit leaves the operation running for the caller to finish or hand on.
+    """
+    handle = OperationHandle(operation_id)
+    token = _current.set(operation_id)
+    try:
+        await _start(handle)
+        yield handle
+    except asyncio.CancelledError:
+        with _shielded():
+            await finish(operation_id, OperationResult("interrupted", "The request was interrupted.", "interrupted"))
+        raise
+    except ProcessNotSettled:
+        with _shielded():
+            await finish(
+                operation_id,
+                OperationResult(
+                    "recovery_required", "bioAF could not confirm that Terraform stopped.", "process_not_settled"
+                ),
+            )
+        raise
+    except DomainError as exc:
+        await finish(operation_id, failed(str(exc) or "The operation failed.", exc.code))
+        raise
+    except Exception:
+        await finish(
+            operation_id,
+            failed("The operation failed unexpectedly. The technical detail is in the server log.", "unexpected"),
+        )
+        raise
+    finally:
+        _reset(token)
+
+
+async def operation_stream(operation_id: int, events: AsyncIterator) -> AsyncIterator:
+    """Pass a stack generator's events through to an SSE response while the operation owns them.
+
+    The stream's outcome becomes the operation's: a terminal event settles it, a client
+    disconnect records it interrupted (the executor settles Terraform first), and progress
+    without a terminal event is never recorded as success.
+    """
+    handle = OperationHandle(operation_id)
+    tracker = StackTracker(handle)
+    token = _current.set(operation_id)
+    try:
+        await _start(handle)
+        await handle.step("prerequisites", "Checking prerequisites", "running")
+        first = True
+        async for event in events:
+            if first:
+                await handle.step("prerequisites", state="done")
+                first = False
+            await tracker.observe(event)
+            yield event
+        result = tracker.result()
+        if result.status == "succeeded":
+            await handle.step("cleanup", "Final cleanup", "done")
+        await finish(operation_id, result)
+    except (asyncio.CancelledError, GeneratorExit):
+        with _shielded():
+            await finish(
+                operation_id,
+                tracker.outcome
+                or OperationResult("interrupted", "The connection closed while this was running.", "interrupted"),
+            )
+        raise
+    except ProcessNotSettled:
+        with _shielded():
+            await finish(
+                operation_id,
+                OperationResult(
+                    "recovery_required", "bioAF could not confirm that Terraform stopped.", "process_not_settled"
+                ),
+            )
+        raise
+    except DomainError as exc:
+        await finish(operation_id, failed(str(exc) or "The operation failed.", exc.code))
+        raise
+    except Exception:
+        await finish(
+            operation_id,
+            failed("The operation failed unexpectedly. The technical detail is in the server log.", "unexpected"),
+        )
+        raise
+    finally:
+        _reset(token)
 
 
 def spawn_operation(

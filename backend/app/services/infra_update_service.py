@@ -39,7 +39,6 @@ from app.exceptions import StateError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
 from app.services.terraform_stream import INTERRUPTED_EVENT, commit_interruption
-from app import runtime
 
 logger = logging.getLogger("bioaf.infra_update_service")
 
@@ -310,36 +309,93 @@ def _is_benign_apply_error(message: str | None) -> bool:
     return any(token in message for token in _BENIGN_APPLY_DIAGNOSTICS)
 
 
-async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
+class TargetApplyFailed(Exception):
+    """A targeted apply failed for a reason other than a classified benign no-op."""
+
+    def __init__(self, module: str, target: str):
+        super().__init__(f"{module}: {target}")
+        self.module = module
+        self.target = target
+
+
+def update_summary(added: int) -> str:
+    """The finished-update line signed off in mockup M1."""
+    if added == 0:
+        return "Your infrastructure is up to date."
+    return f"Updates applied: {added} resource{'s' if added != 1 else ''} added."
+
+
+async def apply_modules_sequentially(modules: list[str], user_id: int, handle=None):
     """Re-plan each module and apply ONLY its additive resources, one resource
     at a time (targeted), one module at a time. Never applies a delete/replace.
 
-    Applying each additive resource on its own run isolates failures: a single
-    benign no-op update (which GCP rejects with "Must specify a field to update")
-    is logged and skipped, so the real new resources still land and the batch is
-    never aborted or stranded by it."""
+    Applying each additive resource on its own run isolates a classified benign
+    no-op update (GCP rejects it with "Must specify a field to update"): it is
+    logged and skipped. Any other failure stops the batch: no later target or
+    module starts, and the outcome says what was applied before it.
+
+    ``handle`` is the infrastructure operation's handle when this runs as one;
+    returns the operation outcome either way."""
     from app.database import async_session_factory
+    from app.services.infrastructure_operations import failed, succeeded
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
-        return
+        return failed("The application is not ready.", "not_ready")
 
+    added = 0
     for module in modules:
+        label = f"Applying {module} changes"
+        if handle is not None:
+            await handle.step(f"plan:{module}", f"Planning {module} changes", "running")
         # Plan once to enumerate the additive resources, then retire the run.
         async with async_session_factory() as s:  # type: ignore[misc]
             try:
                 run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
-                targets = additive_addresses(run.plan_json) if run.status == "awaiting_confirmation" else []
+                if run.status != "awaiting_confirmation":
+                    await s.commit()
+                    raise TargetApplyFailed(module, "plan")
+                targets = additive_addresses(run.plan_json)
                 run.status = "cancelled"
                 run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
+            except TargetApplyFailed:
+                if handle is not None:
+                    await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", added=added
+                )
+            except asyncio.CancelledError:
+                await s.rollback()
+                raise
             except Exception:
                 logger.exception("Infrastructure update plan failed for module %s", module)
                 await s.rollback()
-                continue
+                if handle is not None:
+                    await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", added=added
+                )
+        if handle is not None:
+            await handle.step(f"plan:{module}", state="done")
+            await handle.step(f"apply:{module}", label, "running", completed=0, total=len(targets))
 
         applied_any = False
-        for target in targets:
-            applied_any = await _apply_one_target(module, target, user_id) or applied_any
+        for index, target in enumerate(targets, start=1):
+            try:
+                applied = await _apply_one_target(module, target, user_id)
+            except TargetApplyFailed:
+                if handle is not None:
+                    await handle.step(f"apply:{module}", state="failed", detail=f"Could not apply {target}.")
+                return failed(
+                    f"Applying {module} changes failed. Nothing else was applied.",
+                    "apply_failed",
+                    added=added,
+                    failed_target=target,
+                )
+            applied_any = applied or applied_any
+            added += 1 if applied else 0
+            if handle is not None:
+                await handle.step(f"apply:{module}", completed=index, total=len(targets))
 
         # Persist new resource names (e.g. the literature bucket) once a real
         # change landed. Best-effort.
@@ -351,6 +407,9 @@ async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
                 except Exception:
                     logger.exception("Persisting %s outputs after apply failed", module)
                     await s.rollback()
+        if handle is not None:
+            await handle.step(f"apply:{module}", state="done")
+    return succeeded(update_summary(added), added=added)
 
 
 async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
@@ -399,6 +458,8 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 return False
             applied = run.status == "completed"
             await s.commit()
+            if run.status == "failed":
+                raise TargetApplyFailed(module, target)
             return applied
         except asyncio.CancelledError:
             if applying:
@@ -407,13 +468,22 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 # Nothing ran yet: leave no half-planned run behind.
                 await s.rollback()
             raise
-        except Exception:
+        except TargetApplyFailed:
+            raise
+        except Exception as exc:
             logger.exception("Infrastructure update apply failed for target %s", target)
             await s.rollback()
-            return False
+            raise TargetApplyFailed(module, target) from exc
 
 
-def launch_background_apply(modules: list[str], user_id: int) -> None:
-    """Kick off the additive-only apply in the background. Isolated as a seam
-    so endpoints can trigger it and tests can assert it was scheduled."""
-    runtime.spawn(apply_modules_sequentially(modules, user_id), role="infra-update-apply")
+def launch_background_apply(modules: list[str], user_id: int, *, operation_id: int) -> None:
+    """Run the additive-only apply in the background as the accepted operation.
+    Isolated as a seam so endpoints can trigger it and tests can assert it was
+    scheduled."""
+    from app.services.infrastructure_operations import spawn_operation
+
+    spawn_operation(
+        operation_id,
+        lambda handle: apply_modules_sequentially(modules, user_id, handle),
+        role="infra-update-apply",
+    )

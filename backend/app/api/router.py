@@ -50,6 +50,7 @@ from app.api.networking import router as networking_router
 from app.api.terraform_executor import router as terraform_executor_router
 from app.api.storage_deploy import router as storage_deploy_router
 from app.api.stack_deploy import router as stack_deploy_router
+from app.api.infrastructure_operations import router as infrastructure_operations_router
 from app.api.auto_ingest import router as auto_ingest_router
 from app.api.notebook_sessions import router as notebook_sessions_router
 from app.api.notebook_sessions import settings_router as notebook_settings_router
@@ -130,6 +131,7 @@ api_router.include_router(networking_router)
 api_router.include_router(terraform_executor_router)
 api_router.include_router(storage_deploy_router)
 api_router.include_router(stack_deploy_router)
+api_router.include_router(infrastructure_operations_router)
 api_router.include_router(auto_ingest_router)
 api_router.include_router(notebook_sessions_router)
 api_router.include_router(notebook_settings_router)

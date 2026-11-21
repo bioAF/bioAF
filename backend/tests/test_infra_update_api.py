@@ -99,7 +99,7 @@ async def test_check_updates_additive_auto_applies(client, admin_token, session,
     monkeypatch.setattr(
         infra_update_service,
         "launch_background_apply",
-        lambda modules, user_id: launched.update(modules=modules),
+        lambda modules, user_id, **_kw: launched.update(modules=modules),
     )
 
     r = await client.post(CHECK, headers={"Authorization": f"Bearer {admin_token}"})
@@ -129,7 +129,7 @@ async def test_check_updates_destructive_not_auto_applied(client, admin_token, s
     monkeypatch.setattr(
         infra_update_service,
         "launch_background_apply",
-        lambda modules, user_id: calls.__setitem__("n", calls["n"] + 1),
+        lambda modules, user_id, **_kw: calls.__setitem__("n", calls["n"] + 1),
     )
 
     r = await client.post(CHECK, headers={"Authorization": f"Bearer {admin_token}"})
@@ -159,7 +159,7 @@ async def test_apply_updates_launches_valid_modules(client, admin_token, monkeyp
     monkeypatch.setattr(
         infra_update_service,
         "launch_background_apply",
-        lambda modules, user_id: launched.update(modules=modules),
+        lambda modules, user_id, **_kw: launched.update(modules=modules),
     )
     r = await client.post(
         APPLY, json={"modules": ["storage", "bogus"]}, headers={"Authorization": f"Bearer {admin_token}"}

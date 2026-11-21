@@ -428,6 +428,18 @@ async def glossary_orphans(ctx: StartupContext) -> None:
             logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
 
 
+async def infrastructure_operations(ctx: StartupContext) -> None:
+    """Settle infrastructure operations a restart left behind, from recorded runner evidence (D1)."""
+    from app.database import async_session_factory
+    from app.services.infrastructure_operations import reconcile_on_startup
+
+    async with async_session_factory() as session:
+        counts = await reconcile_on_startup(session)
+        await session.commit()
+    if any(counts.values()):
+        logger.info("Reconciled infrastructure operations after restart: %s", counts)
+
+
 async def install_metrics(ctx: StartupContext) -> None:
     """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
     from app.database import async_session_factory
@@ -502,6 +514,12 @@ NORMAL_STEPS = [
         interrupted_local_jobs,
         "optional",
         "Could not mark jobs interrupted by the restart as failed: %s",
+    ),
+    Step(
+        "infrastructure_operations",
+        infrastructure_operations,
+        "optional",
+        "Could not reconcile infrastructure operations after restart: %s",
     ),
     Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
 ]
