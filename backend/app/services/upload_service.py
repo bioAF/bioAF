@@ -1,10 +1,11 @@
 import logging
+import secrets
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import ValidationError
+from app.exceptions import DomainError, UploadFailedError, ValidationError
 from app.models.file import File
 from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
@@ -22,6 +23,24 @@ _pending_uploads: dict[str, dict] = {}
 # These names are re-exported because callers already import them from here.
 ILLUMINA_PATTERN = sequencing_identity.ILLUMINA_PATTERN
 READ_TYPES = sequencing_identity.READ_TYPES
+
+
+# What the caller is told when an upload fails unexpectedly. The transfer
+# message promises nothing was saved: no file record exists yet at that stage.
+_TRANSFER_FAILED = "Upload failed because storage did not respond. Nothing was saved. Try again. Reference {ref}."
+_UPLOAD_FAILED = "Upload failed. Try again. Reference {ref}."
+
+
+def upload_failure(stage: str, exc: BaseException) -> UploadFailedError:
+    """Log an unexpected upload failure safely and return the error to raise.
+
+    Only the stage and the error's type are logged: storage SDK messages can
+    contain bucket URLs, signed URLs or credentials.
+    """
+    reference = f"UPL-{secrets.token_hex(3).upper()}"
+    logger.error("Upload failed (reference=%s, stage=%s, error_type=%s)", reference, stage, type(exc).__name__)
+    message = _TRANSFER_FAILED if stage == "transfer" else _UPLOAD_FAILED
+    return UploadFailedError(message.format(ref=reference), details={"reference": reference})
 
 
 class UploadService:
@@ -324,8 +343,13 @@ class UploadService:
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
-        gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
-        await adapter.upload_file(gcs_uri, file_obj)
+        try:
+            gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
+            await adapter.upload_file(gcs_uri, file_obj)
+        except DomainError:
+            raise
+        except Exception as exc:
+            raise upload_failure("transfer", exc) from None
 
         if not file_type:
             file_type = UploadService._detect_file_type(filename)

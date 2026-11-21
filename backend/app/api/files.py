@@ -24,7 +24,7 @@ from app.schemas.file import (
 from app.services import entity_references
 from app.services.data_search_service import unified_document_file_search
 from app.services.file_service import FileService
-from app.services.upload_service import UploadService
+from app.services.upload_service import UploadService, upload_failure
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -132,7 +132,12 @@ async def complete_upload(
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
-    file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
+    try:
+        file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
+    except DomainError:
+        raise
+    except Exception as exc:
+        raise upload_failure("completion", exc) from None
     await session.commit()
     file = await FileService.get_file(session, file.id, org_id)
     return (await _file_responses(session, [file], provenance=False))[0]
@@ -168,8 +173,8 @@ async def simple_upload(
         )
     except DomainError:
         raise
-    except Exception as e:
-        raise HTTPException(500, f"Upload failed: {e}")
+    except Exception as exc:
+        raise upload_failure("registration", exc) from None
     await session.commit()
     result = await FileService.get_file(session, result.id, org_id)
     return (await _file_responses(session, [result], provenance=False))[0]
