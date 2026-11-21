@@ -97,23 +97,30 @@ a second file record or notification. An upload that finished in storage but was
 example the browser closed) is filed automatically.
 
 Cancelling an upload that is still being sent stops it from ever being filed, but it counts as a running
-upload until storage confirms the session ended; the attention list shows it as stopping. bioAF settles
-these in the background, and cancels a session that has received no new bytes for an hour. Upload links
-issued before this release count until an hour after they expired; after that the stored object decides.
-When storage cannot confirm an upload stopped, it is listed as "Storage could not confirm this upload
-stopped", and an administrator with infrastructure configure can **Release** it with a reason, confirming
-the transfer might still exist. Releases are recorded in the audit log. Lab document and reference dataset
-uploads are tracked the same way.
+upload until storage confirms it stopped. The attention list shows why it stopped (Cancelled, Upload
+interrupted, or Timed out after 1 hour without progress) and that bioAF is checking that the upload has
+stopped. bioAF settles these in the background, and cancels a session that has received no new bytes for
+an hour. Upload links issued before this release count until an hour after they expired; after that the
+stored object decides. When bioAF cannot confirm whether an upload has stopped, it keeps checking, and an
+administrator with infrastructure configure can choose **Stop waiting…** with a reason, acknowledging that
+Destroy Storage could delete the file while it is still uploading. Nothing is deleted by that step, and it
+is recorded in the audit log. Lab document and reference dataset uploads are tracked the same way; each
+reference upload is stored under its own path, so a new upload never shares objects with an aborted one.
+
+If storage has not yet confirmed the last bytes when an upload finishes, the uploader shows **Confirming
+upload** and checks again automatically.
 
 bioAF's own background writes (thumbnails, QC metric caches, data export archives, environment build
-contexts and reference imports) are admitted the same way: while uploads are paused they are skipped or
-refused before anything is written.
+contexts and reference imports), and filing received uploads into their experiments, are admitted the same
+way: while uploads are paused they are skipped, postponed or refused before anything is written ("An
+administrator has paused uploads and file saving.").
 
 **Destroy Storage** first checks every bucket, then pauses new uploads and gives running ones 30 seconds to
 finish. If any are still running, or bioAF cannot confirm they stopped, nothing is deleted, the action ends
 (other infrastructure actions stay available) and uploads stay paused until you choose **Allow uploads** or
 run Destroy Storage again. When every remaining upload has a known settling time, the result says when to
-try again; uploads storage could not confirm are listed with **Release**. A bucket the provider confirms no
+try again; uploads bioAF cannot confirm have stopped are listed with **Stop waiting…**, and bioAF's own
+work is listed by activity (for example "Creating a data export"). A bucket the provider confirms no
 longer exists is treated as already removed. A bucket whose identity cannot be read now is not emptied. A
 refused bucket stops the destroy with what was done recorded; fix the cause and run it again to continue.
 Files are marked as deleted as each object is confirmed deleted.

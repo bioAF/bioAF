@@ -14,7 +14,8 @@
   bioAF stops at the next safe point and never undoes finished work. This replaces **Abort deployment**.
   Cancelling a notebook image build is now reported only once the build provider confirms it. A
   cancellation made before the action starts prevents it from running.
-- Component changes are refused while another infrastructure action runs.
+- A component change is its own infrastructure action: no other action can start while it runs, and an
+  image build it starts keeps other actions unavailable until the build finishes.
 - After a server restart, an interrupted action is reported once to administrators. When bioAF cannot prove
   Terraform stopped, infrastructure actions pause until an administrator records the recovery (audited). An
   image build still running in the cloud keeps other actions unavailable until its provider reports it
@@ -50,10 +51,17 @@
   storage confirms it stopped. Sessions with no new bytes for an hour are cancelled, so a closed browser tab does not keep Destroy Storage waiting; browsers send Google Cloud uploads in chunks so storage records progress. An upload that
   finished in storage but was never reported back is filed automatically, and filing happens once even
   when requests overlap.
-- An administrator with infrastructure configure can release an upload storage could not confirm stopped,
-  with a reason and an acknowledgement that the transfer might still exist (audited).
-- Lab document and reference dataset uploads, and bioAF's own background writes (thumbnails, QC caches,
-  export archives, environment build contexts, reference imports), count as storage writers too.
+- When bioAF cannot confirm whether an upload has stopped, an administrator with infrastructure configure
+  can choose **Stop waiting…**, with a reason and an acknowledgement that Destroy Storage could delete the
+  file while it is still uploading (audited; nothing is deleted by that step). The attention list shows
+  why an upload was stopped: cancelled, interrupted, or timed out after an hour without progress.
+- While storage confirms the last bytes of an upload, the uploader shows **Confirming upload** instead of
+  an error.
+- Uploads with a declared checksum are verified against it even when bioAF finds them finished on its own.
+- Each reference dataset upload is stored under its own path.
+- Lab document and reference dataset uploads, filing received uploads, and bioAF's own background writes
+  (thumbnails, QC caches, export archives, environment build contexts, reference imports) count as storage
+  writers too, and are paused with uploads.
 
 ### Plot Archive
 
