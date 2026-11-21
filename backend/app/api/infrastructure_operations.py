@@ -45,6 +45,11 @@ class OperationStep(BaseModel):
     total: int | None = None
 
 
+class OperationResources(BaseModel):
+    planned: list[str] = Field(default_factory=list)
+    completed: list[str] = Field(default_factory=list)
+
+
 class OperationView(BaseModel):
     id: int
     action: str
@@ -64,6 +69,8 @@ class OperationView(BaseModel):
     cancel_deadline: datetime | None = None
     recovered_at: datetime | None = None
     outcome_seen_at: datetime | None = None
+    # The running Terraform step's resources, while one runs.
+    resources: OperationResources | None = None
 
 
 class ActiveOperationResponse(BaseModel):

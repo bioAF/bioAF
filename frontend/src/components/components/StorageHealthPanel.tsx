@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { components } from "../../../contracts/internal-api";
-import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { usePermissionGate } from "@/hooks/useInfrastructureActions";
 import { logError } from "@/lib/errorReporting";
 import { Alert } from "@/components/shared/Alert";
 import { Modal } from "@/components/shared/Modal";
@@ -151,7 +151,9 @@ function ConfirmBucketsDialog({
  * not establish on its own (mockup M15). Checking never creates or changes anything in the cloud.
  */
 export function StorageHealthPanel() {
-  const actions = useInfrastructureActions();
+  // Checking and confirming buckets start no infrastructure work, so they stay available while an
+  // operation runs: only the role's permission applies.
+  const actions = usePermissionGate<"deploy" | "configure">("infrastructure");
   const [health, setHealth] = useState<StorageHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [confirming, setConfirming] = useState(false);

@@ -161,12 +161,31 @@ async def _user_names(session: AsyncSession, user_ids: set[int]) -> dict[int, st
     return {row.id: (row.name or row.email) for row in rows}
 
 
+async def _current_resources(session: AsyncSession, op: InfrastructureOperation) -> dict | None:
+    """The running Terraform child's planned and completed resources, for the per-resource list."""
+    from app.models.component import TerraformRun
+
+    if op.exclusive_slot != 1 or not op.child_run_ids:
+        return None
+    run = await session.get(TerraformRun, max(op.child_run_ids))
+    if run is None or run.status not in ("planning", "applying", "awaiting_confirmation"):
+        return None
+    planned = [
+        r["address"]
+        for r in ((run.plan_json or {}).get("resources") or [])
+        if isinstance(r, dict) and not str(r.get("address", "")).startswith("data.")
+    ]
+    return {"planned": planned, "completed": list(run.completed_resources or [])}
+
+
 async def describe(session: AsyncSession, op: InfrastructureOperation) -> dict:
     """The operation as the status popup and banner show it."""
     names = await _user_names(
         session, {u for u in (op.started_by_user_id, op.cancel_requested_by_user_id) if u is not None}
     )
+    resources = await _current_resources(session, op)
     return {
+        "resources": resources,
         "id": op.id,
         "action": op.action,
         "label": ACTION_LABELS.get(op.action, op.action.replace("_", " ").capitalize()),

@@ -6935,6 +6935,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations Endpoint */
+        get: operations["list_operations_endpoint_api_v1_infrastructure_operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Operation Endpoint */
+        get: operations["active_operation_endpoint_api_v1_infrastructure_operations_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Operation Endpoint */
+        get: operations["get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover Operation Endpoint */
+        post: operations["recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Operation Seen Endpoint */
+        post: operations["mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/orphaned-resources": {
         parameters: {
             query?: never;
@@ -7253,8 +7338,8 @@ export interface paths {
          * Stack Destroy Storage Endpoint
          * @description Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
          *
-         *     Only allowed when compute stack is torn down. Resets storage_uid so the
-         *     next deploy creates fresh bucket names (avoids GCS soft-delete conflicts).
+         *     Only allowed when compute stack is torn down. A confirmed destroy retires
+         *     the storage generation so the next deploy creates new bucket names.
          */
         post: operations["stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post"];
         delete?: never;
@@ -8759,6 +8844,16 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ActiveOperationResponse */
+        ActiveOperationResponse: {
+            /** Busy */
+            busy: boolean;
+            /** Interrupted */
+            interrupted?: components["schemas"]["OperationView"][];
+            operation?: components["schemas"]["OperationView"] | null;
+            /** State */
+            state?: ("running" | "recovery_required") | null;
+        };
         /** ActivityFeedItem */
         ActivityFeedItem: {
             /**
@@ -9627,6 +9722,8 @@ export interface components {
             modules: components["schemas"]["ModuleUpdateInfo"][];
             /** Modules With Additive */
             modules_with_additive: string[];
+            /** Operation Id */
+            operation_id?: number | null;
             /** Realigned */
             realigned: {
                 [key: string]: unknown;
@@ -12738,6 +12835,81 @@ export interface components {
             /** Openalex Id */
             openalex_id?: string | null;
         };
+        /** OperationListResponse */
+        OperationListResponse: {
+            /** Operations */
+            operations: components["schemas"]["OperationView"][];
+        };
+        /** OperationResources */
+        OperationResources: {
+            /** Completed */
+            completed?: string[];
+            /** Planned */
+            planned?: string[];
+        };
+        /** OperationStep */
+        OperationStep: {
+            /** Completed */
+            completed?: number | null;
+            /** Detail */
+            detail?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** State */
+            state: string;
+            /** Total */
+            total?: number | null;
+        };
+        /** OperationView */
+        OperationView: {
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+            /** Action */
+            action: string;
+            /** Cancel Deadline */
+            cancel_deadline?: string | null;
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
+            /** Cancel Requested By */
+            cancel_requested_by?: string | null;
+            /** Error Category */
+            error_category?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Message */
+            message?: string | null;
+            /** Outcome Seen At */
+            outcome_seen_at?: string | null;
+            /** Partial Effects */
+            partial_effects?: {
+                [key: string]: unknown;
+            } | null;
+            /** Phase */
+            phase?: string | null;
+            /** Recovered At */
+            recovered_at?: string | null;
+            resources?: components["schemas"]["OperationResources"] | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Started By */
+            started_by?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "running" | "stopping" | "succeeded" | "failed" | "cancelled" | "interrupted" | "recovery_required";
+            /** Steps */
+            steps?: components["schemas"]["OperationStep"][];
+        };
         /** OrphanedResourceListResponse */
         OrphanedResourceListResponse: {
             /** Items */
@@ -14063,6 +14235,16 @@ export interface components {
             review_run_id: number;
             /** Status */
             status: string;
+        };
+        /** RecoverRequest */
+        RecoverRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
         };
         /** RecoveryCheckItem */
         RecoveryCheckItem: {
@@ -31124,7 +31306,9 @@ export interface operations {
     update_cluster_config_api_v1_infrastructure_cluster_config_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31247,6 +31431,154 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_operations_endpoint_api_v1_infrastructure_operations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    active_operation_endpoint_api_v1_infrastructure_operations_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveOperationResponse"];
+                };
+            };
+        };
+    };
+    get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -31438,7 +31770,9 @@ export interface operations {
     apply_infra_updates_endpoint_api_v1_infrastructure_stack_apply_updates_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31473,7 +31807,9 @@ export interface operations {
     check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31486,6 +31822,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckUpdatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -31546,7 +31891,9 @@ export interface operations {
     stack_deploy_endpoint_api_v1_infrastructure_stack_deploy_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31579,7 +31926,9 @@ export interface operations {
     stack_deploy_background_endpoint_api_v1_infrastructure_stack_deploy_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31632,7 +31981,9 @@ export interface operations {
     stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31665,7 +32016,9 @@ export interface operations {
     stack_destroy_storage_background_endpoint_api_v1_infrastructure_stack_destroy_storage_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31762,7 +32115,9 @@ export interface operations {
     stack_teardown_endpoint_api_v1_infrastructure_stack_teardown_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31795,7 +32150,9 @@ export interface operations {
     stack_teardown_background_endpoint_api_v1_infrastructure_stack_teardown_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

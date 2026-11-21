@@ -8,6 +8,7 @@ import { endSession } from "@/lib/session";
 import { api } from "@/lib/api";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { DeploymentBanner } from "@/components/infrastructure/DeploymentBanner";
+import { InfrastructureBanner } from "@/components/infrastructure/InfrastructureBanner";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { QuickCreateMenu } from "@/components/layout/QuickCreateMenu";
 import { AssistantLauncher } from "@/components/assistant/AssistantLauncher";
@@ -51,7 +52,8 @@ export function Header({
   // app-shell-surface.test.ts.
   return (
     <>
-    <DeploymentBanner />
+    <InfrastructureBanner />
+    <DeploymentBanner showBanner={false} />
     <header className="h-16 bg-surface border-b border-hairline flex items-center justify-between gap-4 px-6">
       <button
         type="button"

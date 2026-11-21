@@ -106,6 +106,51 @@
         "title": "AccessLogListResponse",
         "type": "object"
       },
+      "ActiveOperationResponse": {
+        "properties": {
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "interrupted": {
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "title": "Interrupted",
+            "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "running",
+                  "recovery_required"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "busy"
+        ],
+        "title": "ActiveOperationResponse",
+        "type": "object"
+      },
       "ActivityFeedItem": {
         "properties": {
           "created_at": {
@@ -2906,6 +2951,17 @@
             },
             "title": "Modules With Additive",
             "type": "array"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
           },
           "realigned": {
             "anyOf": [
@@ -12428,6 +12484,298 @@
         "title": "OpenAlexContextResponse",
         "type": "object"
       },
+      "OperationListResponse": {
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "OperationListResponse",
+        "type": "object"
+      },
+      "OperationResources": {
+        "properties": {
+          "completed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Completed",
+            "type": "array"
+          },
+          "planned": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Planned",
+            "type": "array"
+          }
+        },
+        "title": "OperationResources",
+        "type": "object"
+      },
+      "OperationStep": {
+        "properties": {
+          "completed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "state"
+        ],
+        "title": "OperationStep",
+        "type": "object"
+      },
+      "OperationView": {
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "cancel_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Deadline"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "cancel_requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested By"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "outcome_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Seen At"
+          },
+          "partial_effects": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Effects"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "recovered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovered At"
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "started_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started By"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "stopping",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted",
+              "recovery_required"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/OperationStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "label",
+          "status",
+          "accepted_at"
+        ],
+        "title": "OperationView",
+        "type": "object"
+      },
       "OrphanedResourceListResponse": {
         "properties": {
           "items": {
@@ -16733,6 +17081,26 @@
           "created_at"
         ],
         "title": "RecommendationPayload",
+        "type": "object"
+      },
+      "RecoverRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RecoverRequest",
         "type": "object"
       },
       "RecoveryCheckItem": {
@@ -47444,6 +47812,24 @@
       "post": {
         "description": "Update cluster config, plan, and auto-apply.",
         "operationId": "update_cluster_config_api_v1_infrastructure_cluster_config_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47591,6 +47977,206 @@
         "summary": "Notebook Image Cancel",
         "tags": [
           "stack_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations": {
+      "get": {
+        "operationId": "list_operations_endpoint_api_v1_infrastructure_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Operations Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/active": {
+      "get": {
+        "operationId": "active_operation_endpoint_api_v1_infrastructure_operations_active_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Active Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}": {
+      "get": {
+        "operationId": "get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/recover": {
+      "post": {
+        "operationId": "recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recover Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/seen": {
+      "post": {
+        "operationId": "mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Operation Seen Endpoint",
+        "tags": [
+          "infrastructure_operations"
         ]
       }
     },
@@ -47843,6 +48429,24 @@
       "post": {
         "description": "Apply the named modules in the background, additive-only.\n\nUsed after the user reviews a plan that also contains destructive changes:\neach module is re-planned and only its create/update resources are applied\n(targeted), so a delete/replace is never carried out by this flow.",
         "operationId": "apply_infra_updates_endpoint_api_v1_infrastructure_stack_apply_updates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47887,6 +48491,24 @@
       "post": {
         "description": "Re-align deployed naming, re-plan every deployed module, and report the\npending changes split into additive vs destructive.\n\nWhen there are additive changes and no destructive (delete/replace) ones,\nthe additive resources start applying immediately in the background. When\na destructive change is present, nothing is auto-applied; the caller can\napply the additive subset via /apply-updates (which only ever targets\nadditive resources).",
         "operationId": "check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -47897,6 +48519,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Check Infra Updates Endpoint",
@@ -47984,6 +48616,24 @@
       "post": {
         "description": "Deploy the full compute stack via SSE stream.",
         "operationId": "stack_deploy_endpoint_api_v1_infrastructure_stack_deploy_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48031,6 +48681,24 @@
       "post": {
         "description": "Start a stack deploy in the background and return immediately.\n\nUsed by the setup wizard to kick off deployment without maintaining\nan SSE connection. The DeploymentBanner polls terraform status to\ntrack progress.",
         "operationId": "stack_deploy_background_endpoint_api_v1_infrastructure_stack_deploy_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48098,8 +48766,26 @@
     },
     "/api/v1/infrastructure/stack/destroy-storage": {
       "post": {
-        "description": "Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.\n\nOnly allowed when compute stack is torn down. Resets storage_uid so the\nnext deploy creates fresh bucket names (avoids GCS soft-delete conflicts).",
+        "description": "Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.\n\nOnly allowed when compute stack is torn down. A confirmed destroy retires\nthe storage generation so the next deploy creates new bucket names.",
         "operationId": "stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48147,6 +48833,24 @@
       "post": {
         "description": "Start storage destruction in the background and return immediately.",
         "operationId": "stack_destroy_storage_background_endpoint_api_v1_infrastructure_stack_destroy_storage_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48264,6 +48968,24 @@
       "post": {
         "description": "Teardown the compute stack via SSE stream.",
         "operationId": "stack_teardown_endpoint_api_v1_infrastructure_stack_teardown_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48311,6 +49033,24 @@
       "post": {
         "description": "Start a stack teardown in the background and return immediately.",
         "operationId": "stack_teardown_background_endpoint_api_v1_infrastructure_stack_teardown_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

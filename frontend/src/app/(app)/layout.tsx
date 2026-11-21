@@ -9,6 +9,7 @@ import { useBackendReady } from "@/hooks/useBackendReady";
 import { usePermissions, clearPermissionsCache } from "@/hooks/usePermissions";
 import { useComponents, invalidateComponentCache } from "@/hooks/useComponents";
 import { ToastProvider } from "@/components/shared/Toast";
+import { InfrastructureOperationsProvider } from "@/components/infrastructure/InfrastructureOperationsProvider";
 import { BootSplash } from "@/components/layout/BootSplash";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
 import { maintenanceMessage } from "@/components/layout/maintenanceMessage";
@@ -99,14 +100,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // app's only live region: before it, a failed mutation produced no message
     // and no announcement anywhere.
     <ToastProvider>
-      <div className="flex h-screen">
-        <Sidebar mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <Header onOpenNav={() => setNavOpen(true)} navOpen={navOpen} />
-          {maintenance && <MaintenanceBanner info={maintenance} />}
-          {children}
+      <InfrastructureOperationsProvider>
+        <div className="flex h-screen">
+          <Sidebar mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <Header onOpenNav={() => setNavOpen(true)} navOpen={navOpen} />
+            {maintenance && <MaintenanceBanner info={maintenance} />}
+            {children}
+          </div>
         </div>
-      </div>
+      </InfrastructureOperationsProvider>
       {/* Asks for the installation metrics choice while it is pending (ADR-075). */}
       <InstallMetricsPrompt />
     </ToastProvider>

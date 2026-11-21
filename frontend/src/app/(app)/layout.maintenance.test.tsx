@@ -9,7 +9,7 @@ jest.mock("next/navigation", () => ({ useRouter: () => ({ replace: jest.fn(), pu
 jest.mock("@/lib/auth", () => ({ isAuthenticated: () => true }));
 jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <nav /> }));
 jest.mock("@/components/layout/Header", () => ({ Header: () => <header /> }));
-jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ loading: false }) }));
+jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ loading: false, canAccess: () => false }) }));
 jest.mock("@/hooks/useComponents", () => ({ useComponents: () => ({ loading: false }) }));
 
 let state: Record<string, unknown> = {};

@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useInfrastructureAvailability } from "@/hooks/useInfrastructureOperations";
 
 /** The infrastructure permissions that gate mutations; reading needs only `view`. */
 export type InfrastructureAction = "configure" | "deploy" | "create";
@@ -39,6 +40,25 @@ export function usePermissionGate<A extends string>(resource: string) {
   return { allowed, reason, gate, stillAllowed };
 }
 
+/**
+ * The gate for controls that start infrastructure work (deploy, teardown, destroy, updates,
+ * builds, cluster changes, sync, initialize): the role's permission, and installation-wide
+ * availability. While an operation holds exclusion, or availability is not yet confirmed, every
+ * such control is unavailable for every admin, with the shared reason (mockup M3).
+ */
 export function useInfrastructureActions() {
-  return usePermissionGate<InfrastructureAction>("infrastructure");
+  const permission = usePermissionGate<InfrastructureAction>("infrastructure");
+  const { reason: busy } = useInfrastructureAvailability();
+
+  const allowed = (action: InfrastructureAction) => permission.allowed(action) && busy === null;
+  const reason = (action: InfrastructureAction): string | null => permission.reason(action) ?? busy;
+  const gate = (action: InfrastructureAction) => {
+    const why = reason(action);
+    return why ? { disabled: true, title: why } : {};
+  };
+  const latest = useRef(allowed);
+  latest.current = allowed;
+  const stillAllowed = (action: InfrastructureAction) => latest.current(action);
+
+  return { allowed, reason, gate, stillAllowed };
 }

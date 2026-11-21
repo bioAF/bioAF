@@ -193,6 +193,11 @@ function invalidResponse(status: number): ApiError {
 
 export interface RequestControls {
   signal?: AbortSignal;
+  /**
+   * Sent as the Idempotency-Key header: retries of one confirmed action reuse it, so the server
+   * replays the same operation instead of starting another (ADR-050).
+   */
+  idempotencyKey?: string;
 }
 
 interface SendOptions extends RequestControls {
@@ -219,6 +224,9 @@ async function send(path: string, owner: Owner, options: SendOptions = {}): Prom
   }
   if (options.accept) {
     headers["Accept"] = options.accept;
+  }
+  if (options.idempotencyKey) {
+    headers["Idempotency-Key"] = options.idempotencyKey;
   }
   if (sentToken) {
     headers["Authorization"] = `Bearer ${sentToken}`;
@@ -681,7 +689,12 @@ export const api = {
   getWithRetry: <T>(path: string, retries?: number, controls?: RequestControls) =>
     fetchWithRetry<T>(path, retries, undefined, controls),
   post: <T>(path: string, body?: unknown, controls?: RequestControls) =>
-    fetchJson<T>(path, { method: "POST", json: body, signal: controls?.signal }),
+    fetchJson<T>(path, {
+      method: "POST",
+      json: body,
+      signal: controls?.signal,
+      idempotencyKey: controls?.idempotencyKey,
+    }),
   patch: <T>(path: string, body?: unknown, controls?: RequestControls) =>
     fetchJson<T>(path, { method: "PATCH", json: body, signal: controls?.signal }),
   put: <T>(path: string, body?: unknown, controls?: RequestControls) =>

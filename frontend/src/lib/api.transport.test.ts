@@ -686,3 +686,17 @@ describe("external uploads keep their own protocol", () => {
     expect(mockNavigateToLogin).not.toHaveBeenCalled();
   });
 });
+
+describe("idempotency keys", () => {
+  test("a POST sends its Idempotency-Key so a retried action replays the same operation", async () => {
+    respondWith(200, { json: { operation_id: 7 } });
+    await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true }, { idempotencyKey: "k-1" });
+    expect(headersOf(lastFetch().init)["Idempotency-Key"]).toBe("k-1");
+  });
+
+  test("a POST without one sends no Idempotency-Key", async () => {
+    respondWith(200, { json: {} });
+    await api.post("/api/x", { a: 1 });
+    expect(headersOf(lastFetch().init)["Idempotency-Key"]).toBeUndefined();
+  });
+});

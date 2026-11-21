@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { useStartInfrastructureAction } from "@/hooks/useStartInfrastructureAction";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -51,6 +52,7 @@ export function ClusterStatusCard({
 }) {
   const { has } = useCapabilities();
   const actions = useInfrastructureActions();
+  const startAction = useStartInfrastructureAction();
   const configureReason = actions.reason("configure");
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showSpotTooltip, setShowSpotTooltip] = useState(false);
@@ -120,7 +122,12 @@ export function ClusterStatusCard({
     setConfigError("");
     setConfigSaving(true);
     try {
-      await api.post("/api/v1/infrastructure/cluster/config", configEdits);
+      const operationId = await startAction(
+        "/api/v1/infrastructure/cluster/config",
+        configEdits,
+        "cluster settings change",
+      );
+      if (operationId === null) return;
       setConfigEdits({});
       setShowConfigPanel(false);
       onApplied();

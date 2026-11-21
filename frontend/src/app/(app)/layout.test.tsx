@@ -29,7 +29,7 @@ let backendReady = true;
 let permissionsLoading = false;
 let componentsLoading = false;
 jest.mock("@/hooks/useBackendReady", () => ({ useBackendReady: () => ({ ready: backendReady }) }));
-jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ loading: permissionsLoading }) }));
+jest.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ loading: permissionsLoading, canAccess: () => false }) }));
 jest.mock("@/hooks/useComponents", () => ({ useComponents: () => ({ loading: componentsLoading }) }));
 
 import AppLayout from "./layout";
