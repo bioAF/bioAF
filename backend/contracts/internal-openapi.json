@@ -34049,7 +34049,7 @@
     },
     "/api/files/uploads/pending": {
       "get": {
-        "description": "Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit.",
+        "description": "Uploads that need following: stored but not yet filed, cancelled but not yet confirmed\nstopped, or whose outcome storage could not confirm. The caller's own, or everyone's for\nfiles edit.",
         "operationId": "pending_uploads_api_files_uploads_pending_get",
         "responses": {
           "200": {

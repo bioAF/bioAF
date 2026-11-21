@@ -222,7 +222,9 @@ class PendingUpload(BaseModel):
     filename: str
     reference: str
     stage: str
-    # "retrying": bioAF will try again automatically; "needs_attention": retries ran out.
+    # "retrying": bioAF will try again automatically; "needs_attention": retries ran out;
+    # "stopping": cancelled, waiting for storage to confirm nothing more can arrive;
+    # "unconfirmed": storage could not confirm the upload stopped (an administrator may release it).
     state: str
     attempts: int
     next_attempt_at: datetime | None = None
@@ -256,8 +258,12 @@ async def pending_uploads(
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit."""
-    from sqlalchemy import select
+    """Uploads that need following: stored but not yet filed, cancelled but not yet confirmed
+    stopped, or whose outcome storage could not confirm. The caller's own, or everyone's for
+    files edit."""
+    from sqlalchemy import and_, or_, select
+
+    from app.services.upload_settlement import UNCONFIRMED
 
     from app.models.experiment import Experiment
     from app.models.user import User
@@ -268,7 +274,10 @@ async def pending_uploads(
         .outerjoin(User, User.id == UploadCheckpoint.user_id)
         .where(
             UploadCheckpoint.organization_id == int(current_user["org_id"]),
-            UploadCheckpoint.stage == "received",
+            or_(
+                UploadCheckpoint.stage.in_(("received", "cancelling")),
+                and_(UploadCheckpoint.stage == "issued", UploadCheckpoint.last_error_category.in_(UNCONFIRMED)),
+            ),
         )
         .order_by(UploadCheckpoint.created_at)
     )
@@ -282,7 +291,7 @@ async def pending_uploads(
                 filename=cp.filename,
                 reference=cp.reference,
                 stage=cp.stage,
-                state="retrying" if cp.next_attempt_at is not None else "needs_attention",
+                state=_attention_state(cp),
                 attempts=cp.attempts,
                 next_attempt_at=cp.next_attempt_at,
                 experiment_id=cp.experiment_id,
@@ -294,6 +303,14 @@ async def pending_uploads(
             for cp, exp_name, user_name, user_email in rows
         ]
     )
+
+
+def _attention_state(cp: UploadCheckpoint) -> str:
+    from app.services.upload_settlement import needs_release
+
+    if cp.stage in ("issued", "cancelling"):
+        return "unconfirmed" if needs_release(cp) else "stopping"
+    return "retrying" if cp.next_attempt_at is not None else "needs_attention"
 
 
 @router.post("/uploads/{upload_id}/retry", response_model=FileResponse)

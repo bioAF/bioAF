@@ -475,3 +475,27 @@ def test_reconciliation_runs_every_minute():
 
     job = next(j for j in PERIODIC_JOBS if j.role == "upload-session-reconcile")
     assert (job.first_delay, job.interval) == (60, 60)
+
+
+# ---------------------------------------------------------------------------
+# the attention list shows uploads still settling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_attention_list_shows_stopping_and_unconfirmed_uploads(
+    client, admin_token, bench_token, storage, store, session
+):
+    unconfirmed = await _unconfirmed(client, admin_token, session, store)
+    stopping = (await _initiate(client, admin_token))["upload_id"]
+    store.cancel_answers = [_status("unknown")]
+    await client.post(f"/api/files/uploads/{stopping}/cancel", headers=_auth(admin_token))
+    running = (await _initiate(client, admin_token))["upload_id"]
+
+    rows = (await client.get("/api/files/uploads/pending", headers=_auth(admin_token))).json()["uploads"]
+    states = {r["upload_id"]: r["state"] for r in rows}
+    assert states == {stopping: "stopping", unconfirmed: "unconfirmed"}
+    assert running not in states
+    assert all("session" not in str(r).lower() or "SECRET" not in str(r) for r in rows)
+    bench_rows = (await client.get("/api/files/uploads/pending", headers=_auth(bench_token))).json()["uploads"]
+    assert bench_rows == []

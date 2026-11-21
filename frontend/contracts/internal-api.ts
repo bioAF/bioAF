@@ -2205,7 +2205,9 @@ export interface paths {
         };
         /**
          * Pending Uploads
-         * @description Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit.
+         * @description Uploads that need following: stored but not yet filed, cancelled but not yet confirmed
+         *     stopped, or whose outcome storage could not confirm. The caller's own, or everyone's for
+         *     files edit.
          */
         get: operations["pending_uploads_api_files_uploads_pending_get"];
         put?: never;
