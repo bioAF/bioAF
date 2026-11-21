@@ -132,9 +132,10 @@ async def prepare_experiment_export(
         raise NotFoundError(f"Experiment {experiment_id} not found")
 
     async def plan(archive: ArchivePlan, job: ExportJob) -> None:
-        await _plan_experiment(
-            session, archive, job, content, content.root, org_id, user_email, include_fastq, include_provenance
+        report = (
+            await _admit_report(session, "experiment", content.id, org_id, user_email) if include_provenance else None
         )
+        await _plan_experiment(session, archive, job, content, content.root, user_email, include_fastq, report)
 
     return await _prepare(
         session, list(content.files), include_fastq, plan, _filename(content.name, "experiment"), started
@@ -166,16 +167,27 @@ async def prepare_project_export(
     root = content.root
 
     async def plan(archive: ArchivePlan, job: ExportJob) -> None:
+        project_report = None
+        if include_provenance:
+            # Admit every report before rendering any, so a report too large to include refuses the
+            # export before work is spent on the others. Experiment reports are gathered again when
+            # rendered rather than held: a project may have thousands.
+            for experiment in content.experiments:
+                await _admit_report(session, "experiment", experiment.id, org_id, user_email)
+            project_report = await _admit_report(session, "project", content.id, org_id, user_email)
         archive.add_generated(f"{root}/README.txt", _build_project_readme(content, user_email))
         for experiment in content.experiments:
             exp_root = f"{root}/experiments/{experiment.root}"
-            await _plan_experiment(
-                session, archive, job, experiment, exp_root, org_id, user_email, include_fastq, include_provenance
+            report = (
+                await _admit_report(session, "experiment", experiment.id, org_id, user_email)
+                if include_provenance
+                else None
             )
+            await _plan_experiment(session, archive, job, experiment, exp_root, user_email, include_fastq, report)
         for file in content.files:
             archive.add_file(root, file)
-        if include_provenance:
-            archive.add_generated(*await _provenance(session, job, "project", content.id, org_id, user_email, root))
+        if project_report is not None:
+            archive.add_generated(*await _render_report(job, "project", content.id, project_report, root))
 
     return await _prepare(
         session, list(content.all_files), include_fastq, plan, _filename(content.name, "project"), started
@@ -224,18 +236,18 @@ async def _plan_experiment(
     job: ExportJob,
     content: ExperimentContent,
     root: str,
-    org_id: int,
     user_email: str,
     include_fastq: bool,
-    include_provenance: bool,
+    report: dict | None,
 ) -> None:
-    archive.add_generated(f"{root}/README.txt", _build_readme(content, user_email, include_fastq, include_provenance))
+    """``report`` is the experiment's admitted provenance report, or None when none was requested."""
+    archive.add_generated(f"{root}/README.txt", _build_readme(content, user_email, include_fastq, report is not None))
     manifest = await selection.write_sample_manifest(session, content.id, limit_bytes=archive.generated_remaining)
     archive.add_generated(f"{root}/sample_manifest.csv", manifest)
     for file in content.files:
         archive.add_file(root, file)
-    if include_provenance:
-        archive.add_generated(*await _provenance(session, job, "experiment", content.id, org_id, user_email, root))
+    if report is not None:
+        archive.add_generated(*await _render_report(job, "experiment", content.id, report, root))
 
 
 _PROVENANCE_FAILED = (
@@ -251,19 +263,11 @@ def _report_too_large(entity_type: str, what: str) -> ExportLimitError:
     )
 
 
-async def _provenance(
-    session: AsyncSession,
-    job: ExportJob,
-    entity_type: str,
-    entity_id: int,
-    org_id: int,
-    user_email: str,
-    root: str,
-) -> tuple[str, bytes]:
-    """The requested provenance report as an archive member; failing to make it fails the export.
+async def _admit_report(session: AsyncSession, entity_type: str, entity_id: int, org_id: int, user_email: str) -> dict:
+    """The requested provenance report's data, admitted for rendering; failing to gather it fails the export.
 
-    Bounded before the expensive work (every gathered collection before it is read, the report's
-    size before rendering) and rendered in the job's owned worker thread, off the event loop.
+    Bounded before the expensive work: every gathered collection before it is read, the report's
+    size before it can be rendered.
     """
     budget = GatherBudget(max_rows=resources.PROVENANCE_MAX_ROWS, max_bytes=resources.PROVENANCE_MAX_ROW_BYTES)
     try:
@@ -287,6 +291,13 @@ async def _provenance(
             entity_type,
             f"{size // 1024:,} KiB of report data; the limit is {resources.PROVENANCE_MAX_REPORT_BYTES // 1024:,} KiB",
         )
+    return gathered
+
+
+async def _render_report(
+    job: ExportJob, entity_type: str, entity_id: int, gathered: dict, root: str
+) -> tuple[str, bytes]:
+    """An admitted report rendered as an archive member in the job's owned worker thread, off the event loop."""
 
     def render():
         try:
