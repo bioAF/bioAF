@@ -31,16 +31,33 @@ class FileOrganizationService:
         return None
 
     @staticmethod
+    async def planned_location(session: AsyncSession, source_uri: str, experiment_id: int, filename: str) -> str:
+        """Where a file assigned to ``experiment_id`` is stored: the raw bucket's experiment prefix
+        (the source bucket when no raw bucket is configured)."""
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
+        source_bucket, _ = adapter.parse_uri(source_uri)
+        dest_bucket = raw_bucket or source_bucket
+        new_prefix = GcsStorageService.build_experiment_prefix(experiment_id)
+        return adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
+
+    @staticmethod
     async def assign_file_to_experiment(
         session: AsyncSession,
         file_id: int,
         experiment_id: int,
         user_id: int,
+        *,
+        commit: bool = True,
     ) -> None:
         """Assign (or reassign) a file to an experiment.
 
         If the file is already assigned to another experiment, this acts
         as a reassignment, moving the file between experiment prefixes.
+        ``commit=False`` leaves the transaction to the caller (upload filing records the File
+        and its move together, so neither is committed without the other).
         """
         row = (
             await session.execute(
@@ -58,15 +75,10 @@ class FileOrganizationService:
             await FileOrganizationService.reassign_file_to_experiment(session, file_id, experiment_id, user_id)
             return
 
-        # Use raw bucket as destination; fall back to source bucket
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
-        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = adapter.parse_uri(old_uri)
-        dest_bucket = raw_bucket or source_bucket
-        new_prefix = GcsStorageService.build_experiment_prefix(experiment_id)
-        new_uri = adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
+        new_uri = await FileOrganizationService.planned_location(session, old_uri, experiment_id, filename)
 
         # Move file in GCS if URIs differ
         if old_uri != new_uri:
@@ -110,7 +122,8 @@ class FileOrganizationService:
                 "new_uri": new_uri,
             },
         )
-        await session.commit()
+        if commit:
+            await session.commit()
 
     @staticmethod
     async def reassign_file_to_experiment(

@@ -25,7 +25,8 @@ from app.services.sequencing_identity import (
     parse_illumina_filename,
     read_type_from_filename,
 )
-from app.services.upload_service import UploadService, _pending_uploads
+from app.services.upload_service import UploadService
+from tests.support.uploads import seed_signed_upload
 
 
 def test_an_index_read_is_parsed():
@@ -131,18 +132,19 @@ def test_the_sheet_builder_reads_a_name_through_the_same_parser():
 
 async def _complete_upload(session, admin_user, filename: str):
     upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = {
-        "org_id": admin_user.organization_id,
-        "user_id": admin_user.id,
-        "filename": filename,
-        "gcs_uri": f"gs://bioaf-ingest-test/uploads/{upload_id}/{filename}",
-        "expected_size": None,
-        "expected_md5": None,
-        "project_id": None,
-        "experiment_id": None,
-        "sample_ids": [],
-        "is_global": False,
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        filename=filename,
+        gcs_uri=f"gs://bioaf-ingest-test/uploads/{upload_id}/{filename}",
+        expected_size=None,
+        expected_md5=None,
+        project_id=None,
+        experiment_id=None,
+        sample_ids=[],
+        is_global=False,
+    )
     return await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "")
 
 

@@ -315,6 +315,57 @@ async def confirm_storage_buckets(
 
 
 # ---------------------------------------------------------------------------
+# Storage write admission (D5, mockups M7 and M11)
+# ---------------------------------------------------------------------------
+
+
+class StorageWritesResponse(BaseModel):
+    # New uploads are refused until an administrator allows them or storage destroy runs again.
+    paused: bool
+    since: datetime | None = None
+    operation_id: int | None = None
+
+
+async def _writes_response(session: AsyncSession) -> StorageWritesResponse:
+    from app.services.storage_write_admission import paused
+
+    state = await paused(session)
+    if state is None:
+        return StorageWritesResponse(paused=False)
+    since = state.get("since")
+    return StorageWritesResponse(
+        paused=True,
+        since=datetime.fromisoformat(since) if since else None,
+        operation_id=state.get("operation_id"),
+    )
+
+
+@router.get("/api/v1/infrastructure/storage/writes", response_model=StorageWritesResponse)
+async def storage_writes_status(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> StorageWritesResponse:
+    return await _writes_response(session)
+
+
+@router.post("/api/v1/infrastructure/storage/writes/allow", response_model=StorageWritesResponse)
+async def allow_storage_writes(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+) -> StorageWritesResponse:
+    """Reopen uploads after a refused or failed storage destroy, without destroying anything (Allow uploads)."""
+    from app.services import infrastructure_operations as ops
+    from app.services.storage_write_admission import allow_writes
+
+    active = await ops.active_operation(session)
+    if active is not None and active.action == "storage_destroy":
+        raise HTTPException(status_code=409, detail="Uploads cannot be allowed while storage destroy runs.")
+    await allow_writes(session, int(current_user["sub"]))
+    await session.commit()
+    return await _writes_response(session)
+
+
+# ---------------------------------------------------------------------------
 # File assignment endpoints
 # ---------------------------------------------------------------------------
 

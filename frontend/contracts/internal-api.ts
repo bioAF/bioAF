@@ -2196,6 +2196,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/uploads/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pending Uploads
+         * @description Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit.
+         */
+        get: operations["pending_uploads_api_files_uploads_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Pending Upload
+         * @description Remove an unfiled upload: its stored copy is deleted and nothing is added.
+         */
+        post: operations["cancel_pending_upload_api_files_uploads__upload_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Pending Upload
+         * @description Retry filing a received upload now. 202 with the reference if it still cannot be filed.
+         */
+        post: operations["retry_pending_upload_api_files_uploads__upload_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{file_id}": {
         parameters: {
             query?: never;
@@ -7638,6 +7698,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/storage/writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage Writes Status */
+        get: operations["storage_writes_status_api_v1_infrastructure_storage_writes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/writes/allow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow Storage Writes
+         * @description Reopen uploads after a refused or failed storage destroy, without destroying anything (Allow uploads).
+         */
+        post: operations["allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/terraform/abandon/{run_id}": {
         parameters: {
             query?: never;
@@ -13057,6 +13154,41 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** PendingUpload */
+        PendingUpload: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Experiment Id */
+            experiment_id?: number | null;
+            /** Experiment Name */
+            experiment_name?: string | null;
+            /** Filename */
+            filename: string;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Reference */
+            reference: string;
+            /** Stage */
+            stage: string;
+            /** State */
+            state: string;
+            /** Upload Id */
+            upload_id: string;
+            /** Uploaded By */
+            uploaded_by?: string | null;
+            /** Uploaded By User Id */
+            uploaded_by_user_id?: number | null;
+        };
+        /** PendingUploadsResponse */
+        PendingUploadsResponse: {
+            /** Uploads */
+            uploads: components["schemas"]["PendingUpload"][];
+        };
         /** PermissionDetail */
         PermissionDetail: {
             /** Granted */
@@ -16479,6 +16611,15 @@ export interface components {
              * @default 0
              */
             unconfirmed: number;
+        };
+        /** StorageWritesResponse */
+        StorageWritesResponse: {
+            /** Operation Id */
+            operation_id?: number | null;
+            /** Paused */
+            paused: boolean;
+            /** Since */
+            since?: string | null;
         };
         /** StoreHealthItem */
         StoreHealthItem: {
@@ -21556,6 +21697,86 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["Body_simple_upload_api_files_upload_simple_post"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pending_uploads_api_files_uploads_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingUploadsResponse"];
+                };
+            };
+        };
+    };
+    cancel_pending_upload_api_files_uploads__upload_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_pending_upload_api_files_uploads__upload_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -32325,6 +32546,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageDeployResponse"];
+                };
+            };
+        };
+    };
+    storage_writes_status_api_v1_infrastructure_storage_writes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageWritesResponse"];
+                };
+            };
+        };
+    };
+    allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageWritesResponse"];
                 };
             };
         };

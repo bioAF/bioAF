@@ -191,7 +191,10 @@ class LabDocumentUploadService:
         origin: str | None = None,
     ) -> dict:
         from app.adapters.registry import get_storage_adapter
+        from app.services.storage_write_admission import require_writes_open
 
+        # Refused before any upload session is created while storage is being changed (D5).
+        await require_writes_open(session)
         token = str(uuid.uuid4())
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         gcs_path = f"{PREFIX}/uploads/{token}/{file_name}"
@@ -401,6 +404,9 @@ class LabDocumentUploadService:
         from app.models.lab_document import LabDocumentVersion
         from app.services.lab_document_service import LabDocumentService
 
+        from app.services.storage_write_admission import require_writes_open
+
+        await require_writes_open(session)
         fetch = fetch_override or LabDocumentUploadService._fetch_url
         content, fetched_name, mime_type = await fetch(url)
         name = fetched_name or "document"

@@ -1,0 +1,149 @@
+"""Write admission for the installation's storage (approved D5, mockup M11).
+
+Before storage destroy deletes anything it closes admission: new uploads are refused before any byte
+reaches storage and before any signed URL is issued. Uploads already running get up to 30 seconds to
+finish; if any are still running, or bioAF cannot tell (a signed URL was issued and never reported
+back), destroy stops before deleting anything and uploads stay paused until an administrator allows
+them again or runs Destroy Storage again. Running uploads are never cut off, and unfinished uploads
+are kept.
+
+A signed URL's expiry is not proof its upload finished: a transfer that started before expiry can
+still land. Only a recorded completion, a confirmed cancellation, or an administrator's cancellation
+of the upload settles it.
+
+The paused state is durable (platform_config ``storage_writes_paused``) so a restart keeps it.
+Proxied transfers in flight are tracked in this process: the supported deployment has one serving
+process.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.exceptions import ConflictError
+from app.platform.platform_config_service import PlatformConfigService
+
+logger = logging.getLogger("bioaf.storage_write_admission")
+
+PAUSED_KEY = "storage_writes_paused"
+DRAIN_SECONDS = 30.0
+UPLOADS_PAUSED = (
+    "Uploads are paused. An administrator is changing storage. Your files have not been sent. Try again later."
+)
+
+# Proxied uploads streaming through this process: checkpoint ID -> start time.
+_in_flight: dict[str, datetime] = {}
+
+
+class UploadsPausedError(ConflictError):
+    """New uploads are refused while storage is being changed."""
+
+    code = "uploads_paused"
+
+
+@dataclass(frozen=True)
+class OutstandingWriter:
+    upload_id: str
+    user_id: int | None
+    experiment_id: int | None
+    filename: str
+    started_at: datetime
+    kind: str
+
+
+async def paused(session: AsyncSession) -> dict | None:
+    value = await PlatformConfigService.get(session, PAUSED_KEY)
+    if not value or value == "null":
+        return None
+    try:
+        return json.loads(value)
+    except ValueError:
+        return {"since": None}
+
+
+async def require_writes_open(session: AsyncSession) -> None:
+    """Refuse a new upload while storage writes are paused, before any byte is stored."""
+    if await paused(session) is not None:
+        raise UploadsPausedError(UPLOADS_PAUSED)
+
+
+async def pause_writes(session: AsyncSession, operation_id: int | None) -> None:
+    """Close admission. Committed by the caller before waiting for running uploads."""
+    if await paused(session) is None:
+        await PlatformConfigService.set(
+            session,
+            PAUSED_KEY,
+            json.dumps({"operation_id": operation_id, "since": datetime.now(timezone.utc).isoformat()}),
+        )
+        logger.info("Storage writes paused for operation %s", operation_id)
+
+
+async def allow_writes(session: AsyncSession, user_id: int | None = None) -> bool:
+    """Reopen uploads. Returns whether they were paused. The caller commits."""
+    from app.services.audit_service import log_action
+
+    if await paused(session) is None:
+        return False
+    await PlatformConfigService.set(session, PAUSED_KEY, None)
+    if user_id is not None:
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="infrastructure",
+            entity_id=0,
+            action="storage_writes_allowed",
+            details={},
+        )
+    logger.info("Storage writes reopened")
+    return True
+
+
+@asynccontextmanager
+async def tracked_transfer(upload_id: str) -> AsyncIterator[None]:
+    """Mark a proxied transfer as running in this process for the duration of the block."""
+    _in_flight[upload_id] = datetime.now(timezone.utc)
+    try:
+        yield
+    finally:
+        _in_flight.pop(upload_id, None)
+
+
+async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
+    """Uploads that may still write: transfers in flight and signed URLs never reported back."""
+    from app.models.upload_checkpoint import UploadCheckpoint
+
+    rows = (
+        await session.execute(select(UploadCheckpoint).where(UploadCheckpoint.stage.in_(("issued", "transferring"))))
+    ).scalars()
+    writers = [
+        OutstandingWriter(r.id, r.user_id, r.experiment_id, r.filename, r.created_at, r.kind)
+        for r in rows
+        if r.stage == "issued" or r.id in _in_flight
+    ]
+    # A proxied transfer this process is running but whose checkpoint is not visible yet.
+    known = {w.upload_id for w in writers}
+    for upload_id, started in list(_in_flight.items()):
+        if upload_id not in known:
+            writers.append(OutstandingWriter(upload_id, None, None, "", started, "proxied"))
+    return writers
+
+
+async def drain(session_factory, seconds: float = DRAIN_SECONDS, interval: float = 1.0) -> list[OutstandingWriter]:
+    """Wait up to ``seconds`` for running uploads to settle; return the ones that did not."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while True:
+        async with session_factory() as session:
+            remaining = await outstanding_writers(session)
+        if not remaining or loop.time() >= deadline:
+            return remaining
+        await asyncio.sleep(min(interval, max(0.0, deadline - loop.time())))

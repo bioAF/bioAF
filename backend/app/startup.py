@@ -440,6 +440,18 @@ async def infrastructure_operations(ctx: StartupContext) -> None:
         logger.info("Reconciled infrastructure operations after restart: %s", counts)
 
 
+async def interrupted_uploads(ctx: StartupContext) -> None:
+    """Settle proxied uploads a restart cut off (storage lifecycle 11F)."""
+    from app.database import async_session_factory
+    from app.services.upload_service import reconcile_transfers_on_startup
+
+    async with async_session_factory() as session:
+        counts = await reconcile_transfers_on_startup(session)
+        await session.commit()
+    if any(counts.values()):
+        logger.info("Reconciled uploads interrupted by the restart: %s", counts)
+
+
 async def install_metrics(ctx: StartupContext) -> None:
     """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
     from app.database import async_session_factory
@@ -521,6 +533,7 @@ NORMAL_STEPS = [
         "optional",
         "Could not reconcile infrastructure operations after restart: %s",
     ),
+    Step("interrupted_uploads", interrupted_uploads, "optional", "Could not reconcile interrupted uploads: %s"),
     Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
 ]
 

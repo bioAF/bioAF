@@ -13188,6 +13188,122 @@
         "title": "PendingAutoRunResponse",
         "type": "object"
       },
+      "PendingUpload": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "experiment_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Name"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "uploaded_by_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By User Id"
+          }
+        },
+        "required": [
+          "upload_id",
+          "filename",
+          "reference",
+          "stage",
+          "state",
+          "attempts",
+          "created_at"
+        ],
+        "title": "PendingUpload",
+        "type": "object"
+      },
+      "PendingUploadsResponse": {
+        "properties": {
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/PendingUpload"
+            },
+            "title": "Uploads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "uploads"
+        ],
+        "title": "PendingUploadsResponse",
+        "type": "object"
+      },
       "PermissionDetail": {
         "properties": {
           "granted": {
@@ -24350,6 +24466,42 @@
         "title": "StorageHealthResponse",
         "type": "object"
       },
+      "StorageWritesResponse": {
+        "properties": {
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "StorageWritesResponse",
+        "type": "object"
+      },
       "StoreHealthItem": {
         "properties": {
           "basis": {
@@ -33617,6 +33769,107 @@
           }
         },
         "summary": "Simple Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/pending": {
+      "get": {
+        "description": "Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit.",
+        "operationId": "pending_uploads_api_files_uploads_pending_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingUploadsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pending Uploads",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/cancel": {
+      "post": {
+        "description": "Remove an unfiled upload: its stored copy is deleted and nothing is added.",
+        "operationId": "cancel_pending_upload_api_files_uploads__upload_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Pending Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/retry": {
+      "post": {
+        "description": "Retry filing a received upload now. 202 with the reference if it still cannot be filed.",
+        "operationId": "retry_pending_upload_api_files_uploads__upload_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Pending Upload",
         "tags": [
           "files"
         ]
@@ -49141,6 +49394,49 @@
           }
         },
         "summary": "Update Storage",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes": {
+      "get": {
+        "operationId": "storage_writes_status_api_v1_infrastructure_storage_writes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageWritesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Storage Writes Status",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes/allow": {
+      "post": {
+        "description": "Reopen uploads after a refused or failed storage destroy, without destroying anything (Allow uploads).",
+        "operationId": "allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageWritesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Allow Storage Writes",
         "tags": [
           "storage_deploy"
         ]

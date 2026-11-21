@@ -59,13 +59,13 @@ async def _experiment(session):
     return exp
 
 
-def _assert_safe(resp, caplog, *, expected_detail: str) -> str:
-    assert resp.status_code == 500
+def _assert_safe(resp, caplog, *, expected_detail: str, status: int = 500, code: str = "upload_failed") -> str:
+    assert resp.status_code == status
     body = resp.json()
     text = resp.text
     for marker in SENSITIVE:
         assert marker not in text
-    assert body["code"] == "upload_failed"
+    assert body["code"] == code
     reference = body["details"]["reference"]
     assert REFERENCE.fullmatch(reference)
     assert body["detail"] == expected_detail.format(ref=reference)
@@ -77,7 +77,11 @@ def _assert_safe(resp, caplog, *, expected_detail: str) -> str:
 
 
 TRANSFER_FAILED = "Upload failed because storage did not respond. Nothing was saved. Try again. Reference {ref}."
-FILING_FAILED = "Upload failed. Try again. Reference {ref}."
+# A filing failure keeps the received bytes and retries them (storage lifecycle 11F, mockup M12).
+FILING_PENDING = (
+    "Received, not yet filed. Your file is stored safely but could not be added to Leak yet. "
+    "bioAF will try again automatically. Reference {ref}."
+)
 
 
 @pytest.mark.asyncio
@@ -104,7 +108,7 @@ async def test_simple_upload_move_failure_is_sanitized(client, admin_token, stor
             files={"file": ("b.fastq.gz", io.BytesIO(b"data"), "application/gzip")},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    _assert_safe(resp, caplog, expected_detail=FILING_FAILED)
+    _assert_safe(resp, caplog, expected_detail=FILING_PENDING, status=202, code="upload_received_not_filed")
 
 
 @pytest.mark.asyncio
@@ -124,7 +128,7 @@ async def test_signed_upload_completion_failure_is_sanitized(client, admin_token
             json={"upload_id": init.json()["upload_id"], "actual_md5": "0" * 32},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    _assert_safe(resp, caplog, expected_detail=FILING_FAILED)
+    _assert_safe(resp, caplog, expected_detail=FILING_PENDING, status=202, code="upload_received_not_filed")
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,16 @@
 from collections.abc import Sequence
+from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.pagination import PageNumber, UnboundedPageSize
 from app.api.content_access import file_for_content
-from app.api.dependencies import require_permission
+from app.api.dependencies import has_effective_permission, require_permission
+from app.models.upload_checkpoint import UploadCheckpoint
 from app.database import get_session
 from app.exceptions import DomainError
 from app.schemas.data_search import DataSearchItem, DataSearchResponse
@@ -178,6 +181,123 @@ async def simple_upload(
     await session.commit()
     result = await FileService.get_file(session, result.id, org_id)
     return (await _file_responses(session, [result], provenance=False))[0]
+
+
+# ---------------------------------------------------------------------------
+# Uploads received but not yet filed (mockup M12)
+# ---------------------------------------------------------------------------
+
+
+class PendingUpload(BaseModel):
+    upload_id: str
+    filename: str
+    reference: str
+    stage: str
+    # "retrying": bioAF will try again automatically; "needs_attention": retries ran out.
+    state: str
+    attempts: int
+    next_attempt_at: datetime | None = None
+    experiment_id: int | None = None
+    experiment_name: str | None = None
+    uploaded_by: str | None = None
+    uploaded_by_user_id: int | None = None
+    created_at: datetime
+
+
+class PendingUploadsResponse(BaseModel):
+    uploads: list[PendingUpload]
+
+
+async def _can_manage_all_uploads(session: AsyncSession, user: dict) -> bool:
+    """Admins and comp_bio (files edit) see and act on everyone's pending uploads (M12-a)."""
+    return await has_effective_permission(session, user, "files", "edit")
+
+
+async def _pending_checkpoint(session: AsyncSession, user: dict, upload_id: str) -> UploadCheckpoint:
+    checkpoint = await session.get(UploadCheckpoint, upload_id)
+    if checkpoint is None or checkpoint.organization_id != int(user["org_id"]):
+        raise HTTPException(404, "Upload not found")
+    if checkpoint.user_id != int(user["sub"]) and not await _can_manage_all_uploads(session, user):
+        raise HTTPException(404, "Upload not found")
+    return checkpoint
+
+
+@router.get("/uploads/pending", response_model=PendingUploadsResponse)
+async def pending_uploads(
+    current_user: dict = require_permission("files", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Uploads whose bytes are stored but not yet filed: the caller's own, or everyone's for files edit."""
+    from sqlalchemy import select
+
+    from app.models.experiment import Experiment
+    from app.models.user import User
+
+    query = (
+        select(UploadCheckpoint, Experiment.name, User.name, User.email)
+        .outerjoin(Experiment, Experiment.id == UploadCheckpoint.experiment_id)
+        .outerjoin(User, User.id == UploadCheckpoint.user_id)
+        .where(
+            UploadCheckpoint.organization_id == int(current_user["org_id"]),
+            UploadCheckpoint.stage == "received",
+        )
+        .order_by(UploadCheckpoint.created_at)
+    )
+    if not await _can_manage_all_uploads(session, current_user):
+        query = query.where(UploadCheckpoint.user_id == int(current_user["sub"]))
+    rows = (await session.execute(query)).all()
+    return PendingUploadsResponse(
+        uploads=[
+            PendingUpload(
+                upload_id=cp.id,
+                filename=cp.filename,
+                reference=cp.reference,
+                stage=cp.stage,
+                state="retrying" if cp.next_attempt_at is not None else "needs_attention",
+                attempts=cp.attempts,
+                next_attempt_at=cp.next_attempt_at,
+                experiment_id=cp.experiment_id,
+                experiment_name=exp_name,
+                uploaded_by=user_name or user_email,
+                uploaded_by_user_id=cp.user_id,
+                created_at=cp.created_at,
+            )
+            for cp, exp_name, user_name, user_email in rows
+        ]
+    )
+
+
+@router.post("/uploads/{upload_id}/retry", response_model=FileResponse)
+async def retry_pending_upload(
+    upload_id: str,
+    current_user: dict = require_permission("files", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Retry filing a received upload now. 202 with the reference if it still cannot be filed."""
+    org_id = int(current_user["org_id"])
+    await _pending_checkpoint(session, current_user, upload_id)
+    try:
+        file = await UploadService.retry_upload(session, org_id, upload_id)
+    except DomainError:
+        raise
+    except Exception as exc:
+        raise upload_failure("retry", exc) from None
+    await session.commit()
+    file = await FileService.get_file(session, file.id, org_id)
+    return (await _file_responses(session, [file], provenance=False))[0]
+
+
+@router.post("/uploads/{upload_id}/cancel", status_code=204)
+async def cancel_pending_upload(
+    upload_id: str,
+    current_user: dict = require_permission("files", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Remove an unfiled upload: its stored copy is deleted and nothing is added."""
+    await _pending_checkpoint(session, current_user, upload_id)
+    await UploadService.cancel_upload(session, int(current_user["org_id"]), upload_id, int(current_user["sub"]))
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/reconcile")

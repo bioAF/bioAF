@@ -25,7 +25,8 @@ from app.models.project import Project
 from app.models.sample import Sample
 from app.services import file_verification_worker
 from app.services.pipeline_output_service import PipelineOutputService
-from app.services.upload_service import UploadService, _pending_uploads
+from app.services.upload_service import UploadService
+from tests.support.uploads import seed_signed_upload
 from tests.support.webhook_capture import WebhookCapture
 
 pytestmark = pytest.mark.asyncio
@@ -74,21 +75,22 @@ async def tree(session, admin_user):
     return project, exp, s1, s2
 
 
-def _pending(admin_user, uri, *, external_id=None, expected_md5=None, sample_ids=(), size=None):
+async def _pending(admin_user, uri, *, external_id=None, expected_md5=None, sample_ids=(), size=None):
     upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = {
-        "org_id": admin_user.organization_id,
-        "user_id": admin_user.id,
-        "filename": uri.rsplit("/", 1)[-1],
-        "gcs_uri": uri,
-        "expected_size": size,
-        "expected_md5": expected_md5,
-        "project_id": None,
-        "experiment_id": None,
-        "sample_ids": list(sample_ids),
-        "is_global": False,
-        "external_id": external_id,
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        filename=uri.rsplit("/", 1)[-1],
+        gcs_uri=uri,
+        expected_size=size,
+        expected_md5=expected_md5,
+        project_id=None,
+        experiment_id=None,
+        sample_ids=list(sample_ids),
+        is_global=False,
+        external_id=external_id,
+    )
     return upload_id
 
 
@@ -99,7 +101,7 @@ async def test_a_completed_upload_is_registered_with_its_links_then_ready(sessio
     project, exp, s1, s2 = tree
     uri = "s3://bioaf-ingest-t/uploads/u1/reads.fastq.gz"
     await store.write_bytes(uri, DATA)
-    upload_id = _pending(admin_user, uri, external_id="LIMS-FILE-9001", sample_ids=[s2.id, s1.id], size=len(DATA))
+    upload_id = await _pending(admin_user, uri, external_id="LIMS-FILE-9001", sample_ids=[s2.id, s1.id], size=len(DATA))
 
     f = await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "")
     await session.commit()
@@ -147,7 +149,7 @@ async def test_a_completed_upload_is_registered_with_its_links_then_ready(sessio
 async def test_an_asserted_md5_is_verified_by_the_worker_before_ready(session, admin_user, store, capture):
     uri = "s3://bioaf-ingest-t/uploads/u2/a.fastq.gz"
     await store.write_bytes(uri, DATA)
-    upload_id = _pending(admin_user, uri, expected_md5=MD5.upper())
+    upload_id = await _pending(admin_user, uri, expected_md5=MD5.upper())
 
     f = await UploadService.complete_upload(session, admin_user.organization_id, upload_id, MD5)
     await session.commit()
@@ -162,7 +164,7 @@ async def test_an_asserted_md5_is_verified_by_the_worker_before_ready(session, a
 async def test_disagreeing_upload_assertions_register_nothing(session, admin_user, store, capture):
     uri = "s3://bioaf-ingest-t/uploads/u3/a.fastq.gz"
     await store.write_bytes(uri, DATA)
-    upload_id = _pending(admin_user, uri, expected_md5=MD5)
+    upload_id = await _pending(admin_user, uri, expected_md5=MD5)
     with pytest.raises(ValidationError):
         await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "0" * 32)
     await session.rollback()
@@ -173,10 +175,10 @@ async def test_disagreeing_upload_assertions_register_nothing(session, admin_use
 async def test_a_duplicate_upload_external_id_is_a_409(client, admin_token, session, admin_user, store, capture):
     uri = "s3://bioaf-ingest-t/uploads/u4/a.fastq.gz"
     await store.write_bytes(uri, DATA)
-    first = _pending(admin_user, uri, external_id="DUP")
+    first = await _pending(admin_user, uri, external_id="DUP")
     await UploadService.complete_upload(session, admin_user.organization_id, first, "")
     await session.commit()
-    second = _pending(admin_user, "s3://bioaf-ingest-t/uploads/u5/b.fastq.gz", external_id="DUP")
+    second = await _pending(admin_user, "s3://bioaf-ingest-t/uploads/u5/b.fastq.gz", external_id="DUP")
     with pytest.raises(ConflictError):
         await UploadService.complete_upload(session, admin_user.organization_id, second, "")
 
@@ -210,7 +212,7 @@ async def test_initiate_refuses_an_external_id_already_in_use(session, admin_use
     uri = "s3://bioaf-ingest-t/uploads/u6/a.fastq.gz"
     await store.write_bytes(uri, DATA)
     await UploadService.complete_upload(
-        session, admin_user.organization_id, _pending(admin_user, uri, external_id="X"), ""
+        session, admin_user.organization_id, await _pending(admin_user, uri, external_id="X"), ""
     )
     await session.commit()
     with pytest.raises(ConflictError):
