@@ -86,7 +86,10 @@ async def test_an_environment_build_context_is_refused_while_writes_are_paused(s
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         with pytest.raises(admission.StorageWritesPaused) as exc:
             await upload_build_context("gs://bioaf-working/env/ctx.tgz", b"tar")
-    assert str(exc.value) == "An administrator is changing storage. Try again later."
+    assert (
+        str(exc.value)
+        == "An administrator has paused uploads and file saving. Try again later, or contact your administrator."
+    )
     adapter.upload_file.assert_not_awaited()
 
 
@@ -117,7 +120,12 @@ async def test_a_reference_import_that_finds_writes_paused_fails_without_writing
     ran = []
     await ReferenceDataService._run_admitted_import(1, lambda: ran.append(True))
     assert ran == []
-    assert recorded == [{"status": "failed", "error_message": "An administrator is changing storage. Try again later."}]
+    assert recorded == [
+        {
+            "status": "failed",
+            "error_message": "An administrator has paused uploads and file saving. Try again later, or contact your administrator.",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -134,3 +142,51 @@ async def test_after_a_restart_the_paused_state_is_read_from_the_database(sessio
     await session.commit()
     async with admission.background_write("thumbnail"):
         pass
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_thread_write_stays_a_writer_until_the_thread_stops(session):
+    """A thread cannot be interrupted: cancelling its awaiter must not make destroy think it stopped."""
+    import asyncio
+    import threading
+
+    started, stop = threading.Event(), threading.Event()
+
+    def writing():
+        started.set()
+        stop.wait(10)
+
+    task = asyncio.create_task(admission.write_in_thread("reference import", writing))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert [w.filename for w in await admission.outstanding_writers(session)] == ["reference import"]
+    finally:
+        stop.set()
+    for _ in range(50):
+        if not await admission.outstanding_writers(session):
+            break
+        await asyncio.sleep(0.05)
+    assert await admission.outstanding_writers(session) == []
+
+
+@pytest.mark.asyncio
+async def test_a_request_admitted_before_the_pause_is_waited_for(session):
+    """Admission registers the writer before reading the pause: a destroy that pauses meanwhile
+    finds it and waits, instead of seeing nobody and deleting under it."""
+    async with admission.admitted(session):
+        await admission.pause_writes(session, operation_id=None)
+        await session.commit()
+        assert len(await admission.outstanding_writers(session)) == 1
+    assert await admission.outstanding_writers(session) == []
+
+
+@pytest.mark.asyncio
+async def test_a_request_arriving_after_the_pause_is_refused_and_not_left_registered(session):
+    await _pause(session)
+    with pytest.raises(admission.UploadsPausedError):
+        async with admission.admitted(session):
+            pass
+    assert await admission.outstanding_writers(session) == []

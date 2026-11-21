@@ -22,6 +22,7 @@ from app.adapters.models import UploadSessionGrant, UploadSessionState, UploadSe
 from app.models.file import File
 from app.models.upload_checkpoint import UploadCheckpoint
 from app.services import storage_write_admission
+from app.services.upload_service import UploadService
 
 GCS_SESSION = "https://storage.googleapis.com/upload?upload_id=SECRET-SESSION"
 
@@ -510,3 +511,131 @@ async def test_the_attention_list_shows_stopping_and_unconfirmed_uploads(
     assert all("session" not in str(r).lower() or "SECRET" not in str(r) for r in rows)
     bench_rows = (await client.get("/api/files/uploads/pending", headers=_auth(bench_token))).json()["uploads"]
     assert bench_rows == []
+
+
+# ---------------------------------------------------------------------------
+# second review round
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_recovered_completion_is_verified_against_the_declared_checksum(
+    client, admin_token, storage, store, session
+):
+    from unittest.mock import AsyncMock
+
+    from app.services.file_verification_service import FileVerificationService
+
+    declared = "a" * 32
+    upload_id = (await _initiate(client, admin_token, expected_md5=declared))["upload_id"]
+    await session.execute(text("UPDATE upload_checkpoints SET next_reconcile_at = now() - interval '1 second'"))
+    await session.commit()
+    store.inspect_answers = [_status("completed")]
+    await _reconcile()
+
+    begin = AsyncMock()
+    with (
+        patch.object(FileVerificationService, "begin", begin),
+        patch("app.services.upload_service.enrich_from_header", AsyncMock()),
+    ):
+        response = await client.post(f"/api/files/uploads/{upload_id}/retry", headers=_auth(admin_token))
+    assert response.status_code == 200, response.text
+    expectation = begin.await_args.args[2]
+    assert (expectation.kind, expectation.value) == ("md5", declared)
+
+
+@pytest.mark.asyncio
+async def test_settlement_never_touches_an_object_another_upload_owns(session, admin_user, storage, store):
+    """Paths are unique per upload; if two ever met, the object is not attributed to the old one."""
+    import uuid as _uuid
+
+    from app import database
+    from app.services.upload_settlement import settle
+
+    uri = "gs://bioaf-ingest-test/shared/a.txt"
+    old_id = str(_uuid.uuid4())
+    for upload_id, stage in ((old_id, "cancelling"), (str(_uuid.uuid4()), "filed")):
+        session.add(
+            UploadCheckpoint(
+                id=upload_id,
+                organization_id=admin_user.organization_id,
+                user_id=admin_user.id,
+                kind="session",
+                stage=stage,
+                filename="a.txt",
+                reference="UPL-000000",
+                source_uri=uri,
+                session_protocol="gcs_resumable",
+                session_handle=f"https://s/{upload_id}",
+            )
+        )
+    await session.commit()
+    store.objects.add(uri)
+    store.cancel_answers = [_status("completed")]
+
+    await settle(database.async_session_factory, old_id)
+
+    assert store.deleted == []
+    assert (await _checkpoint(session, old_id)).stage == "cancelled"
+
+
+async def _received_upload(client, token, session, store):
+    upload_id = (await _initiate(client, token))["upload_id"]
+    await session.execute(
+        text("UPDATE upload_checkpoints SET stage = 'received', next_reconcile_at = NULL WHERE id = :i").bindparams(
+            i=upload_id
+        )
+    )
+    await session.commit()
+    return upload_id
+
+
+@pytest.mark.asyncio
+async def test_retry_now_is_refused_while_writes_are_paused(client, admin_token, storage, store, session):
+    upload_id = await _received_upload(client, admin_token, session, store)
+    await storage_write_admission.pause_writes(session, operation_id=None)
+    await session.commit()
+
+    response = await client.post(f"/api/files/uploads/{upload_id}/retry", headers=_auth(admin_token))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "An administrator has paused uploads and file saving. Try again later, or contact your administrator."
+    )
+    assert (await _checkpoint(session, upload_id)).stage == "received"
+    assert (await session.execute(select(File))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_automatic_filing_waits_while_writes_are_paused(client, admin_token, storage, store, session):
+    from app import database
+
+    upload_id = await _received_upload(client, admin_token, session, store)
+    await session.execute(text("UPDATE upload_checkpoints SET next_attempt_at = now() - interval '1 second'"))
+    await storage_write_admission.pause_writes(session, operation_id=None)
+    await session.commit()
+
+    assert await UploadService.retry_due(database.async_session_factory) == 0
+
+    cp = await _checkpoint(session, upload_id)
+    assert (cp.stage, cp.attempts) == ("received", 0)
+    assert cp.next_attempt_at > datetime.now(timezone.utc)
+    assert (await session.execute(select(File))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_completion_while_writes_are_paused_keeps_the_bytes_for_later(
+    client, admin_token, storage, store, session
+):
+    store.inspect_answers = [_status("completed")]
+    upload_id = (await _initiate(client, admin_token))["upload_id"]
+    await storage_write_admission.pause_writes(session, operation_id=None)
+    await session.commit()
+
+    done = await client.post("/api/files/upload/complete", json={"upload_id": upload_id}, headers=_auth(admin_token))
+
+    assert done.status_code == 202
+    assert done.json()["code"] == "upload_received_not_filed"
+    cp = await _checkpoint(session, upload_id)
+    assert (cp.stage, cp.attempts) == ("received", 0)
+    assert cp.next_attempt_at is not None

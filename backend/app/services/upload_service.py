@@ -24,6 +24,8 @@ SIGNED_URL_SECONDS = 3600
 # Automatic filing retries after the first failure, then the upload waits for Retry now / Cancel.
 RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15))
 MAX_AUTOMATIC_ATTEMPTS = len(RETRY_DELAYS)
+# While storage writes are paused, filing waits this long before trying again (not a failed attempt).
+PAUSED_RETRY = timedelta(minutes=5)
 
 # One reading of the Illumina convention, shared with the sample-sheet builder.
 # These names are re-exported because callers already import them from here.
@@ -206,7 +208,17 @@ class UploadService:
         return name
 
     @staticmethod
-    async def initiate_upload(
+    async def initiate_upload(session: AsyncSession, *args, **kwargs) -> dict:
+        """Initiate a direct upload as an admitted storage writer (see ``_initiate_admitted``).
+
+        Registered before the pause is read, so it is either refused or waited for by destroy."""
+        from app.services.storage_write_admission import admitted
+
+        async with admitted(session):
+            return await UploadService._initiate_admitted(session, *args, **kwargs)
+
+    @staticmethod
+    async def _initiate_admitted(
         session: AsyncSession,
         org_id: int,
         user_id: int,
@@ -230,9 +242,8 @@ class UploadService:
         unique index at completion, for a race)."""
         from app.exceptions import ConflictError
         from app.services.file_service import validate_external_id
-        from app.services.storage_write_admission import require_store_usable, require_writes_open
+        from app.services.storage_write_admission import require_store_usable
 
-        await require_writes_open(session)
         external_id = validate_external_id(external_id)
         await verify_association_targets(
             session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
@@ -376,10 +387,18 @@ class UploadService:
                 raise UploadNotFinished("The upload has not finished sending. Try again in a moment.")
         if checkpoint.stage == "issued":
             await _update_checkpoint(upload_id, stage="received", asserted_md5=asserted_md5, next_reconcile_at=None)
-        return await UploadService._file_or_defer(session, upload_id)
+        return await UploadService._file_or_wait(session, upload_id)
 
     @staticmethod
-    async def simple_upload(
+    async def simple_upload(session: AsyncSession, *args, **kwargs) -> File:
+        """A proxied upload as an admitted storage writer (see ``_simple_admitted``)."""
+        from app.services.storage_write_admission import admitted
+
+        async with admitted(session):
+            return await UploadService._simple_admitted(session, *args, **kwargs)
+
+    @staticmethod
+    async def _simple_admitted(
         session: AsyncSession,
         org_id: int,
         user_id: int,
@@ -400,11 +419,10 @@ class UploadService:
         object stores (Phase 7). The checkpoint is recorded before the transfer; a filing failure
         keeps the received bytes tracked and raises UploadReceivedNotFiled.
         """
-        from app.services.storage_write_admission import require_store_usable, require_writes_open, tracked_transfer
+        from app.services.storage_write_admission import require_store_usable, tracked_transfer
 
-        # Before the storage write: paused storage, an unusable store or a refused target leaves no
-        # object and no record.
-        await require_writes_open(session)
+        # Before the storage write (admission already checked the pause): an unusable store or a
+        # refused target leaves no object and no record.
         await verify_association_targets(
             session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
         )
@@ -449,11 +467,38 @@ class UploadService:
                 raise upload_failure("transfer", exc) from None
             await _update_checkpoint(upload_id, stage="received", received_size=size_bytes)
 
-        return await UploadService._file_or_defer(session, upload_id, file_type=file_type)
+        return await UploadService._file_or_wait(session, upload_id, file_type=file_type)
 
     # ------------------------------------------------------------------
     # Filing: one path for completion, automatic retry and Retry now
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _file_or_wait(session: AsyncSession, upload_id: str, *, file_type: str | None = None) -> File:
+        """File received bytes now, or, while writes are paused, keep them for the automatic retry
+        (answered as received but not yet filed, like any deferred filing)."""
+        from app.services.storage_write_admission import StorageWritesPaused
+
+        try:
+            return await UploadService._file_or_defer(session, upload_id, file_type=file_type)
+        except StorageWritesPaused:
+            checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+            await _update_checkpoint(upload_id, next_attempt_at=datetime.now(timezone.utc) + PAUSED_RETRY)
+            experiment = None
+            if checkpoint.experiment_id is not None:
+                from app.models.experiment import Experiment
+
+                experiment = await session.scalar(
+                    select(Experiment.name).where(Experiment.id == checkpoint.experiment_id)
+                )
+            raise UploadReceivedNotFiled(
+                _pending_message(checkpoint.reference, checkpoint.attempts, experiment),
+                details={
+                    "upload_id": upload_id,
+                    "reference": checkpoint.reference,
+                    "experiment_id": checkpoint.experiment_id,
+                },
+            ) from None
 
     @staticmethod
     async def _file_or_defer(session: AsyncSession, upload_id: str, *, file_type: str | None = None) -> File:
@@ -476,9 +521,13 @@ class UploadService:
         checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
         if checkpoint is None or checkpoint.stage not in ("received", "filed"):
             raise StateError("Only a received upload that has not been filed can be filed.")
+        from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused, admitted
+
         try:
-            async with session.begin_nested():
-                return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type)
+            # Filing moves bytes between stores: an admitted writer, refused while writes are paused.
+            async with admitted(session, error=StorageWritesPaused, message=STORAGE_PAUSED):
+                async with session.begin_nested():
+                    return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type)
         except DomainError:
             raise
         except Exception as exc:
@@ -503,7 +552,7 @@ class UploadService:
         already moved are found at their planned destination, never copied twice.
         """
         from app.adapters.registry import get_storage_adapter
-        from app.services.file_verification_service import Expectation, FileVerificationService
+        from app.services.file_verification_service import Expectation, FileVerificationService, agreed_upload_md5
 
         org_id = checkpoint.organization_id
         if checkpoint.stage == "filed" and checkpoint.file_id is not None:
@@ -603,7 +652,9 @@ class UploadService:
         await session.flush()
         await session.refresh(file)
         await FileService.finalize_registration(session, file)
-        asserted_md5 = checkpoint.asserted_md5
+        # The completion's assertion, or (when nobody reported completion and reconciliation found
+        # the upload finished) the checksum declared when the upload started.
+        asserted_md5 = checkpoint.asserted_md5 or agreed_upload_md5(checkpoint.expected_md5, None)
         await FileVerificationService.begin(
             session,
             file,
@@ -706,6 +757,8 @@ class UploadService:
     @staticmethod
     async def retry_due(session_factory, *, limit: int = 20) -> int:
         """Run the automatic filing retries that are due. Returns how many were filed."""
+        from app.services.storage_write_admission import StorageWritesPaused
+
         now = datetime.now(timezone.utc)
         async with session_factory() as session:
             due = (
@@ -729,6 +782,10 @@ class UploadService:
                     filed += 1
                 except UploadReceivedNotFiled:
                     await session.rollback()
+                except StorageWritesPaused:
+                    # Writes are paused: try again later without counting a failed attempt.
+                    await session.rollback()
+                    await _update_checkpoint(upload_id, next_attempt_at=datetime.now(timezone.utc) + PAUSED_RETRY)
                 except DomainError as exc:
                     await session.rollback()
                     await _update_checkpoint(upload_id, next_attempt_at=None, last_error_category=exc.code[:48])

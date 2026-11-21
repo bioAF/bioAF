@@ -29,6 +29,8 @@ from app.exceptions import ValidationError
 from app.services.outbound_destination import is_public_address
 from app.platform.platform_config_service import PlatformConfigService
 
+from app.services.storage_write_admission import admits_writes  # noqa: E402
+
 logger = logging.getLogger("bioaf.lab_document_upload")
 
 PREFIX = "lab-knowledge/documents"
@@ -213,6 +215,7 @@ class LabDocumentUploadService:
         )
 
     @staticmethod
+    @admits_writes
     async def initiate(
         session: AsyncSession,
         org_id: int,
@@ -224,10 +227,9 @@ class LabDocumentUploadService:
         user_id: int | None = None,
     ) -> dict:
         from app.adapters.registry import get_storage_adapter
-        from app.services.storage_write_admission import require_writes_open
 
-        # Refused before any upload session is created while storage is being changed (D5).
-        await require_writes_open(session)
+        # Admitted (registered, then refused while storage writes are paused) before any upload
+        # session is created (D5).
         token = str(uuid.uuid4())
         bucket = await LabDocumentUploadService._get_working_bucket(session)
         from app.services.storage_write_admission import require_store_usable
@@ -425,6 +427,7 @@ class LabDocumentUploadService:
             await LabDocumentUploadService._fail_url_import(session_factory, import_id, str(exc))
 
     @staticmethod
+    @admits_writes
     async def _import_url_to_document(
         session: AsyncSession,
         *,
@@ -444,9 +447,8 @@ class LabDocumentUploadService:
         from app.models.lab_document import LabDocumentVersion
         from app.services.lab_document_service import LabDocumentService
 
-        from app.services.storage_write_admission import require_store_usable, require_writes_open
+        from app.services.storage_write_admission import require_store_usable
 
-        await require_writes_open(session)
         await require_store_usable(session, "working")
         fetch = fetch_override or LabDocumentUploadService._fetch_url
         content, fetched_name, mime_type = await fetch(url)

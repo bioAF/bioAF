@@ -57,7 +57,7 @@ class UploadsPausedError(ConflictError):
     code = "uploads_paused"
 
 
-STORAGE_PAUSED = "An administrator is changing storage. Try again later."
+STORAGE_PAUSED = "An administrator has paused uploads and file saving. Try again later, or contact your administrator."
 
 
 class StorageWritesPaused(ConflictError):
@@ -183,7 +183,43 @@ async def tracked_transfer(upload_id: str) -> AsyncIterator[None]:
         _in_flight.pop(upload_id, None)
 
 
+def admits_writes(fn):
+    """Run an async function whose first argument is the request session as one admitted writer."""
+    import functools
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        session = kwargs["session"] if "session" in kwargs else args[0]
+        async with admitted(session):
+            return await fn(*args, **kwargs)
+
+    return wrapper
+
+
 _BACKGROUND = "background:"
+_ADMITTED = "admitted:"
+
+
+@asynccontextmanager
+async def admitted(
+    session: AsyncSession, *, error: type[ConflictError] | None = None, message: str | None = None
+) -> AsyncIterator[None]:
+    """Admit one request that may write to storage (an upload, a filing step).
+
+    The request is registered as a writer before the pause is read, so a destroy that pauses writes
+    either sees the pause refuse it or finds it registered and waits for it: nothing can slip in
+    between the pause and the drain. Raises ``error`` (UploadsPausedError by default) while paused.
+    """
+    import uuid
+
+    key = f"{_ADMITTED}{uuid.uuid4()}"
+    _in_flight[key] = datetime.now(timezone.utc)
+    try:
+        if await paused(session) is not None:
+            raise (error or UploadsPausedError)(message or UPLOADS_PAUSED)
+        yield
+    finally:
+        _in_flight.pop(key, None)
 
 
 # This process's view of ``storage_writes_paused``, so a background write needs no session of
@@ -221,6 +257,29 @@ async def background_write(label: str) -> AsyncIterator[None]:
         yield
     finally:
         _in_flight.pop(key, None)
+
+
+async def write_in_thread(label: str, work):
+    """Run blocking storage-writing ``work`` in a thread as an admitted background write.
+
+    A thread cannot be interrupted: cancelling the awaiting task leaves it writing. The write stays
+    registered until the thread itself returns, so destroy never takes a cancelled awaiter for a
+    finished writer. Raises StorageWritesPaused before the thread starts while writes are paused.
+    """
+    import uuid
+
+    key = f"{_BACKGROUND}{label}:{uuid.uuid4()}"
+    _in_flight[key] = datetime.now(timezone.utc)
+    try:
+        if await _paused_now():
+            logger.info("Background %s write skipped: storage writes are paused", label)
+            raise StorageWritesPaused(STORAGE_PAUSED)
+        thread = asyncio.ensure_future(asyncio.to_thread(work))
+    except BaseException:
+        _in_flight.pop(key, None)
+        raise
+    thread.add_done_callback(lambda _done: _in_flight.pop(key, None))
+    return await asyncio.shield(thread)
 
 
 async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
