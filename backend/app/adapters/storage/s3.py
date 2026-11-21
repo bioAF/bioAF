@@ -716,7 +716,20 @@ class S3StorageProvider(StorageProvider):
         bucket, key = self._parse_uri(uri)
         client = self._get_s3_client(creds)
         try:
-            answer = client.list_parts(Bucket=bucket, Key=key, UploadId=handle)
+            # ListParts returns at most 1,000 parts per page: progress beyond the first page counts too.
+            received = 0
+            marker = None
+            while True:
+                kwargs = {"Bucket": bucket, "Key": key, "UploadId": handle}
+                if marker is not None:
+                    kwargs["PartNumberMarker"] = marker
+                answer = client.list_parts(**kwargs)
+                received += sum(int(p.get("Size") or 0) for p in answer.get("Parts", []))
+                if not answer.get("IsTruncated"):
+                    break
+                marker = answer.get("NextPartNumberMarker")
+                if marker is None:
+                    break
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") != "NoSuchUpload":
                 logger.warning("Multipart status did not complete (error_code=%s)", _error_code(exc))
@@ -725,7 +738,6 @@ class S3StorageProvider(StorageProvider):
         except BotoCoreError as exc:
             logger.warning("Multipart status did not complete (error_type=%s)", type(exc).__name__)
             return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
-        received = sum(int(p.get("Size") or 0) for p in answer.get("Parts", []))
         return UploadSessionStatus(state=UploadSessionState.ACTIVE, received_bytes=received)
 
     def _s3_ended_or_completed(self, client, bucket: str, key: str) -> UploadSessionStatus:

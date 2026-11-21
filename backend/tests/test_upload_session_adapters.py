@@ -271,3 +271,25 @@ async def test_nfs_has_no_upload_sessions():
     adapter = NfsStorageProvider.__new__(NfsStorageProvider)
     with pytest.raises(CapabilityNotSupported):
         await adapter.begin_upload_session("file:///x", size_bytes=1)
+
+
+class PagedS3(FakeS3):
+    """ListParts answers 1,000 parts per page, as AWS does."""
+
+    def list_parts(self, **kwargs):
+        if self.aborted:
+            return super().list_parts(**kwargs)
+        if kwargs.get("PartNumberMarker") == 1000:
+            return {"Parts": [{"PartNumber": 1001, "Size": 8}], "IsTruncated": False}
+        return {
+            "Parts": [{"PartNumber": i, "Size": 8} for i in range(1, 1001)],
+            "IsTruncated": True,
+            "NextPartNumberMarker": 1000,
+        }
+
+
+@pytest.mark.asyncio
+async def test_s3_progress_counts_every_page_of_parts():
+    adapter, patches = _s3(PagedS3())
+    result = await _with(patches, lambda: adapter.inspect_upload_session(S3_URI, "UPLOAD-1"))
+    assert (result.state, result.received_bytes) == (UploadSessionState.ACTIVE, 8008)
