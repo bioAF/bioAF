@@ -98,6 +98,22 @@ describe("DataUploadPage", () => {
     expect(calledOptions.isGlobal).toBe(true);
   });
 
+  it("shows Confirming upload while storage confirms the file (W8)", async () => {
+    mockUploadSigned.mockImplementation((_file: File, options: { onConfirming?: () => void }) => {
+      options.onConfirming?.();
+      return new Promise(() => {});
+    });
+    render(<DataUploadPage />);
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), { target: { value: "global" } });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["data"], "sample.fastq.gz")] } });
+    await waitFor(() => screen.getByText(/Upload 1 file/));
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+
+    expect(await screen.findByText("Confirming upload")).toBeInTheDocument();
+    expect(screen.getByText("bioAF is checking that your file has finished uploading.")).toBeInTheDocument();
+  });
+
   it("fetches experiments and displays them in a dropdown", async () => {
     render(<DataUploadPage />);
 

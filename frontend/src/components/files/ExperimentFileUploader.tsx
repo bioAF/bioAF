@@ -9,10 +9,12 @@ import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 
 // "pending": stored but not yet filed (bioAF retries); "needs_attention": retries ran out;
-// "not_sent": refused before anything was stored (uploads paused or store unusable); "cancelled": removed.
+// "not_sent": refused before anything was stored (uploads paused or store unusable); "cancelled": removed;
+// "confirming": sent, and bioAF is checking with storage that the whole file arrived (W8).
 type FileStatus =
   | "queued"
   | "uploading"
+  | "confirming"
   | "complete"
   | "error"
   | "pending"
@@ -213,6 +215,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
+          onConfirming: () => setItemState(i, { status: "confirming", progress: 100 }),
         });
         if (receivedNotFiled(result)) {
           setItemState(i, {
@@ -483,6 +486,9 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                     {item.status === "error" && item.error && (
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
                     )}
+                    {item.status === "confirming" && (
+                      <p className="text-xs text-gray-600 mt-1">bioAF is checking that your file has finished uploading.</p>
+                    )}
                     {(item.status === "pending" || item.status === "needs_attention") && item.message && (
                       <p className="text-xs text-amber-700 mt-1">{item.message}</p>
                     )}
@@ -588,6 +594,9 @@ function StatusLabel({ item }: { item: FileItem }) {
   }
   if (item.status === "error") {
     return <span className="text-xs font-medium text-red-600 shrink-0">Failed</span>;
+  }
+  if (item.status === "confirming") {
+    return <span className="text-xs font-medium text-bioaf-600 shrink-0">Confirming upload</span>;
   }
   if (item.status === "uploading") {
     return (

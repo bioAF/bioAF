@@ -179,3 +179,17 @@ test("an unusable upload store is not sent and says why (11F)", async () => {
   expect(await screen.findByText(message)).toBeInTheDocument();
   expect(screen.getByText("Not sent")).toBeInTheDocument();
 });
+
+
+test("a file storage has not confirmed yet shows Confirming upload, not an error (W8)", async () => {
+  const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  mockUpload.mockImplementation((_file: File, options: { onConfirming?: () => void }) => {
+    options.onConfirming?.();
+    return new Promise(() => {});
+  });
+  await uploadOne(user);
+
+  expect(await screen.findByText("Confirming upload")).toBeInTheDocument();
+  expect(screen.getByText("bioAF is checking that your file has finished uploading.")).toBeInTheDocument();
+  expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+});

@@ -461,7 +461,9 @@ describe("storage destroy outcomes (M7, M11)", () => {
       }),
     );
     const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
-    expect(popup).toHaveTextContent(/Try again after \d{1,2}:\d{2}/);
+    expect(popup).toHaveTextContent(
+      /Try Destroy Storage again after \d{1,2}:\d{2}( [AP]M)?\. bioAF will check the uploads again before proceeding\./,
+    );
   });
 
   test("uploads storage could not confirm can be released from the refusal", async () => {
@@ -479,10 +481,37 @@ describe("storage destroy outcomes (M7, M11)", () => {
       }),
     );
     const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
-    expect(popup).toHaveTextContent("Storage could not confirm these uploads stopped:");
+    expect(popup).toHaveTextContent("bioAF cannot confirm whether these uploads have stopped:");
     expect(popup).toHaveTextContent("a.fastq.gz · Priya · UPL-ABC123");
-    fireEvent.click(within(popup).getByRole("button", { name: "Release" }));
-    expect(await screen.findByRole("dialog", { name: "Release this upload?" })).toBeInTheDocument();
+    fireEvent.click(within(popup).getByRole("button", { name: "Stop waiting…" }));
+    expect(await screen.findByRole("dialog", { name: "Stop waiting for this upload?" })).toBeInTheDocument();
+  });
+
+  test("a suggested time on another day includes the date", async () => {
+    const tomorrow = new Date(Date.now() + 26 * 3600_000).toISOString();
+    await openOutcome(
+      op({ ...refused, id: 68, partial_effects: { uploads: [], retry_after: tomorrow, unconfirmed: [] } }),
+    );
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
+    const day = new Date(tomorrow).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    expect(popup).toHaveTextContent(`Try Destroy Storage again after ${day},`);
+  });
+
+  test("bioAF's own work is listed by activity", async () => {
+    await openOutcome(
+      op({
+        ...refused,
+        id: 69,
+        message:
+          "bioAF is still saving files. Nothing was deleted. Try Destroy Storage again when this work has finished. New uploads stay paused until you allow them or run Destroy Storage again.",
+        partial_effects: {
+          uploads: [],
+          activities: [{ activity: "Creating a data export", started_at: "2026-11-21T15:58:00Z" }],
+        },
+      }),
+    );
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
+    expect(popup).toHaveTextContent(/Creating a data export · Started at \d{1,2}:\d{2}/);
   });
 
   test("a refused bucket offers Allow uploads too (M7)", async () => {

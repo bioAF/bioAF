@@ -32,7 +32,8 @@ interface SampleOption {
   label: string;
 }
 
-type FileStatus = "queued" | "uploading" | "complete" | "error";
+// "confirming": sent, and bioAF is checking with storage that the whole file arrived (W8).
+type FileStatus = "queued" | "uploading" | "confirming" | "complete" | "error";
 
 interface FileItem {
   file: File;
@@ -272,6 +273,7 @@ export default function DataUploadPage() {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
+          onConfirming: () => setItemState(i, { status: "confirming", progress: 100 }),
         });
         setItemState(i, { status: "complete", progress: 100 });
       } catch (err) {
@@ -541,6 +543,9 @@ export default function DataUploadPage() {
                   )}
 
                   <ProgressBar item={item} />
+                  {item.status === "confirming" && (
+                    <p className="text-xs text-gray-600 mt-1">bioAF is checking that your file has finished uploading.</p>
+                  )}
                   {item.status === "error" && item.error && (
                     <p className="text-xs text-red-600 mt-1">{item.error}</p>
                   )}
@@ -571,6 +576,9 @@ function StatusLabel({ item }: { item: FileItem }) {
   }
   if (item.status === "error") {
     return <span className="text-xs font-medium text-red-600 shrink-0">Failed</span>;
+  }
+  if (item.status === "confirming") {
+    return <span className="text-xs font-medium text-bioaf-600 shrink-0">Confirming upload</span>;
   }
   if (item.status === "uploading") {
     return (

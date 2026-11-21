@@ -41,6 +41,15 @@ export function shortTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/** A time, with its date when it is not today (for example "Nov 22, 09:15"). */
+export function timeWithDay(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const when = new Date(iso);
+  const time = shortTime(iso);
+  if (when.toDateString() === new Date().toDateString()) return time;
+  return `${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
+}
+
 const ACTIVE = new Set(["accepted", "running", "stopping"]);
 
 export function isActive(op: Pick<OperationView, "status">): boolean {

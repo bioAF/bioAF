@@ -10,6 +10,7 @@ import {
   isActive,
   operationTitle,
   shortTime,
+  timeWithDay,
   stepStateText,
   type OperationStep,
   type OperationView,
@@ -125,6 +126,8 @@ interface UnconfirmedUpload {
 
 interface UploadsRefusal {
   uploads?: UploadInProgress[];
+  /** bioAF's own work still saving files (W6). */
+  activities?: { activity: string; started_at: string }[];
   retry_after?: string | null;
   unconfirmed?: UnconfirmedUpload[];
 }
@@ -133,22 +136,35 @@ interface UploadsRefusal {
 function UploadsRefusalDetail({ effects, canRelease }: { effects: UploadsRefusal; canRelease: boolean }) {
   const [releasing, setReleasing] = useState<UnconfirmedUpload | null>(null);
   const [released, setReleased] = useState<string[]>([]);
+  const [changed, setChanged] = useState<string | null>(null);
   const unconfirmed = (effects.unconfirmed ?? []).filter((u) => !released.includes(u.upload_id));
   return (
     <>
+      {(effects.activities ?? []).length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm text-gray-700">
+          {(effects.activities ?? []).map((a, i) => (
+            <li key={i}>
+              {a.activity} · Started at {shortTime(a.started_at)}
+            </li>
+          ))}
+        </ul>
+      )}
       {effects.retry_after && (
-        <p className="mt-3 text-sm text-gray-700">Try again after {shortTime(effects.retry_after)}.</p>
+        <p className="mt-3 text-sm text-gray-700">
+          Try Destroy Storage again after {timeWithDay(effects.retry_after)}. bioAF will check the uploads again before
+          proceeding.
+        </p>
       )}
       {unconfirmed.length > 0 && (
         <div className="mt-3 text-sm text-gray-700">
-          <p>Storage could not confirm these uploads stopped:</p>
+          <p>bioAF cannot confirm whether these uploads have stopped:</p>
           <ul className="mt-1 space-y-1">
             {unconfirmed.map((u) => (
               <li key={u.upload_id} className="flex items-center justify-between gap-3">
                 <span>{[u.filename, u.name, u.reference].filter(Boolean).join(" · ")}</span>
                 {canRelease && (
                   <Button size="sm" variant="secondary" onClick={() => setReleasing(u)}>
-                    Release
+                    Stop waiting…
                   </Button>
                 )}
               </li>
@@ -156,6 +172,7 @@ function UploadsRefusalDetail({ effects, canRelease }: { effects: UploadsRefusal
           </ul>
         </div>
       )}
+      {changed && <p className="mt-3 text-sm text-gray-700">{changed}</p>}
       {releasing && (
         <ReleaseUploadDialog
           uploadId={releasing.upload_id}
@@ -164,6 +181,11 @@ function UploadsRefusalDetail({ effects, canRelease }: { effects: UploadsRefusal
           onReleased={() => {
             setReleased((prev) => [...prev, releasing.upload_id]);
             setReleasing(null);
+          }}
+          onRefused={(message) => {
+            setReleased((prev) => [...prev, releasing.upload_id]);
+            setReleasing(null);
+            setChanged(message);
           }}
         />
       )}

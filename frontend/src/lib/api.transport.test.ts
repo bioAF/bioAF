@@ -844,6 +844,8 @@ describe("direct uploads through a provider session (storage lifecycle 11F)", ()
     expect(await call).toBeInstanceOf(Error);
     await tick();
     expect(String(fetchMock.mock.calls[2][0])).toContain("/api/files/uploads/u3/cancel");
+    // A failure is not the uploader's choice: the stop is recorded as interrupted.
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1].body))).toEqual({ reason: "interrupted" });
   });
 
   test("stopping an upload cancels its session so it stops counting as running", async () => {
@@ -866,6 +868,34 @@ describe("direct uploads through a provider session (storage lifecycle 11F)", ()
     const [url, init] = fetchMock.mock.calls[1];
     expect(String(url)).toContain("/api/files/uploads/u4/cancel");
     expect(headersOf(init).Authorization).toBe("Bearer live.jwt");
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "cancelled" });
+  });
+
+  test("a completion storage has not confirmed yet waits and checks again instead of failing", async () => {
+    jest.useFakeTimers();
+    const notFinished = fakeResponse(409, {
+      json: { detail: "The upload has not finished sending.", code: "upload_not_finished" },
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u5", signed_url: "https://s/1", upload: { protocol: "gcs_resumable", url: "https://s/1", part_size: null } },
+        }),
+      )
+      .mockResolvedValueOnce(notFinished)
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 7 } }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const confirming = jest.fn();
+
+    const call = api.uploadSigned(file(), { onConfirming: confirming });
+    await jest.advanceTimersByTimeAsync(0);
+    lastXhr().respond(200, "");
+    await jest.advanceTimersByTimeAsync(0);
+    expect(confirming).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(5_000);
+    await expect(call).resolves.toEqual({ id: 7 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 

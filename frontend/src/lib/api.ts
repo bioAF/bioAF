@@ -486,6 +486,8 @@ interface SignedUploadOptions extends RequestControls {
   onProgress?: (pct: number) => void;
   /** Bytes per GCS chunk; defaults by file size. */
   chunkSize?: number;
+  /** Called when storage has not yet confirmed the whole file and bioAF keeps checking (W8). */
+  onConfirming?: () => void;
 }
 
 interface XhrOptions extends RequestControls {
@@ -634,17 +636,34 @@ async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: 
       await sendChunks(url, file, options, owner);
     }
   } catch (error) {
-    cancelUploadSession(upload_id);
+    // A stop the person asked for is a cancellation; anything else interrupted the upload.
+    cancelUploadSession(upload_id, isAbortError(error) ? "cancelled" : "interrupted");
     throw error;
   }
 
-  // Confirm with the backend: it checks the provider has the whole object, then files it.
-  return fetchJson<T>("/api/files/upload/complete", {
-    method: "POST",
-    json: parts ? { upload_id, parts } : { upload_id },
-    signal: owner.signal,
-  });
+  // Confirm with the backend: it checks the provider has the whole object, then files it. Until
+  // storage confirms the last bytes, bioAF keeps checking rather than reporting a failure (W8).
+  let confirming = false;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchJson<T>("/api/files/upload/complete", {
+        method: "POST",
+        json: parts ? { upload_id, parts } : { upload_id },
+        signal: owner.signal,
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== "upload_not_finished") throw error;
+      if (!confirming) {
+        confirming = true;
+        options.onConfirming?.();
+      }
+      await sleep(CONFIRM_DELAYS_MS[Math.min(attempt, CONFIRM_DELAYS_MS.length - 1)], owner.signal);
+    }
+  }
 }
+
+const CONFIRM_DELAYS_MS = [5_000, 10_000, 15_000, 30_000];
+
 
 const ONE_GIB = 1024 * 1024 * 1024;
 
@@ -739,8 +758,8 @@ async function sendParts(
 
 /** Ask bioAF to cancel a session this browser stopped using. Best effort: bioAF also settles
  * abandoned sessions in the background. Not tied to the stopped upload's signal. */
-function cancelUploadSession(uploadId: string): void {
-  fetchJson(`/api/files/uploads/${encodeURIComponent(uploadId)}/cancel`, { method: "POST" }).catch((error) =>
+function cancelUploadSession(uploadId: string, reason: "cancelled" | "interrupted"): void {
+  fetchJson(`/api/files/uploads/${encodeURIComponent(uploadId)}/cancel`, { method: "POST", json: { reason } }).catch((error) =>
     logError("cancelling a stopped upload session (bioAF settles it later)", error),
   );
 }

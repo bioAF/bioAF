@@ -12,13 +12,16 @@ interface Props {
   filename: string;
   onClose: () => void;
   onReleased: () => void;
+  /** Called with the reason when the stop was refused because the upload's status changed. */
+  onRefused?: (message: string) => void;
 }
 
 /**
- * Release an upload storage could not confirm stopped, so it no longer blocks Destroy Storage
- * (storage lifecycle 11G). Needs a reason and an explicit acknowledgement; recorded in the audit log.
+ * Stop waiting for an upload bioAF cannot confirm has stopped, so it no longer blocks Destroy
+ * Storage (storage lifecycle 11G, W3). Needs a reason and an explicit acknowledgement; recorded in
+ * the audit log. A refusal says what changed (W4) and refreshes the caller's list.
  */
-export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased }: Props) {
+export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased, onRefused }: Props) {
   const [reason, setReason] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -34,8 +37,12 @@ export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased }:
       });
       onReleased();
     } catch (e) {
-      logError("releasing an upload storage could not confirm", e);
-      setError(e instanceof ApiError ? e.message : "The upload could not be released. Try again.");
+      logError("stopping the wait for an upload", e);
+      if (e instanceof ApiError && e.status === 409 && onRefused) {
+        onRefused(e.message);
+        return;
+      }
+      setError(e instanceof ApiError ? e.message : "This could not be recorded. Try again.");
     } finally {
       setBusy(false);
     }
@@ -44,7 +51,7 @@ export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased }:
   return (
     <Modal
       open
-      title="Release this upload?"
+      title="Stop waiting for this upload?"
       onClose={onClose}
       footer={
         <>
@@ -52,15 +59,19 @@ export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased }:
             Keep waiting
           </Button>
           <Button variant="danger" onClick={submit} disabled={busy || !acknowledged || !reason.trim()}>
-            Release upload
+            Stop waiting
           </Button>
         </>
       }
     >
       <div className="space-y-3 text-sm text-gray-700">
         <p>
-          bioAF could not confirm that {filename} stopped uploading. Releasing it lets Destroy Storage go ahead even though
-          the transfer might still exist. This is recorded in the audit log.
+          bioAF cannot tell whether {filename} is still uploading. If you stop waiting, this upload will no longer block
+          Destroy Storage.
+        </p>
+        <p>
+          Destroying storage could delete the file before its upload finishes. This step does not delete anything. Your
+          decision and reason will be recorded.
         </p>
         <label className="block font-medium" htmlFor={`release-reason-${uploadId}`}>
           Reason
@@ -79,7 +90,7 @@ export function ReleaseUploadDialog({ uploadId, filename, onClose, onReleased }:
             checked={acknowledged}
             onChange={(e) => setAcknowledged(e.target.checked)}
           />
-          <span>I understand the transfer might still exist.</span>
+          <span>I understand that Destroy Storage could delete this file while it is still uploading.</span>
         </label>
         {error && <Alert tone="error">{error}</Alert>}
       </div>
