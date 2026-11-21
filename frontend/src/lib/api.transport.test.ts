@@ -695,7 +695,7 @@ describe("direct uploads through a provider session (storage lifecycle 11F)", ()
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     }));
 
-  test("a GCS session receives the whole file, then completion is confirmed", async () => {
+  test("a GCS session receives the file in chunks, then completion is confirmed", async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(
@@ -709,16 +709,80 @@ describe("direct uploads through a provider session (storage lifecycle 11F)", ()
       )
       .mockResolvedValueOnce(fakeResponse(200, { json: { id: 4 } }));
     global.fetch = fetchMock as unknown as typeof fetch;
+    const progress: number[] = [];
 
-    const call = api.uploadSigned(file());
+    // Chunks let storage record progress as it goes, so a running upload is never taken for abandoned.
+    const call = api.uploadSigned(file(), { chunkSize: 2, onProgress: (p) => progress.push(p) });
     await tick();
-    const put = lastXhr();
-    expect(put.method).toBe("PUT");
-    expect(put.url).toBe("https://storage.example.com/session?upload_id=1");
-    expect(put.headers.Authorization).toBeUndefined();
-    put.respond(200, "");
+    const first = lastXhr();
+    expect(first.method).toBe("PUT");
+    expect(first.url).toBe("https://storage.example.com/session?upload_id=1");
+    expect(first.headers.Authorization).toBeUndefined();
+    expect(first.headers["Content-Range"]).toBe("bytes 0-1/3");
+    first.respond(308, "", { Range: "bytes=0-1" });
+    await tick();
+    const second = lastXhr();
+    expect(second.headers["Content-Range"]).toBe("bytes 2-2/3");
+    second.respond(200, "");
     await expect(call).resolves.toEqual({ id: 4 });
     expect(jsonCalls(fetchMock)[1]).toEqual({ url: expect.stringContaining("/api/files/upload/complete"), body: { upload_id: "u1" } });
+    expect(progress).toContain(67);
+    expect(progress[progress.length - 1]).toBe(100);
+  });
+
+  test("a GCS chunk storage only partly kept is resent from where storage stopped", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u1", signed_url: "https://s/1", upload: { protocol: "gcs_resumable", url: "https://s/1", part_size: null } },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 4 } })) as unknown as typeof fetch;
+
+    const call = api.uploadSigned(file(), { chunkSize: 2 });
+    await tick();
+    lastXhr().respond(308, "", { Range: "bytes=0-0" });
+    await tick();
+    expect(lastXhr().headers["Content-Range"]).toBe("bytes 1-2/3");
+    lastXhr().respond(201, "");
+    await expect(call).resolves.toEqual({ id: 4 });
+  });
+
+  test("a GCS answer whose Range cannot be read moves on to the next chunk", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u1", signed_url: "https://s/1", upload: { protocol: "gcs_resumable", url: "https://s/1", part_size: null } },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 4 } })) as unknown as typeof fetch;
+
+    const call = api.uploadSigned(file(), { chunkSize: 2 });
+    await tick();
+    lastXhr().respond(308, "");
+    await tick();
+    expect(lastXhr().headers["Content-Range"]).toBe("bytes 2-2/3");
+    lastXhr().respond(200, "");
+    await expect(call).resolves.toEqual({ id: 4 });
+  });
+
+  test("an empty file is one request that tells storage the size", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u1", signed_url: "https://s/1", upload: { protocol: "gcs_resumable", url: "https://s/1", part_size: null } },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 4 } })) as unknown as typeof fetch;
+
+    const call = api.uploadSigned(new File([], "empty.txt"));
+    await tick();
+    expect(lastXhr().headers["Content-Range"]).toBe("bytes */0");
+    lastXhr().respond(200, "");
+    await expect(call).resolves.toEqual({ id: 4 });
   });
 
   test("an S3 upload sends each part to its own link and completes with the parts' ETags", async () => {

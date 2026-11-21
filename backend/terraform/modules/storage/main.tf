@@ -28,11 +28,12 @@ resource "google_storage_bucket" "ingest" {
   versioning { enabled = true }
   force_destroy = false
 
-  # Allow browsers to PUT files directly via signed URLs
+  # Allow browsers to PUT files directly to upload sessions. Range is exposed so the browser can
+  # read how much of a chunked upload storage has kept.
   cors {
     origin          = ["*"]
     method          = ["PUT", "OPTIONS"]
-    response_header = ["Content-Type", "Content-Length", "Authorization", "x-goog-*"]
+    response_header = ["Content-Type", "Content-Length", "Authorization", "Range", "x-goog-*"]
     max_age_seconds = 3600
   }
 

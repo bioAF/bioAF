@@ -484,6 +484,8 @@ interface SignedUploadOptions extends RequestControls {
   isGlobal?: boolean;
   filename?: string;
   onProgress?: (pct: number) => void;
+  /** Bytes per GCS chunk; defaults by file size. */
+  chunkSize?: number;
 }
 
 interface XhrOptions extends RequestControls {
@@ -500,6 +502,8 @@ interface XhrResult {
   retryAfter: string | null;
   /** The stored part's ETag (S3 multipart parts). */
   etag: string | null;
+  /** The bytes a GCS resumable session has kept so far ("bytes=0-N"). */
+  range: string | null;
 }
 
 /**
@@ -542,6 +546,7 @@ function sendXhr(options: XhrOptions): Promise<XhrResult> {
         responseText: xhr.responseText,
         retryAfter: xhr.getResponseHeader?.("Retry-After") ?? null,
         etag: xhr.getResponseHeader?.("ETag") ?? null,
+        range: xhr.getResponseHeader?.("Range") ?? null,
       });
     };
     xhr.onerror = () => {
@@ -566,8 +571,8 @@ function parseJsonText(text: string): unknown {
 }
 
 // Upload a file directly to storage through a provider session (storage lifecycle 11F):
-// initiate → send the bytes to the session → complete. A GCS resumable session takes the whole
-// file in one PUT; an S3 multipart upload takes parts, each to its own signed link. The bytes
+// initiate → send the bytes to the session → complete. A GCS resumable session takes the file in
+// chunks; an S3 multipart upload takes parts, each to its own signed link. The bytes
 // never transit the backend. If the upload is stopped or fails after the session exists, the
 // session is cancelled so it stops counting as a running upload.
 async function uploadFileSigned<T>(
@@ -626,18 +631,7 @@ async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: 
       // service's answer never ends the bioAF session.
       const url = upload?.url ?? signed_url;
       if (!url) throw new ApiError(502, "Storage did not provide an upload link.");
-      const put = await sendXhr({
-        method: "PUT",
-        url,
-        headers: { "Content-Type": "application/octet-stream" },
-        body: file,
-        onProgress: options.onProgress,
-        signal: owner.signal,
-      });
-      assertOwned(owner);
-      if (put.status < 200 || put.status >= 300) {
-        throw new ApiError(put.status, `Storage upload failed: ${put.status}`);
-      }
+      await sendChunks(url, file, options, owner);
     }
   } catch (error) {
     cancelUploadSession(upload_id);
@@ -650,6 +644,51 @@ async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: 
     json: parts ? { upload_id, parts } : { upload_id },
     signal: owner.signal,
   });
+}
+
+const ONE_GIB = 1024 * 1024 * 1024;
+
+/** GCS chunks: multiples of 256 KiB, larger for large files. */
+function gcsChunkSize(total: number): number {
+  return total > ONE_GIB ? 64 * 1024 * 1024 : 8 * 1024 * 1024;
+}
+
+// Send a file to a GCS resumable session in chunks. Each finished chunk is kept by storage, so
+// bioAF sees the upload progressing (a session with no new bytes for an hour is cancelled as
+// abandoned), and a chunk storage only partly kept is resent from where it stopped.
+async function sendChunks(url: string, file: File, options: SignedUploadOptions, owner: Owner): Promise<void> {
+  const total = file.size;
+  const chunkSize = options.chunkSize ?? gcsChunkSize(total);
+  let start = 0;
+  do {
+    const end = Math.min(start + chunkSize, total);
+    const put = await sendXhr({
+      method: "PUT",
+      url,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Range": total === 0 ? "bytes */0" : `bytes ${start}-${end - 1}/${total}`,
+      },
+      body: file.slice(start, end),
+      onProgress: (pct) =>
+        options.onProgress?.(Math.round(((start + (pct / 100) * (end - start)) / Math.max(total, 1)) * 100)),
+      signal: owner.signal,
+    });
+    assertOwned(owner);
+    if (put.status === 200 || put.status === 201) {
+      options.onProgress?.(100);
+      return;
+    }
+    if (put.status !== 308) {
+      throw new ApiError(put.status, `Storage upload failed: ${put.status}`);
+    }
+    // Storage says how much it kept. When that header cannot be read (a bucket that does not expose
+    // it), the chunk is taken as kept; the final chunk's answer still has to confirm the whole file.
+    const kept = put.range?.match(/bytes=0-(\d+)/);
+    start = kept ? Number(kept[1]) + 1 : end;
+    options.onProgress?.(Math.round((start / Math.max(total, 1)) * 100));
+  } while (start < total);
+  throw new ApiError(502, "Storage did not confirm the upload finished.");
 }
 
 const PART_LINK_BATCH = 100;
