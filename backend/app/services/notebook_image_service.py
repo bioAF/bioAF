@@ -287,7 +287,7 @@ async def _upload_build_context(session: AsyncSession, working_bucket: str) -> s
     return object_path
 
 
-async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> str:
+async def submit_image_build(session: AsyncSession, platform: ImagePlatform, user_id: int | None = None) -> str:
     """Submit a build job to build and push the bioaf-scrna image.
 
     Returns the backend build ID (Cloud Build id on GCP, CodeBuild id on AWS).
@@ -313,14 +313,25 @@ async def submit_image_build(session: AsyncSession, platform: ImagePlatform) -> 
         build_sa = getattr(credentials, "service_account_email", None)
 
     # Submit the build via the cloud-selected image-build provider.
-    build_id = get_image_build_provider().submit_build(
-        credentials,
-        platform.config,
-        context_object_uri=context_uri,
-        image_uri=image_uri,
-        build_sa=build_sa,
-        timeout="7200s",
-    )
+    # The build is infrastructure work: it joins the running operation or is admitted as its own,
+    # and stays active until the provider reports it settled (submission is not completion).
+    from app.services import infrastructure_operations as ops
+
+    operation_id, created = await ops.begin_image_build("notebook", user_id)
+    try:
+        build_id = get_image_build_provider().submit_build(
+            credentials,
+            platform.config,
+            context_object_uri=context_uri,
+            image_uri=image_uri,
+            build_sa=build_sa,
+            timeout="7200s",
+        )
+    except Exception:
+        if created:
+            await ops.finish(operation_id, ops.failed("Submitting the image build failed.", "submit_failed"))
+        raise
+    await ops.record_image_build(operation_id, "notebook", build_id)
 
     # Store build ID for monitoring
     await _set_config(session, "notebook_image_build_id", build_id)
@@ -373,7 +384,7 @@ async def cancel_build(session: AsyncSession) -> str:
     return build_id
 
 
-async def build_notebook_image(session: AsyncSession) -> str:
+async def build_notebook_image(session: AsyncSession, user_id: int | None = None) -> str:
     """Full flow: ensure the image repo, submit build, store image URI on success.
 
     Called when a notebook component (rstudio/jupyterhub) is enabled.
@@ -402,7 +413,7 @@ async def build_notebook_image(session: AsyncSession) -> str:
     await ensure_image_repository(session, platform)
 
     # Submit build
-    build_id = await submit_image_build(session, platform)
+    build_id = await submit_image_build(session, platform, user_id)
 
     return build_id
 
@@ -494,6 +505,11 @@ async def poll_image_build(session: AsyncSession) -> str | None:
 
     status = await check_build_status(session, build_id)
     await _set_config(session, "notebook_image_build_status", status)
+    # The provider confirmed the outcome: settle the operation that owns this build before any
+    # queued follow-on build asks for admission.
+    from app.services.infrastructure_operations import settle_external_build
+
+    await settle_external_build(build_id, status)
 
     if status == "SUCCESS":
         logger.info("Notebook image build %s completed successfully", build_id)

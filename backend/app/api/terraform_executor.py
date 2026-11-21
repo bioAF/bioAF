@@ -15,7 +15,9 @@ import json
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,11 +31,21 @@ from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_cloud import get_terraform_cloud
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services import infrastructure_operations as ops
 from app.services.terraform_stream import INTERRUPTED_EVENT, owned_event_stream
 
 logger = logging.getLogger("bioaf.terraform_api")
 
 router = APIRouter(prefix="/api/v1/infrastructure/terraform", tags=["terraform_executor"])
+
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key")]
+
+
+async def _accept(current_user: dict, action: str, key: str | None = None, inputs: dict | None = None) -> int:
+    op_id, _ = await ops.accept(
+        action=action, principal=ops.Principal.from_user(current_user), idempotency_key=key, inputs=inputs
+    )
+    return op_id
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +131,12 @@ async def bootstrap_foundation(
     if config.get("terraform_initialized", "false") == "true":
         raise HTTPException(status_code=409, detail="Infrastructure is already initialized")
 
-    gen = TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id)
+    op_id = await _accept(current_user, "foundation_bootstrap")
+    gen = ops.operation_stream(
+        op_id,
+        TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id),
+        terminal="terraform",
+    )
 
     async def event_generator():
         async with owned_event_stream(session, gen) as events:
@@ -166,12 +183,17 @@ async def terraform_init(
     if config.get("terraform_initialized", "false") == "true":
         return {"message": "Terraform already initialized"}
 
-    # Consume the SSE generator to completion
+    # Consume the SSE generator to completion, as one accepted operation.
+    op_id = await _accept(current_user, "foundation_bootstrap")
     last_error = None
     try:
         async with owned_event_stream(
             session,
-            TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id),
+            ops.operation_stream(
+                op_id,
+                TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id),
+                terminal="terraform",
+            ),
         ) as events:
             async for event in events:
                 if event.event_type == "apply_error":
@@ -185,7 +207,7 @@ async def terraform_init(
     if last_error:
         raise HTTPException(status_code=500, detail=last_error)
 
-    return {"message": "Terraform initialized"}
+    return {"message": "Terraform initialized", "operation_id": op_id}
 
 
 @router.post("/plan", response_model=TerraformRunDetail)
@@ -197,12 +219,19 @@ async def run_plan(
     """Run terraform plan and return the plan summary."""
     user_id = int(current_user["sub"])
 
-    run = await TerraformExecutor.run_plan(
-        session=session,
-        user_id=user_id,
-        module_name=body.module_name,
+    # A diagnostic plan is its own short operation: exclusion is released once it is read.
+    op_id = await _accept(current_user, "terraform_plan", inputs={"module_name": body.module_name})
+    async with ops.owned(op_id):
+        run = await TerraformExecutor.run_plan(
+            session=session,
+            user_id=user_id,
+            module_name=body.module_name,
+        )
+        await session.commit()
+    await ops.finish(
+        op_id,
+        ops.succeeded("Plan ready.") if run.status != "failed" else ops.failed("Planning failed.", "plan_failed"),
     )
-    await session.commit()
 
     return TerraformRunDetail.model_validate(run)
 
@@ -227,7 +256,10 @@ async def apply_plan(
             detail=f"Run {run_id} is not awaiting confirmation (status: {run.status})",
         )
 
-    gen = TerraformExecutor.run_apply(session=session, run_id=run_id, user_id=user_id)
+    op_id = await _accept(current_user, "terraform_apply", inputs={"run_id": run_id})
+    gen = ops.operation_stream(
+        op_id, TerraformExecutor.run_apply(session=session, run_id=run_id, user_id=user_id), terminal="terraform"
+    )
 
     async def event_generator():
         async with owned_event_stream(session, gen) as events:
@@ -260,6 +292,8 @@ async def abandon_run(
     """Abandon a stuck Terraform run and release the GCS state lock."""
     user_id = int(current_user["sub"])
 
+    # Lock cleanup follows operation authority: never while another operation holds exclusion.
+    await ops.ensure_admitted(session, "terraform_apply")
     run = await TerraformExecutor.abandon_run(
         session=session,
         run_id=run_id,

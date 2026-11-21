@@ -103,6 +103,27 @@ async def deploy_storage_module(session: AsyncSession, user_id: int) -> dict:
     return {"status": "completed"}
 
 
+async def _storage_operation(
+    session: AsyncSession, current_user: dict, action: str, *, store_outputs: bool = False
+) -> dict:
+    """Plan, apply and record outputs (and the storage generation) as one accepted operation."""
+    from app.services import infrastructure_operations as ops
+
+    op_id, _ = await ops.accept(action=action, principal=ops.Principal.from_user(current_user))
+    async with ops.owned(op_id):
+        result = await deploy_storage_module(session, int(current_user["sub"]))
+        # Store outputs since this apply may have added new resources (Pub/Sub).
+        if store_outputs and result.get("status") == "completed":
+            await _store_storage_outputs(session)
+    await ops.finish(
+        op_id,
+        ops.succeeded("Storage applied.")
+        if result.get("status") == "completed"
+        else ops.failed("Applying storage failed.", "apply_failed"),
+    )
+    return result
+
+
 @router.post(
     "/api/v1/infrastructure/storage/deploy",
     response_model=StorageDeployResponse,
@@ -112,7 +133,6 @@ async def deploy_storage(
     session: AsyncSession = Depends(get_session),
 ) -> StorageDeployResponse:
     """Deploy GCS storage buckets via Terraform."""
-    user_id = int(current_user["sub"])
 
     # Read preconditions
     config = await PlatformConfigService.get_many(session, ["terraform_initialized", "storage_deployed"])
@@ -128,7 +148,7 @@ async def deploy_storage(
             detail="Storage infrastructure has already been deployed.",
         )
 
-    result = await deploy_storage_module(session, user_id)
+    result = await _storage_operation(session, current_user, "storage_deploy")
     return StorageDeployResponse(**result)
 
 
@@ -145,7 +165,6 @@ async def update_storage(
     Unlike /deploy, this endpoint works when storage is already deployed.
     Terraform will only create or modify resources that have changed.
     """
-    user_id = int(current_user["sub"])
 
     config = await PlatformConfigService.get_many(session, ["terraform_initialized", "storage_deployed"])
 
@@ -160,12 +179,7 @@ async def update_storage(
             detail="Storage has not been deployed yet. Use /deploy instead.",
         )
 
-    result = await deploy_storage_module(session, user_id)
-
-    # Store outputs since this apply may have added new resources (Pub/Sub).
-    if result.get("status") == "completed":
-        await _store_storage_outputs(session)
-
+    result = await _storage_operation(session, current_user, "storage_update", store_outputs=True)
     return StorageDeployResponse(**result)
 
 

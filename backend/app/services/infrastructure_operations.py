@@ -368,10 +368,64 @@ def _settle_steps(steps: list[dict], status: str) -> list[dict]:
     return out
 
 
+# Provider build states that settle a cloud build, and what each means for its operation.
+BUILD_TERMINAL = {
+    "SUCCESS": "succeeded",
+    "FAILURE": "failed",
+    "TIMEOUT": "failed",
+    "INTERNAL_ERROR": "failed",
+    "EXPIRED": "failed",
+    "CANCELLED": "cancelled",
+}
+_BUILD_LABELS = {"notebook": "Notebook image build", "cellxgene": "Cellxgene image build"}
+
+
+def _unsettled_builds(op: InfrastructureOperation) -> list[dict]:
+    return [b for b in (op.external_builds or []) if b.get("status") not in BUILD_TERMINAL]
+
+
+def _combined_result(op: InfrastructureOperation, pending: dict) -> OperationResult:
+    builds = op.external_builds or []
+    status = pending.get("status", "succeeded")
+    message = pending.get("message")
+    category = pending.get("category")
+    if status == "succeeded":
+        failed_builds = [b for b in builds if BUILD_TERMINAL.get(b.get("status", "")) == "failed"]
+        cancelled = [b for b in builds if b.get("status") == "CANCELLED"]
+        if failed_builds:
+            label = _BUILD_LABELS.get(failed_builds[0].get("kind", ""), "Image build")
+            return failed(f"{label} failed.", "build_failed")
+        if cancelled:
+            return OperationResult("cancelled", message or "The image build was cancelled.", "cancelled")
+    return OperationResult(status, message, category)
+
+
 async def finish(operation_id: int, result: OperationResult) -> None:
-    """Record the settled outcome. Exclusion is released unless recovery is required."""
+    """Record the settled outcome. Exclusion is released unless recovery is required.
+
+    A cloud build the operation submitted may still be running after its own work ends: submission
+    is not completion. Then the outcome is held and the operation keeps exclusion until the build
+    monitor reports every build settled (``settle_external_build``).
+    """
+    waiting = False
 
     def change(op: InfrastructureOperation) -> None:
+        nonlocal waiting
+        if result.status != "recovery_required" and _unsettled_builds(op):
+            waiting = True
+            op.partial_effects = {
+                **(op.partial_effects or {}),
+                **(result.partial_effects or {}),
+                "pending_result": {"status": result.status, "message": result.message, "category": result.category},
+            }
+            op.steps = [
+                dict(s, state="done")
+                if s.get("state") == "running" and not s.get("key", "").startswith("build:")
+                else s
+                for s in (op.steps or [])
+            ]
+            op.phase = "Waiting for image builds to finish"
+            return
         op.status = result.status
         op.message = result.message
         op.error_category = result.category
@@ -384,7 +438,78 @@ async def finish(operation_id: int, result: OperationResult) -> None:
         op.phase = None
 
     await OperationHandle(operation_id)._update(change)
-    logger.info("Infrastructure operation %s finished: %s", operation_id, result.status)
+    if waiting:
+        logger.info("Infrastructure operation %s waits for its image builds", operation_id)
+    else:
+        logger.info("Infrastructure operation %s finished: %s", operation_id, result.status)
+
+
+async def begin_image_build(kind: str, user_id: int | None) -> tuple[int, bool]:
+    """Admit a cloud image build before it is submitted; return (operation_id, created).
+
+    A build started inside an operation (a deploy draining queued components) belongs to it.
+    Otherwise the build is its own operation, which raises InfrastructureBusyError while
+    another holds exclusion.
+    """
+    operation_id = current_operation_id()
+    if operation_id is not None:
+        return operation_id, False
+    operation_id, _ = await accept(action=f"{kind}_image_build", principal=Principal(user_id))
+    handle = OperationHandle(operation_id)
+    await _start(handle)
+
+    def pending(op: InfrastructureOperation) -> None:
+        op.partial_effects = {"pending_result": {"status": "succeeded", "message": "Image build finished."}}
+
+    await handle._update(pending)
+    return operation_id, True
+
+
+async def record_image_build(operation_id: int, kind: str, build_id: str) -> None:
+    handle = OperationHandle(operation_id)
+
+    def change(op: InfrastructureOperation) -> None:
+        op.external_builds = [*(op.external_builds or []), {"kind": kind, "build_id": build_id, "status": "WORKING"}]
+        if op.partial_effects and "pending_result" in op.partial_effects:
+            op.phase = "Waiting for image builds to finish"
+
+    await handle._update(change)
+    await handle.step(f"build:{build_id}", f"Building {kind} image", "running")
+
+
+async def settle_external_build(build_id: str, provider_status: str) -> None:
+    """Record a build's provider-confirmed status; settle its operation once nothing is pending."""
+    if provider_status not in BUILD_TERMINAL:
+        return
+    async with _session_factory()() as session:
+        ops = (
+            await session.execute(
+                select(InfrastructureOperation)
+                .where(InfrastructureOperation.exclusive_slot == 1)
+                .with_for_update(key_share=True)
+            )
+        ).scalars()
+        for op in ops:
+            builds = [dict(b) for b in (op.external_builds or [])]
+            match = next((b for b in builds if b.get("build_id") == build_id), None)
+            if match is None or match.get("status") in BUILD_TERMINAL:
+                continue
+            match["status"] = provider_status
+            op.external_builds = builds
+            state = {"succeeded": "done", "failed": "failed", "cancelled": "stopped"}[BUILD_TERMINAL[provider_status]]
+            op.steps = [dict(s, state=state) if s.get("key") == f"build:{build_id}" else s for s in (op.steps or [])]
+            pending = (op.partial_effects or {}).get("pending_result")
+            if pending is not None and not _unsettled_builds(op):
+                result = _combined_result(op, pending)
+                op.status = result.status
+                op.message = result.message
+                op.error_category = result.category
+                op.finished_at = _now()
+                op.exclusive_slot = None
+                op.phase = None
+                op.steps = _settle_steps(list(op.steps or []), result.status)
+                logger.info("Infrastructure operation %s finished after its image builds: %s", op.id, result.status)
+        await session.commit()
 
 
 async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awaitable[OperationResult]]) -> None:
@@ -494,7 +619,7 @@ async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
         _reset(token)
 
 
-async def operation_stream(operation_id: int, events: AsyncIterator) -> AsyncIterator:
+async def operation_stream(operation_id: int, events: AsyncIterator, *, terminal: str = "stack") -> AsyncIterator:
     """Pass a stack generator's events through to an SSE response while the operation owns them.
 
     The stream's outcome becomes the operation's: a terminal event settles it, a client
@@ -502,7 +627,7 @@ async def operation_stream(operation_id: int, events: AsyncIterator) -> AsyncIte
     without a terminal event is never recorded as success.
     """
     handle = OperationHandle(operation_id)
-    tracker = StackTracker(handle)
+    tracker = StackTracker(handle, terminal=terminal)
     token = _current.set(operation_id)
     try:
         await _start(handle)
@@ -582,6 +707,9 @@ class StackTracker:
     """Turns a stack generator's events into operation steps and an outcome."""
 
     handle: OperationHandle
+    # "stack": stack_complete / stack_error settle the outcome. "terraform": a single Terraform
+    # command's apply_complete / apply_error do.
+    terminal: str = "stack"
     current: str | None = None
     counts: tuple[int, int] = (0, 0)
     outcome: OperationResult | None = None
@@ -610,6 +738,9 @@ class StackTracker:
                 bucket = message.removeprefix("Emptying bucket ").rstrip(".")
                 await self.start(f"empty:{bucket}", f"Emptying {bucket}")
                 return
+        if self.terminal == "terraform" and etype in ("apply_complete", "apply_error"):
+            etype = "stack_complete" if etype == "apply_complete" else "stack_error"
+            message = "Apply complete" if etype == "stack_complete" else "Terraform reported an error."
         if etype == "stack_complete":
             self.outcome = succeeded(message or None)
         elif etype == "stack_error":

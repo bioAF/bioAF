@@ -318,7 +318,7 @@ async def _build_with_recording_registry(session, cloud: str):
     events: list = []
     credentials = object()
 
-    async def submit(session, platform):
+    async def submit(session, platform, *_requester):
         events.append(("submit_image_build", platform.cloud_provider))
         return "build-1"
 

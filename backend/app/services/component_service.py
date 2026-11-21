@@ -5,6 +5,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, ValidationError
+from app.services.infrastructure_operations import InfrastructureBusyError
 from app.models.component import ComponentState
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
@@ -326,7 +327,7 @@ class ComponentService:
         else:
             await ComponentService._require_dependencies(session, comp_def["dependencies"])
             new_enabled = True
-            new_status = await ComponentService._ensure_component_image(session, component_key, force_rebuild)
+            new_status = await ComponentService._ensure_component_image(session, component_key, force_rebuild, user_id)
             await session.execute(
                 text("""
                 UPDATE component_states SET enabled = true, status = :status
@@ -365,7 +366,9 @@ class ComponentService:
             raise ValidationError(f"Dependency not met: {', '.join(missing)} must be enabled first")
 
     @staticmethod
-    async def _ensure_component_image(session: AsyncSession, component_key: str, force_rebuild: bool) -> str:
+    async def _ensure_component_image(
+        session: AsyncSession, component_key: str, force_rebuild: bool, user_id: int | None = None
+    ) -> str:
         """Start the component's image build if it needs one; return its status."""
         if component_key in _NOTEBOOK_COMPONENTS:
             needs_build = await ComponentService._needs_image_build(
@@ -373,8 +376,10 @@ class ComponentService:
             )
             if needs_build:
                 try:
-                    await build_notebook_image(session)
+                    await build_notebook_image(session, user_id)
                     return "provisioning"
+                except InfrastructureBusyError:
+                    raise
                 except Exception as exc:
                     logger.warning("Failed to start notebook image build: %s", exc)
                     return "build_failed"
@@ -387,8 +392,10 @@ class ComponentService:
             )
             if needs_build:
                 try:
-                    await build_cellxgene_image(session)
+                    await build_cellxgene_image(session, user_id)
                     return "provisioning"
+                except InfrastructureBusyError:
+                    raise
                 except Exception as exc:
                     logger.warning("Failed to start cellxgene image build: %s", exc)
                     return "build_failed"
