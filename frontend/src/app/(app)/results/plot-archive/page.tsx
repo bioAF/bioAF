@@ -16,6 +16,7 @@ import type {
   PipelineRunListResponse,
 } from "@/lib/types";
 import { ExperimentPicker } from "@/components/experiments/ExperimentPicker";
+import { PlotScanNotice } from "@/components/plots/PlotScanNotice";
 
 export default function PlotArchivePage() {
   const [query, setQuery] = useState("");
@@ -97,6 +98,7 @@ export default function PlotArchivePage() {
       <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
         Figures saved from pipeline runs and notebook sessions, kept together and searchable across experiments.
       </p>
+      <PlotScanNotice health={list.data?.scan_health} onRecovered={() => void fetchPlots()} />
 
       <div className="space-y-4">
         {/* Filters */}
