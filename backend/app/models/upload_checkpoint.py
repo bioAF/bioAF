@@ -5,16 +5,25 @@ issued or a proxied transfer starts, so the upload survives a restart and a fail
 leaves tracked, recoverable bytes rather than an untracked object.
 
 Stages:
-- ``issued``: a signed URL was handed out; the client may still be sending bytes.
+- ``issued``: an upload session (``session``) or, before this release, a presigned URL
+  (``signed``) was handed out; the client may still be sending bytes.
 - ``transferring``: a proxied upload is streaming through the backend.
 - ``received``: the bytes are stored in ingest but not yet filed (registration and move pending).
 - ``filed``: the File record exists (``file_id``) and the bytes are where it says.
-- ``cancelled``: the uploader or an administrator removed it.
+- ``cancelling``: cancellation was recorded and filing is refused, but the provider has not yet
+  confirmed that nothing more can arrive, so the upload still counts as a possible writer.
+- ``cancelled``: removed, and nothing more can arrive (or an administrator released it).
 - ``failed``: the stored copy was lost; nothing can be filed.
 
 ``attempts`` / ``next_attempt_at`` drive bounded automatic filing retries; after the last one the
 upload waits for Retry now or Cancel upload (mockup M12). ``reference`` is shown to people and
 repeated in the server log.
+
+``session_handle`` is the provider session (a GCS resumable session URL, which is a bearer
+credential, or an S3 multipart upload ID): never logged or returned in a listing.
+``reconcile_attempts`` / ``next_reconcile_at`` drive background settlement with the provider;
+``released_*`` records an administrator's audited release of a writer whose outcome bioAF could
+not confirm.
 """
 
 from datetime import datetime
@@ -64,6 +73,22 @@ class UploadCheckpoint(Base):
     last_error_category: Mapped[str | None] = mapped_column(String(48), nullable=True)
     file_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     grant_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    purpose: Mapped[str] = mapped_column(String(24), nullable=False, server_default=text("'file'"))
+    session_protocol: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    session_handle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reconcile_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    next_reconcile_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    release_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -71,9 +96,10 @@ class UploadCheckpoint(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "stage IN ('issued', 'transferring', 'received', 'filed', 'cancelled', 'failed')",
+            "stage IN ('issued', 'transferring', 'received', 'filed', 'cancelling', 'cancelled', 'failed')",
             name="ck_upload_checkpoints_stage",
         ),
-        CheckConstraint("kind IN ('signed', 'proxied')", name="ck_upload_checkpoints_kind"),
+        CheckConstraint("kind IN ('signed', 'proxied', 'session')", name="ck_upload_checkpoints_kind"),
+        CheckConstraint("purpose IN ('file', 'lab_document', 'reference')", name="ck_upload_checkpoints_purpose"),
         Index("ix_upload_checkpoints_org_stage", "organization_id", "stage"),
     )

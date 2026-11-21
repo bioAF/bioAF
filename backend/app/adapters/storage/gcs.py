@@ -7,6 +7,7 @@ Mode is the resolved settings.compute_mode (BIOAF_COMPUTE_MODE), fixed when the 
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import BinaryIO
 
@@ -22,6 +23,10 @@ from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
+    UploadedPart,
+    UploadSessionGrant,
+    UploadSessionState,
+    UploadSessionStatus,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
@@ -611,6 +616,72 @@ class GcsStorageProvider(StorageProvider):
         return await asyncio.to_thread(
             self._gcs_create_resumable_upload_url, uri, content_type, size_bytes, origin, creds
         )
+
+    # -- Direct-upload sessions: GCS resumable sessions (11F/11G) --
+    #
+    # The session URL is a bearer credential: it is never logged. A status query is a PUT with
+    # an empty body and ``Content-Range: bytes */*``; cancellation is a DELETE (answered 499).
+
+    async def begin_upload_session(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> UploadSessionGrant:
+        if self.is_local:
+            return await super().begin_upload_session(uri, content_type=content_type, size_bytes=size_bytes)
+        url = await self.create_resumable_upload_url(
+            uri, content_type=content_type, size_bytes=size_bytes, origin=origin
+        )
+        return UploadSessionGrant(protocol="gcs_resumable", handle=url, url=url)
+
+    async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
+        # A resumable session stores the object when its last byte arrives.
+        return None
+
+    async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_session_status, uri, handle, "PUT", creds)
+
+    async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_session_status, uri, handle, "DELETE", creds)
+
+    def _gcs_session_request(self, method: str, url: str, headers: dict) -> tuple[int, dict]:
+        import requests
+
+        response = requests.request(method, url, headers=headers, timeout=30)
+        return response.status_code, dict(response.headers)
+
+    def _gcs_session_status(self, uri: str, handle: str, method: str, creds) -> UploadSessionStatus:
+        headers = {"Content-Length": "0"}
+        if method == "PUT":
+            headers["Content-Range"] = "bytes */*"
+        try:
+            status, answer = self._gcs_session_request(method, handle, headers)
+        except Exception as exc:
+            logger.warning("Upload session %s did not answer (error_type=%s)", method.lower(), type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        if status in (200, 201):
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED)
+        if status == 308 and method == "PUT":
+            received = 0
+            match = re.match(r"bytes=0-(\d+)", answer.get("Range") or answer.get("range") or "")
+            if match:
+                received = int(match.group(1)) + 1
+            return UploadSessionStatus(state=UploadSessionState.ACTIVE, received_bytes=received)
+        if status in (404, 410, 499):
+            # The session accepts nothing more. Its object may still have landed just before.
+            try:
+                stored = self._gcs_exists(uri, creds)
+            except Exception as exc:
+                logger.warning("Could not check an ended upload's object (error_type=%s)", type(exc).__name__)
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED if stored else UploadSessionState.ENDED)
+        logger.warning("Upload session %s answered %s", method.lower(), status)
+        return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
 
     # -- GCS-mode object-store helpers (run inside asyncio.to_thread) --
 

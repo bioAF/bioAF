@@ -263,6 +263,44 @@ class ContainerObservation(BaseModel):
     simulated: bool = False
 
 
+class UploadSessionState(str, Enum):
+    """What the provider says about a direct-upload session.
+
+    ``ACTIVE``: it may still accept bytes. ``COMPLETED``: the object is stored. ``ENDED``: it can
+    accept nothing more and stored nothing (cancelled or expired). ``UNKNOWN``: the provider did
+    not give an answer, so nothing may be concluded.
+    """
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ENDED = "ended"
+    UNKNOWN = "unknown"
+
+
+class UploadSessionStatus(BaseModel):
+    state: UploadSessionState
+    received_bytes: int | None = None
+
+
+class UploadSessionGrant(BaseModel):
+    """A provider session a browser uploads to directly, and bioAF can inspect and cancel.
+
+    ``handle`` identifies the session to the provider (a GCS resumable session URL, itself a
+    bearer credential, or an S3 multipart upload ID). ``url`` is where a GCS client sends bytes;
+    an S3 client asks for a signed URL per part of ``part_size`` bytes.
+    """
+
+    protocol: Literal["gcs_resumable", "s3_multipart"]
+    handle: str
+    url: str | None = None
+    part_size: int | None = None
+
+
+class UploadedPart(BaseModel):
+    number: int = Field(ge=1, le=10_000)
+    etag: str = Field(min_length=1, max_length=256)
+
+
 class StorageObjectNotFound(Exception):
     """Raised when a read/download/metadata op targets an object that is absent.
 

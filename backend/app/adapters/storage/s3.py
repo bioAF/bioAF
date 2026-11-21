@@ -37,6 +37,10 @@ from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
+    UploadedPart,
+    UploadSessionGrant,
+    UploadSessionState,
+    UploadSessionStatus,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
@@ -54,6 +58,23 @@ from app.adapters.models import (
 )
 
 logger = logging.getLogger("bioaf.adapters.storage.s3")
+
+_MIB = 1024 * 1024
+_MIN_PART = 8 * _MIB  # S3's floor is 5 MiB; 8 MiB keeps requests few for small files
+_DEFAULT_PART = 64 * _MIB  # when the size is not declared
+_MAX_PARTS = 10_000
+
+
+def multipart_part_size(size_bytes: int | None) -> int:
+    """Part size for a multipart upload: at most 10,000 parts, whole MiB, at least 8 MiB."""
+    if size_bytes is None:
+        return _DEFAULT_PART
+    needed = -(-size_bytes // _MAX_PARTS)
+    return max(_MIN_PART, -(-needed // _MIB) * _MIB)
+
+
+def _error_code(exc) -> str:
+    return str(exc.response.get("Error", {}).get("Code", ""))[:40]
 
 # Local mode emulates the object store on the filesystem, exactly like the GCS
 # adapter (``s3://<bucket>/<key>`` maps to LOCAL_DATA_ROOT/_objects/<bucket>/<key>),
@@ -624,6 +645,121 @@ class S3StorageProvider(StorageProvider):
         # so they are accepted and ignored here.
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_create_presigned_put, uri, content_type, creds)
+
+    # -- Direct-upload sessions: S3 multipart uploads (11F/11G) ---------------
+    #
+    # The browser uploads parts to presigned UploadPart URLs it asks for as it goes, then bioAF
+    # assembles the object. Cancelling aborts the upload and is confirmed only when the provider
+    # no longer lists it: a part still in flight during the abort can keep it listed.
+
+    async def begin_upload_session(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> UploadSessionGrant:
+        if self.is_local:
+            return await super().begin_upload_session(uri, content_type=content_type, size_bytes=size_bytes)
+        creds = await self._get_credentials()
+        upload_id = await asyncio.to_thread(self._s3_begin_multipart, uri, content_type, creds)
+        return UploadSessionGrant(protocol="s3_multipart", handle=upload_id, part_size=multipart_part_size(size_bytes))
+
+    async def sign_upload_parts(self, uri: str, handle: str, part_numbers: list[int]) -> dict[int, str]:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_sign_parts, uri, handle, part_numbers, creds)
+
+    async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
+        creds = await self._get_credentials()
+        await asyncio.to_thread(self._s3_finish_multipart, uri, handle, parts, creds)
+
+    async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_multipart_status, uri, handle, creds)
+
+    async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_abort_multipart, uri, handle, creds)
+
+    def _s3_begin_multipart(self, uri: str, content_type: str, creds) -> str:
+        bucket, key = self._parse_uri(uri)
+        answer = self._get_s3_client(creds).create_multipart_upload(Bucket=bucket, Key=key, ContentType=content_type)
+        return answer["UploadId"]
+
+    def _s3_sign_parts(self, uri: str, handle: str, part_numbers: list[int], creds) -> dict[int, str]:
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        return {
+            number: client.generate_presigned_url(
+                "upload_part",
+                Params={"Bucket": bucket, "Key": key, "UploadId": handle, "PartNumber": number},
+                ExpiresIn=3600,
+            )
+            for number in part_numbers
+        }
+
+    def _s3_finish_multipart(self, uri: str, handle: str, parts: list[UploadedPart], creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        ordered = sorted(parts, key=lambda p: p.number)
+        self._get_s3_client(creds).complete_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            UploadId=handle,
+            MultipartUpload={"Parts": [{"PartNumber": p.number, "ETag": p.etag} for p in ordered]},
+        )
+
+    def _s3_multipart_status(self, uri: str, handle: str, creds) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        try:
+            answer = client.list_parts(Bucket=bucket, Key=key, UploadId=handle)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "NoSuchUpload":
+                logger.warning("Multipart status did not complete (error_code=%s)", _error_code(exc))
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+            return self._s3_ended_or_completed(client, bucket, key)
+        except BotoCoreError as exc:
+            logger.warning("Multipart status did not complete (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        received = sum(int(p.get("Size") or 0) for p in answer.get("Parts", []))
+        return UploadSessionStatus(state=UploadSessionState.ACTIVE, received_bytes=received)
+
+    def _s3_ended_or_completed(self, client, bucket: str, key: str) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        # The upload ID is gone: either it was completed (the object exists) or it ended.
+        try:
+            client.head_object(Bucket=bucket, Key=key)
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED)
+        except ClientError as exc:
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if _error_code(exc) in ("404", "NoSuchKey", "NotFound") or status == 404:
+                return UploadSessionStatus(state=UploadSessionState.ENDED)
+            logger.warning("Could not check an ended upload's object (error_code=%s)", _error_code(exc))
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        except BotoCoreError as exc:
+            logger.warning("Could not check an ended upload's object (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+
+    def _s3_abort_multipart(self, uri: str, handle: str, creds) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        try:
+            client.abort_multipart_upload(Bucket=bucket, Key=key, UploadId=handle)
+        except ClientError as exc:
+            if _error_code(exc) != "NoSuchUpload":
+                logger.warning("Multipart abort did not complete (error_code=%s)", _error_code(exc))
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        except BotoCoreError as exc:
+            logger.warning("Multipart abort did not complete (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        # Confirmed only once the provider no longer lists the upload.
+        return self._s3_multipart_status(uri, handle, creds)
 
     # -- Bucket-admin enumeration (Tier-2): real S3 only, no local mode -------
 

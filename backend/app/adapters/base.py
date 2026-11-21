@@ -37,6 +37,9 @@ from app.adapters.models import (
     StoredObject,
     StorageStore,
     TerminationResult,
+    UploadedPart,
+    UploadSessionGrant,
+    UploadSessionStatus,
     VmInfo,
     VmStatus,
 )
@@ -597,6 +600,41 @@ class StorageProvider(ABC):
         declare ``signed_url_upload=False`` and raise CapabilityNotSupported.
         """
         raise NotImplementedError
+
+    # -- Direct-upload sessions bioAF can inspect and cancel (11F/11G) ----------
+    #
+    # A browser uploads to a provider session rather than a presigned PUT, so bioAF can ask
+    # whether bytes may still arrive and cancel it with the provider's confirmation. Backends
+    # without direct client upload (NFS) raise CapabilityNotSupported.
+
+    async def begin_upload_session(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> UploadSessionGrant:
+        raise CapabilityNotSupported("signed_url_upload", "This storage backend has no direct upload sessions.")
+
+    async def sign_upload_parts(self, uri: str, handle: str, part_numbers: list[int]) -> dict[int, str]:
+        """Signed URLs for the given parts of a multipart session (S3 only)."""
+        raise CapabilityNotSupported("signed_url_upload", "This storage backend has no upload parts to sign.")
+
+    async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
+        """Assemble the object from its uploaded parts (S3); a GCS session finishes itself."""
+        raise CapabilityNotSupported("signed_url_upload", "This storage backend has no direct upload sessions.")
+
+    async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        raise CapabilityNotSupported("signed_url_upload", "This storage backend has no direct upload sessions.")
+
+    async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        """Cancel the session and report what the provider confirms afterwards.
+
+        ``ENDED`` confirms nothing more can arrive and nothing was stored; ``COMPLETED`` means the
+        object landed first (the caller cleans it up); ``ACTIVE`` or ``UNKNOWN`` mean not confirmed.
+        """
+        raise CapabilityNotSupported("signed_url_upload", "This storage backend has no direct upload sessions.")
 
     # -- Bucket-admin enumeration (Tier-2 / Phase 9) --------------------------
     #
