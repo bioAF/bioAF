@@ -190,8 +190,8 @@ export function StorageHealthPanel() {
 
   return (
     <section className="space-y-3" aria-label="Storage health">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">Storage</h3>
+      {/* The Components page's "Storage" heading names this section (mockup M14). */}
+      <div className="flex items-center justify-end">
         <div className="flex items-center gap-3 text-xs text-gray-500">
           {checkedAgo(health.checked_at) && <span>{checkedAgo(health.checked_at)}</span>}
           {isAdmin && (
