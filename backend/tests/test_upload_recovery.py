@@ -462,3 +462,82 @@ async def test_lab_document_and_literature_uploads_are_refused_while_paused(sess
         await LabDocumentUploadService.initiate(session, admin_user.organization_id, file_name="sop.pdf")
     with pytest.raises(UploadsPausedError):
         await upload_pdf_to_gcs(session, paper_id=1, pdf_bytes=b"%PDF")
+
+
+# ---------------------------------------------------------------------------
+# store health before anything is written or signed (11F)
+# ---------------------------------------------------------------------------
+
+UPLOAD_STORAGE_UNAVAILABLE = (
+    "Uploads are unavailable because bioAF cannot reach its upload storage. Your files have not been sent. "
+    "Ask an administrator to check Storage under Infrastructure > Components."
+)
+
+
+def _ingest_health(health):
+    from app.services import storage_identity
+    from app.services.storage_identity import StoreReport
+
+    async def inspect(session, store, bucket):
+        return StoreReport(store, bucket, health)
+
+    return patch.object(storage_identity, "inspect_bucket", side_effect=inspect)
+
+
+@pytest.mark.parametrize("health", ["not_found", "no_access", "wrong_owner"])
+@pytest.mark.asyncio
+async def test_an_unusable_upload_store_refuses_before_anything_is_sent(client, admin_token, storage, session, health):
+    from app.services.storage_identity import StoreHealth
+
+    exp = await _experiment(session)
+    adapter = _adapter()
+    with _ingest_health(StoreHealth(health)), patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        signed = await client.post(
+            "/api/files/upload/initiate",
+            json={"filename": "a.txt", "experiment_id": exp.id, "expected_size_bytes": 3},
+            headers=_auth(admin_token),
+        )
+        proxied = await client.post(
+            f"/api/files/upload/simple?experiment_id={exp.id}",
+            files={"file": ("a.txt", io.BytesIO(b"abc"), "text/plain")},
+            headers=_auth(admin_token),
+        )
+
+    for response in (signed, proxied):
+        assert response.status_code == 409
+        assert response.json()["code"] == "upload_storage_unavailable"
+        assert response.json()["detail"] == UPLOAD_STORAGE_UNAVAILABLE
+    assert await _checkpoints(session) == []
+    adapter.generate_signed_url.assert_not_awaited()
+    adapter.upload_file.assert_not_awaited()
+
+
+@pytest.mark.parametrize("health", ["not_confirmed", "cannot_check", "not_responding"])
+@pytest.mark.asyncio
+async def test_a_store_that_is_not_known_to_be_unusable_still_accepts_uploads(
+    client, admin_token, storage, session, health
+):
+    from app.services.storage_identity import StoreHealth
+
+    exp = await _experiment(session)
+    with _ingest_health(StoreHealth(health)):
+        response = await _simple(client, admin_token, exp.id, _adapter())
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_lab_document_and_literature_uploads_check_their_store(session, admin_user, storage):
+    from app.models.component import PlatformConfig
+    from app.services.lab_document_upload_service import LabDocumentUploadService
+    from app.services.literature.upload_service import upload_pdf_to_gcs
+    from app.services.storage_identity import StoreHealth
+    from app.services.storage_write_admission import UploadStorageUnavailableError
+
+    session.add(PlatformConfig(key="working_bucket_name", value="bioaf-working-test"))
+    session.add(PlatformConfig(key="literature_bucket_name", value="bioaf-literature-test"))
+    await session.commit()
+    with _ingest_health(StoreHealth.NOT_FOUND):
+        with pytest.raises(UploadStorageUnavailableError):
+            await LabDocumentUploadService.initiate(session, admin_user.organization_id, file_name="sop.pdf")
+        with pytest.raises(UploadStorageUnavailableError):
+            await upload_pdf_to_gcs(session, paper_id=1, pdf_bytes=b"%PDF")

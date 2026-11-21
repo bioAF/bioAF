@@ -9,7 +9,7 @@ import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 
 // "pending": stored but not yet filed (bioAF retries); "needs_attention": retries ran out;
-// "not_sent": refused before anything was stored (uploads paused); "cancelled": removed.
+// "not_sent": refused before anything was stored (uploads paused or store unusable); "cancelled": removed.
 type FileStatus =
   | "queued"
   | "uploading"
@@ -227,7 +227,8 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           anySucceeded = true;
         }
       } catch (err) {
-        if (err instanceof ApiError && err.code === "uploads_paused") {
+        // Refused before anything was sent: storage is paused (M11) or known to be unusable (11F).
+        if (err instanceof ApiError && (err.code === "uploads_paused" || err.code === "upload_storage_unavailable")) {
           setItemState(i, { status: "not_sent", error: err.message });
           continue;
         }
@@ -305,7 +306,8 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
     }
   };
 
-  const paused = items.some((i) => i.status === "not_sent");
+  // Why the files were not sent: storage paused (M11) or an unusable upload store (11F).
+  const notSentReason = items.find((i) => i.status === "not_sent")?.error ?? null;
   const pendingCount = items.filter((i) => i.status === "queued" || i.status === "error").length;
 
   const associationSummary = () => {
@@ -399,9 +401,9 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                   Original filenames are kept unless you accept a suggestion.
                 </p>
               )}
-              {paused && (
+              {notSentReason && (
                 <p role="status" className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-2">
-                  Uploads are paused. An administrator is changing storage. Your files have not been sent. Try again later.
+                  {notSentReason}
                 </p>
               )}
               <ul className="space-y-3">

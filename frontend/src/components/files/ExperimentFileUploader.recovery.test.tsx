@@ -168,3 +168,14 @@ test("paused uploads are not sent and say why (M11)", async () => {
   ).toBeInTheDocument();
   expect(screen.getByText("Not sent")).toBeInTheDocument();
 });
+
+test("an unusable upload store is not sent and says why (11F)", async () => {
+  const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  const message =
+    "Uploads are unavailable because bioAF cannot reach its upload storage. Your files have not been sent. Ask an administrator to check Storage under Infrastructure > Components.";
+  mockUpload.mockRejectedValue(new ApiError(409, message, "upload_storage_unavailable"));
+  await uploadOne(user);
+
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(screen.getByText("Not sent")).toBeInTheDocument();
+});

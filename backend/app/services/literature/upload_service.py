@@ -50,6 +50,9 @@ async def upload_pdf_to_gcs(
     bucket = await storage.get_literature_bucket(session)
     if not bucket:
         return None
+    from app.services.storage_write_admission import require_store_usable
+
+    await require_store_usable(session, "literature")
     path = storage.pdf_blob_path(paper_id)
 
     from app.adapters.registry import get_storage_adapter

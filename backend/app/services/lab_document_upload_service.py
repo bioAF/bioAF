@@ -197,6 +197,9 @@ class LabDocumentUploadService:
         await require_writes_open(session)
         token = str(uuid.uuid4())
         bucket = await LabDocumentUploadService._get_working_bucket(session)
+        from app.services.storage_write_admission import require_store_usable
+
+        await require_store_usable(session, "working")
         gcs_path = f"{PREFIX}/uploads/{token}/{file_name}"
         gcs_uri = get_storage_adapter().build_uri(bucket, gcs_path)
         signed_url = await LabDocumentUploadService._create_resumable_session(
@@ -404,9 +407,10 @@ class LabDocumentUploadService:
         from app.models.lab_document import LabDocumentVersion
         from app.services.lab_document_service import LabDocumentService
 
-        from app.services.storage_write_admission import require_writes_open
+        from app.services.storage_write_admission import require_store_usable, require_writes_open
 
         await require_writes_open(session)
+        await require_store_usable(session, "working")
         fetch = fetch_override or LabDocumentUploadService._fetch_url
         content, fetched_name, mime_type = await fetch(url)
         name = fetched_name or "document"

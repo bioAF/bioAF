@@ -44,10 +44,22 @@ UPLOADS_PAUSED = (
 _in_flight: dict[str, datetime] = {}
 
 
+UPLOAD_STORAGE_UNAVAILABLE = (
+    "Uploads are unavailable because bioAF cannot reach its upload storage. Your files have not been sent. "
+    "Ask an administrator to check Storage under Infrastructure > Components."
+)
+
+
 class UploadsPausedError(ConflictError):
     """New uploads are refused while storage is being changed."""
 
     code = "uploads_paused"
+
+
+class UploadStorageUnavailableError(ConflictError):
+    """The store an upload would write to is known to be unusable, so nothing is sent."""
+
+    code = "upload_storage_unavailable"
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,30 @@ async def require_writes_open(session: AsyncSession) -> None:
     """Refuse a new upload while storage writes are paused, before any byte is stored."""
     if await paused(session) is not None:
         raise UploadsPausedError(UPLOADS_PAUSED)
+
+
+async def require_store_usable(session: AsyncSession, store: str) -> None:
+    """Refuse an upload before anything is written or signed when its store is known unusable.
+
+    Only definite answers refuse (missing, refused, another installation's, not mounted). A store
+    that is not confirmed, cannot be checked or did not answer keeps accepting uploads: the
+    transfer itself then reports any failure.
+    """
+    from app.services import storage_identity
+    from app.services.storage_identity import StoreHealth
+
+    unusable = {StoreHealth.NOT_FOUND, StoreHealth.NO_ACCESS, StoreHealth.WRONG_OWNER, StoreHealth.NOT_MOUNTED}
+    bucket = (await storage_identity._configured_buckets(session)).get(store)
+    if not bucket:
+        return
+    try:
+        report = await storage_identity.inspect_bucket(session, store, bucket)
+    except Exception as exc:
+        logger.warning("Could not check the %s store before an upload (error_type=%s)", store, type(exc).__name__)
+        return
+    if report.health in unusable:
+        logger.warning("Upload refused: the %s store is %s", store, report.health.value)
+        raise UploadStorageUnavailableError(UPLOAD_STORAGE_UNAVAILABLE)
 
 
 async def pause_writes(session: AsyncSession, operation_id: int | None) -> None:

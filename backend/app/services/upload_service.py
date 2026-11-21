@@ -209,7 +209,7 @@ class UploadService:
         unique index at completion, for a race)."""
         from app.exceptions import ConflictError
         from app.services.file_service import validate_external_id
-        from app.services.storage_write_admission import require_writes_open
+        from app.services.storage_write_admission import require_store_usable, require_writes_open
 
         await require_writes_open(session)
         external_id = validate_external_id(external_id)
@@ -224,6 +224,7 @@ class UploadService:
                 raise ConflictError("external_id_already_exists", plain_body=True)
         upload_id = str(uuid.uuid4())
         bucket_name = await UploadService._get_ingest_bucket(session)
+        await require_store_usable(session, "ingest")
         gcs_path = f"uploads/{upload_id}/{filename}"
 
         from app.adapters.registry import get_storage_adapter
@@ -340,13 +341,15 @@ class UploadService:
         object stores (Phase 7). The checkpoint is recorded before the transfer; a filing failure
         keeps the received bytes tracked and raises UploadReceivedNotFiled.
         """
-        from app.services.storage_write_admission import require_writes_open, tracked_transfer
+        from app.services.storage_write_admission import require_store_usable, require_writes_open, tracked_transfer
 
-        # Before the storage write: paused storage or a refused target leaves no object and no record.
+        # Before the storage write: paused storage, an unusable store or a refused target leaves no
+        # object and no record.
         await require_writes_open(session)
         await verify_association_targets(
             session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
         )
+        await require_store_usable(session, "ingest")
         upload_id = str(uuid.uuid4())
         gcs_path = f"uploads/{upload_id}/{filename}"
 
