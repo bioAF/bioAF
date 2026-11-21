@@ -71,7 +71,14 @@ async def deploy_storage_module(session: AsyncSession, user_id: int) -> dict:
     topic and subscription names in platform_config.
     This is the default implementation; tests mock this function.
     """
+    from app.services.storage_generation import ensure_storage_generation
     from app.services.terraform_executor import TerraformExecutor
+
+    # A first deploy (or one after a confirmed destroy) needs its storage
+    # generation persisted before Terraform names anything.
+    if await PlatformConfigService.get(session, "storage_deployed") != "true":
+        await ensure_storage_generation(session)
+        await session.commit()
 
     run = await TerraformExecutor.run_plan(session, user_id, module_name="storage")
     await session.commit()

@@ -43,6 +43,7 @@ from app.services.stack_deployment import (
     sync_storage_config,
     teardown_stack,
 )
+from app.services.storage_generation import UNRESOLVED_PARTIAL_MESSAGE
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
 from app import runtime
@@ -63,6 +64,7 @@ _KNOWN_STACK_ERROR_MESSAGES = frozenset(
         "Compute stack is not deployed",
         "Cannot destroy storage while compute stack is deployed. Teardown compute first.",
         "Storage is not deployed.",
+        UNRESOLVED_PARTIAL_MESSAGE,
     }
 )
 

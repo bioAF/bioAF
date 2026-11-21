@@ -180,7 +180,9 @@ async def test_storage_already_deployed_totals_cover_compute_only(session):
 @pytest.mark.asyncio
 async def test_storage_deploy_skips_blank_outputs(session, db_engine):
     user_id = await _seed_user(session)
-    await _seed_gcp_ready(session, literature_bucket_name="keep-me")
+    # A recorded bucket name needs a known storage generation, or the deploy is
+    # refused as an unidentified earlier attempt (storage lifecycle 11A).
+    await _seed_gcp_ready(session, literature_bucket_name="keep-me", storage_stack_uid="abc123")
 
     await _deploy(
         session,

@@ -22,6 +22,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from app.services.deployment_outputs import identifier_value
+
 # The deployed layout: GCP modules at /app/terraform/modules (the executor's
 # MODULES_DIR), AWS modules at /app/terraform/aws/modules. Kept here (not imported
 # from the executor) so the executor can import this module without a cycle.
@@ -118,9 +120,9 @@ class AwsTerraformCloud(TerraformCloud):
 
     def write_tfvars(self, work_dir: Path, module_name: str, config: dict) -> dict:
         region = config.get("aws_region") or "us-east-1"
-        org_slug = config.get("org_slug") or "bioaf"
-        deploy_suffix = config.get("deploy_suffix") or ""
-        storage_suffix = config.get("storage_stack_uid") or deploy_suffix
+        org_slug = identifier_value(config.get("org_slug")) or "bioaf"
+        deploy_suffix = identifier_value(config.get("deploy_suffix"))
+        storage_suffix = identifier_value(config.get("storage_stack_uid")) or deploy_suffix
 
         tfvars: dict = {"region": region}
         if module_name == "foundation":
@@ -142,7 +144,7 @@ class AwsTerraformCloud(TerraformCloud):
             # role ARN is granted an EKS access entry so the backend can drive the
             # cluster out-of-cluster (the ClusterAuth seam).
             tfvars["org_slug"] = org_slug
-            compute_suffix = config.get("compute_stack_uid") or deploy_suffix
+            compute_suffix = identifier_value(config.get("compute_stack_uid")) or deploy_suffix
             if compute_suffix:
                 tfvars["stack_uid"] = compute_suffix
             tfvars["account_id"] = config.get("aws_account_id") or ""

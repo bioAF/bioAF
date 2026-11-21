@@ -34,6 +34,7 @@ from app.exceptions import ConflictError, NotFoundError, StateError, ValidationE
 from app.models.component import TerraformRun
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
+from app.services.deployment_outputs import identifier_value
 from app.services.event_bus import event_bus
 from app.services.event_types import TERRAFORM_APPLY_FAILURE
 from app.services.plan_parser import TerraformPlanParser
@@ -994,19 +995,20 @@ class TerraformExecutor:
         from app.gcp_zones import default_zone
 
         zone = config.get("gcp_zone") or default_zone(region)
-        org_slug = config.get("org_slug") or "bioaf"
+        org_slug = identifier_value(config.get("org_slug")) or "bioaf"
         # The deploy suffix is stored in platform_config for the
         # duration of a deployment. On destroy, the variable is omitted
         # and Terraform uses the default from variables.tf. Terraform
         # destroy works from state, not from the variable value.
-        deploy_suffix = config.get("deploy_suffix") or ""
+        deploy_suffix = identifier_value(config.get("deploy_suffix"))
         # Storage and compute can carry different stack uids: each module is
         # deployed independently and gets its own secrets.token_hex(3) suffix at
         # deploy time, so a single shared deploy_suffix cannot reproduce both
         # sets of resource names. Prefer the module-specific key, falling back to
         # deploy_suffix for installs where they are the same (the common case).
-        storage_suffix = config.get("storage_stack_uid") or deploy_suffix
-        compute_suffix = config.get("compute_stack_uid") or deploy_suffix
+        # A cleared ("null") identifier is unset, never a suffix.
+        storage_suffix = identifier_value(config.get("storage_stack_uid")) or deploy_suffix
+        compute_suffix = identifier_value(config.get("compute_stack_uid")) or deploy_suffix
         state_bucket = config.get("terraform_state_bucket") or f"bioaf-tfstate-{project_id}"
 
         # Common variables shared by all modules

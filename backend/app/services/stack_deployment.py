@@ -40,6 +40,7 @@ from app.services.deployment_outputs import (
 )
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.stack_progress import StackProgress, reduce_progress
+from app.services.storage_generation import ensure_storage_generation, retire_storage_generation
 from app.services.terraform_executor import RUN_INTERRUPTED_MESSAGE, TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import INTERRUPTED_EVENT, OperationOutcome, record_whole
 from app.adapters.work_nodes.gce_capacity import AllZonesExhaustedError
@@ -569,10 +570,12 @@ async def deploy_stack(
     storage_deployed = await _read_config(session, "storage_deployed")
     progress = StackProgress()
 
-    # Generate a fresh deploy suffix for each module. This short hex
-    # string is appended to GCP resource names so that redeploys after
-    # a teardown get new names (avoids GCP's 7-day soft-delete window).
-    # The suffix is set before each module runs and cleared after.
+    # Storage is named by its storage generation, persisted before Terraform so
+    # a retry resumes the same resources and a deploy after a confirmed destroy
+    # gets new names. Compute still takes a fresh deploy suffix per module.
+    if storage_deployed != "true":
+        await ensure_storage_generation(session)
+        await session.commit()
 
     # Step 1: Deploy storage if needed
     if storage_deployed != "true":
@@ -989,9 +992,9 @@ async def destroy_storage(
     """Destroy the storage module (GCS buckets + Pub/Sub).
 
     Empties all GCS buckets before running terraform destroy (required
-    because buckets have force_destroy=false). Clears all storage-related
-    platform_config keys and resets stack_uid so a fresh deploy generates
-    new resource names (avoids GCS soft-delete name conflicts).
+    because buckets have force_destroy=false). Only a confirmed destroy clears
+    the storage-related platform_config keys and retires the storage
+    generation, so the next deploy allocates new resource names.
     """
     compute_deployed = await _read_config(session, "compute_deployed")
     if compute_deployed == "true":
@@ -1087,10 +1090,11 @@ async def destroy_storage(
         yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
         return
 
-    # Clear all storage-related resource names from platform_config.
-    # Next deploy generates a fresh suffix automatically.
+    # Clear all storage-related resource names from platform_config and retire
+    # the storage generation: the next deploy allocates a new one.
     for key in STORAGE_DESTROY_CLEARED_KEYS:
         await _set_config(session, key, "null")
+    await retire_storage_generation(session)
 
     await log_action(
         session,
