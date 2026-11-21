@@ -976,12 +976,24 @@ async def teardown_stack(
     )
 
 
+class PartialEmptyError(Exception):
+    """Emptying a bucket stopped after ``deleted`` objects were confirmed deleted."""
+
+    def __init__(self, deleted: int, cause: BaseException):
+        super().__init__(f"emptying stopped after {deleted} objects")
+        self.deleted = deleted
+        self.cause = cause
+
+
 async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
     """Delete all objects (including noncurrent versions) from a bucket.
 
     Returns the number of objects deleted. Routes through the storage adapter,
     which owns credential resolution; ``include_versions`` enumerates every
     generation and each is deleted by its generation id (versioned-wipe).
+
+    Byte loss is recorded as each deletion is confirmed, so a failure part way through keeps an
+    accurate record of what is gone; it raises ``PartialEmptyError`` carrying the confirmed count.
     """
     from app.adapters.registry import get_storage_adapter
 
@@ -989,11 +1001,20 @@ async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
     uri_prefix = adapter.build_uri(bucket_name, "")
 
     deleted = 0
-    for obj in await adapter.list_objects(uri_prefix, include_versions=True):
-        generation = obj.provider_details.get("generation")
-        await adapter.delete(obj.storage_uri, generation=generation)
-        deleted += 1
-
+    try:
+        for obj in await adapter.list_objects(uri_prefix, include_versions=True):
+            generation = obj.provider_details.get("generation")
+            await adapter.delete(obj.storage_uri, generation=generation)
+            deleted += 1
+            await session.execute(
+                text(
+                    "UPDATE files SET storage_deleted = true WHERE storage_deleted = false AND storage_uri = :uri"
+                ).bindparams(uri=obj.storage_uri)
+            )
+    except Exception as exc:
+        await session.flush()
+        raise PartialEmptyError(deleted, exc) from exc
+    await session.flush()
     return deleted
 
 
@@ -1162,21 +1183,32 @@ async def destroy_storage(
             removed_outside += 1
             continue
         yield _step(key, label, "running")
-        count, failure = 0, None
+        # Objects are deleted only while the bucket's identity is established (AVAILABLE). An
+        # unresponsive provider is checked again after a pause; any other answer stops here.
+        count, failure, health = 0, None, report.health
         for attempt in range(1, _EMPTY_ATTEMPTS + 1):
-            try:
-                count += await _empty_gcs_bucket(session, bucket_name)
-                failure = None
-                break
-            except Exception as exc:
-                # The provider's error text can carry signed or internal URLs: log its type only.
-                logger.warning(
-                    "Emptying bucket %s failed (attempt=%d, error_type=%s)", bucket_name, attempt, type(exc).__name__
-                )
-                failure = (await storage_identity.inspect_bucket(session, store, bucket_name)).health
-                if failure is StoreHealth.NOT_FOUND or failure is not StoreHealth.NOT_RESPONDING:
+            if health is StoreHealth.AVAILABLE:
+                try:
+                    count += await _empty_gcs_bucket(session, bucket_name)
+                    failure = None
                     break
-                await asyncio.sleep(min(2**attempt, 10))
+                except Exception as exc:
+                    count += exc.deleted if isinstance(exc, PartialEmptyError) else 0
+                    cause = exc.cause if isinstance(exc, PartialEmptyError) else exc
+                    # The provider's error text can carry signed or internal URLs: log its type only.
+                    logger.warning(
+                        "Emptying bucket %s failed (attempt=%d, error_type=%s)",
+                        bucket_name,
+                        attempt,
+                        type(cause).__name__,
+                    )
+                    await session.commit()
+                    health = (await storage_identity.inspect_bucket(session, store, bucket_name)).health
+            failure = health
+            if health is not StoreHealth.NOT_RESPONDING or attempt == _EMPTY_ATTEMPTS:
+                break
+            await asyncio.sleep(min(2**attempt, 10))
+            health = (await storage_identity.inspect_bucket(session, store, bucket_name)).health
         if failure is StoreHealth.NOT_FOUND:
             yield _step(key, bucket_name, "already_removed", f"{provider} reports this bucket does not exist.")
             await _mark_bucket_deleted(session, bucket_name)
@@ -1197,9 +1229,8 @@ async def destroy_storage(
                 cause = f"bioAF could not confirm this bucket belongs to this installation. {nothing}"
                 fix = "Confirm the bucket under Infrastructure > Components, then run Destroy Storage again."
                 category = "not_confirmed"
-            if count:
-                await _mark_bucket_deleted(session, bucket_name)
-                await session.commit()
+            # Byte loss for the objects confirmed deleted was recorded as each one went.
+            await session.commit()
             yield _stopped(
                 f"Nothing else was changed. {fix} {_RESUME}",
                 category=category,

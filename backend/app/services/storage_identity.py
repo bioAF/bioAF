@@ -88,7 +88,7 @@ class StoreReport:
     @property
     def usable(self) -> bool:
         """Present and not known to be someone else's: ordinary reads and writes continue."""
-        return self.health in (StoreHealth.AVAILABLE, StoreHealth.NOT_CONFIRMED)
+        return self.health in (StoreHealth.AVAILABLE, StoreHealth.NOT_CONFIRMED, StoreHealth.CANNOT_CHECK)
 
 
 def _adapter():
@@ -138,6 +138,7 @@ async def _installation_owner(session: AsyncSession) -> str | None:
 
 
 def _same_instant(a: datetime | None, b: datetime | None) -> bool:
+    """False only for two known instants that differ; an unknown instant is decided by the caller."""
     if a is None or b is None:
         return True
     return abs(a - b) <= _CREATED_TOLERANCE
@@ -196,9 +197,13 @@ async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: C
 
     recorded = await _active_identity(session, bucket_name)
     if recorded is not None:
-        owner_matches = recorded.owner is None or seen.owner is None or recorded.owner == seen.owner
-        if not owner_matches or not _same_instant(recorded.provider_created_at, seen.created_at):
+        owner_differs = None not in (recorded.owner, seen.owner) and recorded.owner != seen.owner
+        if owner_differs or not _same_instant(recorded.provider_created_at, seen.created_at):
             return StoreReport(store, bucket_name, StoreHealth.WRONG_OWNER, recorded.basis)
+        # Evidence that cannot be read now is not matching evidence: the bucket keeps serving
+        # ordinary reads and writes, but nothing destructive may act on it until it can be checked.
+        if None in (recorded.owner, seen.owner, recorded.provider_created_at, seen.created_at):
+            return StoreReport(store, bucket_name, StoreHealth.CANNOT_CHECK, recorded.basis)
         return StoreReport(store, bucket_name, StoreHealth.AVAILABLE, recorded.basis)
 
     installation_owner = await _installation_owner(session)
@@ -316,6 +321,8 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
             raise StateError(f"{bucket_name} belongs to another installation, so it cannot be confirmed.")
         if seen.presence is not ContainerPresence.PRESENT:
             raise StateError(f"{bucket_name} could not be observed, so it cannot be confirmed.")
+        if seen.owner is None or seen.created_at is None:
+            raise StateError(f"bioAF could not read who owns {bucket_name}, so it cannot be confirmed.")
         if report.health is StoreHealth.NOT_CONFIRMED:
             generation = identifier_value(await PlatformConfigService.get(session, "storage_stack_uid"))
             session.add(

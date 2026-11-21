@@ -286,6 +286,40 @@ async def test_simulated_and_identity_limited_stores_are_available(session):
         assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
 
 
+@pytest.mark.parametrize(
+    "unreadable",
+    [
+        {"owner": None},
+        {"created": None},
+        {"owner": None, "created": None},
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_recorded_bucket_whose_evidence_cannot_be_read_is_not_trusted(session, unreadable):
+    """Missing current evidence is not matching evidence: destroy must not act on it."""
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    await _apply_run(session, user_id)
+    with _patched(FakeAdapter({RAW: _present()})):
+        assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
+    await session.commit()
+
+    with _patched(FakeAdapter({RAW: _present(**unreadable)})):
+        report = await _raw_report(session)
+
+    assert report.health is StoreHealth.CANNOT_CHECK
+    assert report.trusted is False
+
+
+@pytest.mark.asyncio
+async def test_enrollment_is_refused_when_ownership_cannot_be_read(session):
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW)
+    with _patched(FakeAdapter({RAW: _present(owner=None)})):
+        with pytest.raises(StateError, match="could not read"):
+            await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
+
+
 # ---------------------------------------------------------------------------
 # enrollment
 # ---------------------------------------------------------------------------

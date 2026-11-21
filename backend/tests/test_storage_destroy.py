@@ -132,16 +132,19 @@ async def test_a_bucket_that_disappears_while_emptying_counts_as_removed(session
 
 @pytest.mark.asyncio
 async def test_an_unresponsive_provider_is_retried_then_stops_with_nothing_more_deleted(session, deployed):
+    # Deletion resumes only once the provider answers again and the bucket is still established;
+    # while it does not answer, bioAF keeps checking (3 attempts) and deletes nothing more.
     tries = {"n": 0}
 
     async def empty(_s, bucket):
         tries["n"] += 1
         raise RuntimeError("503")
 
-    with _health({RAW: [StoreHealth.AVAILABLE, StoreHealth.NOT_RESPONDING], RESULTS: [StoreHealth.AVAILABLE]}):
+    with _health({RAW: [StoreHealth.AVAILABLE, StoreHealth.NOT_RESPONDING], RESULTS: [StoreHealth.AVAILABLE]}) as inspect:
         events, calls = await _run(session, deployed, empty=empty)
 
-    assert tries["n"] == 3
+    assert tries["n"] == 1
+    assert inspect.call_count == 2 + 3  # preflight for both buckets, then one check per attempt
     assert calls["terraform"] == 0
     error = events[-1]
     assert error.event_type == "stack_error"
@@ -151,6 +154,25 @@ async def test_an_unresponsive_provider_is_retried_then_stops_with_nothing_more_
     )
     assert await _get(session, "storage_deployed") == "true"
     assert await _get(session, "storage_stack_uid") == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_emptying_resumes_when_the_provider_answers_again(session, deployed):
+    tries = {"n": 0}
+
+    async def empty(_s, bucket):
+        tries["n"] += 1
+        if tries["n"] == 1:
+            raise RuntimeError("503")
+        return 1
+
+    table = {RAW: [StoreHealth.AVAILABLE, StoreHealth.NOT_RESPONDING, StoreHealth.AVAILABLE]}
+    table[RESULTS] = [StoreHealth.AVAILABLE]
+    with _health(table):
+        events, _ = await _run(session, deployed, empty=empty)
+
+    assert tries["n"] == 3  # raw failed, raw again, results
+    assert events[-1].event_type == "stack_complete"
 
 
 @pytest.mark.asyncio
@@ -250,3 +272,49 @@ async def test_a_failed_terraform_destroy_keeps_settings_and_uploads_paused(sess
     assert events[-1].event_type == "stack_error"
     assert await _get(session, "storage_stack_uid") == "abc123"
     assert await _get(session, "storage_writes_paused") is not None
+
+
+@pytest.mark.asyncio
+async def test_byte_loss_is_recorded_for_each_object_deleted_before_a_failure(session, deployed, admin_user):
+    """Objects confirmed deleted stay recorded as deleted when a later object in the bucket fails."""
+    from types import SimpleNamespace
+
+    from app.services.stack_deployment import destroy_storage
+
+    await _config(session, results_bucket_name="null")
+    for name in ("a", "b"):
+        await session.execute(
+            text(
+                "INSERT INTO files (organization_id, filename, storage_uri, gcs_uri, file_type, storage_deleted, "
+                "source_type) VALUES (:org, :name, :uri, :uri, 'other', false, 'upload')"
+            ).bindparams(org=admin_user.organization_id, name=name, uri=f"gs://{RAW}/{name}")
+        )
+    await session.commit()
+    adapter = AsyncMock()
+    adapter.build_uri = lambda bucket, key: f"gs://{bucket}/{key}"
+    adapter.list_objects.return_value = [
+        SimpleNamespace(storage_uri=f"gs://{RAW}/{name}", provider_details={"generation": 1}) for name in ("a", "b")
+    ]
+    adapter.delete.side_effect = [None, PermissionError("denied after the first object")]
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        _health({RAW: [StoreHealth.AVAILABLE, StoreHealth.NO_ACCESS]}),
+        patch("app.services.storage_write_admission.drain", AsyncMock(return_value=[])),
+    ):
+        events = [e async for e in destroy_storage(session, user_id=deployed)]
+
+    error = events[-1]
+    assert error.event_type == "stack_error"
+    assert error.extra["step_detail"] == "bioAF is not allowed to read this bucket. Nothing more was deleted from it."
+    rows = dict((await session.execute(text("SELECT filename, storage_deleted FROM files"))).all())
+    assert rows == {"a": True, "b": False}
+
+
+@pytest.mark.parametrize("health", [StoreHealth.CANNOT_CHECK, StoreHealth.NO_ACCESS])
+@pytest.mark.asyncio
+async def test_nothing_is_deleted_from_a_bucket_whose_identity_is_not_established(session, deployed, health):
+    with _health({RAW: [health], RESULTS: [StoreHealth.AVAILABLE]}):
+        events, calls = await _run(session, deployed)
+    assert events[-1].event_type == "stack_error"
+    assert calls == {"empty": [], "terraform": 0}
