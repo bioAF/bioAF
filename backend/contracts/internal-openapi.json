@@ -24178,6 +24178,29 @@
             "title": "Health",
             "type": "string"
           },
+          "observed_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Created At"
+          },
+          "observed_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Owner"
+          },
           "store": {
             "title": "Store",
             "type": "string"

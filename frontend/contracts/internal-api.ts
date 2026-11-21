@@ -16346,6 +16346,10 @@ export interface components {
              * @enum {string}
              */
             health: "available" | "not_found" | "no_access" | "not_responding" | "not_confirmed" | "wrong_owner" | "not_mounted" | "cannot_check";
+            /** Observed Created At */
+            observed_created_at?: string | null;
+            /** Observed Owner */
+            observed_owner?: string | null;
             /** Store */
             store: string;
         };

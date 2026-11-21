@@ -22,7 +22,7 @@ only automatic repair and destruction require an established identity.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
@@ -77,6 +77,8 @@ class StoreReport:
     health: StoreHealth
     basis: str | None = None
     checked_at: datetime | None = None
+    observed_owner: str | None = None
+    observed_created_at: datetime | None = None
 
     @property
     def trusted(self) -> bool:
@@ -225,7 +227,11 @@ async def inspect_bucket(session: AsyncSession, store: str, bucket_name: str) ->
     """Inspect one bucket for ``store`` without recording a health check."""
     adapter = _adapter()
     seen = await adapter.inspect_container(adapter.build_uri(bucket_name, ""))
-    return await _classify(session, store, bucket_name, seen)
+    return _with_observation(await _classify(session, store, bucket_name, seen), seen)
+
+
+def _with_observation(report: StoreReport, seen: ContainerObservation) -> StoreReport:
+    return replace(report, observed_owner=seen.owner, observed_created_at=seen.created_at)
 
 
 async def _record_check(session: AsyncSession, report: StoreReport) -> StoreReport:
@@ -235,13 +241,15 @@ async def _record_check(session: AsyncSession, report: StoreReport) -> StoreRepo
         "bucket_name": report.bucket_name,
         "health": report.health.value,
         "basis": report.basis,
+        "observed_owner": report.observed_owner,
+        "observed_created_at": report.observed_created_at,
         "checked_at": checked_at,
     }
     stmt = insert(StorageStoreCheck).values(**values)
     await session.execute(
         stmt.on_conflict_do_update(index_elements=[StorageStoreCheck.store], set_={k: stmt.excluded[k] for k in values})
     )
-    return StoreReport(report.store, report.bucket_name, report.health, report.basis, checked_at)
+    return replace(report, checked_at=checked_at)
 
 
 async def inspect_stores(session: AsyncSession, stores: list[str] | None = None) -> list[StoreReport]:
@@ -270,7 +278,17 @@ async def latest_reports(session: AsyncSession) -> list[StoreReport]:
         row = rows.get(store)
         if row is None or row.bucket_name != bucket_name:
             continue
-        out.append(StoreReport(store, bucket_name, StoreHealth(row.health), row.basis, row.checked_at))
+        out.append(
+            StoreReport(
+                store,
+                bucket_name,
+                StoreHealth(row.health),
+                row.basis,
+                row.checked_at,
+                row.observed_owner,
+                row.observed_created_at,
+            )
+        )
     return out
 
 
@@ -328,7 +346,7 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
                 },
             )
             report = StoreReport(store, bucket_name, StoreHealth.AVAILABLE, "enrolled")
-        reports.append(await _record_check(session, report))
+        reports.append(await _record_check(session, _with_observation(report, seen)))
     await session.flush()
     return reports
 

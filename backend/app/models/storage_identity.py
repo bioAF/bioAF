@@ -52,4 +52,6 @@ class StorageStoreCheck(Base):
     bucket_name: Mapped[str] = mapped_column(String(255), nullable=False)
     health: Mapped[str] = mapped_column(String(32), nullable=False)
     basis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    observed_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

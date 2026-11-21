@@ -157,3 +157,12 @@ async def test_comp_bio_cannot_confirm_buckets(client, comp_bio_token, buckets):
         headers=_auth(comp_bio_token),
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_health_reports_what_the_provider_observed(client, admin_token, buckets):
+    with patch("app.adapters.registry.get_storage_adapter", return_value=FakeAdapter({RAW: PRESENT})):
+        resp = await client.get("/api/v1/infrastructure/storage/health", headers=_auth(admin_token))
+    raw = next(s for s in resp.json()["stores"] if s["store"] == "raw")
+    assert raw["observed_owner"] == "1234"
+    assert raw["observed_created_at"].startswith("2026-03-02")

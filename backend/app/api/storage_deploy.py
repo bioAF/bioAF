@@ -219,6 +219,9 @@ class StoreHealthItem(BaseModel):
     health: StoreHealthValue
     # How identity was established: "discovered", "enrolled", or null when it was not.
     basis: str | None = None
+    # What the provider reported at the last check: GCS project number or S3 owner, and creation time.
+    observed_owner: str | None = None
+    observed_created_at: datetime | None = None
 
 
 class StorageHealthResponse(BaseModel):
@@ -238,7 +241,14 @@ def _health_response(reports) -> StorageHealthResponse:
     return StorageHealthResponse(
         checked_at=min(checked) if checked else None,
         stores=[
-            StoreHealthItem(store=r.store, bucket_name=r.bucket_name, health=r.health.value, basis=r.basis)
+            StoreHealthItem(
+                store=r.store,
+                bucket_name=r.bucket_name,
+                health=r.health.value,
+                basis=r.basis,
+                observed_owner=r.observed_owner,
+                observed_created_at=r.observed_created_at,
+            )
             for r in reports
         ],
         unconfirmed=sum(1 for r in reports if r.health.value == "not_confirmed"),

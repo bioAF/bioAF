@@ -49,6 +49,8 @@ def upgrade() -> None:
         sa.Column("bucket_name", sa.String(255), nullable=False),
         sa.Column("health", sa.String(32), nullable=False),
         sa.Column("basis", sa.String(16), nullable=True),
+        sa.Column("observed_owner", sa.String(64), nullable=True),
+        sa.Column("observed_created_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("checked_at", sa.DateTime(timezone=True), nullable=False),
     )
 
