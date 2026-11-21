@@ -98,7 +98,7 @@ example the browser closed) is filed automatically.
 
 Cancelling an upload that is still being sent stops it from ever being filed, but it counts as a running
 upload until storage confirms the session ended; the attention list shows it as stopping. bioAF settles
-these in the background, and cancels a session that has received no bytes for 24 hours. Upload links
+these in the background, and cancels a session that has received no new bytes for an hour. Upload links
 issued before this release count until an hour after they expired; after that the stored object decides.
 When storage cannot confirm an upload stopped, it is listed as "Storage could not confirm this upload
 stopped", and an administrator with infrastructure configure can **Release** it with a reason, confirming

@@ -47,7 +47,7 @@
 - Browser uploads now go to a storage upload session that bioAF can check and cancel (a resumable session
   on Google Cloud, a multipart upload on AWS, which also lifts the 5 GiB single-upload limit there).
   Cancelling an upload that is still being sent stops it from being filed, and it counts as running until
-  storage confirms it stopped. Sessions with no new bytes for 24 hours are cancelled. An upload that
+  storage confirms it stopped. Sessions with no new bytes for an hour are cancelled, so a closed browser tab does not keep Destroy Storage waiting; browsers send Google Cloud uploads in chunks so storage records progress. An upload that
   finished in storage but was never reported back is filed automatically, and filing happens once even
   when requests overlap.
 - An administrator with infrastructure configure can release an upload storage could not confirm stopped,
@@ -67,6 +67,8 @@
 
 ### Upgrade notes
 
+- The Google Cloud ingest bucket now exposes the `Range` header to browsers (for chunked uploads); it is
+  applied by Check for Infrastructure Updates. Until then, uploads still work.
 - New infrastructure buckets carry a `storage_uid` label (GCP) or tag (AWS). Existing buckets get it only
   when an administrator applies Check for Infrastructure Updates.
 - On installations deployed before this release, the storage buckets may show **Not confirmed**. Uploads,
