@@ -8316,6 +8316,21 @@
             "title": "Actual Md5",
             "type": "string"
           },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UploadedPartRef"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parts"
+          },
           "upload_id": {
             "title": "Upload Id",
             "type": "string"
@@ -8417,14 +8432,24 @@
             "type": "string"
           },
           "signed_url": {
-            "title": "Signed Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed Url"
           },
           "storage_uri": {
             "description": "Neutral alias of gcs_uri (retained legacy mirror); read storage_uri.",
             "readOnly": true,
             "title": "Storage Uri",
             "type": "string"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadSessionView"
           },
           "upload_id": {
             "title": "Upload Id",
@@ -8433,8 +8458,8 @@
         },
         "required": [
           "upload_id",
-          "signed_url",
           "gcs_uri",
+          "upload",
           "storage_uri"
         ],
         "title": "FileUploadInitiateResponse",
@@ -18398,6 +18423,26 @@
         "title": "RegistryVersionsResponse",
         "type": "object"
       },
+      "ReleaseWriterRequest": {
+        "properties": {
+          "acknowledge_transfer_may_exist": {
+            "title": "Acknowledge Transfer May Exist",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "acknowledge_transfer_may_exist"
+        ],
+        "title": "ReleaseWriterRequest",
+        "type": "object"
+      },
       "ReportFormat": {
         "enum": [
           "json",
@@ -25832,6 +25877,102 @@
           "total"
         ],
         "title": "UpgradeHistoryListResponse",
+        "type": "object"
+      },
+      "UploadPartsRequest": {
+        "properties": {
+          "part_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Part Numbers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "part_numbers"
+        ],
+        "title": "UploadPartsRequest",
+        "type": "object"
+      },
+      "UploadPartsResponse": {
+        "properties": {
+          "urls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "UploadPartsResponse",
+        "type": "object"
+      },
+      "UploadSessionView": {
+        "description": "Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.",
+        "properties": {
+          "part_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Size"
+          },
+          "protocol": {
+            "enum": [
+              "gcs_resumable",
+              "s3_multipart"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "protocol"
+        ],
+        "title": "UploadSessionView",
+        "type": "object"
+      },
+      "UploadedPartRef": {
+        "properties": {
+          "etag": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Etag",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "etag"
+        ],
+        "title": "UploadedPartRef",
         "type": "object"
       },
       "UpsertProviderRequest": {
@@ -33930,7 +34071,7 @@
     },
     "/api/files/uploads/{upload_id}/cancel": {
       "post": {
-        "description": "Remove an unfiled upload: its stored copy is deleted and nothing is added.",
+        "description": "Cancel an unfiled upload. A received copy is deleted at once; an upload still being sent is\ncancelled with the provider, and keeps counting as a writer until the provider confirms it.",
         "operationId": "cancel_pending_upload_api_files_uploads__upload_id__cancel_post",
         "parameters": [
           {
@@ -33959,6 +34100,59 @@
           }
         },
         "summary": "Cancel Pending Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/parts": {
+      "post": {
+        "description": "Signed links for parts of the caller's own S3 multipart upload.",
+        "operationId": "upload_part_links_api_files_uploads__upload_id__parts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadPartsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Part Links",
         "tags": [
           "files"
         ]
@@ -49655,6 +49849,52 @@
           }
         },
         "summary": "Allow Storage Writes",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes/{upload_id}/release": {
+      "post": {
+        "description": "Release an upload bioAF lost track of, so it no longer blocks Destroy Storage (audited).",
+        "operationId": "release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseWriterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Storage Writer",
         "tags": [
           "storage_deploy"
         ]

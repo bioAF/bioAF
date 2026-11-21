@@ -2227,9 +2227,30 @@ export interface paths {
         put?: never;
         /**
          * Cancel Pending Upload
-         * @description Remove an unfiled upload: its stored copy is deleted and nothing is added.
+         * @description Cancel an unfiled upload. A received copy is deleted at once; an upload still being sent is
+         *     cancelled with the provider, and keeps counting as a writer until the provider confirms it.
          */
         post: operations["cancel_pending_upload_api_files_uploads__upload_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Part Links
+         * @description Signed links for parts of the caller's own S3 multipart upload.
+         */
+        post: operations["upload_part_links_api_files_uploads__upload_id__parts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7794,6 +7815,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/storage/writes/{upload_id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Storage Writer
+         * @description Release an upload bioAF lost track of, so it no longer blocks Destroy Storage (audited).
+         */
+        post: operations["release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/terraform/abandon/{run_id}": {
         parameters: {
             query?: never;
@@ -11672,6 +11713,8 @@ export interface components {
              * @default
              */
             actual_md5: string;
+            /** Parts */
+            parts?: components["schemas"]["UploadedPartRef"][] | null;
             /** Upload Id */
             upload_id: string;
         };
@@ -11705,12 +11748,13 @@ export interface components {
             /** Gcs Uri */
             gcs_uri: string;
             /** Signed Url */
-            signed_url: string;
+            signed_url?: string | null;
             /**
              * Storage Uri
              * @description Neutral alias of gcs_uri (retained legacy mirror); read storage_uri.
              */
             readonly storage_uri: string;
+            upload: components["schemas"]["UploadSessionView"];
             /** Upload Id */
             upload_id: string;
         };
@@ -14831,6 +14875,13 @@ export interface components {
             /** Versions */
             versions: components["schemas"]["RegistryVersion"][];
         };
+        /** ReleaseWriterRequest */
+        ReleaseWriterRequest: {
+            /** Acknowledge Transfer May Exist */
+            acknowledge_transfer_may_exist: boolean;
+            /** Reason */
+            reason: string;
+        };
         /**
          * ReportFormat
          * @enum {string}
@@ -17099,6 +17150,40 @@ export interface components {
             total: number;
             /** Upgrades */
             upgrades: components["schemas"]["UpgradeHistoryItem"][];
+        };
+        /** UploadPartsRequest */
+        UploadPartsRequest: {
+            /** Part Numbers */
+            part_numbers: number[];
+        };
+        /** UploadPartsResponse */
+        UploadPartsResponse: {
+            /** Urls */
+            urls: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * UploadSessionView
+         * @description Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.
+         */
+        UploadSessionView: {
+            /** Part Size */
+            part_size?: number | null;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "gcs_resumable" | "s3_multipart";
+            /** Url */
+            url?: string | null;
+        };
+        /** UploadedPartRef */
+        UploadedPartRef: {
+            /** Etag */
+            etag: string;
+            /** Number */
+            number: number;
         };
         /** UpsertProviderRequest */
         UpsertProviderRequest: {
@@ -21853,6 +21938,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_part_links_api_files_uploads__upload_id__parts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadPartsResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -32755,6 +32875,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageWritesResponse"];
+                };
+            };
+        };
+    };
+    release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseWriterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

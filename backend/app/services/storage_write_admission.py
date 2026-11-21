@@ -7,9 +7,10 @@ back), destroy stops before deleting anything and uploads stay paused until an a
 them again or runs Destroy Storage again. Running uploads are never cut off, and unfinished uploads
 are kept.
 
-A signed URL's expiry is not proof its upload finished: a transfer that started before expiry can
-still land. Only a recorded completion, a confirmed cancellation, or an administrator's cancellation
-of the upload settles it.
+A direct upload settles only when the provider confirms it (completion, or a cancellation the
+provider acknowledges), or when an administrator releases one bioAF lost track of; see
+``upload_settlement``. A presigned URL's expiry is not proof its upload finished: a transfer that
+started before expiry can still land.
 
 The paused state is durable (platform_config ``storage_writes_paused``) so a restart keeps it.
 Proxied transfers in flight are tracked in this process: the supported deployment has one serving
@@ -70,6 +71,15 @@ class OutstandingWriter:
     filename: str
     started_at: datetime
     kind: str
+    # "sending" (bytes may be arriving), "stopping" (cancelled, the provider has not confirmed
+    # yet), or "unconfirmed" (bioAF lost track; an administrator may release it).
+    state: str = "sending"
+    reference: str | None = None
+    settles_after: datetime | None = None
+
+    @property
+    def needs_release(self) -> bool:
+        return self.state == "unconfirmed"
 
 
 async def paused(session: AsyncSession) -> dict | None:
@@ -157,13 +167,27 @@ async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
     """Uploads that may still write: transfers in flight and signed URLs never reported back."""
     from app.models.upload_checkpoint import UploadCheckpoint
 
+    from app.services.upload_settlement import needs_release, settles_after
+
     rows = (
-        await session.execute(select(UploadCheckpoint).where(UploadCheckpoint.stage.in_(("issued", "transferring"))))
+        await session.execute(
+            select(UploadCheckpoint).where(UploadCheckpoint.stage.in_(("issued", "transferring", "cancelling")))
+        )
     ).scalars()
     writers = [
-        OutstandingWriter(r.id, r.user_id, r.experiment_id, r.filename, r.created_at, r.kind)
+        OutstandingWriter(
+            r.id,
+            r.user_id,
+            r.experiment_id,
+            r.filename,
+            r.created_at,
+            r.kind,
+            state="unconfirmed" if needs_release(r) else ("stopping" if r.stage == "cancelling" else "sending"),
+            reference=r.reference,
+            settles_after=settles_after(r),
+        )
         for r in rows
-        if r.stage == "issued" or r.id in _in_flight
+        if r.stage != "transferring" or r.id in _in_flight
     ]
     # A proxied transfer this process is running but whose checkpoint is not visible yet.
     known = {w.upload_id for w in writers}

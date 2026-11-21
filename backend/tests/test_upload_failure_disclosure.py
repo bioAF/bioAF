@@ -26,8 +26,9 @@ REFERENCE = re.compile(r"UPL-[0-9A-F]{6}")
 
 
 def _adapter(**failures):
-    adapter = AsyncMock()
-    adapter.generate_signed_url.return_value = "https://storage.example/signed"
+    from tests.support.uploads import with_upload_session
+
+    adapter = with_upload_session(AsyncMock())
     adapter.move.side_effect = lambda src, dst: dst
     adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")

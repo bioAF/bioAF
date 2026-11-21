@@ -124,8 +124,9 @@ async def test_initiate_upload_uses_signing_credentials(session, admin_user):
     )
     await session.commit()
 
-    adapter = AsyncMock()
-    adapter.generate_signed_url.return_value = "https://signed.example/?sig=…"
+    from tests.support.uploads import with_upload_session
+
+    adapter = with_upload_session(AsyncMock(), "https://signed.example/?sig=…")
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
 
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
@@ -141,7 +142,5 @@ async def test_initiate_upload_uses_signing_credentials(session, admin_user):
         )
 
     assert result["signed_url"] == "https://signed.example/?sig=…"
-    # Signed URL minted for a PUT against the ingest object.
-    _, kwargs = adapter.generate_signed_url.call_args
-    assert kwargs["method"] == "PUT"
-    assert adapter.generate_signed_url.call_args.args[0].startswith("gs://bioaf-1-ingest/uploads/")
+    # The upload session is begun through the adapter for the ingest object (storage lifecycle 11F).
+    assert adapter.begin_upload_session.call_args.args[0].startswith("gs://bioaf-1-ingest/uploads/")

@@ -26,8 +26,9 @@ REF = re.compile(r"Reference UPL-[0-9A-F]{6}\.")
 
 
 def _adapter(move_failures: int = 0):
-    adapter = AsyncMock()
-    adapter.generate_signed_url.return_value = "https://storage.example/signed"
+    from tests.support.uploads import with_upload_session
+
+    adapter = with_upload_session(AsyncMock())
     calls = {"move": 0}
 
     async def move(src, dst):
@@ -89,15 +90,17 @@ async def _simple(client, token, experiment_id, adapter, name="PBMC_S1_L001_R1_0
 
 
 @pytest.mark.asyncio
-async def test_a_signed_upload_is_recorded_before_its_url_is_issued(client, admin_token, storage, session):
+async def test_a_direct_upload_is_recorded_before_its_session_exists(client, admin_token, storage, session):
+    from app.adapters.models import UploadSessionGrant
+
     adapter = _adapter()
     seen: list = []
 
-    async def sign(uri, **kw):
+    async def begin(uri, **kw):
         seen.append([cp.stage for cp in await _checkpoints(session)])
-        return "https://storage.example/signed"
+        return UploadSessionGrant(protocol="gcs_resumable", handle="https://s/1", url="https://s/1")
 
-    adapter.generate_signed_url.side_effect = sign
+    adapter.begin_upload_session.side_effect = begin
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/upload/initiate", json={"filename": "a.fastq.gz"}, headers=_auth(admin_token)
@@ -106,7 +109,7 @@ async def test_a_signed_upload_is_recorded_before_its_url_is_issued(client, admi
     assert seen == [["issued"]]
     [cp] = await _checkpoints(session)
     assert cp.id == resp.json()["upload_id"]
-    assert cp.grant_expires_at is not None
+    assert (cp.kind, cp.session_handle) == ("session", "https://s/1")
 
 
 @pytest.mark.asyncio

@@ -43,3 +43,19 @@ async def seed_signed_upload(
         external_id=external_id,
     )
     return upload_id
+
+
+TEST_SESSION_URL = "https://storage.example/upload?upload_id=TEST-SESSION"
+
+
+def with_upload_session(adapter, url: str = TEST_SESSION_URL):
+    """Make a mocked storage adapter answer like a GCS resumable session that finishes.
+
+    Direct uploads go through a provider session (storage lifecycle 11F/11G): initiate begins one,
+    and completion asks the provider whether it has the whole object.
+    """
+    from app.adapters.models import UploadSessionGrant, UploadSessionState, UploadSessionStatus
+
+    adapter.begin_upload_session.return_value = UploadSessionGrant(protocol="gcs_resumable", handle=url, url=url)
+    adapter.inspect_upload_session.return_value = UploadSessionStatus(state=UploadSessionState.COMPLETED)
+    return adapter

@@ -445,6 +445,18 @@ def _upload_filing_retries() -> Iteration:
     return iteration
 
 
+def _upload_session_reconcile() -> Iteration:
+    """Settle direct uploads with the provider: cancellations, abandoned sessions, unreported completions."""
+    from app.services.upload_settlement import reconcile_due
+
+    factory = _factory()
+
+    async def iteration() -> None:
+        await reconcile_due(factory)
+
+    return iteration
+
+
 def _job(role, prepare, first, interval, message, enabled=None) -> PeriodicJob:
     return PeriodicJob(
         role=role, prepare=prepare, first_delay=first, interval=interval, error_message=message, enabled=enabled
@@ -526,6 +538,13 @@ PERIODIC_JOBS: list[PeriodicJob] = [
     ),
     _job("export-cleanup", _with_session(_export_cleanup), HOUR, HOUR, "Export cleanup error: %s"),
     _job("upload-filing-retries", _upload_filing_retries, MINUTE, MINUTE, "Upload filing retry error: %s"),
+    _job(
+        "upload-session-reconcile",
+        _upload_session_reconcile,
+        MINUTE,
+        MINUTE,
+        "Upload settlement check error: %s",
+    ),
     # Warm the cache 60 s after startup so the first browse modal is populated, then daily.
     _job(
         "nf-core-registry-refresh",

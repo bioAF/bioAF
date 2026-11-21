@@ -189,10 +189,16 @@ async def test_initiate_carries_the_external_id_to_completion(session, admin_use
 
     monkeypatch.setattr(UploadService, "_get_ingest_bucket", staticmethod(bucket))
 
-    async def signed(*a, **k):
-        return "https://signed.example/put"
+    from app.adapters.models import UploadSessionGrant, UploadSessionState, UploadSessionStatus
 
-    monkeypatch.setattr(store, "generate_signed_url", signed)
+    async def begin(*a, **k):
+        return UploadSessionGrant(protocol="gcs_resumable", handle="https://session.example/1", url="https://x")
+
+    async def inspect(*a, **k):
+        return UploadSessionStatus(state=UploadSessionState.COMPLETED)
+
+    monkeypatch.setattr(store, "begin_upload_session", begin)
+    monkeypatch.setattr(store, "inspect_upload_session", inspect)
     result = await UploadService.initiate_upload(
         session, admin_user.organization_id, admin_user.id, "x.fastq.gz", None, None, None, external_id="007"
     )

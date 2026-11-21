@@ -16,6 +16,8 @@ from app.exceptions import DomainError
 from app.schemas.data_search import DataSearchItem, DataSearchResponse
 from app.schemas.experiment import UserSummary
 from app.schemas.file import (
+    UploadPartsRequest,
+    UploadPartsResponse,
     FileListResponse,
     FileLinkRequest,
     FileProvenance,
@@ -103,6 +105,7 @@ async def _file_responses(session: AsyncSession, files: list, *, provenance: boo
 @router.post("/upload/initiate", response_model=FileUploadInitiateResponse)
 async def initiate_upload(
     body: FileUploadInitiate,
+    request: Request,
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -124,8 +127,29 @@ async def initiate_upload(
         sample_ids=body.sample_ids,
         is_global=body.is_global,
         external_id=body.external_id,
+        # The browser's origin lets a GCS session accept the cross-origin upload.
+        origin=request.headers.get("origin"),
     )
     return FileUploadInitiateResponse(**result)
+
+
+@router.post("/uploads/{upload_id}/parts", response_model=UploadPartsResponse)
+async def upload_part_links(
+    upload_id: str,
+    body: UploadPartsRequest,
+    current_user: dict = require_permission("files", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Signed links for parts of the caller's own S3 multipart upload."""
+    checkpoint = await session.get(UploadCheckpoint, upload_id)
+    if (
+        checkpoint is None
+        or checkpoint.organization_id != int(current_user["org_id"])
+        or checkpoint.user_id != int(current_user["sub"])
+    ):
+        raise HTTPException(404, "Upload not found")
+    urls = await UploadService.sign_parts(session, int(current_user["org_id"]), upload_id, body.part_numbers)
+    return UploadPartsResponse(urls=urls)
 
 
 @router.post("/upload/complete", response_model=FileResponse)
@@ -136,7 +160,12 @@ async def complete_upload(
 ):
     org_id = int(current_user["org_id"])
     try:
-        file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5)
+        parts = None
+        if body.parts is not None:
+            from app.adapters.models import UploadedPart
+
+            parts = [UploadedPart(number=p.number, etag=p.etag) for p in body.parts]
+        file = await UploadService.complete_upload(session, org_id, body.upload_id, body.actual_md5, parts)
     except DomainError:
         raise
     except Exception as exc:
@@ -293,10 +322,26 @@ async def cancel_pending_upload(
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Remove an unfiled upload: its stored copy is deleted and nothing is added."""
+    """Cancel an unfiled upload. A received copy is deleted at once; an upload still being sent is
+    cancelled with the provider, and keeps counting as a writer until the provider confirms it."""
+    from app import database
+    from app.services.upload_settlement import settle
+
     await _pending_checkpoint(session, current_user, upload_id)
-    await UploadService.cancel_upload(session, int(current_user["org_id"]), upload_id, int(current_user["sub"]))
+    stage = await UploadService.cancel_upload(
+        session, int(current_user["org_id"]), upload_id, int(current_user["sub"])
+    )
     await session.commit()
+    if stage == "cancelling":
+        # Ask the provider now; background reconciliation keeps trying if it does not confirm.
+        try:
+            await settle(database.async_session_factory, upload_id)
+        except Exception as exc:  # settled later by the background job
+            import logging
+
+            logging.getLogger("bioaf.files").warning(
+                "Upload cancellation not confirmed yet (error_type=%s)", type(exc).__name__
+            )
     return Response(status_code=204)
 
 

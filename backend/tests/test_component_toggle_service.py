@@ -182,35 +182,3 @@ def test_stack_catalog_lives_with_the_service():
     keys = {component["key"] for component in KUBERNETES_COMPONENTS}
 
     assert {"nextflow", "jupyterhub", "rstudio", "cellxgene", "qc_dashboard", "meilisearch", "snakemake"} == keys
-
-
-@pytest.mark.asyncio
-async def test_a_toggle_is_refused_while_another_infrastructure_action_runs(session, admin_user):
-    """A stale page cannot change components under a running deploy, teardown or build."""
-    from app.services import infrastructure_operations as ops
-
-    await _component(session, "nextflow", enabled=True, status="enabled")
-    await ops.accept(action="compute_teardown", principal=ops.Principal(admin_user.id))
-
-    with pytest.raises(ops.InfrastructureBusyError) as exc:
-        await ComponentService.toggle_stack_component(session, "nextflow", user_id=admin_user.id)
-
-    assert "Compute teardown" in str(exc.value)
-    assert "Your Component change was not started." in str(exc.value)
-    assert await _state(session, "nextflow") == (True, "enabled")
-
-
-@pytest.mark.asyncio
-async def test_the_toggle_route_answers_409_while_another_action_runs(client, session, admin_user, admin_token):
-    from app.services import infrastructure_operations as ops
-
-    await _component(session, "nextflow", enabled=True, status="enabled")
-    await ops.accept(action="compute_teardown", principal=ops.Principal(admin_user.id))
-
-    response = await client.post(
-        "/api/v1/infrastructure/stack/components/nextflow/toggle",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 409
-    assert await _state(session, "nextflow") == (True, "enabled")

@@ -373,6 +373,36 @@ async def allow_storage_writes(
     return await _writes_response(session)
 
 
+class ReleaseWriterRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    # The administrator confirms the transfer might still exist (bioAF could not confirm it stopped).
+    acknowledge_transfer_may_exist: bool
+
+
+@router.post("/api/v1/infrastructure/storage/writes/{upload_id}/release", status_code=204)
+async def release_storage_writer(
+    upload_id: str,
+    body: ReleaseWriterRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Release an upload bioAF lost track of, so it no longer blocks Destroy Storage (audited)."""
+    from fastapi.responses import Response
+
+    from app.services.upload_settlement import release
+
+    await release(
+        session,
+        int(current_user["org_id"]),
+        upload_id,
+        int(current_user["sub"]),
+        reason=body.reason,
+        acknowledged=body.acknowledge_transfer_may_exist,
+    )
+    await session.commit()
+    return Response(status_code=204)
+
+
 # ---------------------------------------------------------------------------
 # File assignment endpoints
 # ---------------------------------------------------------------------------

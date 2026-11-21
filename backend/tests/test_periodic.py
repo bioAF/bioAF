@@ -186,6 +186,7 @@ TIMINGS = {
     "export-cleanup": (3600, 3600),
     # Automatic filing retries for received uploads (storage lifecycle 11F).
     "upload-filing-retries": (60, 60),
+    "upload-session-reconcile": (60, 60),
     "idempotency-cleanup": (3600, 3600),
     "notification-cleanup": (86400, 86400),
     "work-dir-reaper": (86400, 86400),
@@ -229,6 +230,7 @@ MESSAGES = {
     "work-node-heartbeat": "Work node heartbeat check error: %s",
     "export-cleanup": "Export cleanup error: %s",
     "upload-filing-retries": "Upload filing retry error: %s",
+    "upload-session-reconcile": "Upload settlement check error: %s",
     "nf-core-registry-refresh": "nf-core registry refresh loop error: %s",
 }
 
@@ -237,7 +239,7 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    assert len(jobs.PERIODIC_JOBS) == 30
+    assert len(jobs.PERIODIC_JOBS) == 31
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):
