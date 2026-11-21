@@ -294,7 +294,8 @@ class ComponentService:
     ) -> ComponentToggleResult:
         """Flip a stack component, enforcing dependencies and starting image builds.
 
-        Raises NotFoundError or ValidationError with the caller-facing message.
+        Raises NotFoundError or ValidationError with the caller-facing message, and
+        InfrastructureBusyError (409) while another infrastructure action runs.
         Flushes state and audit; the caller owns the commit. A failed image build
         does not refuse the toggle: the component is enabled as ``build_failed``.
         """
@@ -305,6 +306,12 @@ class ComponentService:
         comp_def = next((c for c in KUBERNETES_COMPONENTS if c["key"] == component_key), None)
         if comp_def is None:
             raise NotFoundError(f"Component '{component_key}' not found")
+
+        # A component change must not run under another infrastructure action (approved M3/M6):
+        # refuse with the running action named, before anything changes.
+        from app.services.infrastructure_operations import ensure_admitted
+
+        await ensure_admitted(session, "component_change")
 
         row = (
             await session.execute(
