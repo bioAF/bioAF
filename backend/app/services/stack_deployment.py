@@ -984,18 +984,76 @@ async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
     return deleted
 
 
+def _step(key: str, label: str, state: str, detail: str | None = None) -> TerraformProgressEvent:
+    return TerraformProgressEvent(
+        event_type="step", message=label, extra={"key": key, "label": label, "state": state, "detail": detail}
+    )
+
+
+def _stopped(message: str, *, category: str, step_detail: str | None = None, **effects) -> TerraformProgressEvent:
+    extra: dict = {"category": category, "effects": effects}
+    if step_detail is not None:
+        extra["step_detail"] = step_detail
+    return TerraformProgressEvent(event_type="stack_error", message=message, extra=extra)
+
+
+_RESUME = "It continues from where it stopped. Uploads remain paused until you run it again or choose Allow uploads."
+_EMPTY_ATTEMPTS = 3
+
+
+async def _provider_name(session: AsyncSession) -> str:
+    from app.platform.cloud_provider import get_cloud_provider
+
+    return "AWS" if await get_cloud_provider(session) == "aws" else "Google Cloud"
+
+
+async def _mark_bucket_deleted(session: AsyncSession, bucket_name: str) -> int:
+    """Record byte loss for the files stored in one emptied or absent bucket. Metadata stays."""
+    from app.adapters.registry import get_storage_adapter
+
+    prefix = get_storage_adapter().build_uri(bucket_name, "")
+    result = await session.execute(
+        text(
+            "UPDATE files SET storage_deleted = true WHERE storage_deleted = false AND storage_uri LIKE :prefix"
+        ).bindparams(prefix=prefix.replace("%", r"\%").replace("_", r"\_") + "%")
+    )
+    await session.flush()
+    return result.rowcount or 0
+
+
+def _writers_summary(writers) -> list[dict]:
+    """M11's list: who is uploading, how many files, into which experiment, since when."""
+    groups: dict[tuple, dict] = {}
+    for w in writers:
+        key = (w.user_id, w.experiment_id)
+        group = groups.setdefault(
+            key, {"user_id": w.user_id, "experiment_id": w.experiment_id, "files": 0, "started_at": w.started_at}
+        )
+        group["files"] += 1
+        group["started_at"] = min(group["started_at"], w.started_at)
+    return [{**g, "started_at": g["started_at"].isoformat()} for g in groups.values()]
+
+
 async def destroy_storage(
     session: AsyncSession,
     user_id: int,
     org_id: int | None = None,
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
-    """Destroy the storage module (GCS buckets + Pub/Sub).
+    """Destroy the storage module (buckets + Pub/Sub) safely and retryably (D3, D5; mockups M7, M8, M11).
 
-    Empties all GCS buckets before running terraform destroy (required
-    because buckets have force_destroy=false). Only a confirmed destroy clears
-    the storage-related platform_config keys and retires the storage
-    generation, so the next deploy allocates new resource names.
+    Before deleting anything: every configured bucket must be this installation's (or confirmed
+    absent), new uploads are paused, and running uploads get 30 seconds to finish; any that remain
+    or cannot be confirmed stop the destroy with nothing deleted. A bucket the provider confirms does
+    not exist counts as already removed. A refused or failing bucket stops the destroy with what was
+    done recorded; running it again continues from there. Only a confirmed destroy clears the storage
+    configuration, retires the storage generation and reopens uploads.
     """
+    from app import database
+    from app.services import storage_identity
+    from app.services.infrastructure_operations import current_operation_id
+    from app.services.storage_identity import StoreHealth
+    from app.services.storage_write_admission import drain, pause_writes
+
     compute_deployed = await _read_config(session, "compute_deployed")
     if compute_deployed == "true":
         raise StateError("Cannot destroy storage while compute stack is deployed. Teardown compute first.")
@@ -1004,38 +1062,124 @@ async def destroy_storage(
     if storage_deployed != "true":
         raise StateError("Storage is not deployed.")
 
-    # Step 1: Empty all GCS buckets so terraform destroy can remove them
-    # (buckets have force_destroy=false and cannot be deleted while non-empty)
+    provider = await _provider_name(session)
+    buckets: list[tuple[str, str]] = []
     for config_key in STORAGE_BUCKETS_TO_EMPTY:
-        bucket_name = await _read_config(session, config_key)
-        if not bucket_name or bucket_name == "null":
-            continue
-        yield TerraformProgressEvent(
-            event_type="progress",
-            message=f"Emptying bucket {bucket_name}...",
+        name = await _read_config(session, config_key)
+        if name and name != "null":
+            buckets.append((config_key.removesuffix("_bucket_name"), name))
+
+    # Step 1: identity. Destruction acts only on buckets established as this installation's.
+    reports = {name: await storage_identity.inspect_bucket(session, store, name) for store, name in buckets}
+    await session.commit()
+    foreign = [n for n, r in reports.items() if r.health is StoreHealth.WRONG_OWNER]
+    unconfirmed = [n for n, r in reports.items() if r.health is StoreHealth.NOT_CONFIRMED]
+    if foreign:
+        yield _stopped(
+            f"A bucket with this name exists but belongs to another installation: {foreign[0]}. "
+            "bioAF will not use, empty, or delete it. Nothing was changed.",
+            category="wrong_owner",
         )
-        try:
-            count = await _empty_gcs_bucket(session, bucket_name)
-            logger.info("Emptied bucket %s (%d objects deleted)", bucket_name, count)
-        except Exception as exc:
-            # The provider's error text can carry signed or internal URLs: log its type only.
-            logger.error("Failed to empty bucket %s (error_type=%s)", bucket_name, type(exc).__name__)
-            yield TerraformProgressEvent(
-                event_type="stack_error",
-                message=f"bioAF could not empty {bucket_name}. Nothing else was changed.",
+        return
+    if unconfirmed:
+        yield _stopped(
+            "Storage destroy is unavailable until an administrator confirms the storage buckets. Nothing was changed.",
+            category="not_confirmed",
+        )
+        return
+
+    # Step 2: pause new uploads, then give running ones 30 seconds to finish.
+    yield _step("pause_uploads", "Pausing uploads", "running")
+    await pause_writes(session, current_operation_id())
+    await session.commit()
+    yield _step("pause_uploads", "Pausing uploads", "done")
+    yield _step("drain_uploads", "Waiting for uploads to finish", "running")
+    remaining = await drain(database.async_session_factory)
+    if remaining:
+        uncertain = any(w.kind == "signed" for w in remaining)
+        detail = (
+            "bioAF could not confirm that every upload had finished, so nothing was deleted."
+            if uncertain
+            else f"{len(remaining)} upload{'s were' if len(remaining) != 1 else ' was'} still in progress "
+            "after 30 seconds, so nothing was deleted."
+        )
+        yield _stopped(
+            f"{detail} New uploads stay paused until you allow them or run Destroy Storage again.",
+            category="uploads_in_progress",
+            step_detail=detail,
+            uploads=_writers_summary(remaining),
+        )
+        return
+    yield _step("drain_uploads", "Waiting for uploads to finish", "done")
+
+    # Step 3: empty each bucket (buckets have force_destroy=false), recording byte loss as it is confirmed.
+    emptied = 0
+    removed_outside = 0
+    deleted_objects = 0
+    for store, bucket_name in buckets:
+        key, label = f"empty:{bucket_name}", f"Emptying {bucket_name}"
+        report = reports[bucket_name]
+        if report.health is StoreHealth.NOT_FOUND:
+            yield _step(key, bucket_name, "already_removed", f"{provider} reports this bucket does not exist.")
+            await _mark_bucket_deleted(session, bucket_name)
+            await session.commit()
+            removed_outside += 1
+            continue
+        yield _step(key, label, "running")
+        count, failure = 0, None
+        for attempt in range(1, _EMPTY_ATTEMPTS + 1):
+            try:
+                count += await _empty_gcs_bucket(session, bucket_name)
+                failure = None
+                break
+            except Exception as exc:
+                # The provider's error text can carry signed or internal URLs: log its type only.
+                logger.warning(
+                    "Emptying bucket %s failed (attempt=%d, error_type=%s)", bucket_name, attempt, type(exc).__name__
+                )
+                failure = (await storage_identity.inspect_bucket(session, store, bucket_name)).health
+                if failure is StoreHealth.NOT_FOUND or failure is not StoreHealth.NOT_RESPONDING:
+                    break
+                await asyncio.sleep(min(2**attempt, 10))
+        if failure is StoreHealth.NOT_FOUND:
+            yield _step(key, bucket_name, "already_removed", f"{provider} reports this bucket does not exist.")
+            await _mark_bucket_deleted(session, bucket_name)
+            await session.commit()
+            removed_outside += 1
+            continue
+        if failure is not None:
+            nothing = "Nothing was deleted from it." if count == 0 else "Nothing more was deleted from it."
+            if failure is StoreHealth.NO_ACCESS:
+                cause = f"bioAF is not allowed to read this bucket. {nothing}"
+                fix = f"Give the bioAF service account access to {bucket_name} in {provider}, then run Destroy Storage again."
+                category = "no_access"
+            elif failure is StoreHealth.NOT_RESPONDING or failure is StoreHealth.AVAILABLE:
+                cause = f"{provider} did not respond after several tries. Nothing more was deleted from it."
+                fix = "Run Destroy Storage again when it responds."
+                category = "provider_unavailable"
+            else:
+                cause = f"bioAF could not confirm this bucket belongs to this installation. {nothing}"
+                fix = "Confirm the bucket under Infrastructure > Components, then run Destroy Storage again."
+                category = "not_confirmed"
+            if count:
+                await _mark_bucket_deleted(session, bucket_name)
+                await session.commit()
+            yield _stopped(
+                f"Nothing else was changed. {fix} {_RESUME}",
+                category=category,
+                step_detail=cause,
+                emptied=emptied,
+                bucket=bucket_name,
             )
             return
+        deleted_objects += count
+        logger.info("Emptied bucket %s (%d objects deleted)", bucket_name, count)
+        await _mark_bucket_deleted(session, bucket_name)
+        await session.commit()
+        emptied += 1
+        yield _step(key, label, "done", f"{count} object{'s' if count != 1 else ''} deleted")
 
-    # Step 2: Mark all file records as storage_deleted. The metadata
-    # (experiment links, checksums, upload history) is preserved but
-    # the backing GCS objects no longer exist.
-    result = await session.execute(text("UPDATE files SET storage_deleted = true WHERE storage_deleted = false"))
-    marked_count = result.rowcount
-    await session.flush()
-    if marked_count:
-        logger.info("Marked %d file(s) as storage_deleted", marked_count)
-
-    # Step 2b (AWS only): destroy the image-build infrastructure (CodeBuild project
+    # Step 3b (AWS only): destroy the image-build infrastructure (CodeBuild project
     # + IAM role) before storage. It is install-level like storage, so a compute
     # teardown intentionally leaves it intact (the operator's teardown/redeploy
     # cycle is compute-only); it is removed only on this full storage teardown. GCP
@@ -1067,7 +1211,7 @@ async def destroy_storage(
         await _set_config(session, "aws_image_build_deployed", "false")
         await session.flush()
 
-    # Step 3: Run terraform destroy on the now-empty buckets
+    # Step 4: Run terraform destroy on the now-empty buckets
     yield TerraformProgressEvent(
         event_type="progress",
         message="Destroying storage infrastructure...",
@@ -1091,11 +1235,15 @@ async def destroy_storage(
         yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
         return
 
-    # Clear all storage-related resource names from platform_config and retire
-    # the storage generation: the next deploy allocates a new one.
+    # Clear all storage-related resource names from platform_config, retire
+    # the storage generation (the next deploy allocates a new one), and reopen
+    # uploads: the pause belonged to this destroy.
+    from app.services.storage_write_admission import allow_writes
+
     for key in STORAGE_DESTROY_CLEARED_KEYS:
         await _set_config(session, key, "null")
     await retire_storage_generation(session)
+    await allow_writes(session)
 
     await log_action(
         session,
@@ -1118,9 +1266,15 @@ async def destroy_storage(
         )
     await session.flush()
 
+    total = emptied + removed_outside
+    summary = f"Storage destroyed. {total} bucket{'s' if total != 1 else ''} emptied and removed."
+    if removed_outside:
+        summary += f" {removed_outside} had already been removed outside bioAF."
+    summary += " A new deployment will create new buckets with new names."
     yield TerraformProgressEvent(
         event_type="stack_complete",
-        message="Storage destroyed",
+        message=summary,
+        extra={"effects": {"emptied": emptied, "removed_outside": removed_outside, "deleted_objects": deleted_objects}},
     )
 
 

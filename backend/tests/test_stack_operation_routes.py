@@ -125,20 +125,38 @@ async def test_a_retried_request_with_the_same_key_replays(client, admin_token, 
 @pytest.mark.asyncio
 async def test_destroy_failing_before_terraform_is_its_own_failed_operation(client, admin_token, session):
     """M7: an older successful teardown run cannot be shown as this destroy's outcome."""
+    from app.services import storage_identity
+    from app.services.storage_identity import StoreHealth, StoreReport
+
     await _config(session, compute_deployed="false", storage_deployed="true", raw_bucket_name="bioaf-raw-acme-4bd459")
+    health = iter([StoreHealth.AVAILABLE, StoreHealth.NO_ACCESS])
+
+    async def inspect(sess, store, bucket):
+        return StoreReport(store, bucket, next(health), "discovered")
 
     async def empty(sess, bucket):
         raise RuntimeError("403 https://storage.googleapis.com/b/bioaf-raw-acme-4bd459 SECRET")
 
-    with patch("app.services.stack_deployment._empty_gcs_bucket", side_effect=empty):
+    with (
+        patch("app.services.stack_deployment._empty_gcs_bucket", side_effect=empty),
+        patch.object(storage_identity, "inspect_bucket", side_effect=inspect),
+    ):
         resp = await client.post(DESTROY, json={"confirm": True}, headers=_auth(admin_token))
         op = await _settled(session, resp.json()["operation_id"])
 
     assert op.status == "failed"
     assert op.child_run_ids == []
-    assert "SECRET" not in (op.message or "") and "googleapis" not in (op.message or "")
-    step = next(s for s in op.steps if s["key"].startswith("empty:"))
-    assert step["state"] == "failed"
+    assert op.message == (
+        "Nothing else was changed. Give the bioAF service account access to bioaf-raw-acme-4bd459 in Google Cloud, "
+        "then run Destroy Storage again. It continues from where it stopped. Uploads remain paused until you run "
+        "it again or choose Allow uploads."
+    )
+    assert "SECRET" not in op.message
+    step = next(s for s in op.steps if s["key"] == "empty:bioaf-raw-acme-4bd459")
+    assert (step["state"], step["detail"]) == (
+        "failed",
+        "bioAF is not allowed to read this bucket. Nothing was deleted from it.",
+    )
     runs = (await session.execute(text("SELECT count(*) FROM terraform_runs"))).scalar_one()
     assert runs == 0
 

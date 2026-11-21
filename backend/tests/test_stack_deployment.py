@@ -70,6 +70,18 @@ def _make_progress_event(event_type="apply_complete", message="done", **kwargs):
 
 
 @pytest.fixture(autouse=True)
+def _verified_buckets(monkeypatch):
+    """Report every bucket as this installation's: storage destroy now checks identity before
+    emptying anything (storage lifecycle 11G)."""
+    from app.services import storage_identity
+
+    async def inspect(session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    monkeypatch.setattr(storage_identity, "inspect_bucket", inspect)
+
+
+@pytest.fixture(autouse=True)
 def _stub_capacity_probe(monkeypatch):
     """Default the pre-flight capacity probe to a no-op for unit tests.
 

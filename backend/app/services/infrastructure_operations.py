@@ -907,6 +907,16 @@ class StackTracker:
 
         etype = event.event_type
         message = event.message or ""
+        extra = event.extra or {}
+        if etype == "step":
+            # A structured step from the workflow: its own key, label, state and detail.
+            key, state = extra.get("key"), extra.get("state", "running")
+            if key:
+                if state == "running" and self.current and self.current != key:
+                    await self.handle.step(self.current, state="done")
+                await self.handle.step(key, extra.get("label"), state, detail=extra.get("detail"))
+                self.current = key if state == "running" else (None if self.current == key else self.current)
+            return
         if etype == "progress":
             for prefix, key, label in _STEP_HINTS:
                 if message.startswith(prefix):
@@ -920,11 +930,15 @@ class StackTracker:
             etype = "stack_complete" if etype == "apply_complete" else "stack_error"
             message = "Apply complete" if etype == "stack_complete" else "Terraform reported an error."
         if etype == "stack_complete":
-            self.outcome = succeeded(message or None)
+            self.outcome = succeeded(message or None, **(extra.get("effects") or {}))
         elif etype == "stack_error":
-            self.outcome = failed(message or "The operation failed.", "stack_error")
+            self.outcome = failed(
+                message or "The operation failed.",
+                extra.get("category", "stack_error"),
+                **(extra.get("effects") or {}),
+            )
             if self.current:
-                await self.handle.step(self.current, state="failed", detail=message or None)
+                await self.handle.step(self.current, state="failed", detail=extra.get("step_detail") or message or None)
         elif etype == INTERRUPTED_EVENT:
             self.outcome = OperationResult("interrupted", "The operation was interrupted.", "interrupted")
         elif etype in _COUNTED_EVENTS and self.current and event.resources_total:

@@ -415,6 +415,8 @@ async def test_storage_destroy_empties_only_buckets(session):
     with (
         patch("app.services.stack_deployment._empty_gcs_bucket", side_effect=empty),
         patch("app.services.stack_deployment._run_destroy", side_effect=destroy),
+        # Destroy empties only buckets established as this installation's (storage lifecycle 11G).
+        _verified_buckets(),
     ):
         async for _ in destroy_storage(session, user_id=user_id):
             pass

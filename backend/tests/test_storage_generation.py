@@ -99,6 +99,18 @@ def _event(event_type: str, message: str = "", **kwargs):
 
 
 @pytest.fixture(autouse=True)
+def _verified_buckets(monkeypatch):
+    """Report every bucket as this installation's: storage destroy now checks identity before
+    emptying anything (storage lifecycle 11G)."""
+    from app.services import storage_identity
+
+    async def inspect(session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    monkeypatch.setattr(storage_identity, "inspect_bucket", inspect)
+
+
+@pytest.fixture(autouse=True)
 def _stub_capacity_probe(monkeypatch):
     from unittest.mock import AsyncMock
 
