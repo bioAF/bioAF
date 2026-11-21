@@ -171,7 +171,5 @@ async def test_a_failed_target_plan_fails_the_update(session, admin_user, monkey
     assert result.category == "plan_failed"
     assert result.message == "Planning storage changes failed. Nothing else was applied."
     assert result.partial_effects == {"added": 0, "failed_target": STORAGE["address"]}
-    run = (
-        await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))
-    ).scalar_one()
+    run = (await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))).scalar_one()
     assert run.status == "failed"

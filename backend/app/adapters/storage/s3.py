@@ -76,6 +76,7 @@ def multipart_part_size(size_bytes: int | None) -> int:
 def _error_code(exc) -> str:
     return str(exc.response.get("Error", {}).get("Code", ""))[:40]
 
+
 # Local mode emulates the object store on the filesystem, exactly like the GCS
 # adapter (``s3://<bucket>/<key>`` maps to LOCAL_DATA_ROOT/_objects/<bucket>/<key>),
 # so the same LOCAL_DATA_ROOT layout serves both backends in dev/CI.

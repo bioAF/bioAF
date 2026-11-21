@@ -314,12 +314,19 @@ class ExportJob:
         """
 
         async def work() -> None:
-            try:
-                with open(self.archive_path, "rb") as raw:
-                    await adapter.upload_file(uri, CancellableReader(raw, self.budget), content_type="application/zip")
-            except BaseException:
-                await undo()
-                raise
+            from app.services.storage_write_admission import background_write
+
+            # Admitted like any background write: refused before anything is written while
+            # storage is being changed, and counted as a writer while it runs (11G).
+            async with background_write("data export"):
+                try:
+                    with open(self.archive_path, "rb") as raw:
+                        await adapter.upload_file(
+                            uri, CancellableReader(raw, self.budget), content_type="application/zip"
+                        )
+                except BaseException:
+                    await undo()
+                    raise
 
         await self._owned(
             work,

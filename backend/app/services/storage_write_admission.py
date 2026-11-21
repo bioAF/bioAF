@@ -57,6 +57,15 @@ class UploadsPausedError(ConflictError):
     code = "uploads_paused"
 
 
+STORAGE_PAUSED = "An administrator is changing storage. Try again later."
+
+
+class StorageWritesPaused(ConflictError):
+    """A background write to installation storage is refused while storage is being changed."""
+
+    code = "storage_writes_paused"
+
+
 class UploadStorageUnavailableError(ConflictError):
     """The store an upload would write to is known to be unusable, so nothing is sent."""
 
@@ -98,6 +107,11 @@ async def require_writes_open(session: AsyncSession) -> None:
         raise UploadsPausedError(UPLOADS_PAUSED)
 
 
+def _set_mirror(value: bool) -> None:
+    global _paused_mirror
+    _paused_mirror = value
+
+
 async def require_store_usable(session: AsyncSession, store: str) -> None:
     """Refuse an upload before anything is written or signed when its store is known unusable.
 
@@ -134,6 +148,7 @@ async def pause_writes(session: AsyncSession, operation_id: int | None) -> None:
             json.dumps({"operation_id": operation_id, "since": datetime.now(timezone.utc).isoformat()}),
         )
         logger.info("Storage writes paused for operation %s", operation_id)
+    _set_mirror(True)
 
 
 async def allow_writes(session: AsyncSession, user_id: int | None = None) -> bool:
@@ -141,8 +156,10 @@ async def allow_writes(session: AsyncSession, user_id: int | None = None) -> boo
     from app.services.audit_service import log_action
 
     if await paused(session) is None:
+        _set_mirror(False)
         return False
     await PlatformConfigService.set(session, PAUSED_KEY, None)
+    _set_mirror(False)
     if user_id is not None:
         await log_action(
             session,
@@ -164,6 +181,46 @@ async def tracked_transfer(upload_id: str) -> AsyncIterator[None]:
         yield
     finally:
         _in_flight.pop(upload_id, None)
+
+
+_BACKGROUND = "background:"
+
+
+# This process's view of ``storage_writes_paused``, so a background write needs no session of
+# its own. None until read: a fresh process reads the durable setting first. Only pause_writes
+# and allow_writes change the setting, both in the one serving process.
+_paused_mirror: bool | None = None
+
+
+async def _paused_now() -> bool:
+    global _paused_mirror
+    if _paused_mirror is None:
+        from app import database
+
+        async with database.async_session_factory() as session:
+            _paused_mirror = await paused(session) is not None
+    return _paused_mirror
+
+
+@asynccontextmanager
+async def background_write(label: str) -> AsyncIterator[None]:
+    """Admit one background write to installation storage (thumbnails, QC caches, exports,
+    build contexts, reference imports).
+
+    Registered before the pause is checked, so a destroy that pauses writes either refuses this
+    write or waits for it. Raises StorageWritesPaused before anything is written while paused.
+    """
+    import uuid
+
+    key = f"{_BACKGROUND}{label}:{uuid.uuid4()}"
+    _in_flight[key] = datetime.now(timezone.utc)
+    try:
+        if await _paused_now():
+            logger.info("Background %s write skipped: storage writes are paused", label)
+            raise StorageWritesPaused(STORAGE_PAUSED)
+        yield
+    finally:
+        _in_flight.pop(key, None)
 
 
 async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
@@ -195,7 +252,12 @@ async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
     # A proxied transfer this process is running but whose checkpoint is not visible yet.
     known = {w.upload_id for w in writers}
     for upload_id, started in list(_in_flight.items()):
-        if upload_id not in known:
+        if upload_id in known:
+            continue
+        if upload_id.startswith(_BACKGROUND):
+            label = upload_id[len(_BACKGROUND) :].rsplit(":", 1)[0]
+            writers.append(OutstandingWriter(upload_id, None, None, label, started, "background"))
+        else:
             writers.append(OutstandingWriter(upload_id, None, None, "", started, "proxied"))
     return writers
 

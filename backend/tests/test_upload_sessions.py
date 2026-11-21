@@ -10,9 +10,8 @@ issued before this release settle after their expiry plus one hour, then by the 
 
 from __future__ import annotations
 
-import io
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
@@ -23,7 +22,6 @@ from app.adapters.models import UploadSessionGrant, UploadSessionState, UploadSe
 from app.models.file import File
 from app.models.upload_checkpoint import UploadCheckpoint
 from app.services import storage_write_admission
-from app.services.upload_service import UploadService
 
 GCS_SESSION = "https://storage.googleapis.com/upload?upload_id=SECRET-SESSION"
 
@@ -158,9 +156,7 @@ async def test_initiate_records_a_session_the_browser_uploads_to(client, admin_t
 
 
 @pytest.mark.asyncio
-async def test_an_s3_upload_gets_part_urls_only_for_its_uploader(
-    client, admin_token, bench_token, storage, session
-):
+async def test_an_s3_upload_gets_part_urls_only_for_its_uploader(client, admin_token, bench_token, storage, session):
     fake = FakeStore("s3_multipart")
     with patch("app.adapters.registry.get_storage_adapter", return_value=fake):
         body = await _initiate(client, admin_token)

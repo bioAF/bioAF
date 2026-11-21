@@ -41,9 +41,7 @@ async def buckets(session):
 
 async def _checkpoints(session, purpose):
     session.expire_all()
-    return (
-        (await session.execute(select(UploadCheckpoint).where(UploadCheckpoint.purpose == purpose))).scalars().all()
-    )
+    return (await session.execute(select(UploadCheckpoint).where(UploadCheckpoint.purpose == purpose))).scalars().all()
 
 
 async def _writers(session):
@@ -128,7 +126,10 @@ def _request():
         category="genome",
         scope="internal",
         version="v45",
-        files=[ReferenceUploadFileSpec(filename="genome.fa", size_bytes=10), ReferenceUploadFileSpec(filename="genes.gtf", size_bytes=5)],
+        files=[
+            ReferenceUploadFileSpec(filename="genome.fa", size_bytes=10),
+            ReferenceUploadFileSpec(filename="genes.gtf", size_bytes=5),
+        ],
     )
 
 
@@ -136,7 +137,9 @@ async def _init_reference(session, admin_user):
     from app.services.reference_data_service import ReferenceDataService
 
     with patch.object(ReferenceDataService, "_create_resumable_session", side_effect=_stub_session_url):
-        dataset, _ = await ReferenceDataService.init_upload(session, admin_user.organization_id, admin_user.id, _request())
+        dataset, _ = await ReferenceDataService.init_upload(
+            session, admin_user.organization_id, admin_user.id, _request()
+        )
     await session.commit()
     return dataset
 

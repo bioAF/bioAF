@@ -8,8 +8,7 @@ A completion that raced the cancellation is reported as completed so the caller 
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -43,9 +42,7 @@ def _gcs(responses, *, exists=False):
         patch.object(GcsStorageProvider, "_get_credentials", return_value=None),
         patch.object(GcsStorageProvider, "_gcs_session_request", side_effect=request, create=True),
         patch.object(GcsStorageProvider, "_gcs_exists", return_value=exists),
-        patch.object(
-            GcsStorageProvider, "_gcs_create_resumable_upload_url", return_value=SESSION
-        ),
+        patch.object(GcsStorageProvider, "_gcs_create_resumable_upload_url", return_value=SESSION),
     ]
     return adapter, calls, patches
 
@@ -63,9 +60,7 @@ async def _with(patches, coro_fn):
 @pytest.mark.asyncio
 async def test_gcs_begin_returns_a_resumable_session_for_the_browser():
     adapter, _, patches = _gcs([])
-    grant = await _with(
-        patches, lambda: adapter.begin_upload_session(URI, size_bytes=10, origin="https://lab.example")
-    )
+    grant = await _with(patches, lambda: adapter.begin_upload_session(URI, size_bytes=10, origin="https://lab.example"))
     assert (grant.protocol, grant.handle, grant.url, grant.part_size) == ("gcs_resumable", SESSION, SESSION, None)
 
 

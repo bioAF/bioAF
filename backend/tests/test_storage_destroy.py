@@ -140,7 +140,9 @@ async def test_an_unresponsive_provider_is_retried_then_stops_with_nothing_more_
         tries["n"] += 1
         raise RuntimeError("503")
 
-    with _health({RAW: [StoreHealth.AVAILABLE, StoreHealth.NOT_RESPONDING], RESULTS: [StoreHealth.AVAILABLE]}) as inspect:
+    with _health(
+        {RAW: [StoreHealth.AVAILABLE, StoreHealth.NOT_RESPONDING], RESULTS: [StoreHealth.AVAILABLE]}
+    ) as inspect:
         events, calls = await _run(session, deployed, empty=empty)
 
     assert tries["n"] == 1
@@ -351,8 +353,14 @@ async def test_a_refusal_lists_uploads_an_administrator_must_release(session, de
     effects = events[-1].extra["effects"]
     assert effects["retry_after"] is None
     assert effects["unconfirmed"] == [
-        {"upload_id": "u1", "reference": "UPL-ABC123", "filename": "a.txt", "user_id": deployed, "name": None,
-         "started_at": started.isoformat()}
+        {
+            "upload_id": "u1",
+            "reference": "UPL-ABC123",
+            "filename": "a.txt",
+            "user_id": deployed,
+            "name": None,
+            "started_at": started.isoformat(),
+        }
     ]
 
 

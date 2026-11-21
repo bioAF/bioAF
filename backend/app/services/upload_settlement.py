@@ -232,7 +232,9 @@ def _unanswered(cp: UploadCheckpoint, *, give_up: bool) -> None:
     cp.reconcile_attempts = attempts
     if give_up or attempts >= NEEDS_RELEASE_AFTER:
         if cp.last_error_category not in UNCONFIRMED:
-            logger.warning("Upload %s: the provider did not confirm its outcome; it needs an administrator", cp.reference)
+            logger.warning(
+                "Upload %s: the provider did not confirm its outcome; it needs an administrator", cp.reference
+            )
         cp.last_error_category = "outcome_unknown"
         cp.next_reconcile_at = _now() + timedelta(hours=1)
         return

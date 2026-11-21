@@ -346,9 +346,7 @@ async def cancel_pending_upload(
     from app.services.upload_settlement import settle
 
     await _pending_checkpoint(session, current_user, upload_id)
-    stage = await UploadService.cancel_upload(
-        session, int(current_user["org_id"]), upload_id, int(current_user["sub"])
-    )
+    stage = await UploadService.cancel_upload(session, int(current_user["org_id"]), upload_id, int(current_user["sub"]))
     await session.commit()
     if stage == "cancelling":
         # Ask the provider now; background reconciliation keeps trying if it does not confirm.

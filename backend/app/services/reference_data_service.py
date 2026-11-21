@@ -805,6 +805,24 @@ class ReferenceDataService:
         return job_id
 
     @staticmethod
+    async def _run_admitted_import(dataset_id: int, run) -> bool:
+        """Run the import's blocking work as an admitted background write (11G).
+
+        While storage writes are paused nothing is written and the import is recorded as failed
+        with the reason. Returns whether it ran."""
+        from app.services.storage_write_admission import StorageWritesPaused, background_write
+
+        try:
+            async with background_write("reference import"):
+                await asyncio.to_thread(run)
+        except StorageWritesPaused as exc:
+            await ReferenceDataService._record_progress_in_new_session(
+                dataset_id, status="failed", error_message=str(exc)
+            )
+            return False
+        return True
+
+    @staticmethod
     async def _run_import_inproc(dataset_id: int, request: ReferenceImportRequest) -> None:
         """Run a single URL import to completion in the backend process.
 
@@ -895,7 +913,8 @@ class ReferenceDataService:
 
         result_holder: dict[str, object] = {}
         try:
-            await asyncio.to_thread(_build_and_run)
+            if not await ReferenceDataService._run_admitted_import(dataset_id, _build_and_run):
+                return
         except Exception:
             # ReferenceImporter already emitted a 'failed' callback before
             # raising; log and exit. Pod-style re-raise would only matter
@@ -968,6 +987,10 @@ class ReferenceDataService:
         """Create the dataset, progress row, and launch the importer GKE Job."""
         # Up-front uniqueness check
         runtime.require_admission("reference import")
+        from app.services.storage_write_admission import require_writes_open
+
+        # Refused before anything is written while storage is being changed (11G).
+        await require_writes_open(session)
         existing = await session.execute(
             select(ReferenceDataset.id).where(
                 ReferenceDataset.organization_id == org_id,
