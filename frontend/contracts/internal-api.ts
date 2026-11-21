@@ -7415,6 +7415,10 @@ export interface paths {
         /**
          * Stack Component Toggle
          * @description Toggle a component's enabled state with dependency enforcement.
+         *
+         *     The whole change is one infrastructure operation: it holds the shared lock from before the
+         *     state is read until it commits, so no other action can start in between (M3/M6). An image
+         *     build it starts belongs to it, and the lock is kept until the provider reports that build.
          */
         post: operations["stack_component_toggle_api_v1_infrastructure_stack_components__component_key__toggle_post"];
         delete?: never;
@@ -9817,6 +9821,15 @@ export interface components {
             file_ids: number[];
             /** Reassigned Count */
             reassigned_count: number;
+        };
+        /** CancelUploadRequest */
+        CancelUploadRequest: {
+            /**
+             * Reason
+             * @default cancelled
+             * @enum {string}
+             */
+            reason: "cancelled" | "interrupted";
         };
         /** CellCountPoint */
         CellCountPoint: {
@@ -13300,6 +13313,8 @@ export interface components {
             filename: string;
             /** Next Attempt At */
             next_attempt_at?: string | null;
+            /** Reason */
+            reason?: string | null;
             /** Reference */
             reference: string;
             /** Stage */
@@ -21932,7 +21947,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelUploadRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

@@ -422,7 +422,22 @@ async def test_a_writer_the_provider_reports_as_running_cannot_be_released(
         headers=_auth(admin_token),
     )
     assert response.status_code == 409
+    assert response.json()["detail"] == "This file is still uploading. Wait for it to finish or cancel the upload."
     assert (await _checkpoint(session, upload_id)).stage == "issued"
+
+
+@pytest.mark.asyncio
+async def test_releasing_an_upload_that_was_settled_meanwhile_says_so(client, admin_token, storage, store, session):
+    upload_id = (await _initiate(client, admin_token))["upload_id"]
+    store.cancel_answers = [_status("ended")]
+    await client.post(f"/api/files/uploads/{upload_id}/cancel", headers=_auth(admin_token))
+    response = await client.post(
+        f"/api/v1/infrastructure/storage/writes/{upload_id}/release",
+        json={"reason": "x", "acknowledge_transfer_may_exist": True},
+        headers=_auth(admin_token),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This upload no longer needs your attention."
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +522,7 @@ async def test_the_attention_list_shows_stopping_and_unconfirmed_uploads(
     rows = (await client.get("/api/files/uploads/pending", headers=_auth(admin_token))).json()["uploads"]
     states = {r["upload_id"]: r["state"] for r in rows}
     assert states == {stopping: "stopping", unconfirmed: "unconfirmed"}
+    assert {r["upload_id"]: r["reason"] for r in rows}[stopping] == "cancelled"
     assert running not in states
     assert all("session" not in str(r).lower() or "SECRET" not in str(r) for r in rows)
     bench_rows = (await client.get("/api/files/uploads/pending", headers=_auth(bench_token))).json()["uploads"]
@@ -639,3 +655,30 @@ async def test_a_completion_while_writes_are_paused_keeps_the_bytes_for_later(
     cp = await _checkpoint(session, upload_id)
     assert (cp.stage, cp.attempts) == ("received", 0)
     assert cp.next_attempt_at is not None
+
+
+@pytest.mark.parametrize(
+    "sent, shown",
+    [(None, "cancelled"), ({"reason": "cancelled"}, "cancelled"), ({"reason": "interrupted"}, "interrupted")],
+)
+@pytest.mark.asyncio
+async def test_a_stopped_upload_keeps_why_it_was_stopped(client, admin_token, storage, store, session, sent, shown):
+    """An automatic stop is never presented as something the uploader chose."""
+    upload_id = (await _initiate(client, admin_token))["upload_id"]
+    store.cancel_answers = [_status("unknown")]
+    kwargs = {"json": sent} if sent is not None else {}
+    await client.post(f"/api/files/uploads/{upload_id}/cancel", headers=_auth(admin_token), **kwargs)
+    [row] = (await client.get("/api/files/uploads/pending", headers=_auth(admin_token))).json()["uploads"]
+    assert (row["state"], row["reason"]) == ("stopping", shown)
+
+
+@pytest.mark.asyncio
+async def test_an_upload_stopped_for_no_progress_says_it_timed_out(client, admin_token, storage, store, session):
+    upload_id = await _issued(client, admin_token, session)
+    await session.execute(text("UPDATE upload_checkpoints SET progress_at = now() - interval '2 hours'"))
+    await session.commit()
+    store.inspect_answers = [_status("active", 0)]
+    store.cancel_answers = [_status("unknown")]
+    await _reconcile()
+    [row] = (await client.get("/api/files/uploads/pending", headers=_auth(admin_token))).json()["uploads"]
+    assert (row["upload_id"], row["state"], row["reason"]) == (upload_id, "stopping", "timed_out")

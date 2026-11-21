@@ -1055,6 +1055,24 @@ async def _mark_bucket_deleted(session: AsyncSession, bucket_name: str) -> int:
     return result.rowcount or 0
 
 
+_ACTIVITIES = {
+    "thumbnail": "Saving a plot thumbnail",
+    "QC metrics cache": "Saving QC results",
+    "data export": "Creating a data export",
+    "environment build context": "Preparing an environment build",
+    "environment definition": "Preparing an environment build",
+    "reference import": "Importing reference data",
+}
+
+
+def _activities(writers) -> list[dict]:
+    """bioAF's own background work still writing, by activity (W6)."""
+    return [
+        {"activity": _ACTIVITIES.get(w.filename, "Saving files"), "started_at": w.started_at.isoformat()}
+        for w in sorted(writers, key=lambda w: w.started_at)
+    ]
+
+
 def _retry_after(writers) -> str | None:
     """When every blocking upload is expected to have settled, if bioAF can say.
 
@@ -1100,8 +1118,7 @@ async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
 
     groups: dict[tuple, dict] = {}
     for w in writers:
-        # bioAF's own background writes (thumbnails, caches, exports) are grouped as bioAF.
-        key = ("background", None) if w.kind == "background" else (w.user_id, w.experiment_id)
+        key = (w.user_id, w.experiment_id)
         group = groups.setdefault(
             key,
             {
@@ -1109,7 +1126,6 @@ async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
                 "experiment_id": w.experiment_id,
                 "files": 0,
                 "started_at": w.started_at,
-                "background": w.kind == "background",
             },
         )
         group["files"] += 1
@@ -1126,8 +1142,8 @@ async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
     )
     return [
         {
-            **{k: v for k, v in g.items() if k != "background"},
-            "name": "bioAF" if g["background"] else names.get(g["user_id"]),
+            **g,
+            "name": names.get(g["user_id"]),
             "experiment": experiments.get(g["experiment_id"]),
             "started_at": g["started_at"].isoformat(),
         }
@@ -1197,19 +1213,31 @@ async def destroy_storage(
     yield _step("drain_uploads", "Waiting for uploads to finish", "running")
     remaining = await drain(database.async_session_factory)
     if remaining:
-        # Running uploads are counted; any whose outcome is still being settled is uncertain.
-        uncertain = any(w.kind == "signed" or w.state != "sending" for w in remaining)
-        detail = (
-            "bioAF could not confirm that every upload had finished, so nothing was deleted."
-            if uncertain
-            else f"{len(remaining)} upload{'s were' if len(remaining) != 1 else ' was'} still in progress "
-            "after 30 seconds, so nothing was deleted."
-        )
+        # Uploads are counted; any whose outcome is still being settled is uncertain. bioAF's own
+        # background work is named by activity (W6).
+        uploads = [w for w in remaining if w.kind != "background"]
+        own_work = [w for w in remaining if w.kind == "background"]
+        uncertain = any(w.kind == "signed" or w.state != "sending" for w in uploads)
+        if own_work and not uploads:
+            detail = (
+                "bioAF is still saving files. Nothing was deleted. "
+                "Try Destroy Storage again when this work has finished."
+            )
+        elif own_work:
+            detail = "Files are still being uploaded or saved. Nothing was deleted."
+        elif uncertain:
+            detail = "bioAF could not confirm that every upload had finished, so nothing was deleted."
+        else:
+            detail = (
+                f"{len(uploads)} upload{'s were' if len(uploads) != 1 else ' was'} still in progress "
+                "after 30 seconds, so nothing was deleted."
+            )
         yield _stopped(
             f"{detail} New uploads stay paused until you allow them or run Destroy Storage again.",
             category="uploads_in_progress",
             step_detail=detail,
-            uploads=await _writers_summary(session, remaining),
+            uploads=await _writers_summary(session, uploads),
+            activities=_activities(own_work),
             retry_after=_retry_after(remaining),
             unconfirmed=await _unconfirmed_writers(session, remaining),
         )

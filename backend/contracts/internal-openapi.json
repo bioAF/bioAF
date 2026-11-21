@@ -2617,6 +2617,21 @@
         "title": "BulkReassignResponse",
         "type": "object"
       },
+      "CancelUploadRequest": {
+        "properties": {
+          "reason": {
+            "default": "cancelled",
+            "enum": [
+              "cancelled",
+              "interrupted"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "CancelUploadRequest",
+        "type": "object"
+      },
       "CellCountPoint": {
         "properties": {
           "cell_count": {
@@ -13327,6 +13342,17 @@
               }
             ],
             "title": "Next Attempt At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           },
           "reference": {
             "title": "Reference",
@@ -34084,6 +34110,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CancelUploadRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -49104,7 +49147,7 @@
     },
     "/api/v1/infrastructure/stack/components/{component_key}/toggle": {
       "post": {
-        "description": "Toggle a component's enabled state with dependency enforcement.",
+        "description": "Toggle a component's enabled state with dependency enforcement.\n\nThe whole change is one infrastructure operation: it holds the shared lock from before the\nstate is read until it commits, so no other action can start in between (M3/M6). An image\nbuild it starts belongs to it, and the lock is kept until the provider reports that build.",
         "operationId": "stack_component_toggle_api_v1_infrastructure_stack_components__component_key__toggle_post",
         "parameters": [
           {

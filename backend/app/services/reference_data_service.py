@@ -518,9 +518,7 @@ class ReferenceDataService:
         # this upload, so an aborted upload's session (still settling with the provider) and a new
         # upload of the same name and version never share an object path: settling the old one
         # can only ever find and remove its own object.
-        gcs_prefix = (
-            f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/{uuid.uuid4().hex[:8]}/"
-        )
+        gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/{uuid.uuid4().hex[:8]}/"
 
         dataset = ReferenceDataset(
             organization_id=org_id,

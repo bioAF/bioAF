@@ -52,6 +52,13 @@ _HANDLE_GRACE = timedelta(minutes=10)
 
 SETTLING_STAGES = ("issued", "cancelling")
 
+# Why an administrator cannot stop waiting for an upload (W4).
+SETTLED_MEANWHILE = "This upload no longer needs your attention."
+STILL_UPLOADING = "This file is still uploading. Wait for it to finish or cancel the upload."
+CHECKING_STOPPED = "bioAF is checking that the upload has stopped."
+# Why an upload was stopped, kept so an automatic stop is never shown as the uploader's choice.
+STOP_REASONS = ("cancelled", "interrupted")
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -224,7 +231,14 @@ async def _settle_presigned(cp: UploadCheckpoint, session: AsyncSession | None =
 def _ended_category(cp: UploadCheckpoint) -> str:
     if cp.stage != "cancelling":
         return "expired"
-    return "abandoned" if cp.last_error_category == "abandoned" else "cancelled"
+    return cp.last_error_category if cp.last_error_category in ("abandoned", "interrupted") else "cancelled"
+
+
+def stop_reason(cp: UploadCheckpoint) -> str:
+    """Why a stopping upload was stopped: cancelled, interrupted, or timed out without progress."""
+    if cp.last_error_category == "abandoned":
+        return "timed_out"
+    return "interrupted" if cp.last_error_category == "interrupted" else "cancelled"
 
 
 def _record_progress(cp: UploadCheckpoint, status: UploadSessionStatus, now: datetime) -> None:
@@ -288,8 +302,10 @@ async def release(
     cp = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
     if cp is None or cp.organization_id != org_id:
         raise NotFoundError("Upload not found")
-    if cp.stage not in SETTLING_STAGES or not needs_release(cp):
-        raise ConflictError("bioAF has not lost track of this upload, so it cannot be released.")
+    if cp.stage not in SETTLING_STAGES:
+        raise ConflictError(SETTLED_MEANWHILE)
+    if not needs_release(cp):
+        raise ConflictError(STILL_UPLOADING if cp.stage == "issued" else CHECKING_STOPPED)
     now = _now()
     cp.stage = "cancelled"
     cp.released_at = now

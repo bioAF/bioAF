@@ -388,10 +388,36 @@ async def test_a_refusal_releases_the_operation_lock(session, admin_user, deploy
 
 
 @pytest.mark.asyncio
-async def test_a_background_writer_is_listed_as_bioaf(session, deployed):
-    started = datetime(2026, 11, 21, 16, 2, tzinfo=timezone.utc)
-    writers = [OutstandingWriter("background:thumbnail:1", None, None, "thumbnail", started, "background")]
+async def test_bioafs_own_work_is_named_by_activity(session, deployed):
+    started = datetime(2026, 11, 21, 15, 58, tzinfo=timezone.utc)
+    writers = [
+        OutstandingWriter("background:data export:1", None, None, "data export", started, "background"),
+        OutstandingWriter("background:reference import:2", None, None, "reference import", started, "background"),
+    ]
     with _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}):
         events, _ = await _run(session, deployed, drain=writers)
-    [row] = events[-1].extra["effects"]["uploads"]
-    assert (row["name"], row["files"]) == ("bioAF", 1)
+    error = events[-1]
+    assert error.message == (
+        "bioAF is still saving files. Nothing was deleted. Try Destroy Storage again when this work has finished. "
+        "New uploads stay paused until you allow them or run Destroy Storage again."
+    )
+    assert error.extra["effects"]["activities"] == [
+        {"activity": "Creating a data export", "started_at": started.isoformat()},
+        {"activity": "Importing reference data", "started_at": started.isoformat()},
+    ]
+    assert error.extra["effects"]["uploads"] == []
+
+
+@pytest.mark.asyncio
+async def test_uploads_and_bioafs_own_work_together(session, deployed):
+    started = datetime(2026, 11, 21, 15, 58, tzinfo=timezone.utc)
+    writers = [
+        OutstandingWriter("u1", deployed, None, "a.txt", started, "proxied"),
+        OutstandingWriter("background:thumbnail:1", None, None, "thumbnail", started, "background"),
+    ]
+    with _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}):
+        events, _ = await _run(session, deployed, drain=writers)
+    assert events[-1].message == (
+        "Files are still being uploaded or saved. Nothing was deleted. "
+        "New uploads stay paused until you allow them or run Destroy Storage again."
+    )

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import Response
@@ -226,6 +226,9 @@ class PendingUpload(BaseModel):
     # "stopping": cancelled, waiting for storage to confirm nothing more can arrive;
     # "unconfirmed": storage could not confirm the upload stopped (an administrator may release it).
     state: str
+    # For "stopping": "cancelled", "interrupted" (the upload failed partway) or "timed_out"
+    # (no new bytes for an hour).
+    reason: str | None = None
     attempts: int
     next_attempt_at: datetime | None = None
     experiment_id: int | None = None
@@ -293,6 +296,7 @@ async def pending_uploads(
                 reference=cp.reference,
                 stage=cp.stage,
                 state=_attention_state(cp),
+                reason=_stop_reason(cp),
                 attempts=cp.attempts,
                 next_attempt_at=cp.next_attempt_at,
                 experiment_id=cp.experiment_id,
@@ -304,6 +308,19 @@ async def pending_uploads(
             for cp, exp_name, user_name, user_email in rows
         ]
     )
+
+
+def _stop_reason(cp: UploadCheckpoint) -> str | None:
+    from app.services.upload_settlement import needs_release, stop_reason
+
+    if cp.stage == "cancelling" and not needs_release(cp):
+        return stop_reason(cp)
+    return None
+
+
+class CancelUploadRequest(BaseModel):
+    # "interrupted" when the browser stops an upload after a failure rather than at the uploader's request.
+    reason: Literal["cancelled", "interrupted"] = "cancelled"
 
 
 def _attention_state(cp: UploadCheckpoint) -> str:
@@ -337,6 +354,7 @@ async def retry_pending_upload(
 @router.post("/uploads/{upload_id}/cancel", status_code=204)
 async def cancel_pending_upload(
     upload_id: str,
+    body: CancelUploadRequest | None = None,
     current_user: dict = require_permission("files", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -346,7 +364,13 @@ async def cancel_pending_upload(
     from app.services.upload_settlement import settle
 
     await _pending_checkpoint(session, current_user, upload_id)
-    stage = await UploadService.cancel_upload(session, int(current_user["org_id"]), upload_id, int(current_user["sub"]))
+    stage = await UploadService.cancel_upload(
+        session,
+        int(current_user["org_id"]),
+        upload_id,
+        int(current_user["sub"]),
+        reason=(body or CancelUploadRequest()).reason,
+    )
     await session.commit()
     if stage == "cancelling":
         # Ask the provider now; background reconciliation keeps trying if it does not confirm.

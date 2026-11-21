@@ -705,7 +705,9 @@ class UploadService:
         return await UploadService._file_or_defer(session, upload_id)
 
     @staticmethod
-    async def cancel_upload(session: AsyncSession, org_id: int, upload_id: str, user_id: int) -> str:
+    async def cancel_upload(
+        session: AsyncSession, org_id: int, upload_id: str, user_id: int, *, reason: str = "cancelled"
+    ) -> str:
         """Cancel an unfiled upload; returns its stage afterwards.
 
         Received bytes (bioAF's own upload object) are deleted and the upload settles at once. An
@@ -729,6 +731,8 @@ class UploadService:
         now = datetime.now(timezone.utc)
         if checkpoint.stage == "issued":
             checkpoint.stage = "cancelling"
+            # "interrupted": the browser stopped it after a failure, not the uploader's choice.
+            checkpoint.last_error_category = reason
             checkpoint.cancel_requested_at = now
             checkpoint.cancel_requested_by_user_id = user_id
             checkpoint.next_reconcile_at = now
