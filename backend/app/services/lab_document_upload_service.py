@@ -132,6 +132,38 @@ def _assert_public_url(url: str) -> None:
 _pending: dict[str, dict] = {}
 
 
+async def _record_writer(
+    token: str, org_id: int, user_id: int | None, file_name: str, uri: str, upload_url: str
+) -> None:
+    """Record a lab document upload as an upload checkpoint, so it counts as a storage writer.
+
+    A GCS resumable session is settled with the provider; any other link (an S3 presigned PUT)
+    settles like a presigned upload, after its expiry plus one hour.
+    """
+    from datetime import timedelta
+
+    from app.services.upload_service import SIGNED_URL_SECONDS, _new_checkpoint
+    from app.services.upload_settlement import first_check
+
+    now = datetime.now(UTC)
+    session_url = "uploadType=resumable" in upload_url
+    await _new_checkpoint(
+        id=token,
+        organization_id=org_id,
+        user_id=user_id,
+        purpose="lab_document",
+        kind="session" if session_url else "signed",
+        stage="issued",
+        filename=file_name,
+        source_uri=uri,
+        session_protocol="gcs_resumable" if session_url else None,
+        session_handle=upload_url if session_url else None,
+        grant_expires_at=None if session_url else now + timedelta(seconds=SIGNED_URL_SECONDS),
+        progress_at=now,
+        next_reconcile_at=first_check(),
+    )
+
+
 def _filename_from_response(parsed_url, content_disposition: str | None) -> str:
     """Best-effort file name for a URL import: prefer Content-Disposition's
     filename, else the URL path basename, else a generic default."""
@@ -189,6 +221,7 @@ class LabDocumentUploadService:
         mime_type: str | None = None,
         size_bytes: int | None = None,
         origin: str | None = None,
+        user_id: int | None = None,
     ) -> dict:
         from app.adapters.registry import get_storage_adapter
         from app.services.storage_write_admission import require_writes_open
@@ -209,6 +242,10 @@ class LabDocumentUploadService:
             size_bytes=size_bytes,
             origin=origin,
         )
+        # A writer to the working bucket until it is placed or the provider confirms it ended
+        # (storage lifecycle 11G). No byte can arrive before this is recorded: the browser only
+        # learns the URL from this response.
+        await _record_writer(token, org_id, user_id, file_name, gcs_uri, signed_url)
         _pending[token] = {
             "org_id": org_id,
             "file_name": file_name,
@@ -510,4 +547,7 @@ class LabDocumentUploadService:
         dest_uri = adapter.build_uri(pending["bucket"], dest_path)
         await adapter.move(pending["gcs_uri"], dest_uri)
         _pending.pop(upload_token, None)
+        from app.services.upload_service import _update_checkpoint
+
+        await _update_checkpoint(upload_token, stage="filed", next_reconcile_at=None)
         return dest_uri

@@ -109,6 +109,9 @@ async def require_store_usable(session: AsyncSession, store: str) -> None:
     from app.services.storage_identity import StoreHealth
 
     unusable = {StoreHealth.NOT_FOUND, StoreHealth.NO_ACCESS, StoreHealth.WRONG_OWNER, StoreHealth.NOT_MOUNTED}
+    if getattr(storage_identity._adapter(), "is_local", False) is True:
+        # Local (simulated) storage creates a store's directory on first write.
+        return
     bucket = (await storage_identity._configured_buckets(session)).get(store)
     if not bucket:
         return

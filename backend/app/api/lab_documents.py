@@ -123,6 +123,7 @@ async def create_upload_url(
         mime_type=body.mime_type,
         size_bytes=body.size_bytes,
         origin=request.headers.get("origin"),
+        user_id=int(current_user["sub"]),
     )
     return LabDocumentUploadUrlResponse(**result)
 

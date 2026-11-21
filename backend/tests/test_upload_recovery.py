@@ -539,8 +539,21 @@ async def test_lab_document_and_literature_uploads_check_their_store(session, ad
     session.add(PlatformConfig(key="working_bucket_name", value="bioaf-working-test"))
     session.add(PlatformConfig(key="literature_bucket_name", value="bioaf-literature-test"))
     await session.commit()
-    with _ingest_health(StoreHealth.NOT_FOUND):
+    cloud = MagicMock(is_local=False, named_containers=True)
+    with _ingest_health(StoreHealth.NOT_FOUND), patch("app.adapters.registry.get_storage_adapter", return_value=cloud):
         with pytest.raises(UploadStorageUnavailableError):
             await LabDocumentUploadService.initiate(session, admin_user.organization_id, file_name="sop.pdf")
         with pytest.raises(UploadStorageUnavailableError):
             await upload_pdf_to_gcs(session, paper_id=1, pdf_bytes=b"%PDF")
+
+
+@pytest.mark.asyncio
+async def test_a_simulated_store_is_never_refused_for_being_absent(session, storage):
+    """Local mode creates a store's directory on first write: absent is not unusable there."""
+    from app.services.storage_write_admission import require_store_usable
+
+    adapter = MagicMock()
+    adapter.is_local = True
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        await require_store_usable(session, "ingest")
+    adapter.inspect_container.assert_not_called()

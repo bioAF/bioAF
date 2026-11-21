@@ -274,6 +274,7 @@ async def pending_uploads(
         .outerjoin(User, User.id == UploadCheckpoint.user_id)
         .where(
             UploadCheckpoint.organization_id == int(current_user["org_id"]),
+            UploadCheckpoint.purpose == "file",
             or_(
                 UploadCheckpoint.stage.in_(("received", "cancelling")),
                 and_(UploadCheckpoint.stage == "issued", UploadCheckpoint.last_error_category.in_(UNCONFIRMED)),

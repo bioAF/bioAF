@@ -208,10 +208,13 @@ def _record_progress(cp: UploadCheckpoint, status: UploadSessionStatus, now: dat
 
 
 def _received(cp: UploadCheckpoint, now: datetime) -> None:
-    """The provider stored the whole object but nobody reported it: file it automatically."""
+    """The provider stored the whole object but nobody reported it: file it automatically.
+
+    Only data file uploads are filed; a lab document or reference file is claimed by its own
+    flow, so it just stops counting as a writer."""
     cp.stage = "received"
     cp.next_reconcile_at = None
-    cp.next_attempt_at = now
+    cp.next_attempt_at = now if cp.purpose == "file" else None
     cp.reconcile_attempts = 0
     logger.info("Upload %s finished without being reported; filing it", cp.reference)
 
