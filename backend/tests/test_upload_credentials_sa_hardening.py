@@ -109,7 +109,7 @@ async def test_storage_service_falls_back_when_credentials_unavailable(session):
 
 
 @pytest.mark.asyncio
-async def test_initiate_upload_uses_signing_credentials(session):
+async def test_initiate_upload_uses_signing_credentials(session, admin_user):
     """End-to-end: initiate_upload mints the signed PUT URL via the BAL storage
     adapter (Phase 3), which owns signing-credential resolution internally.
     """
@@ -131,8 +131,9 @@ async def test_initiate_upload_uses_signing_credentials(session):
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         result = await UploadService.initiate_upload(
             session,
-            org_id=1,
-            user_id=1,
+            # The upload is recorded durably, so it must belong to a real organization and user.
+            org_id=admin_user.organization_id,
+            user_id=admin_user.id,
             filename="test.csv",
             expected_size=10,
             expected_md5=None,
