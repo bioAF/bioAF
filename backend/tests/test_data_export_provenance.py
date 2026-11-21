@@ -9,6 +9,7 @@ import io
 import threading
 import time
 import zipfile
+from collections.abc import Callable
 
 import pytest
 from sqlalchemy import text
@@ -481,7 +482,7 @@ async def test_the_standalone_report_api_is_unchanged_without_a_budget(session, 
 # -- Every report is admitted before any is rendered (bug fix 10) ---------------------------------
 
 
-def _audit_reads(session, entity_type: str) -> tuple[list, callable]:
+def _audit_reads(session, entity_type: str) -> tuple[list[str], Callable[[], None]]:
     """Statements that fetch ``entity_type``'s audit rows into Python; the count/width measurement is allowed."""
     from sqlalchemy import event
 
@@ -510,8 +511,15 @@ async def _audit(session, entity_type: str, entity_id: int, *, rows: int = 1, wi
 
 
 async def _second_experiment(session, org: int) -> None:
+    """Experiment 2 in project 1, ordered after experiment 1: exports plan experiments in UUID order."""
     await session.execute(
-        text("INSERT INTO experiments (id, organization_id, project_id, name, status) VALUES (2, :o, 1, 'E2', 'x')"),
+        text("UPDATE experiments SET uuid = '00000000-0000-0000-0000-000000000001' WHERE id = 1"),
+    )
+    await session.execute(
+        text(
+            "INSERT INTO experiments (id, uuid, organization_id, project_id, name, status) "
+            "VALUES (2, '00000000-0000-0000-0000-000000000002', :o, 1, 'E2', 'x')"
+        ),
         {"o": org},
     )
     await session.commit()
