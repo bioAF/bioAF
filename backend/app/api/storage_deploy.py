@@ -109,12 +109,20 @@ async def _storage_operation(
     """Plan, apply and record outputs (and the storage generation) as one accepted operation."""
     from app.services import infrastructure_operations as ops
 
+    from app.services import infrastructure_definitions as definitions
+
     op_id, _ = await ops.accept(action=action, principal=ops.Principal.from_user(current_user))
     async with ops.owned(op_id):
+        captured = await definitions.capture(session)
         result = await deploy_storage_module(session, int(current_user["sub"]))
         # Store outputs since this apply may have added new resources (Pub/Sub).
         if store_outputs and result.get("status") == "completed":
             await _store_storage_outputs(session)
+        if result.get("status") == "completed":
+            # A full apply of the storage module reconciles its definitions (M17).
+            await definitions.record_reconciled(session, captured, "storage", operation_id=op_id)
+            await definitions.refresh_notice(session)
+            await session.commit()
     await ops.finish(
         op_id,
         ops.succeeded("Storage applied.")

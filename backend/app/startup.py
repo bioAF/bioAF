@@ -452,6 +452,17 @@ async def interrupted_uploads(ctx: StartupContext) -> None:
         logger.info("Reconciled uploads interrupted by the restart: %s", counts)
 
 
+async def infrastructure_notice(ctx: StartupContext) -> None:
+    """Record whether this release's infrastructure definitions await applying (M17; no cloud calls)."""
+    from app.config import settings
+    from app.database import async_session_factory
+    from app.services.infrastructure_definitions import reconcile_notice
+
+    async with async_session_factory() as session:
+        await reconcile_notice(session, settings.app_version)
+        await session.commit()
+
+
 async def install_metrics(ctx: StartupContext) -> None:
     """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
     from app.database import async_session_factory
@@ -534,6 +545,12 @@ NORMAL_STEPS = [
         "Could not reconcile infrastructure operations after restart: %s",
     ),
     Step("interrupted_uploads", interrupted_uploads, "optional", "Could not reconcile interrupted uploads: %s"),
+    Step(
+        "infrastructure_notice",
+        infrastructure_notice,
+        "optional",
+        "Infrastructure definition notice not reconciled: %s",
+    ),
     Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
 ]
 

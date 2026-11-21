@@ -5950,6 +5950,72 @@
         "title": "DeclineRequest",
         "type": "object"
       },
+      "DefinitionNotice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "modules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "unknown_baseline": {
+            "title": "Unknown Baseline",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "unknown_baseline",
+          "modules"
+        ],
+        "title": "DefinitionNotice",
+        "type": "object"
+      },
+      "DefinitionNoticeResponse": {
+        "properties": {
+          "destructive_only_modules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Destructive Only Modules",
+            "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinitionNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "seen": {
+            "default": false,
+            "title": "Seen",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "title": "DefinitionNoticeResponse",
+        "type": "object"
+      },
       "DeployProgressResponse": {
         "properties": {
           "active": {
@@ -48107,6 +48173,70 @@
         "summary": "Get Compute Stack",
         "tags": [
           "infrastructure"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/definition-notice": {
+      "get": {
+        "operationId": "definition_notice_endpoint_api_v1_infrastructure_definition_notice_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionNoticeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Definition Notice Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/definition-notice/{notice_id}/seen": {
+      "post": {
+        "description": "This admin chose Later. It never marks the infrastructure updated, and no other admin's view changes.",
+        "operationId": "acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionNoticeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Definition Notice Endpoint",
+        "tags": [
+          "infrastructure_operations"
         ]
       }
     },

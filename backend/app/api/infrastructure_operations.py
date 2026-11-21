@@ -206,3 +206,56 @@ async def cancel_operation_endpoint(
     await ops.request_cancel(session, operation_id, int(current_user["sub"]))
     session.expire_all()
     return await _view(session, await _get(session, operation_id))
+
+
+# ---------------------------------------------------------------------------
+# Infrastructure changes after a bioAF update (mockup M17)
+# ---------------------------------------------------------------------------
+
+
+class DefinitionNotice(BaseModel):
+    id: int
+    version: str
+    # No reconciled definitions are recorded (an installation from before fingerprints).
+    unknown_baseline: bool
+    modules: list[str]
+
+
+class DefinitionNoticeResponse(BaseModel):
+    # Definitions of this release differ from what was last applied, or nothing is recorded.
+    pending: bool
+    notice: DefinitionNotice | None = None
+    # Whether the caller already chose Later for this notice.
+    seen: bool = False
+    # Modules whose remaining changes would delete or replace resources (applied on redeploy).
+    destructive_only_modules: list[str] = Field(default_factory=list)
+
+
+@router.get("/api/v1/infrastructure/definition-notice", response_model=DefinitionNoticeResponse)
+async def definition_notice_endpoint(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> DefinitionNoticeResponse:
+    from app.services import infrastructure_definitions as definitions
+
+    return DefinitionNoticeResponse(**await definitions.notice_for(session, int(current_user["sub"])))
+
+
+@router.post(
+    "/api/v1/infrastructure/definition-notice/{notice_id}/seen",
+    response_model=DefinitionNoticeResponse,
+)
+async def acknowledge_definition_notice_endpoint(
+    notice_id: int,
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+) -> DefinitionNoticeResponse:
+    """This admin chose Later. It never marks the infrastructure updated, and no other admin's view changes."""
+    from app.models.infrastructure_definition import InfrastructureDefinitionNotice
+    from app.services import infrastructure_definitions as definitions
+
+    if await session.get(InfrastructureDefinitionNotice, notice_id) is None:
+        raise NotFoundError("Notice not found")
+    await definitions.acknowledge(session, notice_id, int(current_user["sub"]))
+    await session.commit()
+    return DefinitionNoticeResponse(**await definitions.notice_for(session, int(current_user["sub"])))

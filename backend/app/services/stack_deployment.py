@@ -569,6 +569,11 @@ async def deploy_stack(
 
     storage_deployed = await _read_config(session, "storage_deployed")
     progress = StackProgress()
+    # The definitions this deploy applies, captured before anything runs (M17 baselines).
+    from app.services import infrastructure_definitions as definitions
+    from app.services.infrastructure_operations import current_operation_id
+
+    captured = await definitions.capture(session)
 
     # Storage is named by its storage generation, persisted before Terraform so
     # a retry resumes the same resources and a deploy after a confirmed destroy
@@ -610,6 +615,7 @@ async def deploy_stack(
         if not storage.outcome.succeeded:
             yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
             return
+        await definitions.record_reconciled(session, captured, "storage", operation_id=current_operation_id())
 
     # Step 1b (AWS only): deploy the image-build infrastructure (CodeBuild project
     # + its IAM service role). Cloud Build is serverless on GCP, so GCP has no
@@ -649,6 +655,7 @@ async def deploy_stack(
             if not image_build.outcome.succeeded:
                 yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
                 return
+            await definitions.record_reconciled(session, captured, "image_build", operation_id=current_operation_id())
 
     # Step 2: Deploy compute
     # If the user chose a different region/zone for compute, temporarily
@@ -804,6 +811,8 @@ async def deploy_stack(
                 ),
             )
 
+    await definitions.record_reconciled(session, captured, "compute", operation_id=current_operation_id())
+    await definitions.refresh_notice(session)
     yield TerraformProgressEvent(
         event_type="stack_complete",
         message="Stack deployment complete",
@@ -955,6 +964,10 @@ async def teardown_stack(
             entity_id=0,
             metadata={"module": "compute"},
         )
+    from app.services import infrastructure_definitions as definitions
+
+    await definitions.forget(session, "compute")
+    await definitions.refresh_notice(session)
     await session.flush()
 
     yield TerraformProgressEvent(
@@ -1267,6 +1280,11 @@ async def destroy_storage(
         await _set_config(session, key, "null")
     await retire_storage_generation(session)
     await allow_writes(session)
+    from app.services import infrastructure_definitions as definitions
+
+    await definitions.forget(session, "storage")
+    await definitions.forget(session, "image_build")
+    await definitions.refresh_notice(session)
 
     await log_action(
         session,

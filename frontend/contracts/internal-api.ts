@@ -6977,6 +6977,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/definition-notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Definition Notice Endpoint */
+        get: operations["definition_notice_endpoint_api_v1_infrastructure_definition_notice_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/definition-notice/{notice_id}/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Definition Notice Endpoint
+         * @description This admin chose Later. It never marks the infrastructure updated, and no other admin's view changes.
+         */
+        post: operations["acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/notebook-image/build-status": {
         parameters: {
             query?: never;
@@ -10897,6 +10934,30 @@ export interface components {
         DeclineRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /** DefinitionNotice */
+        DefinitionNotice: {
+            /** Id */
+            id: number;
+            /** Modules */
+            modules: string[];
+            /** Unknown Baseline */
+            unknown_baseline: boolean;
+            /** Version */
+            version: string;
+        };
+        /** DefinitionNoticeResponse */
+        DefinitionNoticeResponse: {
+            /** Destructive Only Modules */
+            destructive_only_modules?: string[];
+            notice?: components["schemas"]["DefinitionNotice"] | null;
+            /** Pending */
+            pending: boolean;
+            /**
+             * Seen
+             * @default false
+             */
+            seen: boolean;
         };
         /** DeployProgressResponse */
         DeployProgressResponse: {
@@ -31630,6 +31691,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComputeStackResponse"];
+                };
+            };
+        };
+    };
+    definition_notice_endpoint_api_v1_infrastructure_definition_notice_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefinitionNoticeResponse"];
+                };
+            };
+        };
+    };
+    acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefinitionNoticeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

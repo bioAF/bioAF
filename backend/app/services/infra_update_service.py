@@ -543,8 +543,12 @@ async def run_update_check(handle, user_id: int):
     from app.database import async_session_factory
     from app.services.infrastructure_operations import OperationResult, succeeded
 
+    from app.services import infrastructure_definitions as definitions
+
     await handle.step("plan", "Planning changes", "running")
     async with async_session_factory() as s:  # type: ignore[misc]
+        # The definitions this update reconciles, captured before anything runs (M17).
+        captured = await definitions.capture(s)
         result = await check_for_updates(s, user_id)
         await s.commit()
     await handle.step("plan", state="done")
@@ -563,6 +567,19 @@ async def run_update_check(handle, user_id: int):
                 {**(applied.partial_effects or {}), "destructive": destructive},
             )
         added = (applied.partial_effects or {}).get("added", 0)
+    # Every planned module is now reconciled: its additive changes applied, and any remaining
+    # delete/replace changes recorded as pending rather than marked current.
+    async with async_session_factory() as s:  # type: ignore[misc]
+        for planned in result["modules"]:
+            await definitions.record_reconciled(
+                s,
+                captured,
+                planned["module"],
+                destructive_pending=bool(planned["destroy_count"]),
+                operation_id=handle.id,
+            )
+        await definitions.refresh_notice(s)
+        await s.commit()
     return succeeded(check_summary(added, destructive), added=added, destructive=destructive)
 
 
