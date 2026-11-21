@@ -146,3 +146,32 @@ async def test_a_target_whose_plan_adds_something_unconfirmed_is_not_applied(ses
     monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
     result = await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
     assert result.category == "scope_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_target_plan_fails_the_update(session, admin_user, monkeypatch):
+    """A target's own plan failing is a failure, never "already applied" or "up to date"."""
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _PersistSpy())
+    enumerate_plan = _fake_run_plan({"storage": _plan([STORAGE])})
+    calls = {"n": 0}
+
+    async def run_plan(s, user_id, module_name, **kwargs):
+        calls["n"] += 1
+        if kwargs.get("targets"):
+            run = TerraformRun(triggered_by_user_id=user_id, action="plan", module_name=module_name, status="failed")
+            s.add(run)
+            await s.flush()
+            return run
+        return await enumerate_plan(s, user_id, module_name, **kwargs)
+
+    monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
+    result = await infra_update_service.apply_modules_sequentially(["storage"], admin_user.id)
+
+    assert result.status == "failed"
+    assert result.category == "plan_failed"
+    assert result.message == "Planning storage changes failed. Nothing else was applied."
+    assert result.partial_effects == {"added": 0, "failed_target": STORAGE["address"]}
+    run = (
+        await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))
+    ).scalar_one()
+    assert run.status == "failed"

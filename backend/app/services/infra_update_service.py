@@ -318,6 +318,10 @@ class TargetApplyFailed(Exception):
         self.target = target
 
 
+class TargetPlanFailed(TargetApplyFailed):
+    """The plan for one target failed, so whether it still needs applying is unknown."""
+
+
 class TargetOutOfScope(TargetApplyFailed):
     """Applying the target would also change something the confirmed update may not change."""
 
@@ -419,6 +423,15 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                     failed_target=target,
                     out_of_scope=exc.offending,
                 )
+            except TargetPlanFailed:
+                if handle is not None:
+                    await handle.step(f"apply:{module}", state="failed", detail=f"Could not plan {target}.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.",
+                    "plan_failed",
+                    added=added,
+                    failed_target=target,
+                )
             except TargetApplyFailed:
                 if handle is not None:
                     await handle.step(f"apply:{module}", state="failed", detail=f"Could not apply {target}.")
@@ -466,9 +479,13 @@ async def _apply_one_target(module: str, target: str, user_id: int, allowed: set
         applying = False
         try:
             run = await TerraformExecutor.run_plan(s, user_id, module_name=module, targets=[target])
+            if run.status != "awaiting_confirmation":
+                # The plan failed: whether this target still needs applying is unknown.
+                await s.commit()
+                raise TargetPlanFailed(module, target)
             # The target may have already been applied (or turned destructive)
             # since enumeration; only apply it while it is still additive.
-            if run.status != "awaiting_confirmation" or target not in set(additive_addresses(run.plan_json)):
+            if target not in set(additive_addresses(run.plan_json)):
                 run.status = "cancelled"
                 run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
