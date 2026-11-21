@@ -9,6 +9,7 @@ import io
 import threading
 import time
 import zipfile
+from collections.abc import Callable
 
 import pytest
 from sqlalchemy import text
@@ -476,3 +477,118 @@ async def test_the_standalone_report_api_is_unchanged_without_a_budget(session, 
     report = await ProvenanceReportService.gather_report(session, "experiment", 1, admin_user.organization_id, "a@b")
 
     assert len(report["entity"]["samples"]) == 3
+
+
+# -- Every report is admitted before any is rendered (bug fix 10) ---------------------------------
+
+
+def _audit_reads(session, entity_type: str) -> tuple[list[str], Callable[[], None]]:
+    """Statements that fetch ``entity_type``'s audit rows into Python; the count/width measurement is allowed."""
+    from sqlalchemy import event
+
+    fetched: list[str] = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT * FROM AUDIT_LOG") and f"entity_type = '{entity_type}'" in (
+            statement
+        ):
+            fetched.append(statement)
+
+    engine = session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", record)
+    return fetched, lambda: event.remove(engine, "before_cursor_execute", record)
+
+
+async def _audit(session, entity_type: str, entity_id: int, *, rows: int = 1, width: int = 20) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO audit_log (entity_type, entity_id, action, details_json) "
+            "SELECT :t, :i, 'updated', jsonb_build_object('note', repeat('x', :w)) FROM generate_series(1, :n)"
+        ),
+        {"t": entity_type, "i": entity_id, "w": width, "n": rows},
+    )
+    await session.commit()
+
+
+async def _second_experiment(session, org: int) -> None:
+    """Experiment 2 in project 1, ordered after experiment 1: exports plan experiments in UUID order."""
+    await session.execute(
+        text("UPDATE experiments SET uuid = '00000000-0000-0000-0000-000000000001' WHERE id = 1"),
+    )
+    await session.execute(
+        text(
+            "INSERT INTO experiments (id, uuid, organization_id, project_id, name, status) "
+            "VALUES (2, '00000000-0000-0000-0000-000000000002', :o, 1, 'E2', 'x')"
+        ),
+        {"o": org},
+    )
+    await session.commit()
+
+
+@pytest.mark.parametrize("too_wide", [False, True], ids=["rows", "width"])
+@pytest.mark.parametrize(
+    ("path", "entity_type"),
+    [("/api/experiments/1/export/data", "experiment"), ("/api/projects/1/export/data", "project")],
+    ids=["experiment", "project"],
+)
+@pytest.mark.asyncio
+async def test_an_oversized_audit_history_is_refused_before_it_is_fetched_or_anything_renders(
+    client, session, admin_user, headers, store, monkeypatch, path, entity_type, too_wide
+):
+    """A cold request: no earlier export has run in this process."""
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROWS", 40)
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROW_BYTES", 20_000)
+    rendered = _spy(monkeypatch, "render")
+    await _seed(session, admin_user.organization_id)
+    if too_wide:
+        await _audit(session, entity_type, 1, width=30_000)
+    else:
+        await _audit(session, entity_type, 1, rows=50)
+    fetched, stop = _audit_reads(session, entity_type)
+    try:
+        resp = await _post(client, headers, path)
+    finally:
+        stop()
+
+    assert resp.status_code == 413
+    assert "provenance report" in resp.json()["detail"]
+    assert fetched == []
+    assert rendered == []
+
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROWS", 2_000)
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROW_BYTES", 2 * resources.MiB)
+    assert (await _post(client, headers, path)).status_code == 200  # the refusal left nothing behind
+
+
+@pytest.mark.asyncio
+async def test_a_project_export_renders_nothing_when_a_later_experiments_report_is_too_large(
+    client, session, admin_user, headers, store, monkeypatch
+):
+    monkeypatch.setattr(resources, "PROVENANCE_MAX_ROWS", 40)
+    rendered = _spy(monkeypatch, "render")
+    await _seed(session, admin_user.organization_id)
+    await _second_experiment(session, admin_user.organization_id)
+    await _audit(session, "experiment", 2, rows=50)
+
+    resp = await _post(client, headers, "/api/projects/1/export/data")
+
+    assert resp.status_code == 413
+    assert "experiment" in resp.json()["detail"]
+    assert rendered == []
+
+
+@pytest.mark.asyncio
+async def test_a_project_export_includes_every_report_when_all_are_admitted(
+    client, session, admin_user, headers, store
+):
+    await _seed(session, admin_user.organization_id)
+    await _second_experiment(session, admin_user.organization_id)
+    await _audit(session, "project", 1, rows=3)
+    await _audit(session, "experiment", 2, rows=3)
+
+    resp = await _post(client, headers, "/api/projects/1/export/data")
+
+    assert resp.status_code == 200
+    reports = [n for n in zipfile.ZipFile(io.BytesIO(resp.content)).namelist() if "/provenance/" in n]
+    assert len([n for n in reports if "/experiments/" in n]) == 2
+    assert len([n for n in reports if "/experiments/" not in n]) == 1
