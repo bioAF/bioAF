@@ -6926,7 +6926,7 @@ export interface paths {
         put?: never;
         /**
          * Notebook Image Cancel
-         * @description Cancel the active notebook image build.
+         * @description Request cancellation of the active notebook image build; the poller confirms it.
          */
         post: operations["notebook_image_cancel_api_v1_infrastructure_notebook_image_cancel_post"];
         delete?: never;
@@ -6980,6 +6980,28 @@ export interface paths {
         get: operations["get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Operation Endpoint
+         * @description Request that the operation stop at its next safe point (M16). Finished work is never undone.
+         *
+         *     Repeating the request changes nothing; stopping and settlement are reported by the status reads.
+         */
+        post: operations["cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7205,14 +7227,12 @@ export interface paths {
         put?: never;
         /**
          * Check Infra Updates Endpoint
-         * @description Re-align deployed naming, re-plan every deployed module, and report the
-         *     pending changes split into additive vs destructive.
+         * @description Start the confirmed "Check for infrastructure updates" action (mockup M1).
          *
-         *     When there are additive changes and no destructive (delete/replace) ones,
-         *     the additive resources start applying immediately in the background. When
-         *     a destructive change is present, nothing is auto-applied; the caller can
-         *     apply the additive subset via /apply-updates (which only ever targets
-         *     additive resources).
+         *     The popup confirmation is the authorization: one accepted operation plans every deployed
+         *     module and applies the additive changes automatically, with no second approval. Changes that
+         *     would delete or replace an existing resource are listed in the operation's outcome and never
+         *     applied. Progress and outcome are read from the operation.
          */
         post: operations["check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post"];
         delete?: never;
@@ -9704,32 +9724,12 @@ export interface components {
             /** New Password */
             new_password: string;
         };
-        /** CheckUpdatesResponse */
-        CheckUpdatesResponse: {
-            /** Additive Resources */
-            additive_resources: components["schemas"]["ResourceInfo"][];
-            /** Applying */
-            applying: boolean;
-            /** Destructive Resources */
-            destructive_resources: components["schemas"]["DestructiveResourceInfo"][];
-            /** Has Additive */
-            has_additive: boolean;
-            /** Has Changes */
-            has_changes: boolean;
-            /** Has Destructive */
-            has_destructive: boolean;
-            /** Modules */
-            modules: components["schemas"]["ModuleUpdateInfo"][];
-            /** Modules With Additive */
-            modules_with_additive: string[];
+        /** CheckUpdatesAccepted */
+        CheckUpdatesAccepted: {
+            /** Message */
+            message: string;
             /** Operation Id */
-            operation_id?: number | null;
-            /** Realigned */
-            realigned: {
-                [key: string]: unknown;
-            } | null;
-            /** Requires Approval */
-            requires_approval: boolean;
+            operation_id: number;
         };
         /** CitationBulkRequest */
         CitationBulkRequest: {
@@ -10823,19 +10823,6 @@ export interface components {
         DepositOverrideRequest: {
             /** Reason */
             reason: string;
-        };
-        /** DestructiveResourceInfo */
-        DestructiveResourceInfo: {
-            /** Action */
-            action: string;
-            /** Address */
-            address: string;
-            /** Description */
-            description: string;
-            /** Stateful */
-            stateful: boolean;
-            /** Type */
-            type: string;
         };
         /**
          * DifferentialDesignRequest
@@ -12475,19 +12462,6 @@ export interface components {
             status: string;
             /** Text */
             text?: string | null;
-        };
-        /** ModuleUpdateInfo */
-        ModuleUpdateInfo: {
-            /** Add Count */
-            add_count: number;
-            /** Change Count */
-            change_count: number;
-            /** Destroy Count */
-            destroy_count: number;
-            /** Has Changes */
-            has_changes: boolean;
-            /** Module */
-            module: string;
         };
         /** NamingProfileCreate */
         NamingProfileCreate: {
@@ -14692,17 +14666,6 @@ export interface components {
             supported_finding_kinds: string[];
             /** Tools */
             tools?: unknown[] | null;
-        };
-        /** ResourceInfo */
-        ResourceInfo: {
-            /** Action */
-            action: string;
-            /** Address */
-            address: string;
-            /** Description */
-            description: string;
-            /** Type */
-            type: string;
         };
         /** RestoreRequest */
         RestoreRequest: {
@@ -31517,6 +31480,37 @@ export interface operations {
             };
         };
     };
+    cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post: {
         parameters: {
             query?: never;
@@ -31821,7 +31815,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CheckUpdatesResponse"];
+                    "application/json": components["schemas"]["CheckUpdatesAccepted"];
                 };
             };
             /** @description Validation Error */

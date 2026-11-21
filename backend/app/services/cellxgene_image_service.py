@@ -138,6 +138,17 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
     return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
+async def request_provider_cancel(session: AsyncSession, build_id: str) -> None:
+    """Ask the build provider to cancel ``build_id``; the poller records the confirmed outcome."""
+    platform = await resolve_image_platform(session)
+    platform.require_target()
+    credentials = await resolve_image_credentials(session, platform)
+    get_image_build_provider().cancel_build(credentials, platform.config, build_id)
+    if await _read_config(session, "cellxgene_image_build_id") == build_id:
+        await _set_config(session, "cellxgene_image_build_status", "CANCELLING")
+    await session.flush()
+
+
 async def build_cellxgene_image(session: AsyncSession, user_id: int | None = None) -> str:
     """Full flow: ensure the image repo exists, submit build, return build ID.
 

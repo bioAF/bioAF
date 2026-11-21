@@ -24,7 +24,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { Button } from "@/components/ui/Button";
-import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { useInfrastructureActions, usePermissionGate } from "@/hooks/useInfrastructureActions";
 import { useInfrastructureOperations } from "@/hooks/useInfrastructureOperations";
 import { useStartInfrastructureAction } from "@/hooks/useStartInfrastructureAction";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -89,6 +89,7 @@ function InfraComponentsContent() {
   const startAction = useStartInfrastructureAction();
   const runningOp = operations?.active?.busy ? (operations.active.operation ?? null) : null;
   const configureGate = actions.gate("configure");
+  const cancelGate = usePermissionGate<"configure">("infrastructure").gate("configure");
   const deployGate = actions.gate("deploy");
   const createGate = actions.gate("create");
   const [showBootstrapModal, setShowBootstrapModal] = useState(false);
@@ -492,13 +493,25 @@ function InfraComponentsContent() {
                             }>
                             View Progress
                           </Button>
-                          <button
-                            onClick={() => setShowAbortConfirm(true)}
-                            {...createGate}
-                            className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
-                          >
-                            Abort
-                          </button>
+                          {runningOp ? (
+                            // Cancelling is the running operation's own control (M16): it stays
+                            // available while that operation holds exclusion.
+                            <button
+                              onClick={() => operations?.open(runningOp.id)}
+                              {...cancelGate}
+                              className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
+                            >
+                              Cancel {runningOp.label.toLowerCase()}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setShowAbortConfirm(true)}
+                              {...createGate}
+                              className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
+                            >
+                              Abort
+                            </button>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -648,7 +661,9 @@ function InfraComponentsContent() {
           onDismiss={() => setShowDeployModal(false)}
           onAbort={() => {
             setShowDeployModal(false);
-            setShowAbortConfirm(true);
+            // A deployment that runs as an operation is cancelled from its status popup (M16).
+            if (runningOp) operations?.open(runningOp.id);
+            else setShowAbortConfirm(true);
           }}
           onDone={handleDeployComplete}
         />

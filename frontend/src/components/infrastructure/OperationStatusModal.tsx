@@ -108,6 +108,83 @@ function RecoveryForm({ op, onRecovered }: { op: OperationView; onRecovered: () 
   );
 }
 
+/** What finished work means for each action, shown before a cancellation (M16). */
+function cancelConsequence(op: OperationView): string | null {
+  if (op.action === "storage_destroy") return "Those objects are permanently deleted.";
+  if (op.action === "compute_deploy") {
+    return "Created resources stay in place. Run Teardown to remove them, or Deploy again to finish.";
+  }
+  return null;
+}
+
+function CancelConfirm({
+  op,
+  onKeep,
+  onCancelled,
+}: {
+  op: OperationView;
+  onKeep: () => void;
+  onCancelled: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const action = `Cancel ${op.label.toLowerCase()}`;
+  const done = (op.steps ?? []).filter((s) => s.state === "done" && s.key !== "accepted" && s.key !== "prerequisites");
+  const consequence = cancelConsequence(op);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/api/v1/infrastructure/operations/${op.id}/cancel`, {});
+      onCancelled();
+    } catch (e) {
+      logError("cancelling an infrastructure operation", e);
+      setError(e instanceof ApiError ? e.message : "The cancellation could not be requested. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title={`${action}?`}
+      onClose={onKeep}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onKeep} disabled={busy}>
+            Keep running
+          </Button>
+          <Button variant="danger" onClick={submit} disabled={busy}>
+            {action}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-xs text-gray-500">Operation #{op.id}</p>
+      <p className="mt-2 text-sm text-gray-700">bioAF will stop as soon as it safely can. Work already done is not undone.</p>
+      {done.length > 0 && (
+        <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3 text-sm">
+          <p className="font-medium text-gray-800">Already done</p>
+          <ul className="mt-1 list-disc pl-5 text-gray-700">
+            {done.map((s) => (
+              <li key={s.key}>{s.label}</li>
+            ))}
+          </ul>
+          {consequence && <p className="mt-2 text-gray-700">{consequence}</p>}
+        </div>
+      )}
+      {done.length === 0 && consequence && <p className="mt-3 text-sm text-gray-700">{consequence}</p>}
+      {error && (
+        <Alert tone="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
+    </Modal>
+  );
+}
+
 /**
  * The status popup for one infrastructure operation (mockups M2, M5, M7, M8, M9, M10). Every
  * administrator who opens an operation sees the same steps and outcome. Closing it changes
@@ -158,8 +235,14 @@ export function OperationStatusModal({
     }
   }, [op, onSettled]);
 
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const title = op ? operationTitle(op) : "Infrastructure operation";
   const hint = op ? footerHint(op, { openedFromBanner }) : null;
+  // Any admin with infrastructure configure may cancel any active operation (M16-a). This is the
+  // operation's own control, so it stays available while the operation holds exclusion.
+  const canCancel =
+    op !== undefined && ["accepted", "running", "stopping"].includes(op.status) && configure.allowed("configure");
+  const stopping = op?.status === "stopping" || Boolean(op?.cancel_requested_at && op && isActive(op));
 
   return (
     <Modal
@@ -170,9 +253,21 @@ export function OperationStatusModal({
       footer={
         <div className="flex w-full items-center justify-between gap-4">
           <span className="text-xs text-gray-500">{hint}</span>
-          <Button variant="secondary" onClick={onClose}>
-            Close
-          </Button>
+          <div className="flex items-center gap-3">
+            {canCancel && op && (
+              <button
+                type="button"
+                className="text-sm font-medium text-red-600 hover:text-red-800 disabled:opacity-60"
+                disabled={stopping}
+                onClick={() => setConfirmingCancel(true)}
+              >
+                {stopping ? "Stopping..." : `Cancel ${op.label.toLowerCase()}`}
+              </button>
+            )}
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          </div>
         </div>
       }
     >
@@ -192,18 +287,37 @@ export function OperationStatusModal({
               </span>
             )}
           </div>
+          {stopping && (
+            <p className="mb-2 text-sm text-amber-700">Stopping: waiting for Terraform to save its state.</p>
+          )}
           <ul className="divide-y divide-gray-100">
             {(op.steps ?? []).map((step) => (
               <StepRow key={step.key} step={step} resources={op.resources ?? null} />
             ))}
           </ul>
-          {op.message && op.status !== "running" && (
+          {op.status === "cancelled" && op.cancel_requested_by && (
+            <p className="mt-3 text-sm text-gray-600">
+              Cancelled by {op.cancel_requested_by} at {shortTime(op.cancel_requested_at)}.
+            </p>
+          )}
+          {op.message && op.status !== "running" && op.status !== "stopping" && op.status !== "cancelled" && (
             <Alert tone={op.status === "succeeded" ? "success" : op.status === "failed" ? "error" : "warning"} className="mt-4">
               {op.message}
             </Alert>
           )}
           {op.status === "recovery_required" && configure.allowed("configure") && (
             <RecoveryForm op={op} onRecovered={() => void read.refresh().then(onSettled)} />
+          )}
+          {confirmingCancel && (
+            <CancelConfirm
+              op={op}
+              onKeep={() => setConfirmingCancel(false)}
+              onCancelled={() => {
+                setConfirmingCancel(false);
+                void read.refresh();
+                onSettled();
+              }}
+            />
           )}
         </div>
       )}

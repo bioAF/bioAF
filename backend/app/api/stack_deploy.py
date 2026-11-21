@@ -564,150 +564,39 @@ async def stack_status_endpoint(
 # -----------------------------------------------------------------------
 
 
-class ResourceInfo(BaseModel):
-    address: str
-    type: str
-    action: str
-    description: str
-
-
-class DestructiveResourceInfo(ResourceInfo):
-    stateful: bool
-
-
-class ModuleUpdateInfo(BaseModel):
-    module: str
-    add_count: int
-    change_count: int
-    destroy_count: int
-    has_changes: bool
-
-
-class CheckUpdatesResponse(BaseModel):
-    has_changes: bool
-    has_additive: bool
-    has_destructive: bool
-    requires_approval: bool
-    applying: bool
-    realigned: dict | None
-    modules_with_additive: list[str]
-    modules: list[ModuleUpdateInfo]
-    additive_resources: list[ResourceInfo]
-    destructive_resources: list[DestructiveResourceInfo]
-    operation_id: int | None = None
-
-
 class ApplyUpdatesRequest(BaseModel):
     modules: list[str]
 
 
-def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
-    return CheckUpdatesResponse(
-        has_changes=result["has_changes"],
-        has_additive=result["has_additive"],
-        has_destructive=result["has_destructive"],
-        requires_approval=result["requires_approval"],
-        applying=applying,
-        realigned=result["realigned"],
-        modules_with_additive=result["modules_with_additive"],
-        modules=[
-            ModuleUpdateInfo(
-                module=m["module"],
-                add_count=m["add_count"],
-                change_count=m["change_count"],
-                destroy_count=m["destroy_count"],
-                has_changes=m["has_changes"],
-            )
-            for m in result["modules"]
-        ],
-        additive_resources=[
-            ResourceInfo(
-                address=r["address"],
-                type=r["type"],
-                action=r["action"],
-                description=r.get("description", ""),
-            )
-            for r in result["additive_resources"]
-        ],
-        destructive_resources=[
-            DestructiveResourceInfo(
-                address=r["address"],
-                type=r["type"],
-                action=r["action"],
-                description=r.get("description", ""),
-                stateful=bool(r.get("stateful")),
-            )
-            for r in result["destructive_resources"]
-        ],
-    )
+class CheckUpdatesAccepted(BaseModel):
+    message: str
+    operation_id: int
 
 
-@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesResponse)
+@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesAccepted)
 async def check_infra_updates_endpoint(
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
     idempotency_key: IdempotencyKey = None,
-) -> CheckUpdatesResponse:
-    """Re-align deployed naming, re-plan every deployed module, and report the
-    pending changes split into additive vs destructive.
+) -> CheckUpdatesAccepted:
+    """Start the confirmed "Check for infrastructure updates" action (mockup M1).
 
-    When there are additive changes and no destructive (delete/replace) ones,
-    the additive resources start applying immediately in the background. When
-    a destructive change is present, nothing is auto-applied; the caller can
-    apply the additive subset via /apply-updates (which only ever targets
-    additive resources).
+    The popup confirmation is the authorization: one accepted operation plans every deployed
+    module and applies the additive changes automatically, with no second approval. Changes that
+    would delete or replace an existing resource are listed in the operation's outcome and never
+    applied. Progress and outcome are read from the operation.
     """
+    runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
-    op_id, _ = await _accept(current_user, "infrastructure_update", idempotency_key)
+    # Refuse early what cannot run at all, before taking exclusion.
     try:
-        async with ops.owned(op_id) as handle:
-            await handle.step("plan", "Planning changes", "running")
-            result = await infra_update_service.check_for_updates(session, user_id)
-            await handle.step("plan", state="done")
-    except ops.InfrastructureBusyError:
-        await session.rollback()
-        raise
-    except (DomainError, ValueError) as exc:
-        # DomainError comes from infra_update_service (e.g. not-initialized,
-        # nothing-deployed, plan-failed); the bare ValueError still guards the
-        # "Another Terraform operation is in progress" raised deeper in
-        # TerraformExecutor, which is not part of this migration.
-        msg = str(exc)
-        if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
-            await session.rollback()
-            raise HTTPException(status_code=400, detail=msg)
-        if msg.startswith("Another Terraform operation is in progress"):
-            await session.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="Another Terraform operation is in progress. Try again when it finishes.",
-            )
-        logger.error("check_for_updates failed: %s", msg, exc_info=True)
-        await session.rollback()
-        raise HTTPException(status_code=400, detail="Could not check for infrastructure updates. See server logs.")
-
-    applying = False
-    await session.commit()
-    if result["has_additive"] and not result["has_destructive"]:
-        # The same operation continues into the additive-only apply.
-        infra_update_service.launch_background_apply(result["modules_with_additive"], user_id, operation_id=op_id)
-        applying = True
-    else:
-        await ops.finish(op_id, ops.succeeded(_check_summary(result)))
-    response = _to_check_response(result, applying=applying)
-    response.operation_id = op_id
-    return response
-
-
-def _check_summary(result: dict) -> str:
-    """The finished-check line signed off in mockup M1."""
-    if result["has_destructive"]:
-        n = len(result["destructive_resources"])
-        return (
-            f"{n} change{' was' if n == 1 else 's were'} not applied because "
-            f"{'it' if n == 1 else 'they'} would delete or replace an existing resource."
-        )
-    return "Your infrastructure is up to date."
+        await infra_update_service._deployed_modules(session)
+    except DomainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    op_id, replayed = await _accept(current_user, "infrastructure_update", idempotency_key)
+    if not replayed:
+        infra_update_service.launch_update_check(user_id, operation_id=op_id)
+    return CheckUpdatesAccepted(message="Infrastructure update started", operation_id=op_id)
 
 
 @router.post("/api/v1/infrastructure/stack/apply-updates")
@@ -724,8 +613,12 @@ async def apply_infra_updates_endpoint(
     (targeted), so a delete/replace is never carried out by this flow."""
     runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
-    allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
-    modules = [m for m in body.modules if m in allowed]
+    # The server owns the scope: only known modules that are actually deployed.
+    try:
+        deployed = set(await infra_update_service._deployed_modules(session))
+    except DomainError:
+        deployed = set()
+    modules = [m for m in body.modules if m in deployed]
     if not modules:
         raise HTTPException(status_code=400, detail="No valid modules to apply")
     op_id, replayed = await _accept(current_user, "infrastructure_update", idempotency_key, {"modules": modules})
@@ -883,8 +776,8 @@ async def notebook_image_cancel(
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Cancel the active notebook image build."""
-    build_id = await cancel_build(session)
+    """Request cancellation of the active notebook image build; the poller confirms it."""
+    build_id = await cancel_build(session, int(current_user["sub"]))
     await session.commit()
     return {"cancelled": True, "build_id": build_id}
 

@@ -351,10 +351,23 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
     return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
-async def cancel_build(session: AsyncSession) -> str:
-    """Cancel the active Cloud Build job.
+async def request_provider_cancel(session: AsyncSession, build_id: str) -> None:
+    """Ask the build provider to cancel ``build_id``. A request is not settlement: the build poller
+    records CANCELLED (and the component state) only once the provider reports it."""
+    platform = await resolve_image_platform(session)
+    platform.require_target()
+    credentials = await resolve_image_credentials(session, platform)
+    get_image_build_provider().cancel_build(credentials, platform.config, build_id)
+    if await _read_config(session, "notebook_image_build_id") == build_id:
+        await _set_config(session, "notebook_image_build_status", "CANCELLING")
+    await session.flush()
 
-    Returns the build ID that was cancelled.
+
+async def cancel_build(session: AsyncSession, user_id: int | None = None) -> str:
+    """Cancel the active notebook image build.
+
+    The cancellation goes through the infrastructure operation that owns the build, so every admin
+    sees it stopping and exclusion holds until the provider confirms it. Returns the build ID.
     Raises a DomainError if there is no active build to cancel.
     """
     build_id = await _read_config(session, "notebook_image_build_id")
@@ -365,22 +378,13 @@ async def cancel_build(session: AsyncSession) -> str:
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         raise StateError(f"Build already finished with status {current_status}.")
 
-    platform = await resolve_image_platform(session)
-    platform.require_target()
-    credentials = await resolve_image_credentials(session, platform)
-    get_image_build_provider().cancel_build(credentials, platform.config, build_id)
+    from app.services import infrastructure_operations as ops
 
-    await _set_config(session, "notebook_image_build_status", "CANCELLED")
-    # Mark notebook components back to build_failed so user can retry
-    await session.execute(
-        text("""
-        UPDATE component_states SET status = 'build_failed'
-        WHERE component_key IN ('rstudio', 'jupyterhub')
-        AND enabled = true AND status = 'provisioning'
-        """)
-    )
-    await session.flush()
-
+    owner = await ops.operation_for_build(session, build_id)
+    if owner is not None and user_id is not None:
+        await ops.request_cancel(session, owner, user_id)
+    else:
+        await request_provider_cancel(session, build_id)
     return build_id
 
 

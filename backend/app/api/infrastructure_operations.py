@@ -7,6 +7,7 @@
 - ``GET  /api/v1/infrastructure/operations/{id}``: one operation, for the status popup (M2, M5).
 - ``POST /api/v1/infrastructure/operations/{id}/seen``: an administrator opened its outcome (M9).
 - ``POST /api/v1/infrastructure/operations/{id}/recover``: audited recovery (M10, configure).
+- ``POST /api/v1/infrastructure/operations/{id}/cancel``: stop at the next safe point (M16, configure).
 
 Status reads never start, stop or change infrastructure work.
 """
@@ -190,3 +191,18 @@ async def recover_operation_endpoint(
     op = await ops.recover(session, operation_id, int(current_user["sub"]), reason=body.reason)
     await session.commit()
     return await _view(session, op)
+
+
+@router.post("/api/v1/infrastructure/operations/{operation_id}/cancel", response_model=OperationView)
+async def cancel_operation_endpoint(
+    operation_id: int,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+) -> OperationView:
+    """Request that the operation stop at its next safe point (M16). Finished work is never undone.
+
+    Repeating the request changes nothing; stopping and settlement are reported by the status reads.
+    """
+    await ops.request_cancel(session, operation_id, int(current_user["sub"]))
+    session.expire_all()
+    return await _view(session, await _get(session, operation_id))

@@ -314,3 +314,101 @@ test("a confirmation that lost the race shows who started first (M6)", async () 
     "Your compute teardown was not started.",
   );
 });
+
+describe("cancel from the status popup (M16)", () => {
+  const destroy = op({
+    id: 62,
+    action: "storage_destroy",
+    label: "Storage destroy",
+    steps: [
+      { key: "accepted", label: "Accepted", state: "done" },
+      { key: "empty:bioaf-ingest", label: "Emptying bioaf-ingest", state: "done" },
+      { key: "empty:bioaf-raw", label: "Emptying bioaf-raw", state: "done" },
+      { key: "empty:bioaf-results", label: "Emptying bioaf-results", state: "running" },
+    ],
+    resources: null,
+  });
+
+  async function openPopup(detail: OperationView) {
+    respond({ busy: true, state: "running", operation: detail, interrupted: [] }, detail);
+    render(
+      <Shell>
+        <OpenAsInitiatorFor id={detail.id} />
+      </Shell>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open mine" }));
+    return screen.findByRole("dialog", { name: detail.label });
+  }
+
+  test("confirming asks first and lists what is already done", async () => {
+    mockPost.mockResolvedValue({ ...destroy, status: "stopping" });
+    const popup = await openPopup(destroy);
+    fireEvent.click(within(popup).getByRole("button", { name: "Cancel storage destroy" }));
+
+    const confirm = await screen.findByRole("dialog", { name: "Cancel storage destroy?" });
+    expect(confirm).toHaveTextContent("bioAF will stop as soon as it safely can. Work already done is not undone.");
+    expect(within(confirm).getByText("Emptying bioaf-ingest")).toBeInTheDocument();
+    expect(within(confirm).getByText("Emptying bioaf-raw")).toBeInTheDocument();
+    expect(confirm).toHaveTextContent("Those objects are permanently deleted.");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel storage destroy" }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/v1/infrastructure/operations/62/cancel", {}));
+  });
+
+  test("Keep running leaves the operation alone", async () => {
+    const popup = await openPopup(destroy);
+    fireEvent.click(within(popup).getByRole("button", { name: "Cancel storage destroy" }));
+    const confirm = await screen.findByRole("dialog", { name: "Cancel storage destroy?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Keep running" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Cancel storage destroy?" })).not.toBeInTheDocument());
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("a deploy explains created resources stay", async () => {
+    const deploy = op({ id: 63, action: "compute_deploy", label: "Compute deployment", resources: null });
+    const popup = await openPopup(deploy);
+    fireEvent.click(within(popup).getByRole("button", { name: "Cancel compute deployment" }));
+    expect(await screen.findByRole("dialog", { name: "Cancel compute deployment?" })).toHaveTextContent(
+      "Created resources stay in place. Run Teardown to remove them, or Deploy again to finish.",
+    );
+  });
+
+  test("while stopping the button waits for Terraform", async () => {
+    const stopping = { ...destroy, status: "stopping" as const, cancel_requested_at: "2026-11-21T16:12:00Z" };
+    const popup = await openPopup(stopping);
+    expect(within(popup).getByRole("button", { name: "Stopping..." })).toBeDisabled();
+    expect(within(popup).getByText("Stopping: waiting for Terraform to save its state.")).toBeInTheDocument();
+  });
+
+  test("a cancelled operation says who cancelled it", async () => {
+    const cancelled = {
+      ...destroy,
+      status: "cancelled" as const,
+      cancel_requested_by: "Admin B",
+      cancel_requested_at: "2026-11-21T16:12:00Z",
+      steps: (destroy.steps ?? []).map((s) => (s.state === "running" ? { ...s, state: "stopped" } : s)),
+    };
+    respond({ busy: false, state: null, operation: null, interrupted: [] }, cancelled);
+    render(
+      <Shell>
+        <OpenAsInitiatorFor id={62} />
+      </Shell>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open mine" }));
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy cancelled" });
+    expect(within(popup).getByText(/^Cancelled by Admin B at /)).toBeInTheDocument();
+    expect(within(popup).getByText("Stopped")).toBeInTheDocument();
+    expect(within(popup).queryByRole("button", { name: "Cancel storage destroy" })).not.toBeInTheDocument();
+  });
+
+  test("roles without infrastructure configure cannot cancel", async () => {
+    permissions = { "infrastructure:view": true, "infrastructure:deploy": true };
+    const popup = await openPopup(destroy);
+    expect(within(popup).queryByRole("button", { name: "Cancel storage destroy" })).not.toBeInTheDocument();
+  });
+});
+
+function OpenAsInitiatorFor({ id }: { id: number }) {
+  const ops = useInfrastructureOperations();
+  return <button onClick={() => ops?.open(id)}>Open mine</button>;
+}

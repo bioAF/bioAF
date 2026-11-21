@@ -70,6 +70,26 @@ ACTION_LABELS: dict[str, str] = {
 
 _current: ContextVar[int | None] = ContextVar("bioaf_infrastructure_operation", default=None)
 
+# The longest a user-requested cancellation may take to confirm stopping (approved M16). The stop is
+# requested at once; this is the deadline for confirming it, after which the operation needs recovery.
+CANCEL_BUDGET = timedelta(seconds=120)
+CANCEL_UNCONFIRMED = "bioAF asked Terraform to stop, but could not confirm that it did."
+
+# The task running each operation in this process, so a cancellation can reach it.
+_op_tasks: dict[int, asyncio.Task] = {}
+
+
+def _register_task(operation_id: int) -> None:
+    task = asyncio.current_task()
+    if task is not None:
+        _op_tasks[operation_id] = task
+
+
+def _unregister_task(operation_id: int) -> None:
+    task = _op_tasks.get(operation_id)
+    if task is asyncio.current_task():
+        _op_tasks.pop(operation_id, None)
+
 
 class InfrastructureBusyError(ConflictError):
     """Another infrastructure operation holds installation-wide exclusion."""
@@ -427,9 +447,23 @@ async def finish(operation_id: int, result: OperationResult) -> None:
     monitor reports every build settled (``settle_external_build``).
     """
     waiting = False
+    live = _live_children(operation_id)
 
     def change(op: InfrastructureOperation) -> None:
-        nonlocal waiting
+        nonlocal waiting, result
+        if op.exclusive_slot is None and op.status in TERMINAL_STATUSES:
+            # Already settled (a completion raced a cancellation, or a duplicate finish): keep it.
+            return
+        if op.cancel_requested_at is not None and result.status == "interrupted":
+            result = OperationResult(
+                "cancelled",
+                "Cancelled. Work already done was not undone.",
+                "cancelled",
+                result.partial_effects,
+            )
+        if result.status != "recovery_required" and live(op):
+            # A Terraform child is still alive: never release exclusion under it.
+            result = OperationResult("recovery_required", CANCEL_UNCONFIRMED, "process_not_settled")
         if result.status != "recovery_required" and _unsettled_builds(op):
             waiting = True
             op.partial_effects = {
@@ -461,6 +495,125 @@ async def finish(operation_id: int, result: OperationResult) -> None:
         logger.info("Infrastructure operation %s waits for its image builds", operation_id)
     else:
         logger.info("Infrastructure operation %s finished: %s", operation_id, result.status)
+
+
+def _live_children(operation_id: int):
+    def live(op: InfrastructureOperation) -> bool:
+        from app.services.terraform_executor import live_child_pids
+
+        return any(pid_alive(pid) for pid in live_child_pids(operation_id, list(op.child_run_ids or [])))
+
+    return live
+
+
+async def request_cancel(session: AsyncSession, operation_id: int, user_id: int) -> InfrastructureOperation:
+    """Record a cancellation request and ask the operation's owned work to stop (M16).
+
+    Stops remaining work at the next safe point and never undoes finished work. The request is
+    durable and idempotent: a repeat neither restarts the deadline nor signals again. A finished
+    operation keeps its outcome; a recovery-required one needs recovery, not cancellation.
+    """
+    from app.exceptions import NotFoundError
+    from app.services.audit_service import log_action
+
+    op = (
+        await session.execute(
+            select(InfrastructureOperation)
+            .where(InfrastructureOperation.id == operation_id)
+            .with_for_update(key_share=True)
+        )
+    ).scalar_one_or_none()
+    if op is None:
+        raise NotFoundError("Operation not found")
+    if op.status in TERMINAL_STATUSES:
+        raise StateError("This operation already finished, so there is nothing to cancel.")
+    if op.status == "recovery_required":
+        raise StateError("This operation needs recovery, not cancellation.")
+    first = op.cancel_requested_at is None
+    if first:
+        now = _now()
+        op.cancel_requested_at = now
+        op.cancel_requested_by_user_id = user_id
+        op.cancel_deadline = now + CANCEL_BUDGET
+        op.status = "stopping"
+        op.phase = "Stopping"
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="infrastructure_operation",
+            entity_id=op.id,
+            action="infrastructure_operation_cancel_requested",
+            details={"operation_id": op.id, "action": op.action},
+        )
+    builds = list(op.external_builds or [])
+    await session.commit()
+    if first:
+        await _signal_cancel(operation_id, builds)
+    return op
+
+
+async def _signal_cancel(operation_id: int, builds: list[dict]) -> None:
+    """Ask owned work to stop: the running task (Terraform stops gracefully) and unsettled cloud builds."""
+    from app import runtime
+
+    task = _op_tasks.get(operation_id)
+    if task is not None and not task.done():
+        task.cancel()
+    for build in builds:
+        if build.get("status") in BUILD_TERMINAL:
+            continue
+        try:
+            await _cancel_cloud_build(build.get("kind", ""), build.get("build_id", ""))
+        except Exception as exc:
+            # The monitor still settles it; an unconfirmed stop becomes recovery at the deadline.
+            logger.warning("Could not request build cancellation (error_type=%s)", type(exc).__name__)
+    runtime.spawn(_cancel_watchdog(operation_id), role="infrastructure-cancel-watchdog")
+
+
+async def _cancel_cloud_build(kind: str, build_id: str) -> None:
+    if kind == "notebook":
+        from app.services.notebook_image_service import request_provider_cancel
+    else:
+        from app.services.cellxgene_image_service import request_provider_cancel  # type: ignore[no-redef]
+    async with _session_factory()() as session:
+        await request_provider_cancel(session, build_id)
+        await session.commit()
+
+
+async def _cancel_watchdog(operation_id: int) -> None:
+    """At the deadline, an operation that has not confirmed stopping needs recovery (lock kept)."""
+    async with _session_factory()() as session:
+        op = await session.get(InfrastructureOperation, operation_id)
+        deadline = op.cancel_deadline if op else None
+    if deadline is None:
+        return
+    await asyncio.sleep(max(0.0, (deadline - _now()).total_seconds()))
+    await expire_cancellation(operation_id)
+
+
+async def expire_cancellation(operation_id: int) -> bool:
+    """Move a stopping operation past its deadline to recovery required. Returns whether it did."""
+    expired = False
+
+    def change(op: InfrastructureOperation) -> None:
+        nonlocal expired
+        if op.status == "stopping" and op.cancel_deadline is not None and op.cancel_deadline <= _now():
+            op.status = "recovery_required"
+            op.message = CANCEL_UNCONFIRMED
+            op.error_category = "cancel_unconfirmed"
+            op.phase = None
+            expired = True
+
+    await OperationHandle(operation_id)._update(change)
+    return expired
+
+
+async def operation_for_build(session: AsyncSession, build_id: str) -> int | None:
+    """The operation holding exclusion that submitted ``build_id``, if any."""
+    active = await active_operation(session)
+    if active is None:
+        return None
+    return active.id if any(b.get("build_id") == build_id for b in (active.external_builds or [])) else None
 
 
 async def begin_image_build(kind: str, user_id: int | None) -> tuple[int, bool]:
@@ -540,6 +693,7 @@ async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awa
     """
     handle = OperationHandle(operation_id)
     token = _current.set(operation_id)
+    _register_task(operation_id)
     try:
         await _start(handle)
         try:
@@ -569,6 +723,7 @@ async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awa
             )
         await finish(operation_id, result)
     finally:
+        _unregister_task(operation_id)
         _reset(token)
 
 
@@ -609,6 +764,7 @@ async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
     """
     handle = OperationHandle(operation_id)
     token = _current.set(operation_id)
+    _register_task(operation_id)
     try:
         await _start(handle)
         yield handle
@@ -635,6 +791,7 @@ async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
         )
         raise
     finally:
+        _unregister_task(operation_id)
         _reset(token)
 
 
@@ -648,6 +805,7 @@ async def operation_stream(operation_id: int, events: AsyncIterator, *, terminal
     handle = OperationHandle(operation_id)
     tracker = StackTracker(handle, terminal=terminal)
     token = _current.set(operation_id)
+    _register_task(operation_id)
     try:
         await _start(handle)
         await handle.step("prerequisites", "Checking prerequisites", "running")
@@ -689,6 +847,7 @@ async def operation_stream(operation_id: int, events: AsyncIterator, *, terminal
         )
         raise
     finally:
+        _unregister_task(operation_id)
         _reset(token)
 
 
@@ -838,12 +997,15 @@ async def reconcile_on_startup(session: AsyncSession) -> dict[str, int]:
             )
             counts["interrupted"] += 1
         elif container_restarted(op.runner, now):
-            _mark(
-                op,
-                "interrupted",
-                "The bioAF server restarted while this was running, and Terraform stopped with it.",
-                "interrupted",
-            )
+            if op.cancel_requested_at is not None:
+                _mark(op, "cancelled", "Cancelled. Work already done was not undone.", "cancelled")
+            else:
+                _mark(
+                    op,
+                    "interrupted",
+                    "The bioAF server restarted while this was running, and Terraform stopped with it.",
+                    "interrupted",
+                )
             await _fail_child_runs(session, op)
             counts["interrupted"] += 1
         else:

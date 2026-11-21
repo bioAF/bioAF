@@ -2906,93 +2906,22 @@
         "title": "ChangePasswordRequest",
         "type": "object"
       },
-      "CheckUpdatesResponse": {
+      "CheckUpdatesAccepted": {
         "properties": {
-          "additive_resources": {
-            "items": {
-              "$ref": "#/components/schemas/ResourceInfo"
-            },
-            "title": "Additive Resources",
-            "type": "array"
-          },
-          "applying": {
-            "title": "Applying",
-            "type": "boolean"
-          },
-          "destructive_resources": {
-            "items": {
-              "$ref": "#/components/schemas/DestructiveResourceInfo"
-            },
-            "title": "Destructive Resources",
-            "type": "array"
-          },
-          "has_additive": {
-            "title": "Has Additive",
-            "type": "boolean"
-          },
-          "has_changes": {
-            "title": "Has Changes",
-            "type": "boolean"
-          },
-          "has_destructive": {
-            "title": "Has Destructive",
-            "type": "boolean"
-          },
-          "modules": {
-            "items": {
-              "$ref": "#/components/schemas/ModuleUpdateInfo"
-            },
-            "title": "Modules",
-            "type": "array"
-          },
-          "modules_with_additive": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Modules With Additive",
-            "type": "array"
+          "message": {
+            "title": "Message",
+            "type": "string"
           },
           "operation_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operation Id"
-          },
-          "realigned": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Realigned"
-          },
-          "requires_approval": {
-            "title": "Requires Approval",
-            "type": "boolean"
+            "title": "Operation Id",
+            "type": "integer"
           }
         },
         "required": [
-          "has_changes",
-          "has_additive",
-          "has_destructive",
-          "requires_approval",
-          "applying",
-          "realigned",
-          "modules_with_additive",
-          "modules",
-          "additive_resources",
-          "destructive_resources"
+          "message",
+          "operation_id"
         ],
-        "title": "CheckUpdatesResponse",
+        "title": "CheckUpdatesAccepted",
         "type": "object"
       },
       "CitationBulkRequest": {
@@ -6118,39 +6047,6 @@
           "reason"
         ],
         "title": "DepositOverrideRequest",
-        "type": "object"
-      },
-      "DestructiveResourceInfo": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "address": {
-            "title": "Address",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "stateful": {
-            "title": "Stateful",
-            "type": "boolean"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "address",
-          "type",
-          "action",
-          "description",
-          "stateful"
-        ],
-        "title": "DestructiveResourceInfo",
         "type": "object"
       },
       "DifferentialDesignRequest": {
@@ -11497,39 +11393,6 @@
           "status"
         ],
         "title": "MessageResponse",
-        "type": "object"
-      },
-      "ModuleUpdateInfo": {
-        "properties": {
-          "add_count": {
-            "title": "Add Count",
-            "type": "integer"
-          },
-          "change_count": {
-            "title": "Change Count",
-            "type": "integer"
-          },
-          "destroy_count": {
-            "title": "Destroy Count",
-            "type": "integer"
-          },
-          "has_changes": {
-            "title": "Has Changes",
-            "type": "boolean"
-          },
-          "module": {
-            "title": "Module",
-            "type": "string"
-          }
-        },
-        "required": [
-          "module",
-          "add_count",
-          "change_count",
-          "destroy_count",
-          "has_changes"
-        ],
-        "title": "ModuleUpdateInfo",
         "type": "object"
       },
       "NamingProfileCreate": {
@@ -18531,34 +18394,6 @@
           "id"
         ],
         "title": "ReproductionPlanResponse",
-        "type": "object"
-      },
-      "ResourceInfo": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "address": {
-            "title": "Address",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "address",
-          "type",
-          "action",
-          "description"
-        ],
-        "title": "ResourceInfo",
         "type": "object"
       },
       "RestoreRequest": {
@@ -47958,7 +47793,7 @@
     },
     "/api/v1/infrastructure/notebook-image/cancel": {
       "post": {
-        "description": "Cancel the active notebook image build.",
+        "description": "Request cancellation of the active notebook image build; the poller confirms it.",
         "operationId": "notebook_image_cancel_api_v1_infrastructure_notebook_image_cancel_post",
         "responses": {
           "200": {
@@ -48081,6 +47916,49 @@
           }
         },
         "summary": "Get Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/cancel": {
+      "post": {
+        "description": "Request that the operation stop at its next safe point (M16). Finished work is never undone.\n\nRepeating the request changes nothing; stopping and settlement are reported by the status reads.",
+        "operationId": "cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Operation Endpoint",
         "tags": [
           "infrastructure_operations"
         ]
@@ -48489,7 +48367,7 @@
     },
     "/api/v1/infrastructure/stack/check-updates": {
       "post": {
-        "description": "Re-align deployed naming, re-plan every deployed module, and report the\npending changes split into additive vs destructive.\n\nWhen there are additive changes and no destructive (delete/replace) ones,\nthe additive resources start applying immediately in the background. When\na destructive change is present, nothing is auto-applied; the caller can\napply the additive subset via /apply-updates (which only ever targets\nadditive resources).",
+        "description": "Start the confirmed \"Check for infrastructure updates\" action (mockup M1).\n\nThe popup confirmation is the authorization: one accepted operation plans every deployed\nmodule and applies the additive changes automatically, with no second approval. Changes that\nwould delete or replace an existing resource are listed in the operation's outcome and never\napplied. Progress and outcome are read from the operation.",
         "operationId": "check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post",
         "parameters": [
           {
@@ -48514,7 +48392,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckUpdatesResponse"
+                  "$ref": "#/components/schemas/CheckUpdatesAccepted"
                 }
               }
             },

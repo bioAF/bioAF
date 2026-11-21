@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
-import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { useInfrastructureActions, usePermissionGate } from "@/hooks/useInfrastructureActions";
 import { useInfrastructureOperations } from "@/hooks/useInfrastructureOperations";
 import { useResource } from "@/hooks/useResource";
 import { invalidateComponentCache } from "@/hooks/useComponents";
@@ -43,6 +43,7 @@ export function AddOnComponentsSection({
   const toast = useToast();
   const actions = useInfrastructureActions();
   const operations = useInfrastructureOperations();
+  const cancelPermission = usePermissionGate<"configure">("infrastructure");
   const configureReason = actions.reason("configure");
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
   const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
@@ -209,7 +210,8 @@ export function AddOnComponentsSection({
 
 
   async function handleCancelBuild() {
-    if (!actions.allowed("configure")) return;
+    // Cancelling is the running build's own control: only the permission applies (M16).
+    if (!cancelPermission.allowed("configure")) return;
     setCancellingBuild(true);
     try {
       await api.post("/api/v1/infrastructure/notebook-image/cancel");
@@ -347,8 +349,8 @@ export function AddOnComponentsSection({
                         )}
                         <button
                           onClick={handleCancelBuild}
-                          disabled={cancellingBuild || configureReason !== null}
-                          title={configureReason ?? undefined}
+                          disabled={cancellingBuild || cancelPermission.reason("configure") !== null}
+                          title={cancelPermission.reason("configure") ?? undefined}
                           className="mt-1 text-xs text-red-600 hover:text-red-800 font-medium"
                         >
                           {cancellingBuild ? "Cancelling..." : "Cancel Build"}
