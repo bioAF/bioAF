@@ -1100,9 +1100,17 @@ async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
 
     groups: dict[tuple, dict] = {}
     for w in writers:
-        key = (w.user_id, w.experiment_id)
+        # bioAF's own background writes (thumbnails, caches, exports) are grouped as bioAF.
+        key = ("background", None) if w.kind == "background" else (w.user_id, w.experiment_id)
         group = groups.setdefault(
-            key, {"user_id": w.user_id, "experiment_id": w.experiment_id, "files": 0, "started_at": w.started_at}
+            key,
+            {
+                "user_id": w.user_id,
+                "experiment_id": w.experiment_id,
+                "files": 0,
+                "started_at": w.started_at,
+                "background": w.kind == "background",
+            },
         )
         group["files"] += 1
         group["started_at"] = min(group["started_at"], w.started_at)
@@ -1118,8 +1126,8 @@ async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
     )
     return [
         {
-            **g,
-            "name": names.get(g["user_id"]),
+            **{k: v for k, v in g.items() if k != "background"},
+            "name": "bioAF" if g["background"] else names.get(g["user_id"]),
             "experiment": experiments.get(g["experiment_id"]),
             "started_at": g["started_at"].isoformat(),
         }

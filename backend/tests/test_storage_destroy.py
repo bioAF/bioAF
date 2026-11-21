@@ -385,3 +385,13 @@ async def test_a_refusal_releases_the_operation_lock(session, admin_user, deploy
     session.expire_all()
     assert await ops.active_operation(session) is None
     assert await _get(session, "storage_writes_paused") is not None
+
+
+@pytest.mark.asyncio
+async def test_a_background_writer_is_listed_as_bioaf(session, deployed):
+    started = datetime(2026, 11, 21, 16, 2, tzinfo=timezone.utc)
+    writers = [OutstandingWriter("background:thumbnail:1", None, None, "thumbnail", started, "background")]
+    with _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}):
+        events, _ = await _run(session, deployed, drain=writers)
+    [row] = events[-1].extra["effects"]["uploads"]
+    assert (row["name"], row["files"]) == ("bioAF", 1)
