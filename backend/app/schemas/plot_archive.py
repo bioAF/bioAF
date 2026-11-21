@@ -1,3 +1,4 @@
+from typing import Literal
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -24,11 +25,21 @@ class PlotArchiveResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlotScanHealth(BaseModel):
+    # "ok", or why new plots are not being added: missing, no_access, not_confirmed, temporary.
+    status: Literal["ok", "missing", "no_access", "not_confirmed", "temporary"]
+    last_success_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+
+
 class PlotArchiveListResponse(BaseModel):
     plots: list[PlotArchiveResponse]
     total: int
     page: int
     page_size: int
+    # Whether new plots are being added from the results store (mockup M13).
+    scan_health: PlotScanHealth | None = None
 
 
 class PlotUpdateRequest(BaseModel):

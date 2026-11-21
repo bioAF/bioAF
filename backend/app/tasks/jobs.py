@@ -115,7 +115,7 @@ async def _job_status_sync(session) -> None:
 
 
 def _plot_archive_watcher() -> Iteration:
-    """Scan the results bucket for new images; backfill metadata once per job lifetime."""
+    """Scan the results bucket for new images when due (11H); backfill metadata once per job lifetime."""
     from app.services.plot_archive_service import PlotArchiveService
 
     factory = _factory()
@@ -126,7 +126,7 @@ def _plot_archive_watcher() -> Iteration:
             if not state["backfilled"]:
                 await PlotArchiveService.backfill_metadata(session)
                 state["backfilled"] = True
-            await PlotArchiveService.scan_and_index(session)
+            await PlotArchiveService.scheduled_scan(session)
 
     return iteration
 

@@ -184,6 +184,8 @@ TIMINGS = {
     "storage-stats-refresh": (3600, 3600),
     "backup-health-check": (3600, 3600),
     "export-cleanup": (3600, 3600),
+    # Automatic filing retries for received uploads (storage lifecycle 11F).
+    "upload-filing-retries": (60, 60),
     "idempotency-cleanup": (3600, 3600),
     "notification-cleanup": (86400, 86400),
     "work-dir-reaper": (86400, 86400),
@@ -226,6 +228,7 @@ MESSAGES = {
     "environment-build-poll": "Environment build poll error: %s",
     "work-node-heartbeat": "Work node heartbeat check error: %s",
     "export-cleanup": "Export cleanup error: %s",
+    "upload-filing-retries": "Upload filing retry error: %s",
     "nf-core-registry-refresh": "nf-core registry refresh loop error: %s",
 }
 
@@ -234,7 +237,7 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    assert len(jobs.PERIODIC_JOBS) == 29
+    assert len(jobs.PERIODIC_JOBS) == 30
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):
@@ -249,7 +252,8 @@ async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch,
         scans.append(True)
 
     monkeypatch.setattr(PlotArchiveService, "backfill_metadata", staticmethod(backfill))
-    monkeypatch.setattr(PlotArchiveService, "scan_and_index", staticmethod(scan))
+    # The watcher's pass is the scheduled scan, which lists only when due (storage lifecycle 11H).
+    monkeypatch.setattr(PlotArchiveService, "scheduled_scan", staticmethod(scan))
     job = next(j for j in jobs.PERIODIC_JOBS if j.role == "plot-archive-watcher")
     await run_periodic(job, wait=FakeWait(stop_after=3))
     assert (len(backfills), len(scans)) == (1, 3)

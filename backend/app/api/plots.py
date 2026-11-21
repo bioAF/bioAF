@@ -4,11 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.pagination import PageNumber, UnboundedPageSize
 from app.api.content_access import plot_for_content
-from app.api.dependencies import require_permission, require_results_view
+from app.api.dependencies import require_any_permission, require_permission, require_results_view
 from app.database import get_session
 from app.schemas.experiment import UserSummary
 from app.schemas.file import FileResponse
-from app.schemas.plot_archive import PlotArchiveListResponse, PlotArchiveResponse, PlotUpdateRequest
+from app.schemas.plot_archive import (
+    PlotArchiveListResponse,
+    PlotArchiveResponse,
+    PlotScanHealth,
+    PlotUpdateRequest,
+)
 from app.services.plot_archive_service import PlotArchiveService
 
 router = APIRouter(prefix="/api/plots", tags=["plots"])
@@ -93,7 +98,29 @@ async def search_plots(
         total=total,
         page=page,
         page_size=page_size,
+        scan_health=_scan_health(await PlotArchiveService.scan_health(session)),
     )
+
+
+def _scan_health(health) -> PlotScanHealth:
+    return PlotScanHealth(
+        status=health.status,
+        last_success_at=health.last_success_at,
+        last_attempt_at=health.last_attempt_at,
+        next_attempt_at=health.next_attempt_at,
+    )
+
+
+@router.post("/scan/check", response_model=PlotScanHealth)
+async def check_plot_scanning(
+    current_user: dict = require_any_permission([("infrastructure", "deploy"), ("infrastructure", "configure")]),
+    session: AsyncSession = Depends(get_session),
+):
+    """Check the results store now and scan it if it is available (Check again, mockup M13).
+
+    Read-only toward the cloud: a missing store is never recreated here.
+    """
+    return _scan_health(await PlotArchiveService.scheduled_scan(session, force=True))
 
 
 @router.get("/{plot_id}", response_model=PlotArchiveResponse)

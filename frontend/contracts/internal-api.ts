@@ -4798,6 +4798,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plots/scan/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Plot Scanning
+         * @description Check the results store now and scan it if it is available (Check again, mockup M13).
+         *
+         *     Read-only toward the cloud: a missing store is never recreated here.
+         */
+        post: operations["check_plot_scanning_api_plots_scan_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plots/{plot_id}": {
         parameters: {
             query?: never;
@@ -13679,6 +13701,7 @@ export interface components {
             page_size: number;
             /** Plots */
             plots: components["schemas"]["PlotArchiveResponse"][];
+            scan_health?: components["schemas"]["PlotScanHealth"] | null;
             /** Total */
             total: number;
         };
@@ -13717,6 +13740,20 @@ export interface components {
             thumbnail_url?: string | null;
             /** Title */
             title: string | null;
+        };
+        /** PlotScanHealth */
+        PlotScanHealth: {
+            /** Last Attempt At */
+            last_attempt_at?: string | null;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "missing" | "no_access" | "not_confirmed" | "temporary";
         };
         /** PlotUpdateRequest */
         PlotUpdateRequest: {
@@ -27249,6 +27286,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    check_plot_scanning_api_plots_scan_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlotScanHealth"];
                 };
             };
         };

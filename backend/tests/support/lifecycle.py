@@ -40,7 +40,6 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.api_key_service", "_LAST_USED_DEBOUNCE"),
     ("app.services.request_health", "_counters"),
     ("app.services.vocabulary_validator", "_cache"),
-    ("app.services.plot_archive_service", "_last_scan"),
     ("app.services.storage_write_admission", "_in_flight"),
     ("app.services.lab_document_upload_service", "_pending"),
     ("app.services.upgrade_service", "_version_cache"),

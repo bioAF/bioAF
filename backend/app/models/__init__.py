@@ -29,6 +29,7 @@ from app.models.storage_stats import StorageStatsCache
 from app.models.storage_identity import StorageIdentity, StorageStoreCheck
 from app.models.infrastructure_operation import InfrastructureOperation
 from app.models.upload_checkpoint import UploadCheckpoint
+from app.models.plot_scan_state import PlotScanState
 from app.models.gitops_repo import GitOpsRepo
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
@@ -167,6 +168,7 @@ __all__ = [
     "StorageStoreCheck",
     "InfrastructureOperation",
     "UploadCheckpoint",
+    "PlotScanState",
     "GitOpsRepo",
     "Environment",
     "EnvironmentVersion",

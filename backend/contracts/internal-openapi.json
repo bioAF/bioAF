@@ -14956,6 +14956,16 @@
             "title": "Plots",
             "type": "array"
           },
+          "scan_health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlotScanHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -15119,6 +15129,62 @@
           "indexed_at"
         ],
         "title": "PlotArchiveResponse",
+        "type": "object"
+      },
+      "PlotScanHealth": {
+        "properties": {
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "missing",
+              "no_access",
+              "not_confirmed",
+              "temporary"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PlotScanHealth",
         "type": "object"
       },
       "PlotUpdateRequest": {
@@ -41996,6 +42062,28 @@
           }
         },
         "summary": "Backfill Plot Metadata",
+        "tags": [
+          "plots"
+        ]
+      }
+    },
+    "/api/plots/scan/check": {
+      "post": {
+        "description": "Check the results store now and scan it if it is available (Check again, mockup M13).\n\nRead-only toward the cloud: a missing store is never recreated here.",
+        "operationId": "check_plot_scanning_api_plots_scan_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlotScanHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Plot Scanning",
         "tags": [
           "plots"
         ]
