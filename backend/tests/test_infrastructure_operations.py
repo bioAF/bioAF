@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select, text
@@ -451,6 +451,92 @@ async def test_an_external_build_waits_for_its_monitor(session):
         await ops.reconcile_on_startup(session)
     await session.commit()
     assert (await _op(session, op_id)).status == "running"
+
+
+async def _stopping_build(session, user_id, *, deadline_in: timedelta) -> int:
+    op_id = await _running(session, user_id, external=[{"kind": "notebook", "build_id": "b-2", "status": "WORKING"}])
+    await session.execute(
+        text(
+            "UPDATE infrastructure_operations SET status='stopping', cancel_requested_at=now(), "
+            "cancel_deadline=now() + CAST(:d AS interval) WHERE id=:i"
+        ).bindparams(d=f"{int(deadline_in.total_seconds())} seconds", i=op_id)
+    )
+    await session.commit()
+    return op_id
+
+
+@pytest.mark.asyncio
+async def test_a_restart_keeps_exclusion_while_a_cancelled_cloud_build_may_still_run(session):
+    """Restarting bioAF does not stop a cloud build: its provider-confirmed status settles it."""
+    user_id = await _seed_user(session)
+    op_id = await _stopping_build(session, user_id, deadline_in=timedelta(seconds=90))
+    with patch(
+        "app.services.infrastructure_operations.current_runner", return_value={**RUNNER, "container_start": "x"}
+    ):
+        counts = await ops.reconcile_on_startup(session)
+    await session.commit()
+
+    op = await _op(session, op_id)
+    assert (op.status, op.exclusive_slot) == ("stopping", 1)
+    assert counts["external"] == 1
+
+    await ops.settle_external_build("b-2", "CANCELLED")
+    session.expire_all()
+    op = await _op(session, op_id)
+    assert (op.status, op.exclusive_slot) == ("cancelled", None)
+
+
+@pytest.mark.asyncio
+async def test_a_restart_after_the_cancel_deadline_needs_recovery_and_keeps_exclusion(session):
+    user_id = await _seed_user(session)
+    op_id = await _stopping_build(session, user_id, deadline_in=timedelta(seconds=-5))
+    with patch(
+        "app.services.infrastructure_operations.current_runner", return_value={**RUNNER, "container_start": "x"}
+    ):
+        await ops.reconcile_on_startup(session)
+    await session.commit()
+
+    op = await _op(session, op_id)
+    assert (op.status, op.error_category, op.exclusive_slot) == ("recovery_required", "cancel_unconfirmed", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_deploy_cut_off_by_a_restart_settles_when_its_build_does(session):
+    user_id = await _seed_user(session)
+    op_id = await _running(session, user_id, external=[{"kind": "notebook", "build_id": "b-3", "status": "WORKING"}])
+    with patch(
+        "app.services.infrastructure_operations.current_runner", return_value={**RUNNER, "container_start": "x"}
+    ):
+        await ops.reconcile_on_startup(session)
+    await session.commit()
+    assert (await _op(session, op_id)).exclusive_slot == 1
+
+    await ops.settle_external_build("b-3", "SUCCESS")
+    session.expire_all()
+    op = await _op(session, op_id)
+    assert (op.status, op.exclusive_slot) == ("interrupted", None)
+
+
+@pytest.mark.asyncio
+async def test_a_process_only_restart_with_a_build_needs_recovery(session):
+    user_id = await _seed_user(session)
+    op_id = await _running(session, user_id, external=[{"kind": "notebook", "build_id": "b-4", "status": "WORKING"}])
+    with patch("app.services.infrastructure_operations.current_runner", return_value={**RUNNER, "pid": 99}):
+        await ops.reconcile_on_startup(session)
+    await session.commit()
+    op = await _op(session, op_id)
+    assert (op.status, op.error_category, op.exclusive_slot) == ("recovery_required", "runner_unconfirmed", 1)
+
+
+@pytest.mark.asyncio
+async def test_startup_resumes_the_cancel_deadline_for_a_stopping_build(session):
+    user_id = await _seed_user(session)
+    op_id = await _stopping_build(session, user_id, deadline_in=timedelta(seconds=90))
+    with patch.object(ops, "_cancel_watchdog", AsyncMock()) as watchdog:
+        resumed = await ops.resume_cancel_watchdogs()
+        await asyncio.sleep(0)
+    assert resumed == [op_id]
+    watchdog.assert_awaited_once_with(op_id)
 
 
 # ---------------------------------------------------------------------------

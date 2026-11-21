@@ -431,11 +431,12 @@ async def glossary_orphans(ctx: StartupContext) -> None:
 async def infrastructure_operations(ctx: StartupContext) -> None:
     """Settle infrastructure operations a restart left behind, from recorded runner evidence (D1)."""
     from app.database import async_session_factory
-    from app.services.infrastructure_operations import reconcile_on_startup
+    from app.services.infrastructure_operations import reconcile_on_startup, resume_cancel_watchdogs
 
     async with async_session_factory() as session:
         counts = await reconcile_on_startup(session)
         await session.commit()
+    await resume_cancel_watchdogs()
     if any(counts.values()):
         logger.info("Reconciled infrastructure operations after restart: %s", counts)
 

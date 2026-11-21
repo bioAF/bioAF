@@ -272,3 +272,40 @@ async def test_notebook_cancel_no_longer_claims_cancelled_before_the_provider_co
         await notebook_image_service.cancel_build(session, admin_user.id)
     provider.assert_awaited_once()
     assert await notebook_image_service._read_config(session, "notebook_image_build_status") == "WORKING"
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_committed_before_the_worker_starts_prevents_the_work(session, admin_user):
+    """There is no task to signal yet, so the worker itself must honor the recorded request."""
+    op_id, _ = await ops.accept(action="storage_destroy", principal=ops.Principal(admin_user.id))
+    with patch.object(ops, "_signal_cancel", AsyncMock()):
+        await ops.request_cancel(session, op_id, admin_user.id)
+    effects = []
+
+    async def body(handle):
+        effects.append("deleted objects")
+        return ops.succeeded()
+
+    await ops.run_operation(op_id, body)
+
+    assert effects == []
+    session.expire_all()
+    op = await _op(session, op_id)
+    assert (op.status, op.exclusive_slot) == ("cancelled", None)
+    assert op.message == "Cancelled. Work already done was not undone."
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_work_cancelled_before_it_starts_does_not_run(session, admin_user):
+    op_id, _ = await ops.accept(action="compute_deploy", principal=ops.Principal(admin_user.id))
+    with patch.object(ops, "_signal_cancel", AsyncMock()):
+        await ops.request_cancel(session, op_id, admin_user.id)
+    ran = []
+
+    with pytest.raises(ops.CancelledBeforeStart):
+        async with ops.owned(op_id):
+            ran.append(True)
+
+    assert ran == []
+    session.expire_all()
+    assert (await _op(session, op_id)).status == "cancelled"

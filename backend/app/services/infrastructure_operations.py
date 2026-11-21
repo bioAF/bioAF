@@ -74,6 +74,7 @@ _current: ContextVar[int | None] = ContextVar("bioaf_infrastructure_operation", 
 # requested at once; this is the deadline for confirming it, after which the operation needs recovery.
 CANCEL_BUDGET = timedelta(seconds=120)
 CANCEL_UNCONFIRMED = "bioAF asked Terraform to stop, but could not confirm that it did."
+CANCELLED_MESSAGE = "Cancelled. Work already done was not undone."
 
 # The task running each operation in this process, so a cancellation can reach it.
 _op_tasks: dict[int, asyncio.Task] = {}
@@ -101,6 +102,12 @@ class IdempotencyKeyReusedError(UnprocessableError):
     """The Idempotency-Key was already used for a different request."""
 
     code = "idempotency_key_reused"
+
+
+class CancelledBeforeStart(ConflictError):
+    """The operation was cancelled after it was accepted and before its work began; nothing ran."""
+
+    code = "cancelled"
 
 
 class ProcessNotSettled(Exception):
@@ -457,7 +464,7 @@ async def finish(operation_id: int, result: OperationResult) -> None:
         if op.cancel_requested_at is not None and result.status == "interrupted":
             result = OperationResult(
                 "cancelled",
-                "Cancelled. Work already done was not undone.",
+                CANCELLED_MESSAGE,
                 "cancelled",
                 result.partial_effects,
             )
@@ -695,7 +702,10 @@ async def run_operation(operation_id: int, body: Callable[[OperationHandle], Awa
     token = _current.set(operation_id)
     _register_task(operation_id)
     try:
-        await _start(handle)
+        try:
+            await _start(handle)
+        except CancelledBeforeStart:
+            return
         try:
             result = await body(handle)
         except ProcessNotSettled:
@@ -739,12 +749,24 @@ class _shielded:
 
 
 async def _start(handle: OperationHandle) -> None:
+    """Mark the operation running, or settle it as cancelled when a cancellation was already
+    recorded (there was no task to signal yet) and raise CancelledBeforeStart: nothing runs."""
+    cancelled = False
+
     def start(op: InfrastructureOperation) -> None:
+        nonlocal cancelled
+        if op.cancel_requested_at is not None and op.status in ("accepted", "stopping"):
+            cancelled = True
+            _mark(op, "cancelled", CANCELLED_MESSAGE, "cancelled")
+            return
         op.status = "running"
         op.started_at = op.started_at or _now()
         op.runner = op.runner or current_runner()
 
     await handle._update(start)
+    if cancelled:
+        logger.info("Infrastructure operation %s was cancelled before it started", handle.id)
+        raise CancelledBeforeStart(CANCELLED_MESSAGE)
 
 
 def _reset(token) -> None:
@@ -768,6 +790,8 @@ async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
     try:
         await _start(handle)
         yield handle
+    except CancelledBeforeStart:
+        raise
     except asyncio.CancelledError:
         with _shielded():
             await finish(operation_id, OperationResult("interrupted", "The request was interrupted.", "interrupted"))
@@ -1000,8 +1024,13 @@ async def reconcile_on_startup(session: AsyncSession) -> dict[str, int]:
         )
     ).scalars()
     for op in ops:
-        if op.external_builds and op.status == "running":
-            # An external cloud build may still run without this container; its monitor settles it.
+        if _unsettled_builds(op) and op.status in ("running", "stopping"):
+            # A restart does not stop a cloud build: exclusion stays until its monitor reports the
+            # provider-confirmed status (or, for a requested cancellation, until the deadline).
+            restarted = op.runner is not None and container_restarted(op.runner, now)
+            _hold_for_builds(op, restarted=restarted)
+            if restarted:
+                await _fail_child_runs(session, op)
             counts["external"] += 1
             continue
         if op.runner is None:
@@ -1012,7 +1041,7 @@ async def reconcile_on_startup(session: AsyncSession) -> dict[str, int]:
             counts["interrupted"] += 1
         elif container_restarted(op.runner, now):
             if op.cancel_requested_at is not None:
-                _mark(op, "cancelled", "Cancelled. Work already done was not undone.", "cancelled")
+                _mark(op, "cancelled", CANCELLED_MESSAGE, "cancelled")
             else:
                 _mark(
                     op,
@@ -1030,6 +1059,59 @@ async def reconcile_on_startup(session: AsyncSession) -> dict[str, int]:
             counts["recovery_required"] += 1
     await session.flush()
     return counts
+
+
+def _hold_for_builds(op: InfrastructureOperation, *, restarted: bool) -> None:
+    """Keep an operation with unsettled cloud builds; settle it from the builds' outcome later."""
+    if op.status == "stopping" and op.cancel_deadline is not None and op.cancel_deadline <= _now():
+        op.status = "recovery_required"
+        op.message = CANCEL_UNCONFIRMED
+        op.error_category = "cancel_unconfirmed"
+        op.phase = None
+        return
+    effects = dict(op.partial_effects or {})
+    if "pending_result" in effects:
+        # The operation's own work had finished; the builds' provider status decides the outcome.
+        return
+    # The work that would have recorded an outcome did not survive the restart.
+    if not restarted:
+        # Only the server process restarted: a Terraform child it started may still run.
+        op.status = "recovery_required"
+        op.error_category = "runner_unconfirmed"
+        op.message = "bioAF could not confirm that Terraform stopped."
+        op.phase = None
+        return
+    if op.status == "stopping":
+        pending = {"status": "cancelled", "message": CANCELLED_MESSAGE, "category": "cancelled"}
+    else:
+        pending = {
+            "status": "interrupted",
+            "message": "The bioAF server restarted while this was running, and Terraform stopped with it.",
+            "category": "interrupted",
+        }
+    effects["pending_result"] = pending
+    op.partial_effects = effects
+    op.phase = "Waiting for image builds to finish"
+
+
+async def resume_cancel_watchdogs() -> list[int]:
+    """After a restart, enforce the cancel deadline of operations still stopping (M16)."""
+    from app import runtime
+
+    async with _session_factory()() as session:
+        ids = list(
+            (
+                await session.execute(
+                    select(InfrastructureOperation.id).where(
+                        InfrastructureOperation.status == "stopping",
+                        InfrastructureOperation.cancel_deadline.is_not(None),
+                    )
+                )
+            ).scalars()
+        )
+    for operation_id in ids:
+        runtime.spawn(_cancel_watchdog(operation_id), role="infrastructure-cancel-watchdog")
+    return ids
 
 
 def _mark(op: InfrastructureOperation, status: str, message: str, category: str) -> None:
