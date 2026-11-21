@@ -86,7 +86,7 @@ An installer's `--ref` pins its helpers; the VM's automatic setup still uses `ma
 
 ### Deploy on an existing server
 
-On a Linux server with Docker, Docker Compose, Git, openssl and Python 3:
+On a Linux server with Docker, Docker Compose, Git, openssl and Python 3 (3.10 or newer):
 
 ```bash
 git clone https://github.com/bioAF/bioAF.git

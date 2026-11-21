@@ -515,3 +515,70 @@ mode_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 
     [ "$(python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$REPO/host-only/agent.log.1")" = 0o600 ]
     ! grep -q "round" "$REPO/host-only/agent.log"
 }
+
+# ---------------------------------------------------------------------------
+# Host python3 prerequisite. Every trigger read and status write runs python3, so the agent checks it at
+# startup and stops, with a diagnostic in the journal, instead of polling triggers it cannot handle.
+# ---------------------------------------------------------------------------
+
+load host_python
+
+# start_agent <python kind>: start the actual agent as the service does (no terminal, its own working
+# directory) with only that python3, give it up to 5 seconds to exit, then stop it. Prints STILL-RUNNING
+# and fails with 99 when it was still running.
+start_agent() {
+    mkdir -p "$REPO/cwd"
+    mkdir -p "$REPO/installer"
+    cp "$BATS_TEST_DIRNAME/../../installer/host_prereqs.sh" "$REPO/installer/"
+    local path
+    path="$(host_python_path "$BATS_FILE_TMPDIR/py" "$1")"
+    run env PATH="$path" bash -c "cd '$REPO/cwd'
+        bash '$REPO/scripts/update-agent.sh' </dev/null & pid=\$!
+        for _ in \$(seq 50); do kill -0 \$pid 2>/dev/null || break; sleep 0.1; done
+        if kill -0 \$pid 2>/dev/null; then kill \$pid; echo STILL-RUNNING; exit 99; fi
+        wait \$pid"
+}
+
+@test "the agent stops at startup without a usable python3, leaving triggers and status untouched" {
+    stub_updater
+    printf '{"status": "completed", "to_version": "2026.11.20"}' > "$REPO/update-status/current.json"
+    cp "$REPO/update-requests/update_7.json" "$REPO/trigger.before"
+    cp "$REPO/update-status/current.json" "$REPO/status.before"
+    for kind in none broken old nocap; do
+        start_agent "$kind"
+        [ "$status" -ne 0 ] && [ "$status" -ne 99 ]
+        [[ "$output" == *"python3"* ]]
+        [[ "$output" == *"3.10"* ]]
+        [[ "$output" == *"journalctl -u bioaf-update-agent"* ]]
+        cmp "$REPO/trigger.before" "$REPO/update-requests/update_7.json"
+        cmp "$REPO/status.before" "$REPO/update-status/current.json"
+        [ ! -e "$REPO/updater-calls" ]
+        [ ! -e "$REPO/host-only" ] && [ ! -e "$REPO/host-state" ]
+    done
+}
+
+@test "the agent without python3 creates none of its directories" {
+    rm -rf "$REPO/update-requests" "$REPO/update-status"
+    start_agent none
+    [ "$status" -ne 0 ] && [ "$status" -ne 99 ]
+    [ ! -e "$REPO/update-requests" ] && [ ! -e "$REPO/update-status" ]
+    [ ! -e "$REPO/host-only" ] && [ ! -e "$REPO/host-state" ]
+}
+
+@test "the agent with a working python3 starts and keeps polling" {
+    stub_updater
+    start_agent real
+    [ "$status" -eq 99 ]
+    [ -s "$REPO/host-state/agent-code" ]
+    grep -q "Update agent started" "$REPO/host-only/agent.log"
+}
+
+@test "a change to the host prerequisite check marks the running agent's code as out of date" {
+    mkdir -p "$REPO/installer"
+    cp "$BATS_TEST_DIRNAME/../../installer/host_prereqs.sh" "$REPO/installer/"
+    python3 -I "$HOST_IO" record-agent-code "$REPO"
+    python3 -I "$HOST_IO" agent-code-current "$REPO"
+    echo '# policy change' >> "$REPO/installer/host_prereqs.sh"
+    run python3 -I "$HOST_IO" agent-code-current "$REPO"
+    [ "$status" -ne 0 ]
+}

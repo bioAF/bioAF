@@ -28,6 +28,24 @@ AGENT_LOG_MAX_BYTES="${AGENT_LOG_MAX_BYTES:-$((10 * 1024 * 1024))}"
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
 AGENT_LOG_OPEN=false
 
+# Started as the service (tests source this file for its functions): every trigger read and status write
+# runs python3 on the host, so without a usable one the agent stops here, before it creates, opens or
+# records anything, and leaves pending triggers and the published status as they are. The reason goes
+# to stderr, which the shipped unit sends to the journal.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    # shellcheck source=installer/host_prereqs.sh
+    if ! source "$SCRIPT_DIR/installer/host_prereqs.sh" 2>/dev/null || ! declare -F host_python_check >/dev/null; then
+        echo "ERROR: installer/host_prereqs.sh is missing from $SCRIPT_DIR, so python3 could not be checked." >&2
+        echo "The update agent did not start. Details: sudo journalctl -u bioaf-update-agent" >&2
+        exit 1
+    fi
+    if ! host_python_check; then
+        echo "The update agent did not start, so in-app updates will not run. After installing python3:" >&2
+        echo "  sudo systemctl restart bioaf-update-agent    (details: sudo journalctl -u bioaf-update-agent)" >&2
+        exit 1
+    fi
+fi
+
 mkdir -p "$TRIGGER_DIR"
 # 0755 whatever the umask: the backend reads current.json from here, possibly as another UID.
 [ -d "$STATUS_DIR" ] || mkdir -m 755 "$STATUS_DIR"
