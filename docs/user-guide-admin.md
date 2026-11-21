@@ -34,6 +34,85 @@ time. Deploy is blocked while conflicting resources remain. Resume and teardown 
 `infrastructure:deploy` and server-side ownership validation. A read-only role cannot recover resources
 merely because it can see their status.
 
+### One Infrastructure Action at a Time
+
+Deploy, teardown, Destroy Storage, Check for Infrastructure Updates, cluster settings changes, image
+builds, configuration sync and initialization each run as one **infrastructure operation**. Every action
+asks for confirmation first; once you confirm and bioAF accepts it, it plans and applies on its own, with
+no second approval. While an operation runs, those controls are unavailable to every administrator and a
+banner names it; click **View status** to open the same progress as the administrator who started it.
+Other roles see only that infrastructure maintenance is in progress. If two administrators confirm at
+nearly the same moment, only one action starts and the other is told which one started first. Closing the
+status window, refreshing or signing out does not stop an operation.
+
+**Check for Infrastructure Updates** compares deployed infrastructure with this version of bioAF and adds
+what is new. Changes that would delete or replace an existing resource are listed in the outcome and never
+applied there; they take effect the next time you tear down and redeploy. An update stops at the first
+real failure and reports what was applied before it.
+
+**Cancel.** An administrator with `infrastructure:configure` can cancel any running operation from its
+status window. bioAF stops at the next safe point (Terraform is asked to stop and save its state; a cloud
+image build is cancelled with the provider). Work already done is not undone. If stopping cannot be
+confirmed within two minutes, the operation needs recovery and other actions stay unavailable.
+
+**After a restart.** When the bioAF server restarts during an operation and bioAF can prove the old
+backend container stopped (the same container restarted), the operation is recorded as interrupted and
+administrators see a one-time banner. Running the action again continues with what already exists.
+
+**Recovery required.** When bioAF cannot prove the Terraform process stopped (for example the backend now
+runs in a different container), infrastructure actions stay paused. To recover:
+
+1. Open the banner's **View details**.
+2. On the bioAF host, confirm no Terraform process is running, for example
+   `docker compose exec backend ps -ef | grep '[t]erraform'` and `ps -ef | grep '[t]erraform'` on the host.
+3. Enter a reason, tick the confirmation, and click **Mark as recovered**. This needs
+   `infrastructure:configure`, is recorded in the audit log, and clears the stale Terraform lock. It is
+   refused while bioAF itself still sees the process running.
+
+Retrying an action through the API with the same `Idempotency-Key` header returns the same operation.
+
+### Storage Health and Bucket Confirmation
+
+The **Storage** section of Components shows each bucket's state (Available, Not found, No access, Not
+responding, Not confirmed, Belongs to another installation, Not mounted, Cannot check). Checking is
+read-only: bioAF never creates or recreates a bucket from a check. A missing bucket is created again only by
+**Check for Infrastructure Updates**.
+
+bioAF records a bucket as its own when the provider's evidence matches a recorded storage deployment. On an
+installation deployed before this release that evidence may be missing; uploads, downloads and pipelines
+keep working, but Destroy Storage and automatic repairs are unavailable until an administrator uses
+**Review and confirm buckets**, which records an audited baseline as of that day. A bucket bioAF knows
+belongs to another installation is never used, emptied or deleted, and cannot be confirmed.
+
+### Uploads and Destroy Storage
+
+Every upload is recorded before any byte is sent. If the bytes arrive but filing them into their
+experiment fails, the uploader sees "Received, not yet filed" with a reference, and bioAF retries at 1, 5
+and 15 minutes. After that the uploader (or an admin or comp_bio user under **Data & Files > Files**) can
+**Retry now** or **Cancel upload**. Retrying never creates a second file record or notification.
+
+**Destroy Storage** first checks every bucket, then pauses new uploads and gives running ones 30 seconds to
+finish. If any are still running, or a signed upload link was issued and never reported back, nothing is
+deleted and uploads stay paused until you choose **Allow uploads** or run Destroy Storage again. A bucket
+the provider confirms no longer exists is treated as already removed. A refused bucket stops the destroy
+with what was done recorded; fix the cause and run it again to continue. Files are marked as deleted only
+for buckets that were emptied or found gone.
+
+### Plot Archive Health
+
+When the results storage is missing, refused or not confirmed, the Plot Archive says new plots are not
+being added and bioAF checks the storage every 30 minutes instead of every minute; a temporary failure is
+retried with increasing waits up to 30 minutes. Administrators can **Check again**. Existing plots are not
+affected.
+
+### Infrastructure Changes After an Update
+
+After a bioAF update whose infrastructure definitions differ from what this installation last applied,
+each administrator with `infrastructure:deploy` sees a popup once. **Apply now** starts Check for
+Infrastructure Updates; **Later** only records that you saw it, and the Infrastructure updates card keeps a
+reminder until the changes are applied. The update itself never changes cloud resources. An installation
+from before this release reports that bioAF cannot tell what was applied and offers **Check now**.
+
 ### Notebook Session Cleanup
 
 A notebook session that fails, stops, or never finishes starting has its pod and LoadBalancer Service deleted
