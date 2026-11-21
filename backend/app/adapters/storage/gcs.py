@@ -650,9 +650,9 @@ class GcsStorageProvider(StorageProvider):
         return await asyncio.to_thread(self._gcs_session_status, uri, handle, "DELETE", creds)
 
     def _gcs_session_request(self, method: str, url: str, headers: dict) -> tuple[int, dict]:
-        import requests
+        import httpx
 
-        response = requests.request(method, url, headers=headers, timeout=30)
+        response = httpx.request(method, url, headers=headers, timeout=30)
         return response.status_code, dict(response.headers)
 
     def _gcs_session_status(self, uri: str, handle: str, method: str, creds) -> UploadSessionStatus:
