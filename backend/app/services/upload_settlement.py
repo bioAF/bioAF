@@ -114,14 +114,14 @@ async def settle(session_factory, upload_id: str) -> str | None:
         if cp is None or cp.stage not in SETTLING_STAGES:
             return cp.stage if cp else None
         if cp.kind == "signed":
-            await _settle_presigned(cp)
+            await _settle_presigned(cp, session)
         elif cp.kind == "session":
-            await _settle_session(cp)
+            await _settle_session(cp, session)
         await session.commit()
         return cp.stage
 
 
-async def _settle_session(cp: UploadCheckpoint) -> None:
+async def _settle_session(cp: UploadCheckpoint, session: AsyncSession | None = None) -> None:
     from app.adapters.registry import get_storage_adapter
 
     now = _now()
@@ -150,13 +150,38 @@ async def _settle_session(cp: UploadCheckpoint) -> None:
             cancelling = True
     if cancelling:
         status = await adapter.cancel_upload_session(cp.source_uri, cp.session_handle)
-    await _apply(cp, status, now)
+    await _apply(cp, status, now, session)
 
 
-async def _apply(cp: UploadCheckpoint, status: UploadSessionStatus, now: datetime) -> None:
+async def _owned_by_another_upload(session: AsyncSession | None, cp: UploadCheckpoint) -> bool:
+    """Whether another upload that is not settled away claims this object path.
+
+    Upload paths are unique per upload, so this should never be true; if it is, the object at the
+    path cannot be attributed to this upload, and it is neither deleted nor filed as this upload's.
+    """
+    if session is None:
+        return False
+    other = await session.scalar(
+        select(UploadCheckpoint.id)
+        .where(
+            UploadCheckpoint.source_uri == cp.source_uri,
+            UploadCheckpoint.id != cp.id,
+            UploadCheckpoint.stage.in_(("issued", "transferring", "received", "filed")),
+        )
+        .limit(1)
+    )
+    return other is not None
+
+
+async def _apply(
+    cp: UploadCheckpoint, status: UploadSessionStatus, now: datetime, session: AsyncSession | None = None
+) -> None:
     from app.adapters.registry import get_storage_adapter
 
     state = status.state
+    if state is UploadSessionState.COMPLETED and await _owned_by_another_upload(session, cp):
+        logger.warning("Upload %s: the object at its path belongs to another upload; not touching it", cp.reference)
+        state = UploadSessionState.ENDED
     if state is UploadSessionState.COMPLETED:
         if cp.stage == "cancelling":
             # The last bytes landed before the cancellation: remove what was stored.
@@ -172,7 +197,7 @@ async def _apply(cp: UploadCheckpoint, status: UploadSessionStatus, now: datetim
     _unanswered(cp, give_up=False)
 
 
-async def _settle_presigned(cp: UploadCheckpoint) -> None:
+async def _settle_presigned(cp: UploadCheckpoint, session: AsyncSession | None = None) -> None:
     from app.adapters.registry import get_storage_adapter
 
     now = _now()
@@ -188,7 +213,7 @@ async def _settle_presigned(cp: UploadCheckpoint) -> None:
         return
     if stored:
         status = UploadSessionStatus(state=UploadSessionState.COMPLETED)
-        await _apply(cp, status, now)
+        await _apply(cp, status, now, session)
         return
     # No object: the transfer may have ended, or may still be running. bioAF cannot tell. Keep
     # looking (an object that appears later is still handled) and let an administrator decide.

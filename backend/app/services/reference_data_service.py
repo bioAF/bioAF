@@ -40,6 +40,8 @@ from app.services.audit_service import log_action
 from app.services.post_commit_events import defer_event
 from app.services.event_types import REFERENCE_DEPRECATED
 
+from app.services.storage_write_admission import admits_writes  # noqa: E402
+
 logger = logging.getLogger("bioaf.reference_data")
 
 # GCS resumable upload sessions are valid for ~7 days; report a conservative
@@ -477,6 +479,7 @@ class ReferenceDataService:
         )
 
     @staticmethod
+    @admits_writes
     async def init_upload(
         session: AsyncSession,
         org_id: int,
@@ -493,10 +496,9 @@ class ReferenceDataService:
         """
         if not request.files:
             raise ValidationError("init_upload requires at least one file in `files`")
-        from app.services.storage_write_admission import require_store_usable, require_writes_open
+        from app.services.storage_write_admission import require_store_usable
 
-        # Refused before any session exists while storage is being changed or the store is unusable.
-        await require_writes_open(session)
+        # Admitted (registered, then refused while writes are paused) before any session exists.
 
         # Up-front uniqueness check so we don't create a GCS session before failing
         existing = await session.execute(
@@ -512,8 +514,13 @@ class ReferenceDataService:
         bucket_name = await ReferenceDataService._get_references_bucket(session)
         await require_store_usable(session, "references")
 
-        # GCS prefix: {category}/{slug-name}/{slug-version}/
-        gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/"
+        # GCS prefix: {category}/{slug-name}/{slug-version}/{upload}/. The last segment is unique to
+        # this upload, so an aborted upload's session (still settling with the provider) and a new
+        # upload of the same name and version never share an object path: settling the old one
+        # can only ever find and remove its own object.
+        gcs_prefix = (
+            f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/{uuid.uuid4().hex[:8]}/"
+        )
 
         dataset = ReferenceDataset(
             organization_id=org_id,
@@ -810,11 +817,11 @@ class ReferenceDataService:
 
         While storage writes are paused nothing is written and the import is recorded as failed
         with the reason. Returns whether it ran."""
-        from app.services.storage_write_admission import StorageWritesPaused, background_write
+        from app.services.storage_write_admission import StorageWritesPaused, write_in_thread
 
         try:
-            async with background_write("reference import"):
-                await asyncio.to_thread(run)
+            # Tracked until the import thread itself stops, even if this task is cancelled.
+            await write_in_thread("reference import", run)
         except StorageWritesPaused as exc:
             await ReferenceDataService._record_progress_in_new_session(
                 dataset_id, status="failed", error_message=str(exc)

@@ -189,3 +189,23 @@ async def test_finalizing_a_reference_upload_settles_its_sessions(session, admin
     await session.commit()
     assert {cp.stage for cp in await _checkpoints(session, "reference")} == {"filed"}
     assert await _writers(session) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_reference_uploaded_again_after_an_abort_gets_its_own_object_paths(session, admin_user, buckets):
+    """An aborted upload's sessions settle later: they must never share a path with the new upload."""
+    from app.services.reference_data_service import ReferenceDataService
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    first = await _init_reference(session, admin_user)
+    first_id = first.id
+    with patch.object(ReferenceDataService, "_delete_blobs"):
+        await ReferenceDataService.abort_upload(session, first_id, org_id, user_id)
+    await session.commit()
+    await _init_reference(session, admin_user)
+
+    cps = await _checkpoints(session, "reference")
+    old = {cp.source_uri for cp in cps if cp.stage == "cancelling"}
+    new = {cp.source_uri for cp in cps if cp.stage == "issued"}
+    assert len(old) == 2 and len(new) == 2
+    assert old.isdisjoint(new)
