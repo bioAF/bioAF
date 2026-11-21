@@ -1,3 +1,4 @@
+import { logError } from "@/lib/errorReporting";
 import { getToken } from "./auth";
 import { expireSession, sessionGeneration, sessionSignal } from "./session";
 import { apiUrl } from "./apiUrl";
@@ -497,6 +498,8 @@ interface XhrResult {
   status: number;
   responseText: string;
   retryAfter: string | null;
+  /** The stored part's ETag (S3 multipart parts). */
+  etag: string | null;
 }
 
 /**
@@ -538,6 +541,7 @@ function sendXhr(options: XhrOptions): Promise<XhrResult> {
         status: xhr.status,
         responseText: xhr.responseText,
         retryAfter: xhr.getResponseHeader?.("Retry-After") ?? null,
+        etag: xhr.getResponseHeader?.("ETag") ?? null,
       });
     };
     xhr.onerror = () => {
@@ -561,9 +565,11 @@ function parseJsonText(text: string): unknown {
   }
 }
 
-// Upload a file via the initiate → PUT to GCS → complete flow.
-// The file bytes never transit the backend, so there is no size limit
-// beyond what GCS supports. Progress events are available via XHR.
+// Upload a file directly to storage through a provider session (storage lifecycle 11F):
+// initiate → send the bytes to the session → complete. A GCS resumable session takes the whole
+// file in one PUT; an S3 multipart upload takes parts, each to its own signed link. The bytes
+// never transit the backend. If the upload is stopped or fails after the session exists, the
+// session is cancelled so it stops counting as a running upload.
 async function uploadFileSigned<T>(
   file: File,
   options: SignedUploadOptions = {},
@@ -571,8 +577,18 @@ async function uploadFileSigned<T>(
   return owned(options.signal, (owner) => signedUpload<T>(file, options, owner));
 }
 
+interface UploadSessionView {
+  protocol: "gcs_resumable" | "s3_multipart";
+  url: string | null;
+  part_size: number | null;
+}
+
+interface UploadedPart {
+  number: number;
+  etag: string;
+}
+
 async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: Owner): Promise<T> {
-  // Step 1: get a signed URL and upload_id from the backend
   const initiateBody: Record<string, unknown> = {
     filename: options.filename ?? file.name,
     expected_size_bytes: file.size,
@@ -589,38 +605,105 @@ async function signedUpload<T>(file: File, options: SignedUploadOptions, owner: 
   if (options.isGlobal) {
     initiateBody.is_global = true;
   }
-  const { upload_id, signed_url } = await fetchJson<{
+  const { upload_id, signed_url, upload } = await fetchJson<{
     upload_id: string;
-    signed_url: string;
+    signed_url: string | null;
     gcs_uri: string;
     storage_uri: string;
+    upload?: UploadSessionView;
   }>("/api/files/upload/initiate", {
     method: "POST",
     json: initiateBody,
     signal: owner.signal,
   });
 
-  // Step 2: PUT directly to storage. The signed URL is the credential: no bioAF session token is
-  // sent, and the storage service's answer never ends the bioAF session.
-  const put = await sendXhr({
-    method: "PUT",
-    url: signed_url,
-    headers: { "Content-Type": "application/octet-stream" },
-    body: file,
-    onProgress: options.onProgress,
-    signal: owner.signal,
-  });
-  assertOwned(owner);
-  if (put.status < 200 || put.status >= 300) {
-    throw new ApiError(put.status, `GCS upload failed: ${put.status}`);
+  let parts: UploadedPart[] | undefined;
+  try {
+    if (upload?.protocol === "s3_multipart") {
+      parts = await sendParts(upload_id, file, upload.part_size ?? file.size, options, owner);
+    } else {
+      // The session URL is the credential: no bioAF session token is sent, and the storage
+      // service's answer never ends the bioAF session.
+      const url = upload?.url ?? signed_url;
+      if (!url) throw new ApiError(502, "Storage did not provide an upload link.");
+      const put = await sendXhr({
+        method: "PUT",
+        url,
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+        onProgress: options.onProgress,
+        signal: owner.signal,
+      });
+      assertOwned(owner);
+      if (put.status < 200 || put.status >= 300) {
+        throw new ApiError(put.status, `Storage upload failed: ${put.status}`);
+      }
+    }
+  } catch (error) {
+    cancelUploadSession(upload_id);
+    throw error;
   }
 
-  // Step 3: confirm with the backend so it creates the DB record
+  // Confirm with the backend: it checks the provider has the whole object, then files it.
   return fetchJson<T>("/api/files/upload/complete", {
     method: "POST",
-    json: { upload_id },
+    json: parts ? { upload_id, parts } : { upload_id },
     signal: owner.signal,
   });
+}
+
+const PART_LINK_BATCH = 100;
+
+async function sendParts(
+  uploadId: string,
+  file: File,
+  partSize: number,
+  options: SignedUploadOptions,
+  owner: Owner,
+): Promise<UploadedPart[]> {
+  const count = Math.max(1, Math.ceil(file.size / partSize));
+  const parts: UploadedPart[] = [];
+  let sent = 0;
+  for (let first = 1; first <= count; first += PART_LINK_BATCH) {
+    const numbers = Array.from({ length: Math.min(PART_LINK_BATCH, count - first + 1) }, (_, i) => first + i);
+    const { urls } = await fetchJson<{ urls: Record<string, string> }>(
+      `/api/files/uploads/${encodeURIComponent(uploadId)}/parts`,
+      { method: "POST", json: { part_numbers: numbers }, signal: owner.signal },
+    );
+    for (const number of numbers) {
+      const start = (number - 1) * partSize;
+      const body = file.slice(start, Math.min(start + partSize, file.size));
+      const url = urls[String(number)];
+      if (!url) throw new ApiError(502, "Storage did not provide an upload link.");
+      const put = await sendXhr({
+        method: "PUT",
+        url,
+        body,
+        onProgress: (pct) =>
+          options.onProgress?.(Math.round(((sent + (pct / 100) * body.size) / Math.max(file.size, 1)) * 100)),
+        signal: owner.signal,
+      });
+      assertOwned(owner);
+      if (put.status < 200 || put.status >= 300) {
+        throw new ApiError(put.status, `Storage upload failed: ${put.status}`);
+      }
+      if (!put.etag) {
+        throw new ApiError(502, "Storage did not confirm a part of the upload.");
+      }
+      parts.push({ number, etag: put.etag });
+      sent += body.size;
+      options.onProgress?.(Math.round((sent / Math.max(file.size, 1)) * 100));
+    }
+  }
+  return parts;
+}
+
+/** Ask bioAF to cancel a session this browser stopped using. Best effort: bioAF also settles
+ * abandoned sessions in the background. Not tied to the stopped upload's signal. */
+function cancelUploadSession(uploadId: string): void {
+  fetchJson(`/api/files/uploads/${encodeURIComponent(uploadId)}/cancel`, { method: "POST" }).catch((error) =>
+    logError("cancelling a stopped upload session (bioAF settles it later)", error),
+  );
 }
 
 // Server-proxied upload: the file bytes transit the backend (POST multipart to

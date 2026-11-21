@@ -687,6 +687,124 @@ describe("external uploads keep their own protocol", () => {
   });
 });
 
+describe("direct uploads through a provider session (storage lifecycle 11F)", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const jsonCalls = (mock: jest.Mock) =>
+    mock.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    }));
+
+  test("a GCS session receives the whole file, then completion is confirmed", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: {
+            upload_id: "u1",
+            signed_url: "https://storage.example.com/session?upload_id=1",
+            upload: { protocol: "gcs_resumable", url: "https://storage.example.com/session?upload_id=1", part_size: null },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 4 } }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const call = api.uploadSigned(file());
+    await tick();
+    const put = lastXhr();
+    expect(put.method).toBe("PUT");
+    expect(put.url).toBe("https://storage.example.com/session?upload_id=1");
+    expect(put.headers.Authorization).toBeUndefined();
+    put.respond(200, "");
+    await expect(call).resolves.toEqual({ id: 4 });
+    expect(jsonCalls(fetchMock)[1]).toEqual({ url: expect.stringContaining("/api/files/upload/complete"), body: { upload_id: "u1" } });
+  });
+
+  test("an S3 upload sends each part to its own link and completes with the parts' ETags", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u2", signed_url: null, upload: { protocol: "s3_multipart", url: null, part_size: 2 } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        fakeResponse(200, { json: { urls: { "1": "https://s3.example/p1", "2": "https://s3.example/p2" } } }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { id: 5 } }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const progress: number[] = [];
+
+    const call = api.uploadSigned(file(), { onProgress: (p) => progress.push(p) });
+    await tick();
+    const first = lastXhr();
+    expect(first.url).toBe("https://s3.example/p1");
+    expect(first.headers.Authorization).toBeUndefined();
+    first.progress(1, 2);
+    first.respond(200, "", { ETag: '"e1"' });
+    await tick();
+    const second = lastXhr();
+    expect(second.url).toBe("https://s3.example/p2");
+    second.respond(200, "", { ETag: '"e2"' });
+    await expect(call).resolves.toEqual({ id: 5 });
+
+    const calls = jsonCalls(fetchMock);
+    expect(calls[1]).toEqual({ url: expect.stringContaining("/api/files/uploads/u2/parts"), body: { part_numbers: [1, 2] } });
+    expect(calls[2].body).toEqual({
+      upload_id: "u2",
+      parts: [
+        { number: 1, etag: '"e1"' },
+        { number: 2, etag: '"e2"' },
+      ],
+    });
+    expect(progress[0]).toBe(33);
+    expect(progress[progress.length - 1]).toBe(100);
+  });
+
+  test("a part the provider stored without an ETag fails the upload and cancels the session", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u3", signed_url: null, upload: { protocol: "s3_multipart", url: null, part_size: 8 } },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(200, { json: { urls: { "1": "https://s3.example/p1" } } }))
+      .mockResolvedValueOnce(fakeResponse(204));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const call = api.uploadSigned(file()).catch((e) => e);
+    await tick();
+    lastXhr().respond(200, "");
+    expect(await call).toBeInstanceOf(Error);
+    await tick();
+    expect(String(fetchMock.mock.calls[2][0])).toContain("/api/files/uploads/u3/cancel");
+  });
+
+  test("stopping an upload cancels its session so it stops counting as running", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        fakeResponse(200, {
+          json: { upload_id: "u4", signed_url: "https://s/1", upload: { protocol: "gcs_resumable", url: "https://s/1", part_size: null } },
+        }),
+      )
+      .mockResolvedValueOnce(fakeResponse(204));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const controller = new AbortController();
+
+    const call = api.uploadSigned(file(), { signal: controller.signal }).catch((e) => e);
+    await tick();
+    controller.abort();
+    expect(isAbortError(await call)).toBe(true);
+    await tick();
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(String(url)).toContain("/api/files/uploads/u4/cancel");
+    expect(headersOf(init).Authorization).toBe("Bearer live.jwt");
+  });
+});
+
 describe("idempotency keys", () => {
   test("a POST sends its Idempotency-Key so a retried action replays the same operation", async () => {
     respondWith(200, { json: { operation_id: 7 } });
