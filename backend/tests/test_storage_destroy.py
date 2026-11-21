@@ -318,3 +318,62 @@ async def test_nothing_is_deleted_from_a_bucket_whose_identity_is_not_establishe
         events, calls = await _run(session, deployed)
     assert events[-1].event_type == "stack_error"
     assert calls == {"empty": [], "terraform": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_for_settling_uploads_says_when_to_retry(session, deployed):
+    later = datetime(2026, 11, 21, 17, 5, tzinfo=timezone.utc)
+    sooner = datetime(2026, 11, 21, 16, 45, tzinfo=timezone.utc)
+    started = datetime(2026, 11, 21, 15, 58, tzinfo=timezone.utc)
+    writers = [
+        OutstandingWriter("u1", deployed, None, "a.txt", started, "signed", state="sending", settles_after=later),
+        OutstandingWriter("u2", deployed, None, "b.txt", started, "session", state="stopping", settles_after=sooner),
+    ]
+    with _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}):
+        events, calls = await _run(session, deployed, drain=writers)
+
+    error = events[-1]
+    assert error.message.startswith("bioAF could not confirm that every upload had finished, so nothing was deleted.")
+    assert error.extra["effects"]["retry_after"] == later.isoformat()
+    assert error.extra["effects"]["unconfirmed"] == []
+    assert calls == {"empty": [], "terraform": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_lists_uploads_an_administrator_must_release(session, deployed):
+    started = datetime(2026, 11, 21, 15, 58, tzinfo=timezone.utc)
+    writers = [
+        OutstandingWriter("u1", deployed, 42, "a.txt", started, "session", state="unconfirmed", reference="UPL-ABC123"),
+    ]
+    with _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}):
+        events, _ = await _run(session, deployed, drain=writers)
+
+    effects = events[-1].extra["effects"]
+    assert effects["retry_after"] is None
+    assert effects["unconfirmed"] == [
+        {"upload_id": "u1", "reference": "UPL-ABC123", "filename": "a.txt", "user_id": deployed, "name": None,
+         "started_at": started.isoformat()}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_releases_the_operation_lock(session, admin_user, deployed):
+    """Waiting for uploads must not keep every infrastructure action unavailable."""
+    from app.services import infrastructure_operations as ops
+    from app.services.stack_deployment import destroy_storage
+
+    writers = [OutstandingWriter("u1", deployed, None, "a.txt", datetime.now(timezone.utc), "session")]
+    op_id, _ = await ops.accept(action="storage_destroy", principal=ops.Principal(admin_user.id))
+
+    async def body(handle):
+        return await ops.drive_stack(handle, lambda s: destroy_storage(s, user_id=deployed))
+
+    with (
+        _health({RAW: [StoreHealth.AVAILABLE], RESULTS: [StoreHealth.AVAILABLE]}),
+        patch("app.services.storage_write_admission.drain", AsyncMock(return_value=writers)),
+    ):
+        await ops.run_operation(op_id, body)
+
+    session.expire_all()
+    assert await ops.active_operation(session) is None
+    assert await _get(session, "storage_writes_paused") is not None

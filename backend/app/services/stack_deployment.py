@@ -1055,6 +1055,42 @@ async def _mark_bucket_deleted(session: AsyncSession, bucket_name: str) -> int:
     return result.rowcount or 0
 
 
+def _retry_after(writers) -> str | None:
+    """When every blocking upload is expected to have settled, if bioAF can say.
+
+    Only when each one has a known settlement time: an upload still sending finishes when it
+    finishes, and one bioAF lost track of needs an administrator.
+    """
+    times = [w.settles_after for w in writers]
+    if not times or any(t is None for t in times):
+        return None
+    return max(times).isoformat()
+
+
+async def _unconfirmed_writers(session: AsyncSession, writers) -> list[dict]:
+    """Uploads bioAF could not settle with the provider: an administrator may release them."""
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    unconfirmed = [w for w in writers if w.needs_release]
+    user_ids = {w.user_id for w in unconfirmed if w.user_id is not None}
+    names = (
+        dict((await session.execute(select(User.id, User.name).where(User.id.in_(user_ids)))).all()) if user_ids else {}
+    )
+    return [
+        {
+            "upload_id": w.upload_id,
+            "reference": w.reference,
+            "filename": w.filename,
+            "user_id": w.user_id,
+            "name": names.get(w.user_id),
+            "started_at": w.started_at.isoformat(),
+        }
+        for w in unconfirmed
+    ]
+
+
 async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
     """M11's list: who is uploading, how many files, into which experiment, since when."""
     from sqlalchemy import select
@@ -1153,7 +1189,8 @@ async def destroy_storage(
     yield _step("drain_uploads", "Waiting for uploads to finish", "running")
     remaining = await drain(database.async_session_factory)
     if remaining:
-        uncertain = any(w.kind == "signed" for w in remaining)
+        # Running uploads are counted; any whose outcome is still being settled is uncertain.
+        uncertain = any(w.kind == "signed" or w.state != "sending" for w in remaining)
         detail = (
             "bioAF could not confirm that every upload had finished, so nothing was deleted."
             if uncertain
@@ -1165,6 +1202,8 @@ async def destroy_storage(
             category="uploads_in_progress",
             step_detail=detail,
             uploads=await _writers_summary(session, remaining),
+            retry_after=_retry_after(remaining),
+            unconfirmed=await _unconfirmed_writers(session, remaining),
         )
         return
     yield _step("drain_uploads", "Waiting for uploads to finish", "done")
