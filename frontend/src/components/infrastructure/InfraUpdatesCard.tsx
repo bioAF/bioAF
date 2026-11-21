@@ -8,6 +8,7 @@ import { useResource } from "@/hooks/useResource";
 import { logError } from "@/lib/errorReporting";
 import { isActive, type OperationView } from "@/lib/infrastructureOperations";
 import { infrastructure, type DestructiveResourceInfo } from "@/lib/infrastructure";
+import { DEFINITION_NOTICE_PATH, displayVersion, isDefinitionNotice, type DefinitionNotice } from "@/lib/definitionNotice";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 
@@ -65,6 +66,13 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
     },
   );
   const op = outcome.data;
+  // Infrastructure changes from a bioAF update that wait to be applied (mockup M17).
+  const definitions = useResource<DefinitionNotice>(
+    `infrastructure:definition-notice:${op && !isActive(op) ? op.id : "current"}`,
+    useCallback((signal: AbortSignal) => api.get<DefinitionNotice>(DEFINITION_NOTICE_PATH, { signal }), []),
+    { onError: (e) => logError("reading pending infrastructure changes", e) },
+  );
+  const pending = isDefinitionNotice(definitions.data) ? definitions.data : null;
   const settled = op && !isActive(op) ? op : null;
   const skipped = ((settled?.partial_effects as { destructive?: DestructiveResourceInfo[] } | null)?.destructive ??
     []) as DestructiveResourceInfo[];
@@ -109,6 +117,20 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
           {starting ? "Starting..." : "Check for Infrastructure Updates"}
         </Button>
       </div>
+
+      {pending?.pending && pending.notice && (
+        <p className="mt-3 text-sm text-amber-700">
+          {pending.notice.unknown_baseline
+            ? "bioAF can't tell which infrastructure changes were applied before this update. Run a check to add anything this version needs."
+            : `Infrastructure changes from bioAF ${displayVersion(pending.notice.version)} are waiting to be applied.`}
+        </p>
+      )}
+      {pending && pending.destructive_only_modules.length > 0 && (
+        <p className="mt-3 text-sm text-gray-700">
+          Some infrastructure changes in this version would delete or replace existing resources. bioAF does not apply
+          these automatically. They take effect the next time you tear down and redeploy.
+        </p>
+      )}
 
       {error && <div className="mt-3 text-sm text-red-700">{error}</div>}
 

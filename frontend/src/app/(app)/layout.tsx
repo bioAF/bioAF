@@ -10,6 +10,7 @@ import { usePermissions, clearPermissionsCache } from "@/hooks/usePermissions";
 import { useComponents, invalidateComponentCache } from "@/hooks/useComponents";
 import { ToastProvider } from "@/components/shared/Toast";
 import { InfrastructureOperationsProvider } from "@/components/infrastructure/InfrastructureOperationsProvider";
+import { InfrastructureChangesPopup } from "@/components/infrastructure/InfrastructureChangesPopup";
 import { BootSplash } from "@/components/layout/BootSplash";
 import { MaintenanceBanner } from "@/components/layout/MaintenanceBanner";
 import { maintenanceMessage } from "@/components/layout/maintenanceMessage";
@@ -109,6 +110,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {children}
           </div>
         </div>
+        {/* Infrastructure changes a bioAF update brought, once per admin (M17). */}
+        <InfrastructureChangesPopup />
       </InfrastructureOperationsProvider>
       {/* Asks for the installation metrics choice while it is pending (ADR-075). */}
       <InstallMetricsPrompt />

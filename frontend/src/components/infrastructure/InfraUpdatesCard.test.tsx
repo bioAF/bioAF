@@ -154,3 +154,53 @@ test("a check that cannot start shows why", async () => {
   );
   expect(await screen.findByText("No infrastructure is deployed")).toBeInTheDocument();
 });
+
+describe("pending infrastructure changes after an update (M17)", () => {
+  function noticeResponse(extra: Record<string, unknown>) {
+    return {
+      pending: true,
+      notice: { id: 3, version: "2026.12.0", unknown_baseline: false, modules: ["storage"] },
+      seen: true,
+      destructive_only_modules: [],
+      ...extra,
+    };
+  }
+
+  test("the card reminds while changes wait to be applied", async () => {
+    mockGet.mockImplementation((path: string) =>
+      path === "/api/v1/infrastructure/definition-notice" ? Promise.resolve(noticeResponse({})) : Promise.resolve({}),
+    );
+    render(<InfraUpdatesCard />);
+    expect(
+      await screen.findByText("Infrastructure changes from bioAF v2026.12.0 are waiting to be applied."),
+    ).toBeInTheDocument();
+  });
+
+  test("an unknown baseline asks for a check", async () => {
+    mockGet.mockImplementation((path: string) =>
+      path === "/api/v1/infrastructure/definition-notice"
+        ? Promise.resolve(noticeResponse({ notice: { id: 3, version: "2026.12.0", unknown_baseline: true, modules: [] } }))
+        : Promise.resolve({}),
+    );
+    render(<InfraUpdatesCard />);
+    expect(
+      await screen.findByText(
+        "bioAF can't tell which infrastructure changes were applied before this update. Run a check to add anything this version needs.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("only delete/replace changes are explained, not offered", async () => {
+    mockGet.mockImplementation((path: string) =>
+      path === "/api/v1/infrastructure/definition-notice"
+        ? Promise.resolve({ pending: false, notice: null, seen: false, destructive_only_modules: ["storage"] })
+        : Promise.resolve({}),
+    );
+    render(<InfraUpdatesCard />);
+    expect(
+      await screen.findByText(
+        "Some infrastructure changes in this version would delete or replace existing resources. bioAF does not apply these automatically. They take effect the next time you tear down and redeploy.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
