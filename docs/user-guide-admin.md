@@ -86,17 +86,37 @@ belongs to another installation is never used, emptied or deleted, and cannot be
 
 ### Uploads and Destroy Storage
 
-Every upload is recorded before any byte is sent. If the bytes arrive but filing them into their
-experiment fails, the uploader sees "Received, not yet filed" with a reference, and bioAF retries at 1, 5
-and 15 minutes. After that the uploader (or an admin or comp_bio user under **Data & Files > Files**) can
-**Retry now** or **Cancel upload**. Retrying never creates a second file record or notification.
+Every upload is recorded before any byte is sent, and refused before anything is sent while its storage is
+missing, refused or another installation's. Direct uploads from the browser go to a provider upload session
+(a Google Cloud Storage resumable session or an S3 multipart upload) that bioAF can check and cancel.
+
+If the bytes arrive but filing them into their experiment fails, the uploader sees "Received, not yet
+filed" with a reference, and bioAF retries at 1, 5 and 15 minutes. After that the uploader (or an admin or
+comp_bio user under **Data & Files > Files**) can **Retry now** or **Cancel upload**. Retrying never creates
+a second file record or notification. An upload that finished in storage but was never reported back (for
+example the browser closed) is filed automatically.
+
+Cancelling an upload that is still being sent stops it from ever being filed, but it counts as a running
+upload until storage confirms the session ended; the attention list shows it as stopping. bioAF settles
+these in the background, and cancels a session that has received no bytes for 24 hours. Upload links
+issued before this release count until an hour after they expired; after that the stored object decides.
+When storage cannot confirm an upload stopped, it is listed as "Storage could not confirm this upload
+stopped", and an administrator with infrastructure configure can **Release** it with a reason, confirming
+the transfer might still exist. Releases are recorded in the audit log. Lab document and reference dataset
+uploads are tracked the same way.
+
+bioAF's own background writes (thumbnails, QC metric caches, data export archives, environment build
+contexts and reference imports) are admitted the same way: while uploads are paused they are skipped or
+refused before anything is written.
 
 **Destroy Storage** first checks every bucket, then pauses new uploads and gives running ones 30 seconds to
-finish. If any are still running, or a signed upload link was issued and never reported back, nothing is
-deleted and uploads stay paused until you choose **Allow uploads** or run Destroy Storage again. A bucket
-the provider confirms no longer exists is treated as already removed. A refused bucket stops the destroy
-with what was done recorded; fix the cause and run it again to continue. Files are marked as deleted only
-for buckets that were emptied or found gone.
+finish. If any are still running, or bioAF cannot confirm they stopped, nothing is deleted, the action ends
+(other infrastructure actions stay available) and uploads stay paused until you choose **Allow uploads** or
+run Destroy Storage again. When every remaining upload has a known settling time, the result says when to
+try again; uploads storage could not confirm are listed with **Release**. A bucket the provider confirms no
+longer exists is treated as already removed. A bucket whose identity cannot be read now is not emptied. A
+refused bucket stops the destroy with what was done recorded; fix the cause and run it again to continue.
+Files are marked as deleted as each object is confirmed deleted.
 
 ### Plot Archive Health
 

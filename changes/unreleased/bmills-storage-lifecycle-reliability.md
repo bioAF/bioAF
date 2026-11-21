@@ -12,17 +12,24 @@
   are listed and never applied. An update stops at the first real failure.
 - Any administrator with infrastructure configure can **Cancel** a running action from its status window.
   bioAF stops at the next safe point and never undoes finished work. This replaces **Abort deployment**.
-  Cancelling a notebook image build is now reported only once the build provider confirms it.
+  Cancelling a notebook image build is now reported only once the build provider confirms it. A
+  cancellation made before the action starts prevents it from running.
+- Component changes are refused while another infrastructure action runs.
 - After a server restart, an interrupted action is reported once to administrators. When bioAF cannot prove
-  Terraform stopped, infrastructure actions pause until an administrator records the recovery (audited).
+  Terraform stopped, infrastructure actions pause until an administrator records the recovery (audited). An
+  image build still running in the cloud keeps other actions unavailable until its provider reports it
+  finished.
+- An infrastructure update whose plan for a change fails is reported as failed, not up to date.
 - Retried API requests with the same `Idempotency-Key` return the same operation.
 
 ### Storage
 
 - Destroy Storage no longer stops on a bucket that was already deleted outside bioAF, retries an
   unresponsive provider, reports a refused bucket with what to fix, and continues where it stopped when run
-  again. It pauses uploads first and deletes nothing while uploads are still running. Files are marked as
-  deleted only for the buckets actually emptied.
+  again. It pauses uploads first and deletes nothing while uploads are still running; it then ends, says
+  when to try again when it can, and leaves other infrastructure actions available. Files are marked as
+  deleted as each object is confirmed deleted. A bucket whose owner or creation time cannot be read is
+  never emptied.
 - A new storage deployment after Destroy Storage creates buckets with new names; a retry after a failed
   storage deployment reuses the same names.
 - Components shows each bucket's health (Available, Not found, No access, and so on) with **Check again**.
@@ -34,7 +41,19 @@
 - An upload whose bytes arrived but could not be filed into its experiment is kept, retried automatically,
   and can be retried or cancelled by the uploader (and by admins and comp_bio users from **Files**). Upload
   errors no longer show internal storage addresses; they show a plain message and a reference.
-- While storage is being destroyed, new uploads are refused before anything is sent.
+- While storage is being destroyed, new uploads are refused before anything is sent. Uploads are also
+  refused before anything is sent when their storage is missing, refused or belongs to another
+  installation.
+- Browser uploads now go to a storage upload session that bioAF can check and cancel (a resumable session
+  on Google Cloud, a multipart upload on AWS, which also lifts the 5 GiB single-upload limit there).
+  Cancelling an upload that is still being sent stops it from being filed, and it counts as running until
+  storage confirms it stopped. Sessions with no new bytes for 24 hours are cancelled. An upload that
+  finished in storage but was never reported back is filed automatically, and filing happens once even
+  when requests overlap.
+- An administrator with infrastructure configure can release an upload storage could not confirm stopped,
+  with a reason and an acknowledgement that the transfer might still exist (audited).
+- Lab document and reference dataset uploads, and bioAF's own background writes (thumbnails, QC caches,
+  export archives, environment build contexts, reference imports), count as storage writers too.
 
 ### Plot Archive
 
@@ -55,3 +74,5 @@
   Components before Destroy Storage is available.
 - Uploads that were waiting in memory for completion when the update restarted the backend cannot be
   completed; upload those files again.
+- Upload links issued before this release count as running uploads until an hour after they expire; then
+  bioAF files any upload that arrived, and lists the rest for an administrator to release.
