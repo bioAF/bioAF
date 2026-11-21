@@ -23,6 +23,7 @@ from app.services.stack_deployment import _run_module, deploy_stack, destroy_sto
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
 from tests.test_terraform_interruption import FakeProcess, _hook
+from tests.support.terraform_cli import cli_fake
 
 
 def _event(event_type, **kwargs):
@@ -306,7 +307,7 @@ def real_module(monkeypatch):
         stderr="",
     )
     monkeypatch.setattr("asyncio.create_subprocess_exec", AsyncMock(return_value=process))
-    monkeypatch.setattr("app.services.terraform_executor.subprocess.run", lambda *a, **k: show)
+    monkeypatch.setattr(TerraformExecutor, "_run_captured", cli_fake(return_value=show))
     monkeypatch.setattr(TerraformExecutor, "_delete_gcs_lock_file", staticmethod(AsyncMock()))
     monkeypatch.setattr(TerraformExecutor, "_load_gcs_credentials", AsyncMock(return_value=None))
     import tempfile

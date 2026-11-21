@@ -70,8 +70,23 @@ _tf_lock = asyncio.Lock()
 # An entry outlives its run when Terraform's exit could not be confirmed.
 _active_processes: dict[int, asyncio.subprocess.Process] = {}
 
+# Short Terraform commands (init, plan, show, output) that are running, keyed by the infrastructure
+# operation that owns them (None outside an operation). A child whose exit could not be confirmed
+# stays here, so recovery never acknowledges away a process that may still hold the state lock.
+_captured_children: dict[int | None, set[asyncio.subprocess.Process]] = {}
+
 # Recorded on a run, so polling consumers keep their existing "failed" status.
 RUN_INTERRUPTED_MESSAGE = "Operation cancelled (client disconnected)"
+
+
+def live_child_pids(operation_id: int | None, run_ids: list[int]) -> list[int]:
+    """PIDs of Terraform processes this container still tracks for an operation or its runs."""
+    pids = [p.pid for p in _captured_children.get(operation_id, set()) if p.returncode is None]
+    for run_id in run_ids:
+        process = _active_processes.get(run_id)
+        if process is not None and process.returncode is None:
+            pids.append(process.pid)
+    return pids
 
 
 class TerraformExecutor:
@@ -103,6 +118,7 @@ class TerraformExecutor:
         7. Parse output and update the run record
         """
         runtime.require_admission("deployment")
+        await TerraformExecutor._admit(session)
         await TerraformExecutor._recover_stale_runs(session)
         await TerraformExecutor._check_no_active_run(session)
 
@@ -114,6 +130,7 @@ class TerraformExecutor:
         )
         session.add(run)
         await session.flush()
+        await TerraformExecutor._join_operation(session, run)
 
         cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
 
@@ -179,6 +196,7 @@ class TerraformExecutor:
         infrastructure-update flow uses this to apply additive resources only,
         never the resources a plan marks for replace/delete.
         """
+        await TerraformExecutor._admit(session)
         result = await session.execute(select(TerraformRun).where(TerraformRun.id == run_id))
         run = result.scalar_one_or_none()
         if not run:
@@ -186,6 +204,7 @@ class TerraformExecutor:
         if run.status not in ("awaiting_confirmation", "applying"):
             raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
 
+        await TerraformExecutor._join_operation(session, run)
         run.action = "apply"
         run.status = "applying"
         await session.flush()
@@ -304,8 +323,7 @@ class TerraformExecutor:
                 run.completed_at = datetime.now(timezone.utc)
                 tf_outputs: dict = {}
                 try:
-                    output_result = await asyncio.to_thread(
-                        subprocess.run,
+                    output_result = await TerraformExecutor._run_captured(
                         ["terraform", "output", "-json"],
                         cwd=str(work_dir),
                         capture_output=True,
@@ -418,6 +436,7 @@ class TerraformExecutor:
         3. Run `terraform output -json` to get the state bucket name
         4. Update platform_config: terraform_state_bucket, terraform_initialized
         """
+        await TerraformExecutor._admit(session)
         cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
 
         if not cloud.is_configured(config):
@@ -526,8 +545,7 @@ class TerraformExecutor:
                 return
 
             # Get bucket name from terraform output
-            output_result = await asyncio.to_thread(
-                subprocess.run,
+            output_result = await TerraformExecutor._run_captured(
                 ["terraform", "output", "-json"],
                 cwd=str(work_dir),
                 capture_output=True,
@@ -641,6 +659,7 @@ class TerraformExecutor:
         and yields progress events as resources are destroyed.
         """
         runtime.require_admission("deployment")
+        await TerraformExecutor._admit(session)
         await TerraformExecutor._recover_stale_runs(session)
 
         run = TerraformRun(
@@ -651,6 +670,7 @@ class TerraformExecutor:
         )
         session.add(run)
         await session.flush()
+        await TerraformExecutor._join_operation(session, run)
 
         progress = StreamProgress()
         interrupted = False
@@ -808,8 +828,7 @@ class TerraformExecutor:
             cloud.write_tfvars(work_dir, module_name, config)
             await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
 
-            output_result = await asyncio.to_thread(
-                subprocess.run,
+            output_result = await TerraformExecutor._run_captured(
                 ["terraform", "output", "-json"],
                 cwd=str(work_dir),
                 capture_output=True,
@@ -1097,8 +1116,7 @@ class TerraformExecutor:
         cmd = ["terraform", "init", "-no-color", "-input=false"]
         cmd += cloud.backend_init_args(config, module_name, local_backend)
 
-        result = await asyncio.to_thread(
-            subprocess.run,
+        result = await TerraformExecutor._run_captured(
             cmd,
             cwd=str(work_dir),
             capture_output=True,
@@ -1112,8 +1130,7 @@ class TerraformExecutor:
     @staticmethod
     async def _run_plan_capture(work_dir: Path, env: dict) -> dict:
         """Run `terraform plan -out=tfplan` and `terraform show -json`, return parsed dict."""
-        plan_result = await asyncio.to_thread(
-            subprocess.run,
+        plan_result = await TerraformExecutor._run_captured(
             ["terraform", "plan", "-out=tfplan", "-no-color", "-input=false"],
             cwd=str(work_dir),
             capture_output=True,
@@ -1124,8 +1141,7 @@ class TerraformExecutor:
         if plan_result.returncode != 0:
             raise RuntimeError(f"terraform plan failed: {plan_result.stderr}")
 
-        show_result = await asyncio.to_thread(
-            subprocess.run,
+        show_result = await TerraformExecutor._run_captured(
             ["terraform", "show", "-json", "tfplan"],
             cwd=str(work_dir),
             capture_output=True,
@@ -1140,6 +1156,57 @@ class TerraformExecutor:
             return json.loads(show_result.stdout)
         except json.JSONDecodeError:
             return {}
+
+    @staticmethod
+    async def _run_captured(
+        cmd: list[str],
+        *,
+        cwd: str,
+        env: dict,
+        timeout: float,
+        capture_output: bool = True,
+        text: bool = True,
+    ) -> subprocess.CompletedProcess:
+        """Run a short Terraform command as a registered child and return its captured result.
+
+        The single seam for init, plan, show and output. The child is registered under the owning
+        operation while it runs. Cancellation or a timeout stops it through the shared graceful
+        stop; a child whose exit cannot be confirmed stays registered and raises ProcessNotSettled.
+        """
+        from app.services.infrastructure_operations import ProcessNotSettled, current_operation_id
+
+        owner = current_operation_id()
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        children = _captured_children.setdefault(owner, set())
+        children.add(process)
+        settled = True
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except (asyncio.CancelledError, asyncio.TimeoutError) as exc:
+            with anyio.CancelScope(shield=True):
+                settled = await stop_process(process)
+            if not settled:
+                raise ProcessNotSettled(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''} did not exit") from exc
+            if isinstance(exc, asyncio.TimeoutError):
+                raise RuntimeError(f"{' '.join(cmd[:2])} timed out after {int(timeout)} seconds") from None
+            raise
+        finally:
+            if settled:
+                children.discard(process)
+                if not children:
+                    _captured_children.pop(owner, None)
+        return subprocess.CompletedProcess(
+            cmd,
+            process.returncode if process.returncode is not None else -1,
+            stdout.decode(errors="replace") if text else stdout,
+            stderr.decode(errors="replace") if text else stderr,
+        )
 
     @staticmethod
     async def _resolve_cloud_and_config(session: AsyncSession) -> tuple[TerraformCloud, dict]:
@@ -1192,11 +1259,19 @@ class TerraformExecutor:
         """
         safety_cutoff = datetime.now(timezone.utc) - timedelta(hours=SAFETY_TIMEOUT_HOURS)
 
+        from app.services.infrastructure_operations import current_operation_id
+
+        # A run owned by another operation that still holds exclusion is that operation's to
+        # settle: an empty registry here (a reload, another request) proves nothing about it.
         result = await session.execute(
             text("""
-            SELECT id, module_name, started_at FROM terraform_runs
-            WHERE status IN ('planning', 'applying', 'awaiting_confirmation')
-            """)
+            SELECT r.id, r.module_name, r.started_at FROM terraform_runs r
+            LEFT JOIN infrastructure_operations o ON o.id = r.operation_id
+            WHERE r.status IN ('planning', 'applying', 'awaiting_confirmation')
+              AND (r.operation_id IS NULL
+                   OR o.exclusive_slot IS NULL
+                   OR r.operation_id = :current)
+            """).bindparams(current=current_operation_id() or -1)
         )
         active_rows = result.fetchall()
 
@@ -1278,6 +1353,16 @@ class TerraformExecutor:
         abandonable = {"planning", "applying", "awaiting_confirmation"}
         if run.status not in abandonable:
             raise StateError(f"Run {run_id} in status '{run.status}' cannot be abandoned")
+        if run.operation_id is not None:
+            from app.models.infrastructure_operation import InfrastructureOperation
+
+            owner = await session.get(InfrastructureOperation, run.operation_id)
+            if owner is not None and owner.exclusive_slot == 1:
+                # The operation owns its runs: cancel it, or record its recovery, instead.
+                raise StateError(
+                    f"Run {run_id} belongs to Operation #{owner.id}, which is still in progress. "
+                    "Cancel or recover that operation instead."
+                )
 
         cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         state_bucket = config.get("terraform_state_bucket", "")
@@ -1335,6 +1420,25 @@ class TerraformExecutor:
             logger.info("Deleted lock file %s", uri)
         except Exception as exc:
             logger.warning("Error deleting lock file %s: %s", uri, exc)
+
+    @staticmethod
+    async def _admit(session: AsyncSession) -> None:
+        """Refuse to start Terraform outside an operation while another operation holds exclusion."""
+        from app.services.infrastructure_operations import ensure_admitted
+
+        await ensure_admitted(session)
+
+    @staticmethod
+    async def _join_operation(session: AsyncSession, run: TerraformRun) -> None:
+        """Record ``run`` as a child of the operation running it, if any."""
+        from app.services.infrastructure_operations import OperationHandle, current_operation_id
+
+        operation_id = current_operation_id()
+        if operation_id is None or run.operation_id == operation_id:
+            return
+        run.operation_id = operation_id
+        await session.flush()
+        await OperationHandle(operation_id).attach_run(run.id)
 
     @staticmethod
     async def _check_no_active_run(session: AsyncSession) -> None:

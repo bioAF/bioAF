@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +43,10 @@ class TerraformRun(Base):
     apply_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     terraform_state_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tfvars_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The infrastructure operation this run belongs to (NULL for runs recorded before operations).
+    operation_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("infrastructure_operations.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class VerificationCode(Base):
