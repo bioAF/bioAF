@@ -25,9 +25,9 @@ async def test_a_failed_target_stops_later_targets_and_modules(session, admin_us
     planned: list[str] = []
     fake_plan = _fake_run_plan({"compute": _plan([FIRST, SECOND]), "storage": _plan([STORAGE])})
 
-    async def run_plan(s, user_id, module_name):
+    async def run_plan(s, user_id, module_name, **kwargs):
         planned.append(module_name)
-        return await fake_plan(s, user_id, module_name)
+        return await fake_plan(s, user_id, module_name, **kwargs)
 
     monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
     monkeypatch.setattr(TerraformExecutor, "run_apply", _fake_run_apply({FIRST["address"]: ("failed", "quota")}))
@@ -71,7 +71,7 @@ async def test_nothing_to_apply_reports_up_to_date(session, admin_user, monkeypa
 
 @pytest.mark.asyncio
 async def test_a_failed_plan_stops_the_batch(session, admin_user, monkeypatch):
-    async def failing_plan(s, user_id, module_name):
+    async def failing_plan(s, user_id, module_name, **_kwargs):
         run = TerraformRun(triggered_by_user_id=user_id, action="plan", module_name=module_name, status="failed")
         s.add(run)
         await s.flush()
@@ -80,3 +80,69 @@ async def test_a_failed_plan_stops_the_batch(session, admin_user, monkeypatch):
     monkeypatch.setattr(TerraformExecutor, "run_plan", failing_plan)
     result = await infra_update_service.apply_modules_sequentially(["compute", "storage"], admin_user.id)
     assert result.status == "failed" and result.category == "plan_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_target_whose_plan_would_replace_something_is_not_applied(session, admin_user, monkeypatch):
+    """-target also applies dependencies; a dependency marked for replacement stops the batch."""
+    from app.models.component import TerraformRun
+
+    full = _plan([FIRST])
+    targeted = _plan(
+        [FIRST, _resource("module.compute.google_container_cluster.main", "google_container_cluster", "replace")]
+    )
+
+    async def run_plan(s, user_id, module_name, targets=None):
+        plan = targeted if targets else full
+        run = TerraformRun(
+            triggered_by_user_id=user_id,
+            action="plan",
+            module_name=module_name,
+            status="awaiting_confirmation",
+            plan_json=plan,
+            resources_planned=plan["total"],
+        )
+        s.add(run)
+        await s.flush()
+        return run
+
+    applied: list = []
+
+    async def run_apply(s, run_id, user_id, targets=None):
+        applied.append(targets)
+        if False:  # pragma: no cover
+            yield
+
+    monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
+    monkeypatch.setattr(TerraformExecutor, "run_apply", run_apply)
+
+    result = await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
+
+    assert applied == []
+    assert result.status == "failed" and result.category == "scope_exceeded"
+    assert result.partial_effects["out_of_scope"] == ["module.compute.google_container_cluster.main"]
+
+
+@pytest.mark.asyncio
+async def test_a_target_whose_plan_adds_something_unconfirmed_is_not_applied(session, admin_user, monkeypatch):
+    from app.models.component import TerraformRun
+
+    extra = _resource("module.compute.google_compute_firewall.open", "google_compute_firewall", "create")
+
+    async def run_plan(s, user_id, module_name, targets=None):
+        plan = _plan([FIRST, extra]) if targets else _plan([FIRST])
+        run = TerraformRun(
+            triggered_by_user_id=user_id,
+            action="plan",
+            module_name=module_name,
+            status="awaiting_confirmation",
+            plan_json=plan,
+            resources_planned=plan["total"],
+        )
+        s.add(run)
+        await s.flush()
+        return run
+
+    monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
+    result = await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
+    assert result.category == "scope_exceeded"

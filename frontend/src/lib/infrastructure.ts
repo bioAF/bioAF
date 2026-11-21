@@ -16,37 +16,20 @@ export interface DestructiveResourceInfo extends ResourceInfo {
   stateful: boolean;
 }
 
-export interface ModuleUpdateInfo {
-  module: string;
-  add_count: number;
-  change_count: number;
-  destroy_count: number;
-  has_changes: boolean;
-}
-
-export interface CheckUpdatesResult {
-  has_changes: boolean;
-  has_additive: boolean;
-  has_destructive: boolean;
-  requires_approval: boolean;
-  // true when the backend already started applying the additive changes.
-  applying: boolean;
-  realigned: { org_slug?: string; stack_uid?: string } | null;
-  modules_with_additive: string[];
-  modules: ModuleUpdateInfo[];
-  additive_resources: ResourceInfo[];
-  destructive_resources: DestructiveResourceInfo[];
+/** The confirmed update was accepted as one operation; progress and outcome are read from it. */
+export interface UpdateCheckAccepted {
+  message: string;
+  operation_id: number;
 }
 
 export const infrastructure = {
-  // Re-plan deployed modules. Additive-only plans begin applying in the
-  // background (applying=true); a plan that also contains destructive changes
-  // is returned without applying (the caller can apply the additive subset).
-  checkUpdates: () =>
-    api.post<CheckUpdatesResult>("/api/v1/infrastructure/stack/check-updates"),
+  // Start the confirmed "Check for infrastructure updates" action (mockup M1): one operation
+  // plans every deployed module and applies the additive changes automatically.
+  checkUpdates: (idempotencyKey?: string) =>
+    api.post<UpdateCheckAccepted>("/api/v1/infrastructure/stack/check-updates", undefined, { idempotencyKey }),
   // Apply the named modules, additive-only (create/update resources only).
   applyUpdates: (modules: string[]) =>
-    api.post<{ applying: boolean; modules: string[] }>(
+    api.post<{ applying: boolean; modules: string[]; operation_id: number }>(
       "/api/v1/infrastructure/stack/apply-updates",
       { modules },
     ),

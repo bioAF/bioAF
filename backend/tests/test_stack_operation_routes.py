@@ -77,7 +77,7 @@ async def test_background_deploy_returns_its_operation_and_records_the_outcome(c
 
 @pytest.mark.asyncio
 async def test_a_second_action_gets_409_with_the_running_operation(client, admin_token, session):
-    await _config(session, compute_deployed="true", storage_deployed="true")
+    await _config(session, compute_deployed="true", storage_deployed="true", terraform_initialized="true")
     gate = asyncio.Event()
 
     async def teardown(sess, user_id, org_id=None):
@@ -144,8 +144,10 @@ async def test_destroy_failing_before_terraform_is_its_own_failed_operation(clie
 
 
 @pytest.mark.asyncio
-async def test_check_updates_runs_as_an_operation(client, admin_token, session, monkeypatch):
+async def test_check_updates_runs_as_one_background_operation(client, admin_token, session, monkeypatch):
     from app.services import infra_update_service
+
+    await _config(session, terraform_initialized="true", storage_deployed="true")
 
     async def check(sess, user_id):
         return {
@@ -169,3 +171,4 @@ async def test_check_updates_runs_as_an_operation(client, admin_token, session, 
         "succeeded",
         "Your infrastructure is up to date.",
     )
+    assert [s["key"] for s in op.steps] == ["accepted", "plan"]

@@ -98,11 +98,14 @@ describe("infrastructure updates", () => {
     expect(checkUpdates).not.toHaveBeenCalled();
   });
 
-  test("with deploy it checks", async () => {
+  test("with deploy it checks once confirmed", async () => {
     grant("infrastructure:deploy");
-    checkUpdates.mockResolvedValue({ has_changes: false, applying: false });
+    checkUpdates.mockResolvedValue({ message: "Infrastructure update started", operation_id: 1 });
     render(<InfraUpdatesCard />);
     fireEvent.click(screen.getByRole("button", { name: "Check for Infrastructure Updates" }));
+    // The popup is the confirmation (mockup M1): nothing runs until it is confirmed.
+    expect(checkUpdates).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Check and apply updates" }));
     await waitFor(() => expect(checkUpdates).toHaveBeenCalledTimes(1));
   });
 });

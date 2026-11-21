@@ -1,7 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+/**
+ * "Check for Infrastructure Updates" confirms first, then one operation plans and applies
+ * additive changes automatically (storage lifecycle 11E; signed-off mockup M1). The card shows
+ * the outcome of its own operation only.
+ */
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { InfraUpdatesCard } from "./InfraUpdatesCard";
-import type { CheckUpdatesResult } from "@/lib/infrastructure";
 
 jest.mock("@/lib/infrastructure", () => ({
   infrastructure: {
@@ -9,117 +13,144 @@ jest.mock("@/lib/infrastructure", () => ({
     applyUpdates: jest.fn(),
   },
 }));
-
 import { infrastructure } from "@/lib/infrastructure";
 
-// These controls need infrastructure/pipelines permissions; the suite is about their behavior, so
-// the role has every permission.
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true, loading: false, failed: false }),
 }));
+
+const mockGet = jest.fn();
+jest.mock("@/lib/api", () => ({
+  ApiError: jest.requireActual("@/lib/api").ApiError,
+  api: { get: (...a: unknown[]) => mockGet(...a) },
+}));
+
 const checkUpdates = infrastructure.checkUpdates as jest.Mock;
-const applyUpdates = infrastructure.applyUpdates as jest.Mock;
 
-const result = (over: Partial<CheckUpdatesResult> = {}): CheckUpdatesResult => ({
-  has_changes: false,
-  has_additive: false,
-  has_destructive: false,
-  requires_approval: false,
-  applying: false,
-  realigned: null,
-  modules_with_additive: [],
-  modules: [],
-  additive_resources: [],
-  destructive_resources: [],
-  ...over,
-});
-
-const litCreate = {
-  address: "module.storage.google_storage_bucket.literature",
-  type: "google_storage_bucket",
-  action: "create",
-  description: "GCS bucket: literature",
-};
-const rawReplace = {
-  address: "module.storage.google_storage_bucket.raw",
-  type: "google_storage_bucket",
-  action: "replace",
-  description: "GCS bucket: raw",
-  stateful: true,
-};
+function operation(extra: Record<string, unknown> = {}) {
+  return {
+    id: 70,
+    action: "infrastructure_update",
+    label: "Infrastructure update",
+    status: "succeeded",
+    accepted_at: "2026-11-21T14:00:00Z",
+    steps: [],
+    message: "Your infrastructure is up to date.",
+    partial_effects: { added: 0, destructive: [] },
+    ...extra,
+  };
+}
 
 beforeEach(() => {
   checkUpdates.mockReset();
-  applyUpdates.mockReset();
+  mockGet.mockReset();
 });
 
-const clickCheck = () =>
-  userEvent.click(screen.getByRole("button", { name: /check for infrastructure updates/i }));
+const clickCheck = () => userEvent.click(screen.getByRole("button", { name: "Check for Infrastructure Updates" }));
 
-test("reports when infrastructure is up to date", async () => {
-  checkUpdates.mockResolvedValue(result());
+test("describes what the check does", () => {
+  render(<InfraUpdatesCard />);
+  expect(
+    screen.getByText(
+      "Compare deployed infrastructure with this version of bioAF and add any new resources it needs. Changes that would delete or replace existing resources are listed, never applied here.",
+    ),
+  ).toBeInTheDocument();
+});
+
+test("asks for confirmation before anything runs", async () => {
   render(<InfraUpdatesCard />);
   await clickCheck();
-  await waitFor(() => expect(screen.getByText(/up to date/i)).toBeInTheDocument());
+
+  const dialog = await screen.findByRole("dialog", { name: "Check for infrastructure updates" });
+  expect(dialog).toHaveTextContent(
+    "bioAF will compare your deployed infrastructure with this version of bioAF and add anything new it needs, such as a new storage bucket.",
+  );
+  expect(dialog).toHaveTextContent(
+    "Existing resources are never deleted or replaced by this check. If an update would delete or replace something, bioAF lists it for you and leaves it unchanged.",
+  );
+  expect(dialog).toHaveTextContent(
+    "While this runs, deploy, teardown, storage, and image build actions are unavailable to every administrator.",
+  );
+  expect(checkUpdates).not.toHaveBeenCalled();
+
+  await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(checkUpdates).not.toHaveBeenCalled();
 });
 
-test("auto-applies additive-only changes and notifies the parent", async () => {
-  checkUpdates.mockResolvedValue(
-    result({
-      has_changes: true,
-      has_additive: true,
-      applying: true,
-      modules_with_additive: ["storage"],
-      additive_resources: [litCreate],
-    }),
-  );
-  const onApplyStarted = jest.fn();
-  render(<InfraUpdatesCard onApplyStarted={onApplyStarted} />);
-  await clickCheck();
-  await waitFor(() =>
-    expect(screen.getByText(/applying updates in the background/i)).toBeInTheDocument(),
-  );
-  expect(onApplyStarted).toHaveBeenCalled();
-  expect(applyUpdates).not.toHaveBeenCalled();
-});
-
-test("shows the literature create AND the skipped destructive buckets, applies additive only", async () => {
-  checkUpdates.mockResolvedValue(
-    result({
-      has_changes: true,
-      has_additive: true,
-      has_destructive: true,
-      requires_approval: true,
-      modules_with_additive: ["storage"],
-      additive_resources: [litCreate],
-      destructive_resources: [rawReplace],
-    }),
-  );
-  applyUpdates.mockResolvedValue({ applying: true, modules: ["storage"] });
+test("confirming starts one operation and shows its outcome", async () => {
+  checkUpdates.mockResolvedValue({ message: "Infrastructure update started", operation_id: 70 });
+  mockGet.mockResolvedValue(operation({ message: "Updates applied: 1 resource added.", partial_effects: { added: 1 } }));
   const onApplyStarted = jest.fn();
   render(<InfraUpdatesCard onApplyStarted={onApplyStarted} />);
 
   await clickCheck();
-  // The new literature bucket is now visible (the original bug hid it)...
-  await waitFor(() => expect(screen.getByText(/GCS bucket: literature/i)).toBeInTheDocument());
-  // ...alongside the destructive bucket that will be skipped.
-  expect(screen.getByText(/will not be applied/i)).toBeInTheDocument();
-  expect(screen.getByText(/GCS bucket: raw/i)).toBeInTheDocument();
-  expect(applyUpdates).not.toHaveBeenCalled();
+  const dialog = await screen.findByRole("dialog", { name: "Check for infrastructure updates" });
+  await userEvent.click(within(dialog).getByRole("button", { name: "Check and apply updates" }));
 
-  await userEvent.click(screen.getByRole("button", { name: /apply additive changes only/i }));
-  await waitFor(() => expect(applyUpdates).toHaveBeenCalledWith(["storage"]));
-  await waitFor(() =>
-    expect(screen.getByText(/applying updates in the background/i)).toBeInTheDocument(),
-  );
+  await waitFor(() => expect(checkUpdates).toHaveBeenCalledWith(expect.any(String)));
   expect(onApplyStarted).toHaveBeenCalled();
+  expect(await screen.findByText("Updates applied: 1 resource added.")).toBeInTheDocument();
+  expect(mockGet).toHaveBeenCalledWith("/api/v1/infrastructure/operations/70", expect.anything());
 });
 
-test("shows an error when the check fails", async () => {
-  checkUpdates.mockRejectedValue(new Error("Another Terraform operation is in progress."));
+test("a skipped delete/replace is listed with the existing red list", async () => {
+  checkUpdates.mockResolvedValue({ message: "Infrastructure update started", operation_id: 71 });
+  mockGet.mockResolvedValue(
+    operation({
+      id: 71,
+      message: "1 change was not applied because it would delete or replace an existing resource.",
+      partial_effects: {
+        added: 0,
+        destructive: [
+          {
+            address: "module.storage.google_storage_bucket.raw",
+            type: "google_storage_bucket",
+            action: "replace",
+            description: "GCS bucket: raw",
+            stateful: true,
+          },
+        ],
+      },
+    }),
+  );
   render(<InfraUpdatesCard />);
   await clickCheck();
-  await waitFor(() =>
-    expect(screen.getByText(/another terraform operation is in progress/i)).toBeInTheDocument(),
+  await userEvent.click(
+    within(await screen.findByRole("dialog", { name: "Check for infrastructure updates" })).getByRole("button", {
+      name: "Check and apply updates",
+    }),
   );
+
+  expect(
+    await screen.findByText("1 change was not applied because it would delete or replace an existing resource."),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/GCS bucket: raw/)).toBeInTheDocument();
+  expect(screen.getByText("(stored data)")).toBeInTheDocument();
+});
+
+test("a failed update shows its outcome", async () => {
+  checkUpdates.mockResolvedValue({ message: "Infrastructure update started", operation_id: 72 });
+  mockGet.mockResolvedValue(
+    operation({ id: 72, status: "failed", message: "Applying storage changes failed. Nothing else was applied." }),
+  );
+  render(<InfraUpdatesCard />);
+  await clickCheck();
+  await userEvent.click(
+    within(await screen.findByRole("dialog", { name: "Check for infrastructure updates" })).getByRole("button", {
+      name: "Check and apply updates",
+    }),
+  );
+  expect(await screen.findByText("Applying storage changes failed. Nothing else was applied.")).toBeInTheDocument();
+});
+
+test("a check that cannot start shows why", async () => {
+  checkUpdates.mockRejectedValue(new Error("No infrastructure is deployed"));
+  render(<InfraUpdatesCard />);
+  await clickCheck();
+  await userEvent.click(
+    within(await screen.findByRole("dialog", { name: "Check for infrastructure updates" })).getByRole("button", {
+      name: "Check and apply updates",
+    }),
+  );
+  expect(await screen.findByText("No infrastructure is deployed")).toBeInTheDocument();
 });

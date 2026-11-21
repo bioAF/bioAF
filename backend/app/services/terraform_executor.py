@@ -105,6 +105,7 @@ class TerraformExecutor:
         session: AsyncSession,
         user_id: int,
         module_name: str,
+        targets: list[str] | None = None,
     ) -> TerraformRun:
         """Run `terraform plan` for the given module and return the run record.
 
@@ -142,7 +143,7 @@ class TerraformExecutor:
             env, cleanup = await cloud.build_provider_env(config)
             try:
                 await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
-                plan_json = await TerraformExecutor._run_plan_capture(work_dir, env)
+                plan_json = await TerraformExecutor._run_plan_capture(work_dir, env, targets)
                 parsed = TerraformPlanParser.parse(plan_json)
 
                 run.plan_json = parsed
@@ -1128,10 +1129,14 @@ class TerraformExecutor:
             raise RuntimeError(f"terraform init failed: {result.stderr}")
 
     @staticmethod
-    async def _run_plan_capture(work_dir: Path, env: dict) -> dict:
-        """Run `terraform plan -out=tfplan` and `terraform show -json`, return parsed dict."""
+    async def _run_plan_capture(work_dir: Path, env: dict, targets: list[str] | None = None) -> dict:
+        """Run `terraform plan -out=tfplan` and `terraform show -json`, return parsed dict.
+
+        ``targets`` restricts the plan to those addresses and what they depend on, which is
+        exactly what a targeted apply would change.
+        """
         plan_result = await TerraformExecutor._run_captured(
-            ["terraform", "plan", "-out=tfplan", "-no-color", "-input=false"],
+            ["terraform", "plan", "-out=tfplan", "-no-color", "-input=false", *(f"-target={t}" for t in targets or [])],
             cwd=str(work_dir),
             capture_output=True,
             text=True,

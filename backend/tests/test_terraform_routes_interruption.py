@@ -471,7 +471,7 @@ async def test_infra_update_plan_cancellation_leaves_no_active_run(admin_user, s
 
     planning = asyncio.Event()
 
-    async def plan(s, user_id, module_name):
+    async def plan(s, user_id, module_name, **_kwargs):
         await s.execute(
             text(
                 "INSERT INTO terraform_runs (triggered_by_user_id, action, module_name, status) "

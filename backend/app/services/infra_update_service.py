@@ -318,6 +318,26 @@ class TargetApplyFailed(Exception):
         self.target = target
 
 
+class TargetOutOfScope(TargetApplyFailed):
+    """Applying the target would also change something the confirmed update may not change."""
+
+    def __init__(self, module: str, target: str, offending: list[str]):
+        super().__init__(module, target)
+        self.offending = offending
+
+
+def _out_of_scope(plan_json: dict | None, allowed: set[str]) -> list[str]:
+    """What a targeted plan would change beyond the confirmed additive scope.
+
+    A targeted apply also applies the target's dependencies, so ``-target`` alone does not keep
+    an update additive: every change in the targeted plan must be an additive change the update
+    already enumerated, and nothing may be deleted or replaced.
+    """
+    offending = [r["address"] for r in list_destructive(plan_json)]
+    offending += [r["address"] for r in additive_resources(plan_json) if r["address"] not in allowed]
+    return offending
+
+
 def update_summary(added: int) -> str:
     """The finished-update line signed off in mockup M1."""
     if added == 0:
@@ -380,9 +400,25 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
             await handle.step(f"apply:{module}", label, "running", completed=0, total=len(targets))
 
         applied_any = False
+        allowed = set(targets)
         for index, target in enumerate(targets, start=1):
             try:
-                applied = await _apply_one_target(module, target, user_id)
+                applied = await _apply_one_target(module, target, user_id, allowed)
+            except TargetOutOfScope as exc:
+                if handle is not None:
+                    await handle.step(
+                        f"apply:{module}",
+                        state="failed",
+                        detail="It would also delete or replace an existing resource.",
+                    )
+                return failed(
+                    f"Applying {target} would also delete or replace an existing resource, so it was not applied. "
+                    "Nothing else was applied.",
+                    "scope_exceeded",
+                    added=added,
+                    failed_target=target,
+                    out_of_scope=exc.offending,
+                )
             except TargetApplyFailed:
                 if handle is not None:
                     await handle.step(f"apply:{module}", state="failed", detail=f"Could not apply {target}.")
@@ -412,13 +448,15 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
     return succeeded(update_summary(added), added=added)
 
 
-async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
-    """Re-plan the module and apply a single additive target. Returns True when a
-    real change was applied.
+async def _apply_one_target(module: str, target: str, user_id: int, allowed: set[str] | None = None) -> bool:
+    """Plan exactly what applying ``target`` would change, check it stays within the confirmed
+    additive scope, and apply it. Returns True when a real change was applied.
 
     A benign no-op update (GCP "Must specify a field to update") is logged and
     treated as applied-nothing (returns False) instead of failing, so it cannot
-    abort the surrounding batch or strand the module."""
+    abort the surrounding batch or strand the module. A targeted plan that would
+    delete, replace, or change anything outside ``allowed`` raises TargetOutOfScope
+    before anything is applied."""
     from app.database import async_session_factory
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
@@ -427,7 +465,7 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
     async with async_session_factory() as s:  # type: ignore[misc]
         applying = False
         try:
-            run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
+            run = await TerraformExecutor.run_plan(s, user_id, module_name=module, targets=[target])
             # The target may have already been applied (or turned destructive)
             # since enumeration; only apply it while it is still additive.
             if run.status != "awaiting_confirmation" or target not in set(additive_addresses(run.plan_json)):
@@ -435,6 +473,13 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
                 return False
+            offending = _out_of_scope(run.plan_json, allowed if allowed is not None else {target})
+            if offending:
+                run.status = "cancelled"
+                run.completed_at = datetime.now(timezone.utc)
+                await s.commit()
+                logger.warning("Infrastructure update: %s would also change %s; not applied", target, offending)
+                raise TargetOutOfScope(module, target, offending)
             run.status = "applying"
             await s.flush()
             applying = True
@@ -474,6 +519,58 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
             logger.exception("Infrastructure update apply failed for target %s", target)
             await s.rollback()
             raise TargetApplyFailed(module, target) from exc
+
+
+def check_summary(added: int, destructive: list[dict]) -> str:
+    """The finished-update line signed off in mockup M1."""
+    skipped = len(destructive)
+    parts = [] if added == 0 and skipped else [update_summary(added)]
+    if skipped:
+        parts.append(
+            f"{skipped} change{' was' if skipped == 1 else 's were'} not applied because "
+            f"{'it' if skipped == 1 else 'they'} would delete or replace an existing resource."
+        )
+    return " ".join(parts)
+
+
+async def run_update_check(handle, user_id: int):
+    """The confirmed "Check for infrastructure updates" action (M1), as one operation.
+
+    Plans every deployed module, then applies only the additive changes automatically, with no
+    second approval. Changes that would delete or replace a resource are listed in the outcome
+    and never applied.
+    """
+    from app.database import async_session_factory
+    from app.services.infrastructure_operations import OperationResult, succeeded
+
+    await handle.step("plan", "Planning changes", "running")
+    async with async_session_factory() as s:  # type: ignore[misc]
+        result = await check_for_updates(s, user_id)
+        await s.commit()
+    await handle.step("plan", state="done")
+    destructive = [
+        {k: r.get(k) for k in ("address", "type", "action", "description", "stateful")}
+        for r in result["destructive_resources"]
+    ]
+    added = 0
+    if result["has_additive"]:
+        applied = await apply_modules_sequentially(result["modules_with_additive"], user_id, handle)
+        if applied.status != "succeeded":
+            return OperationResult(
+                applied.status,
+                applied.message,
+                applied.category,
+                {**(applied.partial_effects or {}), "destructive": destructive},
+            )
+        added = (applied.partial_effects or {}).get("added", 0)
+    return succeeded(check_summary(added, destructive), added=added, destructive=destructive)
+
+
+def launch_update_check(user_id: int, *, operation_id: int) -> None:
+    """Run the confirmed update check in the background as the accepted operation (seam)."""
+    from app.services.infrastructure_operations import spawn_operation
+
+    spawn_operation(operation_id, lambda handle: run_update_check(handle, user_id), role="infra-update-check")
 
 
 def launch_background_apply(modules: list[str], user_id: int, *, operation_id: int) -> None:

@@ -141,8 +141,11 @@ async def test_realign_noop_when_already_aligned(session):
 
 
 def _fake_run_plan(plans: dict[str, dict]):
-    async def run_plan(session, user_id, module_name):
+    async def run_plan(session, user_id, module_name, targets=None, **_kwargs):
         plan = plans.get(module_name, _plan([]))
+        if targets:
+            # A targeted plan covers only the targets (these fakes model no dependencies).
+            plan = _plan([r for r in plan["resources"] if r["address"] in targets])
         run = TerraformRun(
             triggered_by_user_id=user_id,
             action="plan",
