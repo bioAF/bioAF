@@ -120,5 +120,11 @@ async def ensure_storage_generation(session: AsyncSession) -> str:
 
 
 async def retire_storage_generation(session: AsyncSession) -> None:
-    """Forget the generation after a confirmed storage destroy. The caller commits."""
+    """Forget the generation and its bucket identities after a confirmed storage destroy.
+
+    The caller commits.
+    """
+    from app.services.storage_identity import retire_identities
+
     await PlatformConfigService.set(session, STORAGE_GENERATION_KEY, None)
+    await retire_identities(session)

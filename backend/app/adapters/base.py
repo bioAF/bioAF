@@ -10,6 +10,8 @@ from typing import BinaryIO
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.adapters.job_specs import JobSpec
 from app.adapters.models import (
+    ContainerObservation,
+    ContainerPresence,
     NotebookWorkload,
     WorkloadRelease,
     ConnectionDescription,
@@ -532,6 +534,21 @@ class StorageProvider(ABC):
         Tier-2 concern (Phase 9), not part of this method.
         """
         raise NotImplementedError
+
+    # Stores live in configured, named containers (buckets). A mounted filesystem
+    # names each store's directory after the store instead.
+    named_containers: bool = True
+
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        """Read-only inspection of the container (bucket, export) ``uri`` lives in.
+
+        Reports whether the provider confirms the container exists, is missing,
+        refuses access, or did not answer, with the provider's native owner and
+        incarnation evidence. Never creates, mounts, or modifies anything, and never
+        carries raw provider error text. A backend that cannot inspect reports
+        ``UNSUPPORTED``.
+        """
+        return ContainerObservation(presence=ContainerPresence.UNSUPPORTED, limits=("presence",))
 
     async def generate_signed_url(
         self,

@@ -27,6 +27,8 @@ from app.adapters.models import (
     ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
+    ContainerObservation,
+    ContainerPresence,
     ObjectMetadata,
     validate_object_metadata,
     StorageMetrics,
@@ -563,6 +565,22 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_bucket_info, uri, creds)
 
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        bucket_name, _ = self._parse_uri(uri)
+        if self.is_local:
+            root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket_name)
+            present = await asyncio.to_thread(os.path.isdir, root)
+            return ContainerObservation(
+                presence=ContainerPresence.PRESENT if present else ContainerPresence.MISSING,
+                simulated=True,
+            )
+        try:
+            creds = await self._get_credentials()
+            return await asyncio.to_thread(self._gcs_inspect_container, bucket_name, creds)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+
     async def generate_signed_url(
         self,
         uri: str,
@@ -802,6 +820,27 @@ class GcsStorageProvider(StorageProvider):
         bucket_name, _ = self._parse_uri(uri)
         bucket = self._get_gcs_client(creds).get_bucket(bucket_name)
         return {"versioning_enabled": bool(bucket.versioning_enabled)}
+
+    def _gcs_inspect_container(self, bucket_name: str, creds) -> ContainerObservation:
+        from google.api_core import exceptions as gexc
+
+        try:
+            bucket = self._get_gcs_client(creds).get_bucket(bucket_name)
+        except gexc.NotFound:
+            return ContainerObservation(presence=ContainerPresence.MISSING)
+        except (gexc.Forbidden, gexc.Unauthorized):
+            return ContainerObservation(presence=ContainerPresence.FORBIDDEN)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+        project_number = getattr(bucket, "project_number", None)
+        return ContainerObservation(
+            presence=ContainerPresence.PRESENT,
+            owner=str(project_number) if project_number is not None else None,
+            created_at=getattr(bucket, "time_created", None),
+            labels=dict(getattr(bucket, "labels", None) or {}),
+            limits=() if project_number is not None else ("owner",),
+        )
 
     def _gcs_create_resumable_upload_url(self, uri: str, content_type, size_bytes, origin, creds) -> str:
         bucket, key = self._parse_uri(uri)

@@ -15,7 +15,7 @@ variable "org_slug" {
 }
 
 variable "stack_uid" {
-  description = "Short unique ID appended to resource names to avoid GCP soft-delete conflicts on redeploy. Defaults to 'pending' so terraform destroy works from state without requiring the original value."
+  description = "Short unique ID (the storage generation) appended to resource names and recorded as the storage_uid label, so each deployment has its own names. Defaults to 'pending' so terraform destroy works from state without requiring the original value."
   type        = string
   default     = "pending"
 }

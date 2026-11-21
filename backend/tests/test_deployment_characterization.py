@@ -252,14 +252,32 @@ async def test_aws_image_build_writes_null_for_blank_project(session, db_engine)
     assert await _committed(db_engine, "aws_image_build_deployed") == "true"
 
 
+def _verified_buckets():
+    """Treat every inspected bucket as this installation's (storage lifecycle 11C).
+
+    Sync records an output bucket only when inspection establishes its identity.
+    """
+    from app.services import storage_identity
+
+    async def inspect(session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    return patch("app.services.storage_identity.inspect_bucket", side_effect=inspect)
+
+
 @pytest.mark.asyncio
 async def test_sync_storage_excludes_pubsub_and_skips_blanks(session, db_engine):
     from app.services.stack_deployment import sync_storage_config
 
-    await _seed_config(session, pubsub_topic_name="original", raw_bucket_name="old")
+    # An unrecorded bucket is recorded once inspection establishes it; a recorded
+    # name is never replaced from outputs (storage lifecycle 11C).
+    await _seed_config(session, pubsub_topic_name="original", raw_bucket_name="null")
     outputs = _outputs(raw_bucket_name="new", results_bucket_name="", pubsub_topic_name="replaced")
 
-    with patch("app.services.stack_deployment.TerraformExecutor.read_module_outputs", AsyncMock(return_value=outputs)):
+    with (
+        patch("app.services.stack_deployment.TerraformExecutor.read_module_outputs", AsyncMock(return_value=outputs)),
+        _verified_buckets(),
+    ):
         populated = await sync_storage_config(session)
     await session.commit()
 

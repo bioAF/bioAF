@@ -1130,8 +1130,30 @@ async def sync_storage_config(session: AsyncSession) -> dict[str, str]:
     persistence fix was in place.  Returns a dict of {config_key: bucket_name}
     for all keys that were successfully populated.
     """
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services.deployment_outputs import identifier_value
+    from app.services.storage_identity import inspect_bucket
+
     outputs = await TerraformExecutor.read_module_outputs(session, "storage")
-    populated = await persist_outputs(session, outputs, STORAGE_SYNC_OUTPUTS, BlankOutputs.SKIP)
+    populated: dict[str, str] = {}
+    for output_name, config_key in STORAGE_SYNC_OUTPUTS.items():
+        value = identifier_value(str(outputs.get(output_name, {}).get("value") or ""))
+        if not value:
+            continue
+        recorded = identifier_value(await PlatformConfigService.get(session, config_key))
+        if recorded == value:
+            continue
+        if recorded:
+            # A Terraform output never replaces a recorded bucket: that would move
+            # where data is written on the strength of state alone.
+            logger.warning("Storage sync left %s unchanged: Terraform output names a different bucket", config_key)
+            continue
+        report = await inspect_bucket(session, config_key.removesuffix("_bucket_name"), value)
+        if not report.trusted:
+            logger.warning("Storage sync did not record %s: bucket health is %s", config_key, report.health.value)
+            continue
+        await PlatformConfigService.set(session, config_key, value)
+        populated[config_key] = value
     await session.flush()
     return populated
 

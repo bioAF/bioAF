@@ -37,8 +37,9 @@ resource "google_storage_bucket" "ingest" {
   }
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "ingest"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "ingest"
   }
 }
 
@@ -63,8 +64,9 @@ resource "google_storage_bucket" "raw" {
   }
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "raw-data"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "raw-data"
   }
 }
 
@@ -79,8 +81,9 @@ resource "google_storage_bucket" "working" {
   force_destroy = false
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "working-data"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "working-data"
   }
 }
 
@@ -95,8 +98,9 @@ resource "google_storage_bucket" "results" {
   force_destroy = false
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "results"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "results"
   }
 }
 
@@ -123,8 +127,9 @@ resource "google_storage_bucket" "references" {
   }
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "references"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "references"
   }
 }
 
@@ -153,8 +158,9 @@ resource "google_storage_bucket" "literature" {
   }
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "literature"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "literature"
   }
 }
 
@@ -190,8 +196,9 @@ resource "google_storage_bucket" "config_backups" {
   }
 
   labels = {
-    managed_by = "bioaf"
-    purpose    = "config-backups"
+    managed_by  = "bioaf"
+    storage_uid = var.stack_uid
+    purpose     = "config-backups"
   }
 }
 

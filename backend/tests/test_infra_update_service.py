@@ -272,6 +272,15 @@ async def test_check_self_heals_storage_bucket_names(session, admin_user, monkey
 
     monkeypatch.setattr(TerraformExecutor, "read_module_outputs", fake_outputs)
 
+    # The unrecorded buckets are recorded because inspection establishes them as
+    # this installation's; outputs alone would not (storage lifecycle 11C).
+    from app.services import storage_identity
+
+    async def verified(_session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    monkeypatch.setattr(storage_identity, "inspect_bucket", verified)
+
     await infra_update_service.check_for_updates(session, admin_user.id)
 
     assert await PlatformConfigService.get(session, "literature_bucket_name") == "bioaf-literature-bioaf-co-4bd459"

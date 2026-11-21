@@ -3907,6 +3907,36 @@
         "title": "ConfigureSmtpRequest",
         "type": "object"
       },
+      "ConfirmBucketsRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "stores": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Stores",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stores",
+          "reason"
+        ],
+        "title": "ConfirmBucketsRequest",
+        "type": "object"
+      },
       "ConfirmResponse": {
         "properties": {
           "executed": {
@@ -24082,6 +24112,83 @@
           }
         },
         "title": "StorageDestroyRequest",
+        "type": "object"
+      },
+      "StorageHealthResponse": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "stores": {
+            "items": {
+              "$ref": "#/components/schemas/StoreHealthItem"
+            },
+            "title": "Stores",
+            "type": "array"
+          },
+          "unconfirmed": {
+            "default": 0,
+            "title": "Unconfirmed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stores"
+        ],
+        "title": "StorageHealthResponse",
+        "type": "object"
+      },
+      "StoreHealthItem": {
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "bucket_name": {
+            "title": "Bucket Name",
+            "type": "string"
+          },
+          "health": {
+            "enum": [
+              "available",
+              "not_found",
+              "no_access",
+              "not_responding",
+              "not_confirmed",
+              "wrong_owner",
+              "not_mounted",
+              "cannot_check"
+            ],
+            "title": "Health",
+            "type": "string"
+          },
+          "store": {
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "bucket_name",
+          "health"
+        ],
+        "title": "StoreHealthItem",
         "type": "object"
       },
       "SubItemPayload": {
@@ -48263,6 +48370,92 @@
           }
         },
         "summary": "Deploy Storage",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/health": {
+      "get": {
+        "description": "The last read-only inspection of each configured bucket; inspects once if none is recorded.",
+        "operationId": "get_storage_health_api_v1_infrastructure_storage_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Storage Health",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/health/check": {
+      "post": {
+        "description": "Inspect every configured bucket now. Read-only: nothing is created or changed in the cloud.",
+        "operationId": "check_storage_health_api_v1_infrastructure_storage_health_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Storage Health",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/identity/confirm": {
+      "post": {
+        "description": "Record an administrator's confirmation that the observed buckets belong to this installation.",
+        "operationId": "confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBucketsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Storage Buckets",
         "tags": [
           "storage_deploy"
         ]

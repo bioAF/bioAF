@@ -7430,6 +7430,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/storage/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Storage Health
+         * @description The last read-only inspection of each configured bucket; inspects once if none is recorded.
+         */
+        get: operations["get_storage_health_api_v1_infrastructure_storage_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/health/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Storage Health
+         * @description Inspect every configured bucket now. Read-only: nothing is created or changed in the cloud.
+         */
+        post: operations["check_storage_health_api_v1_infrastructure_storage_health_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/identity/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Storage Buckets
+         * @description Record an administrator's confirmation that the observed buckets belong to this installation.
+         */
+        post: operations["confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/storage/metrics": {
         parameters: {
             query?: never;
@@ -9903,6 +9963,18 @@ export interface components {
             port: number;
             /** Username */
             username: string;
+        };
+        /** ConfirmBucketsRequest */
+        ConfirmBucketsRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Stores */
+            stores: string[];
         };
         /** ConfirmResponse */
         ConfirmResponse: {
@@ -16250,6 +16322,32 @@ export interface components {
              * @default false
              */
             confirm: boolean;
+        };
+        /** StorageHealthResponse */
+        StorageHealthResponse: {
+            /** Checked At */
+            checked_at?: string | null;
+            /** Stores */
+            stores: components["schemas"]["StoreHealthItem"][];
+            /**
+             * Unconfirmed
+             * @default 0
+             */
+            unconfirmed: number;
+        };
+        /** StoreHealthItem */
+        StoreHealthItem: {
+            /** Basis */
+            basis?: string | null;
+            /** Bucket Name */
+            bucket_name: string;
+            /**
+             * Health
+             * @enum {string}
+             */
+            health: "available" | "not_found" | "no_access" | "not_responding" | "not_confirmed" | "wrong_owner" | "not_mounted" | "cannot_check";
+            /** Store */
+            store: string;
         };
         /** SubItemPayload */
         SubItemPayload: {
@@ -31759,6 +31857,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageDeployResponse"];
+                };
+            };
+        };
+    };
+    get_storage_health_api_v1_infrastructure_storage_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+        };
+    };
+    check_storage_health_api_v1_infrastructure_storage_health_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+        };
+    };
+    confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmBucketsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

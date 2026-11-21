@@ -26,6 +26,7 @@ from app.models.cellxgene_publication import CellxgenePublication
 from app.models.qc_dashboard import QCDashboard
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.models.storage_stats import StorageStatsCache
+from app.models.storage_identity import StorageIdentity, StorageStoreCheck
 from app.models.gitops_repo import GitOpsRepo
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
@@ -160,6 +161,8 @@ __all__ = [
     "QCDashboard",
     "PlotArchiveEntry",
     "StorageStatsCache",
+    "StorageIdentity",
+    "StorageStoreCheck",
     "GitOpsRepo",
     "Environment",
     "EnvironmentVersion",

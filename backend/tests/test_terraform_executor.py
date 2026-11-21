@@ -1259,6 +1259,19 @@ async def test_read_module_outputs_raises_on_failure(session):
 # ---------------------------------------------------------------------------
 
 
+def _verified_buckets():
+    """Treat every inspected bucket as this installation's (storage lifecycle 11C).
+
+    Sync records an output bucket only when inspection establishes its identity.
+    """
+    from app.services import storage_identity
+
+    async def inspect(session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    return patch("app.services.storage_identity.inspect_bucket", side_effect=inspect)
+
+
 @pytest.mark.asyncio
 async def test_sync_storage_config_writes_bucket_names(session):
     """sync_storage_config reads storage outputs and populates platform_config."""
@@ -1272,7 +1285,7 @@ async def test_sync_storage_config_writes_bucket_names(session):
         "config_backups_bucket_name": {"value": "bioaf-abc123-config-backups"},
     }
 
-    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs), _verified_buckets():
         populated = await sync_storage_config(session)
 
     await session.commit()
@@ -1296,7 +1309,7 @@ async def test_sync_storage_config_skips_empty_outputs(session):
         # Other keys absent -- simulates partial output
     }
 
-    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs), _verified_buckets():
         populated = await sync_storage_config(session)
 
     assert list(populated.keys()) == ["ingest_bucket_name"]

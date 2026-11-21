@@ -42,6 +42,8 @@ from app.adapters.models import (
     ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
+    ContainerObservation,
+    ContainerPresence,
     ObjectMetadata,
     validate_object_metadata,
     SignedDownload,
@@ -558,6 +560,22 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_bucket_info, uri, creds)
 
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        bucket_name, _ = self._parse_uri(uri)
+        if self.is_local:
+            root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket_name)
+            present = await asyncio.to_thread(os.path.isdir, root)
+            return ContainerObservation(
+                presence=ContainerPresence.PRESENT if present else ContainerPresence.MISSING,
+                simulated=True,
+            )
+        try:
+            creds = await self._get_credentials()
+            return await asyncio.to_thread(self._s3_inspect_container, bucket_name, creds)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+
     # -- Object-store interface (Phase 3): signed URLs + resumable (6a.4) ------
     #
     # No is_local branch (parity with the GCS adapter): signed URLs are a real-
@@ -907,6 +925,48 @@ class S3StorageProvider(StorageProvider):
                 raise ObjectChanged(identity.uri) from e
             raise
         return resp["Body"]
+
+    def _s3_inspect_container(self, bucket_name: str, creds) -> ContainerObservation:
+        from botocore.exceptions import ClientError
+
+        client = self._get_s3_client(creds)
+        try:
+            client.head_bucket(Bucket=bucket_name)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if code in ("404", "NoSuchBucket", "NotFound") or status == 404:
+                return ContainerObservation(presence=ContainerPresence.MISSING)
+            if code in ("403", "AccessDenied", "Forbidden") or status == 403:
+                return ContainerObservation(presence=ContainerPresence.FORBIDDEN)
+            logger.warning("Bucket inspection did not complete (error_code=%s)", code[:40])
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+
+        limits: list[str] = []
+        owner: str | None = None
+        created_at = None
+        try:
+            # ListBuckets returns only buckets the caller's own account owns.
+            listed = client.list_buckets().get("Buckets", [])
+            match = next((b for b in listed if b.get("Name") == bucket_name), None)
+            owner = "own-account" if match else "other-account"
+            created_at = match.get("CreationDate") if match else None
+        except ClientError:
+            limits.append("owner")
+        labels: dict[str, str] = {}
+        try:
+            tag_set = client.get_bucket_tagging(Bucket=bucket_name).get("TagSet", [])
+            labels = {t["Key"]: t["Value"] for t in tag_set if "Key" in t}
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "NoSuchTagSet":
+                limits.append("labels")
+        return ContainerObservation(
+            presence=ContainerPresence.PRESENT,
+            owner=owner,
+            created_at=created_at,
+            labels=labels,
+            limits=tuple(limits),
+        )
 
     def _s3_get_bucket_info(self, uri: str, creds) -> dict:
         bucket_name, _ = self._parse_uri(uri)

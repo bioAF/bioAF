@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_any_permission, require_permission
 from app.database import get_session
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.deployment_outputs import STORAGE_DEPLOY_OUTPUTS, BlankOutputs, persist_outputs
@@ -192,6 +194,100 @@ async def get_storage_buckets(
 
     metrics = await GcsStorageService.get_bucket_metrics(session)
     return BucketMetricsResponse(buckets=metrics)
+
+
+# ---------------------------------------------------------------------------
+# Storage health and bucket confirmation
+# ---------------------------------------------------------------------------
+
+
+StoreHealthValue = Literal[
+    "available",
+    "not_found",
+    "no_access",
+    "not_responding",
+    "not_confirmed",
+    "wrong_owner",
+    "not_mounted",
+    "cannot_check",
+]
+
+
+class StoreHealthItem(BaseModel):
+    store: str
+    bucket_name: str
+    health: StoreHealthValue
+    # How identity was established: "discovered", "enrolled", or null when it was not.
+    basis: str | None = None
+
+
+class StorageHealthResponse(BaseModel):
+    checked_at: datetime | None = None
+    stores: list[StoreHealthItem]
+    unconfirmed: int = 0
+
+
+class ConfirmBucketsRequest(BaseModel):
+    stores: list[str] = Field(min_length=1, max_length=16)
+    reason: str = Field(min_length=1, max_length=2000)
+    confirm: bool = False
+
+
+def _health_response(reports) -> StorageHealthResponse:
+    checked = [r.checked_at for r in reports if r.checked_at is not None]
+    return StorageHealthResponse(
+        checked_at=min(checked) if checked else None,
+        stores=[
+            StoreHealthItem(store=r.store, bucket_name=r.bucket_name, health=r.health.value, basis=r.basis)
+            for r in reports
+        ],
+        unconfirmed=sum(1 for r in reports if r.health.value == "not_confirmed"),
+    )
+
+
+@router.get("/api/v1/infrastructure/storage/health", response_model=StorageHealthResponse)
+async def get_storage_health(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> StorageHealthResponse:
+    """The last read-only inspection of each configured bucket; inspects once if none is recorded."""
+    from app.services import storage_identity
+
+    reports = await storage_identity.latest_reports(session)
+    configured = await storage_identity.configured_store_count(session)
+    if len(reports) < configured:
+        reports = await storage_identity.inspect_stores(session)
+        await session.commit()
+    return _health_response(reports)
+
+
+@router.post("/api/v1/infrastructure/storage/health/check", response_model=StorageHealthResponse)
+async def check_storage_health(
+    current_user: dict = require_any_permission([("infrastructure", "deploy"), ("infrastructure", "configure")]),
+    session: AsyncSession = Depends(get_session),
+) -> StorageHealthResponse:
+    """Inspect every configured bucket now. Read-only: nothing is created or changed in the cloud."""
+    from app.services import storage_identity
+
+    reports = await storage_identity.inspect_stores(session)
+    await session.commit()
+    return _health_response(reports)
+
+
+@router.post("/api/v1/infrastructure/storage/identity/confirm", response_model=StorageHealthResponse)
+async def confirm_storage_buckets(
+    body: ConfirmBucketsRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+) -> StorageHealthResponse:
+    """Record an administrator's confirmation that the observed buckets belong to this installation."""
+    from app.services import storage_identity
+
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Confirm that these buckets belong to this installation.")
+    await storage_identity.enroll_stores(session, int(current_user["sub"]), body.stores, reason=body.reason)
+    await session.commit()
+    return _health_response(await storage_identity.latest_reports(session))
 
 
 # ---------------------------------------------------------------------------

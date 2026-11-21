@@ -48,8 +48,9 @@ resource "aws_s3_bucket" "store" {
   force_destroy = false
 
   tags = {
-    managed_by = "bioaf"
-    purpose    = each.value.purpose
+    managed_by  = "bioaf"
+    purpose     = each.value.purpose
+    storage_uid = var.stack_uid
   }
 }
 

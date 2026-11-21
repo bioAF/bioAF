@@ -232,6 +232,37 @@ class StorageStore(str, Enum):
     BACKUPS = "backups"
 
 
+class ContainerPresence(str, Enum):
+    """What a provider says about a store's container (bucket, export root).
+
+    Container absence is distinct from object absence and from a refused read:
+    only ``MISSING`` means the provider confirmed the container does not exist.
+    """
+
+    PRESENT = "present"
+    MISSING = "missing"
+    FORBIDDEN = "forbidden"
+    UNAVAILABLE = "unavailable"
+    NOT_MOUNTED = "not_mounted"
+    UNSUPPORTED = "unsupported"
+
+
+class ContainerObservation(BaseModel):
+    """One read-only inspection of a container; never carries raw provider error text.
+
+    ``owner`` is the provider's native owner evidence (GCS project number, or
+    ``own-account`` / ``other-account`` for S3); ``created_at`` is the native
+    incarnation evidence. ``limits`` names what this backend could not check.
+    """
+
+    presence: ContainerPresence
+    owner: str | None = None
+    created_at: datetime | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    limits: tuple[str, ...] = ()
+    simulated: bool = False
+
+
 class StorageObjectNotFound(Exception):
     """Raised when a read/download/metadata op targets an object that is absent.
 

@@ -168,18 +168,11 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
     want to replace the live cluster. org_slug is shared and identical for both,
     so it is safe to align.
 
-    Reads a known deployed bucket name (raw) from platform_config, falling back
-    to live Terraform outputs. Returns the values it changed, or None when
-    nothing needed changing or the name could not be parsed."""
+    Reads the recorded raw bucket name from platform_config. Terraform outputs
+    are not identity, so an unrecorded name is never taken from them. Returns
+    the values it changed, or None when nothing needed changing or the name
+    could not be parsed."""
     name = await PlatformConfigService.get(session, "raw_bucket_name")
-    if not name or name == "null":
-        try:
-            outputs = await TerraformExecutor.read_module_outputs(session, "storage")
-            entry = outputs.get("raw_bucket_name") or {}
-            name = entry.get("value") if isinstance(entry, dict) else None
-        except Exception as exc:  # pragma: no cover - depends on live state
-            logger.warning("realign: could not read storage outputs: %s", exc)
-            name = None
     if not name or name == "null":
         return None
 
