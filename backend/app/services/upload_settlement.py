@@ -30,10 +30,12 @@ logger = logging.getLogger("bioaf.upload_settlement")
 
 # A presigned URL may still be in use this long after it expires.
 LEGACY_GRACE = timedelta(hours=1)
-# An issued session with no new bytes for this long is abandoned and cancelled with the provider.
-ABANDON_AFTER = timedelta(hours=24)
+# An issued session with no new bytes for this long is abandoned and cancelled with the provider,
+# so a closed browser tab does not keep Destroy Storage waiting. Browsers send in chunks (GCS) or
+# parts (S3), so a running upload shows new bytes well within this.
+ABANDON_AFTER = timedelta(hours=1)
 # How often an active session is checked.
-ACTIVE_CHECK = timedelta(minutes=10)
+ACTIVE_CHECK = timedelta(minutes=5)
 # Backoff between unanswered checks; after the last one the upload needs an administrator.
 UNANSWERED_BACKOFF = (
     timedelta(minutes=1),

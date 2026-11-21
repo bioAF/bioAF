@@ -309,7 +309,7 @@ async def test_an_expired_session_that_stored_nothing_settles(client, admin_toke
 @pytest.mark.asyncio
 async def test_progress_keeps_a_session_alive(client, admin_token, storage, store, session):
     upload_id = await _issued(client, admin_token, session)
-    await session.execute(text("UPDATE upload_checkpoints SET progress_at = now() - interval '25 hours'"))
+    await session.execute(text("UPDATE upload_checkpoints SET progress_at = now() - interval '2 hours'"))
     await session.commit()
     store.inspect_answers = [_status("active", 1024)]
 
@@ -322,10 +322,25 @@ async def test_progress_keeps_a_session_alive(client, admin_token, storage, stor
 
 
 @pytest.mark.asyncio
+async def test_a_session_idle_for_less_than_an_hour_is_left_running(client, admin_token, storage, store, session):
+    upload_id = await _issued(client, admin_token, session)
+    await session.execute(
+        text("UPDATE upload_checkpoints SET progress_bytes = 1024, progress_at = now() - interval '50 minutes'")
+    )
+    await session.commit()
+    store.inspect_answers = [_status("active", 1024)]
+
+    await _reconcile()
+
+    assert (await _checkpoint(session, upload_id)).stage == "issued"
+    assert store.cancel_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_an_abandoned_session_is_cancelled_with_the_provider(client, admin_token, storage, store, session):
     upload_id = await _issued(client, admin_token, session)
     await session.execute(
-        text("UPDATE upload_checkpoints SET progress_bytes = 1024, progress_at = now() - interval '25 hours'")
+        text("UPDATE upload_checkpoints SET progress_bytes = 1024, progress_at = now() - interval '61 minutes'")
     )
     await session.commit()
     store.inspect_answers = [_status("active", 1024)]
