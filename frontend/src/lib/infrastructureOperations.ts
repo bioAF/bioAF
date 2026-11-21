@@ -90,6 +90,9 @@ export function blockedReason(active: ActiveOperation | null): string | null {
 export function operationTitle(op: OperationView): string {
   switch (op.status) {
     case "failed":
+      if (op.action === "storage_destroy" && op.error_category === "uploads_in_progress") {
+        return "Storage destroy stopped before deleting anything";
+      }
       return `${op.label} failed`;
     case "interrupted":
       return `${op.label} interrupted`;

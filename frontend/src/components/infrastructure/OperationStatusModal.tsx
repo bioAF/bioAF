@@ -108,6 +108,37 @@ function RecoveryForm({ op, onRecovered }: { op: OperationView; onRecovered: () 
   );
 }
 
+interface UploadInProgress {
+  name?: string | null;
+  experiment?: string | null;
+  files: number;
+  started_at: string;
+}
+
+/** Reopen uploads after a refused or failed storage destroy, without destroying anything (M7, M11). */
+function AllowUploads() {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const allow = async () => {
+    setState("busy");
+    try {
+      await api.post("/api/v1/infrastructure/storage/writes/allow", {});
+      setState("done");
+    } catch (e) {
+      logError("allowing uploads", e);
+      setState("error");
+    }
+  };
+  if (state === "done") return <p className="mt-3 text-sm text-green-700">Uploads are allowed again.</p>;
+  return (
+    <div className="mt-3 flex items-center gap-3">
+      <Button variant="secondary" onClick={allow} disabled={state === "busy"}>
+        Allow uploads
+      </Button>
+      {state === "error" && <span className="text-sm text-red-700">Uploads could not be allowed. Try again.</span>}
+    </div>
+  );
+}
+
 /** What finished work means for each action, shown before a cancellation (M16). */
 function cancelConsequence(op: OperationView): string | null {
   if (op.action === "storage_destroy") return "Those objects are permanently deleted.";
@@ -304,6 +335,21 @@ export function OperationStatusModal({
             <Alert tone={op.status === "succeeded" ? "success" : op.status === "failed" ? "error" : "warning"} className="mt-4">
               {op.message}
             </Alert>
+          )}
+          {op.action === "storage_destroy" &&
+            op.error_category === "uploads_in_progress" &&
+            ((op.partial_effects as { uploads?: UploadInProgress[] } | null)?.uploads ?? []).length > 0 && (
+              <ul className="mt-3 space-y-1 text-sm text-gray-700">
+                {((op.partial_effects as { uploads?: UploadInProgress[] }).uploads ?? []).map((u, i) => (
+                  <li key={i}>
+                    {u.name ?? "Someone"} · {u.files} file{u.files === 1 ? "" : "s"}
+                    {u.experiment ? ` · ${u.experiment}` : ""}, started {shortTime(u.started_at)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          {op.action === "storage_destroy" && op.status === "failed" && configure.allowed("configure") && (
+            <AllowUploads />
           )}
           {op.status === "recovery_required" && configure.allowed("configure") && (
             <RecoveryForm op={op} onRecovered={() => void read.refresh().then(onSettled)} />

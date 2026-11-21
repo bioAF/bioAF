@@ -48,6 +48,8 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.slurm_service", "_cluster_status_cache"),
     ("app.services.slurm_service", "_cluster_status_cache_time"),
     ("app.services.terraform_executor", "_active_processes"),
+    ("app.services.terraform_executor", "_captured_children"),
+    ("app.services.infrastructure_operations", "_op_tasks"),
     ("app.services.literature.fulltext_service", "_parses_running"),
     ("app.services.backup_service", "_restore_state"),
     ("app.services.backup_service", "_backup_state"),

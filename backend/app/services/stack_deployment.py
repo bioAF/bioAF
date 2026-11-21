@@ -1021,8 +1021,13 @@ async def _mark_bucket_deleted(session: AsyncSession, bucket_name: str) -> int:
     return result.rowcount or 0
 
 
-def _writers_summary(writers) -> list[dict]:
+async def _writers_summary(session: AsyncSession, writers) -> list[dict]:
     """M11's list: who is uploading, how many files, into which experiment, since when."""
+    from sqlalchemy import select
+
+    from app.models.experiment import Experiment
+    from app.models.user import User
+
     groups: dict[tuple, dict] = {}
     for w in writers:
         key = (w.user_id, w.experiment_id)
@@ -1031,7 +1036,25 @@ def _writers_summary(writers) -> list[dict]:
         )
         group["files"] += 1
         group["started_at"] = min(group["started_at"], w.started_at)
-    return [{**g, "started_at": g["started_at"].isoformat()} for g in groups.values()]
+    user_ids = {g["user_id"] for g in groups.values() if g["user_id"] is not None}
+    exp_ids = {g["experiment_id"] for g in groups.values() if g["experiment_id"] is not None}
+    names = (
+        dict((await session.execute(select(User.id, User.name).where(User.id.in_(user_ids)))).all()) if user_ids else {}
+    )
+    experiments = (
+        dict((await session.execute(select(Experiment.id, Experiment.name).where(Experiment.id.in_(exp_ids)))).all())
+        if exp_ids
+        else {}
+    )
+    return [
+        {
+            **g,
+            "name": names.get(g["user_id"]),
+            "experiment": experiments.get(g["experiment_id"]),
+            "started_at": g["started_at"].isoformat(),
+        }
+        for g in groups.values()
+    ]
 
 
 async def destroy_storage(
@@ -1107,7 +1130,7 @@ async def destroy_storage(
             f"{detail} New uploads stay paused until you allow them or run Destroy Storage again.",
             category="uploads_in_progress",
             step_detail=detail,
-            uploads=_writers_summary(remaining),
+            uploads=await _writers_summary(session, remaining),
         )
         return
     yield _step("drain_uploads", "Waiting for uploads to finish", "done")

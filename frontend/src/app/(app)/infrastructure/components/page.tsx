@@ -188,6 +188,17 @@ function InfraComponentsContent() {
       },
     },
   );
+  // Destroy Storage acts only on buckets established as this installation's (mockup M15).
+  const storageDestroyable = Boolean(stack.data?.storage_deployed) && !stack.data?.compute_deployed;
+  const storageHealth = useResource<{ unconfirmed: number }>(
+    storageDestroyable ? "infra:storage-health" : null,
+    (signal) => api.get<{ unconfirmed: number }>("/api/v1/infrastructure/storage/health", { signal }),
+    { onError: logRead("the storage health") },
+  );
+  const unconfirmedBuckets = (storageHealth.data?.unconfirmed ?? 0) > 0;
+  const destroyGate = unconfirmedBuckets
+    ? { disabled: true, title: "Unavailable until an administrator confirms the storage buckets." }
+    : configureGate;
   const tfStatus = tf.data ?? null;
   const runs = runList.data?.runs ?? [];
   const stackStatus = stack.data ?? null;
@@ -443,7 +454,7 @@ function InfraComponentsContent() {
                     onClick={() => {
                       setShowDestroyStorageModal(true);
                     }}
-                    {...configureGate}
+                    {...destroyGate}
                     className="ml-4 shrink-0 text-sm text-red-600 hover:text-red-800 font-medium"
                   >
                     Destroy Storage

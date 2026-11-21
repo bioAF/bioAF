@@ -412,3 +412,58 @@ function OpenAsInitiatorFor({ id }: { id: number }) {
   const ops = useInfrastructureOperations();
   return <button onClick={() => ops?.open(id)}>Open mine</button>;
 }
+
+describe("storage destroy outcomes (M7, M11)", () => {
+  const refused = op({
+    id: 64,
+    action: "storage_destroy",
+    label: "Storage destroy",
+    status: "failed",
+    error_category: "uploads_in_progress",
+    message:
+      "2 uploads were still in progress after 30 seconds, so nothing was deleted. New uploads stay paused until you allow them or run Destroy Storage again.",
+    partial_effects: {
+      uploads: [
+        { user_id: 5, name: "Priya", experiment_id: 42, experiment: "PBMC pilot", files: 2, started_at: "2026-11-21T15:58:00Z" },
+      ],
+    },
+    steps: [{ key: "drain_uploads", label: "Waiting for uploads to finish", state: "failed" }],
+    resources: null,
+  });
+
+  async function openOutcome(detail: OperationView) {
+    respond({ busy: false, state: null, operation: null, interrupted: [] }, detail);
+    render(
+      <Shell>
+        <OpenAsInitiatorFor id={detail.id} />
+      </Shell>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open mine" }));
+  }
+
+  test("running uploads stop destroy before deleting anything, and uploads can be allowed again (M11)", async () => {
+    mockPost.mockResolvedValue({ paused: false });
+    await openOutcome(refused);
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy stopped before deleting anything" });
+    expect(popup).toHaveTextContent(/Priya · 2 files · PBMC pilot, started /);
+    fireEvent.click(within(popup).getByRole("button", { name: "Allow uploads" }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/v1/infrastructure/storage/writes/allow", {}));
+  });
+
+  test("a refused bucket offers Allow uploads too (M7)", async () => {
+    const failed = op({
+      id: 65,
+      action: "storage_destroy",
+      label: "Storage destroy",
+      status: "failed",
+      error_category: "no_access",
+      message: "Nothing else was changed. Give the bioAF service account access to bioaf-raw in Google Cloud, then run Destroy Storage again.",
+      steps: [{ key: "empty:bioaf-raw", label: "Emptying bioaf-raw", state: "failed", detail: "bioAF is not allowed to read this bucket. Nothing was deleted from it." }],
+      resources: null,
+    });
+    await openOutcome(failed);
+    const popup = await screen.findByRole("dialog", { name: "Storage destroy failed" });
+    expect(popup).toHaveTextContent("bioAF is not allowed to read this bucket. Nothing was deleted from it.");
+    expect(within(popup).getByRole("button", { name: "Allow uploads" })).toBeInTheDocument();
+  });
+});

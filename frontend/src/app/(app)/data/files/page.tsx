@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { FileBrowser } from "@/components/files/FileBrowser";
+import { UploadsAttentionPanel } from "@/components/files/UploadsAttentionPanel";
 
 export default function DataFilesPage() {
   return (
@@ -23,6 +24,7 @@ function DataFilesPageInner() {
       <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
         Every file registered in this instance, filterable by project, experiment and pipeline run.
       </p>
+      <UploadsAttentionPanel />
       <FileBrowser
         showSearch
         showProjectFilter

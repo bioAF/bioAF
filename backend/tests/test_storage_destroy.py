@@ -189,7 +189,14 @@ async def test_running_uploads_stop_destroy_before_deleting_anything(session, de
         "New uploads stay paused until you allow them or run Destroy Storage again."
     )
     assert error.extra["effects"]["uploads"] == [
-        {"user_id": deployed, "experiment_id": 42, "files": 2, "started_at": started.isoformat()}
+        {
+            "user_id": deployed,
+            "experiment_id": 42,
+            "files": 2,
+            "started_at": started.isoformat(),
+            "name": None,
+            "experiment": None,
+        }
     ]
     assert calls == {"empty": [], "terraform": 0}
     assert await _get(session, "storage_writes_paused") is not None

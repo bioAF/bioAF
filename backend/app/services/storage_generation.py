@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import secrets
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import StateError
@@ -84,10 +84,8 @@ async def _store_generation(session: AsyncSession, value: str) -> str:
     if current is None:
         stored = await PlatformConfigService.insert_if_absent(session, STORAGE_GENERATION_KEY, value)
     else:
-        await session.execute(
-            text("UPDATE platform_config SET value = :v, updated_at = now() WHERE key = :k"),
-            {"k": STORAGE_GENERATION_KEY, "v": value},
-        )
+        # The row is locked above, so replacing its blank value cannot race another allocation.
+        await PlatformConfigService.set(session, STORAGE_GENERATION_KEY, value)
         stored = value
     return identifier_value(stored)
 
