@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import DomainError, StateError, UploadFailedError, ValidationError
@@ -54,6 +54,10 @@ def _session_factory():
     from app import database
 
     return database.async_session_factory
+
+
+# First key of the per-upload filing lock (pg_advisory_xact_lock(namespace, hashtext(upload_id))).
+_FILING_LOCK_NAMESPACE = 11_0006
 
 
 async def _new_checkpoint(**fields) -> str:
@@ -402,6 +406,16 @@ class UploadService:
             raise ValidationError("Invalid or expired upload_id")
         # Read before the attempt: a failed savepoint expires the object.
         reference, experiment_id = checkpoint.reference, checkpoint.experiment_id
+        # Completion, Retry now and the automatic retry may overlap: they take turns on a lock held
+        # until the caller's transaction ends, and a later attempt then sees the filed checkpoint
+        # and returns its File. An advisory lock, not a row lock, so the attempt can still record
+        # its planned destination and a failure in separate transactions.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, hashtext(:id))").bindparams(ns=_FILING_LOCK_NAMESPACE, id=upload_id)
+        )
+        checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+        if checkpoint is None or checkpoint.stage not in ("received", "filed"):
+            raise StateError("Only a received upload that has not been filed can be filed.")
         try:
             async with session.begin_nested():
                 return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type)

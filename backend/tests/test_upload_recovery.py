@@ -199,6 +199,70 @@ async def test_retry_now_files_it_and_a_repeat_returns_the_same_file(client, adm
 
 
 @pytest.mark.asyncio
+async def test_concurrent_filing_attempts_register_one_file(session, admin_user, storage):
+    """Completion, Retry now and the automatic retry can overlap: only one may file the upload."""
+    import asyncio
+
+    from app import database
+    from app.services.file_service import FileService
+    from app.services.file_verification_service import FileVerificationService
+
+    upload_id = str(uuid.uuid4())
+    org_id = admin_user.organization_id
+    filename = f"concurrent-{upload_id}.txt"
+    session.add(
+        UploadCheckpoint(
+            id=upload_id,
+            organization_id=org_id,
+            user_id=admin_user.id,
+            kind="proxied",
+            stage="received",
+            filename=filename,
+            reference="UPL-ABCDEF",
+            source_uri=f"gs://bioaf-ingest-test/uploads/{upload_id}/{filename}",
+            expected_size=3,
+        )
+    )
+    await session.commit()
+    entered = 0
+    both = asyncio.Event()
+    create = FileService.create_file_record
+
+    async def overlapping_create(*args, **kwargs):
+        # Without serialization both attempts reach registration together.
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both.set()
+        try:
+            await asyncio.wait_for(both.wait(), 1)
+        except asyncio.TimeoutError:
+            pass
+        return await create(*args, **kwargs)
+
+    async def attempt():
+        async with database.async_session_factory() as s:
+            result = await UploadService.retry_upload(s, org_id, upload_id)
+            await s.commit()
+            return result.id
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=_adapter()),
+        patch.object(FileService, "create_file_record", side_effect=overlapping_create),
+        patch.object(FileService, "finalize_registration", AsyncMock()),
+        patch.object(FileVerificationService, "begin", AsyncMock()),
+        patch("app.services.upload_service.enrich_from_header", AsyncMock()),
+        patch("app.services.upload_service.defer_event"),
+    ):
+        ids = await asyncio.gather(attempt(), attempt())
+
+    assert ids[0] == ids[1]
+    assert entered == 1
+    count = len((await session.execute(select(File).where(File.filename == filename))).scalars().all())
+    assert count == 1
+
+
+@pytest.mark.asyncio
 async def test_bytes_an_earlier_attempt_already_moved_are_adopted_not_copied_again(session, admin_user, storage):
     exp = await _experiment(session)
     upload_id = str(uuid.uuid4())
