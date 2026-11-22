@@ -9,6 +9,16 @@ import { PickerNotice } from "@/components/shared/PickerNotice";
 import { listAllExperiments } from "@/lib/experimentOptions";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import { Card } from "@/components/ui/Card";
+import {
+  CancelUploadDialog,
+  FilingBadge,
+  FilingDetails,
+  pendingFrom,
+  receivedNotFiled,
+  useUploadFiling,
+  type FilingStatus,
+  type ReceivedNotFiled,
+} from "@/components/files/uploadFiling";
 import type {
   FileResponse,
   SampleBrief,
@@ -33,13 +43,17 @@ interface SampleOption {
 }
 
 // "confirming": sent, and bioAF is checking with storage that the whole file arrived (W8).
-type FileStatus = "queued" | "uploading" | "confirming" | "complete" | "error";
+// Filing statuses (stored, not yet filed; cancelled) are shared with the experiment uploader (M12).
+type FileStatus = "queued" | "uploading" | "confirming" | "error" | FilingStatus;
 
 interface FileItem {
   file: File;
   status: FileStatus;
   progress: number;
   error?: string;
+  message?: string;
+  uploadId?: string;
+  reference?: string;
   // rename suggestion state
   suggestedName: string | null;
   nameAccepted: boolean | null; // null = undecided
@@ -255,7 +269,7 @@ export default function DataUploadPage() {
     };
 
     for (let i = 0; i < items.length; i++) {
-      if (items[i].status === "complete") continue;
+      if (items[i].status !== "queued" && items[i].status !== "error") continue;
 
       setItemState(i, { status: "uploading", progress: 0 });
 
@@ -269,13 +283,14 @@ export default function DataUploadPage() {
       // the server-proxied path (e.g. NFS, signed_url_upload=False).
       const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await upload<FileResponse>(item.file, {
+        const result = await upload<FileResponse | ReceivedNotFiled>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
           onConfirming: () => setItemState(i, { status: "confirming", progress: 100 }),
         });
-        setItemState(i, { status: "complete", progress: 100 });
+        // Stored but not yet filed: shown as pending and followed until filed (M12), never "Done".
+        setItemState(i, receivedNotFiled(result) ? pendingFrom(result) : { status: "complete", progress: 100 });
       } catch (err) {
         setItemState(i, {
           status: "error",
@@ -287,7 +302,12 @@ export default function DataUploadPage() {
     setUploading(false);
   };
 
-  const pendingCount = items.filter((i) => i.status !== "complete").length;
+  const pendingCount = items.filter((i) => i.status === "queued" || i.status === "error").length;
+  const filing = useUploadFiling(items, setItems, () => {});
+  const destination =
+    scope === "experiment" || scope === "sample"
+      ? (experiments.find((e) => String(e.id) === experimentId)?.name ?? null)
+      : "Data & Files";
 
   const associationSummary = () => {
     if (scope === "global") return "Global (visible to anyone in your organization)";
@@ -549,6 +569,11 @@ export default function DataUploadPage() {
                   {item.status === "error" && item.error && (
                     <p className="text-xs text-red-600 mt-1">{item.error}</p>
                   )}
+                  <FilingDetails
+                    item={item}
+                    onRetry={() => void filing.retryNow(idx)}
+                    onCancel={() => filing.requestCancel(idx)}
+                  />
                 </li>
               ))}
             </ul>
@@ -566,11 +591,20 @@ export default function DataUploadPage() {
           </Card>
         )}
       </div>
+      {filing.cancelling !== null && (
+        <CancelUploadDialog
+          destination={destination}
+          onKeep={() => filing.requestCancel(null)}
+          onRemove={() => void filing.cancelUpload(filing.cancelling as number)}
+        />
+      )}
     </main>
   );
 }
 
 function StatusLabel({ item }: { item: FileItem }) {
+  const filing = FilingBadge({ status: item.status });
+  if (filing) return filing;
   if (item.status === "complete") {
     return <span className="text-xs font-medium text-green-600 shrink-0">Done</span>;
   }

@@ -38,6 +38,23 @@ class UploadSessionView(BaseModel):
     part_size: int | None = None
 
 
+class UploadReceivedNotFiledDetails(BaseModel):
+    upload_id: str
+    reference: str
+    experiment_id: int | None = None
+
+
+class UploadReceivedNotFiled(BaseModel):
+    """202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).
+
+    bioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.
+    """
+
+    detail: str
+    code: Literal["upload_received_not_filed"] = "upload_received_not_filed"
+    details: UploadReceivedNotFiledDetails
+
+
 class UploadPartsRequest(BaseModel):
     part_numbers: list[int] = Field(min_length=1, max_length=100)
 

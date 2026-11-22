@@ -7,6 +7,15 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
+import {
+  CancelUploadDialog,
+  FilingBadge,
+  FilingDetails,
+  pendingFrom,
+  receivedNotFiled,
+  useUploadFiling,
+  type ReceivedNotFiled,
+} from "@/components/files/uploadFiling";
 
 // "pending": stored but not yet filed (bioAF retries); "needs_attention": retries ran out;
 // "not_sent": refused before anything was stored (uploads paused or store unusable); "cancelled": removed;
@@ -35,26 +44,6 @@ interface FileItem {
   nameAccepted: boolean | null;
 }
 
-interface ReceivedNotFiled {
-  code: "upload_received_not_filed";
-  detail: string;
-  details: { upload_id: string; reference: string };
-}
-
-interface PendingUploadsResponse {
-  uploads: { upload_id: string; reference: string; state: "retrying" | "needs_attention" }[];
-}
-
-const PENDING_POLL_MS = 30_000;
-
-function receivedNotFiled(value: unknown): value is ReceivedNotFiled {
-  return (value as { code?: string } | null)?.code === "upload_received_not_filed";
-}
-
-function exhaustedMessage(reference: string | undefined): string {
-  return `Could not be filed. Your file is still stored. Retry now, or cancel the upload to remove it. Reference ${reference}.`;
-}
-
 interface SampleOption {
   id: number;
   label: string;
@@ -76,7 +65,6 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
   const [projectCode, setProjectCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [experimentName, setExperimentName] = useState<string | null>(null);
-  const [cancelling, setCancelling] = useState<number | null>(null);
 
   // Pull experiment + project codes for filename suggestion
   useEffect(() => {
@@ -218,13 +206,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           onConfirming: () => setItemState(i, { status: "confirming", progress: 100 }),
         });
         if (receivedNotFiled(result)) {
-          setItemState(i, {
-            status: "pending",
-            progress: 100,
-            message: result.detail,
-            uploadId: result.details.upload_id,
-            reference: result.details.reference,
-          });
+          setItemState(i, pendingFrom(result));
         } else {
           setItemState(i, { status: "complete", progress: 100 });
           anySucceeded = true;
@@ -247,67 +229,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
   };
 
   // Follow received uploads until they are filed, or retries run out (mockup M12).
-  const waiting = items.some((i) => i.status === "pending" || i.status === "needs_attention");
-  const onUploadedRef = useRef(onUploaded);
-  onUploadedRef.current = onUploaded;
-  useEffect(() => {
-    if (!waiting) return;
-    const timer = setInterval(() => {
-      api
-        .get<PendingUploadsResponse>("/api/files/uploads/pending")
-        .then((data) => {
-          const byId = new Map(data.uploads.map((u) => [u.upload_id, u]));
-          let filed = false;
-          setItems((prev) =>
-            prev.map((item) => {
-              if ((item.status !== "pending" && item.status !== "needs_attention") || !item.uploadId) return item;
-              const found = byId.get(item.uploadId);
-              if (!found) {
-                filed = true;
-                return { ...item, status: "complete" as const, message: undefined };
-              }
-              if (found.state === "needs_attention") {
-                return { ...item, status: "needs_attention" as const, message: exhaustedMessage(found.reference) };
-              }
-              return item;
-            }),
-          );
-          if (filed) onUploadedRef.current();
-        })
-        .catch(() => {
-          // Keep what is shown; the next poll tries again.
-        });
-    }, PENDING_POLL_MS);
-    return () => clearInterval(timer);
-  }, [waiting]);
-
-  const retryNow = async (idx: number) => {
-    const item = items[idx];
-    if (!item.uploadId) return;
-    try {
-      const result = await api.post<FileResponse | ReceivedNotFiled>(`/api/files/uploads/${item.uploadId}/retry`, {});
-      if (receivedNotFiled(result)) {
-        setItemState(idx, { message: result.detail });
-      } else {
-        setItemState(idx, { status: "complete", message: undefined });
-        onUploaded();
-      }
-    } catch (err) {
-      setItemState(idx, { message: err instanceof Error ? err.message : exhaustedMessage(item.reference) });
-    }
-  };
-
-  const cancelUpload = async (idx: number) => {
-    const item = items[idx];
-    setCancelling(null);
-    if (!item.uploadId) return;
-    try {
-      await api.post(`/api/files/uploads/${item.uploadId}/cancel`, {});
-      setItemState(idx, { status: "cancelled", message: undefined });
-    } catch (err) {
-      setItemState(idx, { message: err instanceof Error ? err.message : "The upload could not be cancelled." });
-    }
-  };
+  const filing = useUploadFiling(items, setItems, onUploaded);
 
   // Why the files were not sent: storage paused (M11) or an unusable upload store (11F).
   const notSentReason = items.find((i) => i.status === "not_sent")?.error ?? null;
@@ -489,19 +411,11 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                     {item.status === "confirming" && (
                       <p className="text-xs text-gray-600 mt-1">bioAF is checking that your file has finished uploading.</p>
                     )}
-                    {(item.status === "pending" || item.status === "needs_attention") && item.message && (
-                      <p className="text-xs text-amber-700 mt-1">{item.message}</p>
-                    )}
-                    {item.status === "needs_attention" && (
-                      <div className="mt-1 flex gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => setCancelling(idx)}>
-                          Cancel upload
-                        </Button>
-                        <Button size="sm" onClick={() => void retryNow(idx)}>
-                          Retry now
-                        </Button>
-                      </div>
-                    )}
+                    <FilingDetails
+                      item={item}
+                      onRetry={() => void filing.retryNow(idx)}
+                      onCancel={() => filing.requestCancel(idx)}
+                    />
                   </li>
                 ))}
               </ul>
@@ -519,48 +433,17 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           )}
         </div>
       )}
-      {cancelling !== null && (
+      {filing.cancelling !== null && (
         <CancelUploadDialog
-          experiment={experimentName}
-          onKeep={() => setCancelling(null)}
-          onRemove={() => void cancelUpload(cancelling)}
+          destination={experimentName}
+          onKeep={() => filing.requestCancel(null)}
+          onRemove={() => void filing.cancelUpload(filing.cancelling as number)}
         />
       )}
     </>
   );
 }
 
-function CancelUploadDialog({
-  experiment,
-  onKeep,
-  onRemove,
-}: {
-  experiment: string | null;
-  onKeep: () => void;
-  onRemove: () => void;
-}) {
-  return (
-    <Modal
-      open
-      title="Remove this upload?"
-      onClose={onKeep}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onKeep}>
-            Keep it
-          </Button>
-          <Button variant="danger" onClick={onRemove}>
-            Remove upload
-          </Button>
-        </>
-      }
-    >
-      <p className="text-sm text-gray-700">
-        Remove this upload? The stored copy is deleted and nothing is added to {experiment ?? "the experiment"}.
-      </p>
-    </Modal>
-  );
-}
 
 function dedupeNames(items: FileItem[]): FileItem[] {
   const nameCounts = new Map<string, number>();
@@ -580,14 +463,10 @@ function dedupeNames(items: FileItem[]): FileItem[] {
 }
 
 function StatusLabel({ item }: { item: FileItem }) {
-  if (item.status === "pending" || item.status === "needs_attention") {
-    return <span className="text-xs font-medium text-amber-700 shrink-0">Not filed yet</span>;
-  }
+  const filing = FilingBadge({ status: item.status });
+  if (filing) return filing;
   if (item.status === "not_sent") {
     return <span className="text-xs font-medium text-amber-700 shrink-0">Not sent</span>;
-  }
-  if (item.status === "cancelled") {
-    return <span className="text-xs font-medium text-gray-500 shrink-0">Cancelled</span>;
   }
   if (item.status === "complete") {
     return <span className="text-xs font-medium text-green-600 shrink-0">Done</span>;

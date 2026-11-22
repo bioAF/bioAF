@@ -17181,6 +17181,32 @@ export interface components {
             };
         };
         /**
+         * UploadReceivedNotFiled
+         * @description 202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).
+         *
+         *     bioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.
+         */
+        UploadReceivedNotFiled: {
+            /**
+             * Code
+             * @default upload_received_not_filed
+             * @constant
+             */
+            code: "upload_received_not_filed";
+            /** Detail */
+            detail: string;
+            details: components["schemas"]["UploadReceivedNotFiledDetails"];
+        };
+        /** UploadReceivedNotFiledDetails */
+        UploadReceivedNotFiledDetails: {
+            /** Experiment Id */
+            experiment_id?: number | null;
+            /** Reference */
+            reference: string;
+            /** Upload Id */
+            upload_id: string;
+        };
+        /**
          * UploadSessionView
          * @description Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.
          */
@@ -21835,6 +21861,15 @@ export interface operations {
                     "application/json": components["schemas"]["FileResponse"];
                 };
             };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21905,6 +21940,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FileResponse"];
+                };
+            };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
                 };
             };
             /** @description Validation Error */
@@ -22024,6 +22068,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FileResponse"];
+                };
+            };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
                 };
             };
             /** @description Validation Error */

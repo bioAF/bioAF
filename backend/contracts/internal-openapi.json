@@ -25939,6 +25939,59 @@
         "title": "UploadPartsResponse",
         "type": "object"
       },
+      "UploadReceivedNotFiled": {
+        "description": "202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).\n\nbioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.",
+        "properties": {
+          "code": {
+            "const": "upload_received_not_filed",
+            "default": "upload_received_not_filed",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/UploadReceivedNotFiledDetails"
+          }
+        },
+        "required": [
+          "detail",
+          "details"
+        ],
+        "title": "UploadReceivedNotFiled",
+        "type": "object"
+      },
+      "UploadReceivedNotFiledDetails": {
+        "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "reference"
+        ],
+        "title": "UploadReceivedNotFiledDetails",
+        "type": "object"
+      },
       "UploadSessionView": {
         "description": "Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.",
         "properties": {
@@ -33893,6 +33946,16 @@
             },
             "description": "Successful Response"
           },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -34055,6 +34118,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
           },
           "422": {
             "content": {
@@ -34226,6 +34299,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
           },
           "422": {
             "content": {

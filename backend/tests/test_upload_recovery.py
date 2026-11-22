@@ -557,3 +557,20 @@ async def test_a_simulated_store_is_never_refused_for_being_absent(session, stor
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         await require_store_usable(session, "ingest")
     adapter.inspect_container.assert_not_called()
+
+
+def test_the_received_not_filed_receipt_is_part_of_the_api_contract():
+    """Every route that can answer 202 received-not-filed declares it, so clients type it (M12)."""
+    from app.main import create_app
+
+    schema = create_app().openapi()
+    for path in ("/api/files/upload/complete", "/api/files/upload/simple", "/api/files/uploads/{upload_id}/retry"):
+        accepted = schema["paths"][path]["post"]["responses"]["202"]
+        ref = accepted["content"]["application/json"]["schema"]["$ref"]
+        assert ref.endswith("/UploadReceivedNotFiled"), path
+    receipt = schema["components"]["schemas"]["UploadReceivedNotFiled"]
+    assert receipt["properties"]["code"]["const"] == "upload_received_not_filed"
+    assert set(schema["components"]["schemas"]["UploadReceivedNotFiledDetails"]["required"]) == {
+        "upload_id",
+        "reference",
+    }

@@ -16,6 +16,7 @@ from app.exceptions import DomainError
 from app.schemas.data_search import DataSearchItem, DataSearchResponse
 from app.schemas.experiment import UserSummary
 from app.schemas.file import (
+    UploadReceivedNotFiled,
     UploadPartsRequest,
     UploadPartsResponse,
     FileListResponse,
@@ -102,6 +103,12 @@ async def _file_responses(session: AsyncSession, files: list, *, provenance: boo
     ]
 
 
+# The bytes are stored but filing is pending: answered 202 with the reference (mockup M12).
+_RECEIVED_NOT_FILED: dict = {
+    202: {"model": UploadReceivedNotFiled, "description": "Received, not yet filed; bioAF retries automatically."}
+}
+
+
 @router.post("/upload/initiate", response_model=FileUploadInitiateResponse)
 async def initiate_upload(
     body: FileUploadInitiate,
@@ -152,7 +159,7 @@ async def upload_part_links(
     return UploadPartsResponse(urls=urls)
 
 
-@router.post("/upload/complete", response_model=FileResponse)
+@router.post("/upload/complete", response_model=FileResponse, responses=_RECEIVED_NOT_FILED)
 async def complete_upload(
     body: FileUploadComplete,
     current_user: dict = require_permission("files", "upload"),
@@ -175,7 +182,7 @@ async def complete_upload(
     return (await _file_responses(session, [file], provenance=False))[0]
 
 
-@router.post("/upload/simple", response_model=FileResponse)
+@router.post("/upload/simple", response_model=FileResponse, responses=_RECEIVED_NOT_FILED)
 async def simple_upload(
     file: UploadFile = FastAPIFile(...),
     experiment_id: int | None = Query(None),
@@ -331,7 +338,7 @@ def _attention_state(cp: UploadCheckpoint) -> str:
     return "retrying" if cp.next_attempt_at is not None else "needs_attention"
 
 
-@router.post("/uploads/{upload_id}/retry", response_model=FileResponse)
+@router.post("/uploads/{upload_id}/retry", response_model=FileResponse, responses=_RECEIVED_NOT_FILED)
 async def retry_pending_upload(
     upload_id: str,
     current_user: dict = require_permission("files", "upload"),
