@@ -103,8 +103,11 @@ resource "google_container_cluster" "bioaf" {
   # plane zones, so after creation the live value rarely matches the requested
   # one. Reconciling it post-create would relocate cluster nodes, so ignore
   # drift here: the field has done its job once the cluster exists.
+  # node_config likewise only shapes that default pool, which is deleted right
+  # after creation; GKE then reports values (a 100 GB disk) Terraform cannot
+  # change in place, so every update would plan the same change forever.
   lifecycle {
-    ignore_changes = [node_locations]
+    ignore_changes = [node_locations, node_config]
   }
 }
 

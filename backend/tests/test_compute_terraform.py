@@ -538,3 +538,19 @@ def test_compute_module_outputs_the_cluster_location():
     block = re.search(r'output "cluster_location" \{(.*?)\n\}', outputs_tf, re.S)
     assert block, "outputs.tf should define output cluster_location"
     assert "google_container_cluster.bioaf.location" in block.group(1)
+
+
+def test_the_removed_default_pools_settings_are_not_reconciled():
+    """The cluster's node_config only shapes the default pool, which is deleted right after
+    creation (remove_default_node_pool). GKE then reports values Terraform cannot change in place
+    (a 100 GB disk against the configured 30), so without ignoring it every infrastructure update
+    plans and "applies" the same change forever. The real pools are their own resources."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+    start = main_tf.index('resource "google_container_cluster" "bioaf"')
+    end = main_tf.find('\nresource "', start + 1)
+    cluster_block = main_tf[start : end if end != -1 else len(main_tf)]
+
+    assert "remove_default_node_pool = true" in cluster_block
+    ignored = re.search(r"ignore_changes\s*=\s*\[([^\]]*)\]", cluster_block)
+    assert ignored, "the cluster must declare ignore_changes"
+    assert {item.strip() for item in ignored.group(1).split(",")} >= {"node_locations", "node_config"}
