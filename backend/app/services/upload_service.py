@@ -319,6 +319,34 @@ class UploadService:
         )
 
     @staticmethod
+    async def _assemble_once(adapter, upload_id: str, checkpoint: UploadCheckpoint, parts):
+        """Assemble an S3 multipart upload, never twice: a completed upload ID no longer exists, so
+        once assembly was requested, the upload's actual state is checked before asking again.
+        Returns the provider's status afterwards."""
+        from app.adapters.models import UploadSessionState
+
+        uri, handle = checkpoint.source_uri, checkpoint.session_handle
+        if checkpoint.assembly_requested_at is not None:
+            status = await adapter.inspect_upload_session(uri, handle)
+            if status.state is not UploadSessionState.ACTIVE:
+                # Completed (proceed), ended (refused below) or no answer (the caller checks again).
+                if status.state is UploadSessionState.ENDED:
+                    raise ValidationError("Invalid or expired upload_id")
+                return status
+        if not parts:
+            raise ValidationError("The uploaded parts are required to complete this upload.")
+        await _update_checkpoint(upload_id, assembly_requested_at=datetime.now(timezone.utc))
+        try:
+            await adapter.finish_upload_session(uri, handle, parts)
+        except Exception:
+            # The answer may be lost after the provider assembled it: decide from its actual state.
+            status = await adapter.inspect_upload_session(uri, handle)
+            if status.state in (UploadSessionState.COMPLETED, UploadSessionState.UNKNOWN):
+                return status
+            raise
+        return await adapter.inspect_upload_session(uri, handle)
+
+    @staticmethod
     def _data_uploaded_event(
         *,
         org_id: int,
@@ -378,11 +406,11 @@ class UploadService:
         asserted_md5 = agreed_upload_md5(checkpoint.expected_md5, actual_md5)
         if checkpoint.stage == "issued" and checkpoint.kind == "session":
             adapter = get_storage_adapter()
+            uri, handle = checkpoint.source_uri, checkpoint.session_handle
             if checkpoint.session_protocol == "s3_multipart":
-                if not parts:
-                    raise ValidationError("The uploaded parts are required to complete this upload.")
-                await adapter.finish_upload_session(checkpoint.source_uri, checkpoint.session_handle, parts)
-            status = await adapter.inspect_upload_session(checkpoint.source_uri, checkpoint.session_handle)
+                status = await UploadService._assemble_once(adapter, upload_id, checkpoint, parts)
+            else:
+                status = await adapter.inspect_upload_session(uri, handle)
             if status.state is not UploadSessionState.COMPLETED:
                 raise UploadNotFinished("The upload has not finished sending. Try again in a moment.")
         if checkpoint.stage == "issued":

@@ -57,6 +57,8 @@ from app.adapters.models import (
     StoredObject,
 )
 
+from app.adapters.storage import workers as storage_workers  # noqa: E402
+
 logger = logging.getLogger("bioaf.adapters.storage.s3")
 
 _MIB = 1024 * 1024
@@ -447,7 +449,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_write_bytes, uri, data, content_type, creds)
+        await storage_workers.run("storage write", self._s3_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(
         self,
@@ -462,7 +464,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds, metadata)
+        await storage_workers.run("storage upload", self._s3_upload_file, uri, file_obj, content_type, creds, metadata)
 
     async def upload_filename(
         self,
@@ -477,7 +479,9 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds, metadata)
+        await storage_workers.run(
+            "storage upload", self._s3_upload_filename, uri, local_path, content_type, creds, metadata
+        )
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -499,7 +503,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_delete, uri, generation, creds)
+        await storage_workers.run("storage delete", self._s3_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
@@ -530,7 +534,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_copy, source_uri, dest_uri, creds)
+        await storage_workers.run("storage copy", self._s3_copy, source_uri, dest_uri, creds)
         return dest_uri
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
@@ -538,7 +542,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_move, source_uri, dest_uri, creds)
+        await storage_workers.run("storage move", self._s3_move, source_uri, dest_uri, creds)
         return dest_uri
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
@@ -673,7 +677,7 @@ class S3StorageProvider(StorageProvider):
 
     async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_finish_multipart, uri, handle, parts, creds)
+        await storage_workers.run("multipart assembly", self._s3_finish_multipart, uri, handle, parts, creds)
 
     async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
         creds = await self._get_credentials()
@@ -681,7 +685,7 @@ class S3StorageProvider(StorageProvider):
 
     async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
         creds = await self._get_credentials()
-        return await asyncio.to_thread(self._s3_abort_multipart, uri, handle, creds)
+        return await storage_workers.run("multipart abort", self._s3_abort_multipart, uri, handle, creds)
 
     def _s3_begin_multipart(self, uri: str, content_type: str, creds) -> str:
         bucket, key = self._parse_uri(uri)
@@ -788,7 +792,7 @@ class S3StorageProvider(StorageProvider):
         bucket. Used by orphaned-resource cleanup.
         """
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_delete_bucket, bucket_name, creds)
+        await storage_workers.run("bucket delete", self._s3_delete_bucket, bucket_name, creds)
 
     def native_upload_client(self, credentials=None):
         """Raw synchronous boto3 S3 client (transitional escape hatch), mirroring the

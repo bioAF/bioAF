@@ -78,6 +78,9 @@ class UploadCheckpoint(Base):
     session_handle: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When bioAF first asked the provider to assemble an S3 multipart upload: a later completion
+    # checks the upload's actual state before asking again (a completed upload ID is gone).
+    assembly_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_by_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True

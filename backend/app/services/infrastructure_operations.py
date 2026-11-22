@@ -118,6 +118,30 @@ def current_operation_id() -> int | None:
     return _current.get()
 
 
+def _install_storage_workers() -> None:
+    """Storage calls record the operation they were made under; one settling may finish it."""
+    from app.adapters.storage import workers
+
+    workers.set_operation_lookup(current_operation_id)
+
+    def settled(worker) -> None:
+        if worker.operation_id is not None and not workers.running(worker.operation_id):
+            from app import runtime
+
+            try:
+                runtime.spawn(_settle_when_ready(worker.operation_id), role="infrastructure-operation-settle")
+            except Exception:
+                logger.exception("Could not schedule settling operation %s", worker.operation_id)
+
+    workers.on_settled(settled)
+
+
+def _storage_calls(operation_id: int) -> list:
+    from app.adapters.storage import workers
+
+    return workers.running(operation_id)
+
+
 @dataclass(frozen=True)
 class Principal:
     user_id: int | None
@@ -471,7 +495,10 @@ async def finish(operation_id: int, result: OperationResult) -> None:
         if result.status != "recovery_required" and live(op):
             # A Terraform child is still alive: never release exclusion under it.
             result = OperationResult("recovery_required", CANCEL_UNCONFIRMED, "process_not_settled")
-        if result.status != "recovery_required" and _unsettled_builds(op):
+        calls = _storage_calls(op.id)
+        if result.status != "recovery_required" and (_unsettled_builds(op) or calls):
+            # A storage call this operation made (a deletion the cancel interrupted the wait for)
+            # or a cloud build may still be changing things: keep the lock until it stops.
             waiting = True
             op.partial_effects = {
                 **(op.partial_effects or {}),
@@ -484,7 +511,7 @@ async def finish(operation_id: int, result: OperationResult) -> None:
                 else s
                 for s in (op.steps or [])
             ]
-            op.phase = "Waiting for image builds to finish"
+            op.phase = "Waiting for storage to finish" if calls else "Waiting for image builds to finish"
             return
         op.status = result.status
         op.message = result.message
@@ -677,17 +704,39 @@ async def settle_external_build(build_id: str, provider_status: str) -> None:
             op.external_builds = builds
             state = {"succeeded": "done", "failed": "failed", "cancelled": "stopped"}[BUILD_TERMINAL[provider_status]]
             op.steps = [dict(s, state=state) if s.get("key") == f"build:{build_id}" else s for s in (op.steps or [])]
-            pending = (op.partial_effects or {}).get("pending_result")
-            if pending is not None and not _unsettled_builds(op):
-                result = _combined_result(op, pending)
-                op.status = result.status
-                op.message = result.message
-                op.error_category = result.category
-                op.finished_at = _now()
-                op.exclusive_slot = None
-                op.phase = None
-                op.steps = _settle_steps(list(op.steps or []), result.status)
-                logger.info("Infrastructure operation %s finished after its image builds: %s", op.id, result.status)
+            _settle_if_ready(op)
+        await session.commit()
+
+
+def _settle_if_ready(op: InfrastructureOperation) -> None:
+    """Record a held outcome once no cloud build or storage call of the operation is still running."""
+    pending = (op.partial_effects or {}).get("pending_result")
+    if pending is None or op.status == "recovery_required" or op.exclusive_slot is None:
+        return
+    if _unsettled_builds(op) or _storage_calls(op.id):
+        return
+    result = _combined_result(op, pending)
+    op.status = result.status
+    op.message = result.message
+    op.error_category = result.category
+    op.finished_at = _now()
+    op.exclusive_slot = None
+    op.phase = None
+    op.steps = _settle_steps(list(op.steps or []), result.status)
+    logger.info("Infrastructure operation %s finished after its outstanding work: %s", op.id, result.status)
+
+
+async def _settle_when_ready(operation_id: int) -> None:
+    async with _session_factory()() as session:
+        op = (
+            await session.execute(
+                select(InfrastructureOperation)
+                .where(InfrastructureOperation.id == operation_id)
+                .with_for_update(key_share=True)
+            )
+        ).scalar_one_or_none()
+        if op is not None:
+            _settle_if_ready(op)
         await session.commit()
 
 
@@ -1142,6 +1191,9 @@ async def _fail_child_runs(session: AsyncSession, op: InfrastructureOperation) -
     )
 
 
+STORAGE_CALL_RUNNING = (
+    "A storage change this action started is still running, so it cannot be marked as recovered. Wait for it to finish."
+)
 RECOVERY_REFUSED = (
     "bioAF still sees this Terraform process running, so it cannot be marked as recovered. "
     "Wait for it to finish or stop it on the server."
@@ -1186,6 +1238,8 @@ async def recover(session: AsyncSession, operation_id: int, user_id: int, *, rea
         raise StateError("Only an operation that needs recovery can be marked as recovered.")
     if _process_still_seen(op):
         raise StateError(RECOVERY_REFUSED)
+    if _storage_calls(op.id):
+        raise StateError(STORAGE_CALL_RUNNING)
     _mark(
         op,
         "interrupted",
@@ -1230,3 +1284,6 @@ async def mark_seen(session: AsyncSession, operation_id: int) -> None:
     if op is not None and op.outcome_seen_at is None and op.status in TERMINAL_STATUSES:
         op.outcome_seen_at = _now()
         await session.flush()
+
+
+_install_storage_workers()

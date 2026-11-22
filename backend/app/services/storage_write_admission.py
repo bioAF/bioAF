@@ -24,6 +24,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -43,6 +44,33 @@ UPLOADS_PAUSED = (
 
 # Proxied uploads streaming through this process: checkpoint ID -> start time.
 _in_flight: dict[str, datetime] = {}
+
+# The writer claim the current task holds, recorded on each storage call it makes. A call that
+# outlives its claim (the awaiting task was cancelled) still counts as a writer until its thread stops.
+_claim: ContextVar[str | None] = ContextVar("bioaf_storage_writer_claim", default=None)
+
+
+def _hold(key: str):
+    _in_flight[key] = datetime.now(timezone.utc)
+    return _claim.set(key)
+
+
+def _drop(key: str, token) -> None:
+    _in_flight.pop(key, None)
+    try:
+        _claim.reset(token)
+    except ValueError:
+        # Closed from another context: the variable dies with that context.
+        pass
+
+
+def _install() -> None:
+    from app.adapters.storage import workers
+
+    workers.set_claim_lookup(_claim.get)
+
+
+_install()
 
 
 UPLOAD_STORAGE_UNAVAILABLE = (
@@ -176,11 +204,11 @@ async def allow_writes(session: AsyncSession, user_id: int | None = None) -> boo
 @asynccontextmanager
 async def tracked_transfer(upload_id: str) -> AsyncIterator[None]:
     """Mark a proxied transfer as running in this process for the duration of the block."""
-    _in_flight[upload_id] = datetime.now(timezone.utc)
+    token = _hold(upload_id)
     try:
         yield
     finally:
-        _in_flight.pop(upload_id, None)
+        _drop(upload_id, token)
 
 
 def admits_writes(fn):
@@ -213,13 +241,13 @@ async def admitted(
     import uuid
 
     key = f"{_ADMITTED}{uuid.uuid4()}"
-    _in_flight[key] = datetime.now(timezone.utc)
+    token = _hold(key)
     try:
         if await paused(session) is not None:
             raise (error or UploadsPausedError)(message or UPLOADS_PAUSED)
         yield
     finally:
-        _in_flight.pop(key, None)
+        _drop(key, token)
 
 
 # This process's view of ``storage_writes_paused``, so a background write needs no session of
@@ -249,14 +277,14 @@ async def background_write(label: str) -> AsyncIterator[None]:
     import uuid
 
     key = f"{_BACKGROUND}{label}:{uuid.uuid4()}"
-    _in_flight[key] = datetime.now(timezone.utc)
+    token = _hold(key)
     try:
         if await _paused_now():
             logger.info("Background %s write skipped: storage writes are paused", label)
             raise StorageWritesPaused(STORAGE_PAUSED)
         yield
     finally:
-        _in_flight.pop(key, None)
+        _drop(key, token)
 
 
 async def write_in_thread(label: str, work):
@@ -268,18 +296,26 @@ async def write_in_thread(label: str, work):
     """
     import uuid
 
+    from app import runtime
+
     key = f"{_BACKGROUND}{label}:{uuid.uuid4()}"
     _in_flight[key] = datetime.now(timezone.utc)
     try:
         if await _paused_now():
             logger.info("Background %s write skipped: storage writes are paused", label)
             raise StorageWritesPaused(STORAGE_PAUSED)
-        thread = asyncio.ensure_future(asyncio.to_thread(work))
     except BaseException:
         _in_flight.pop(key, None)
         raise
-    thread.add_done_callback(lambda _done: _in_flight.pop(key, None))
-    return await asyncio.shield(thread)
+
+    async def tracked():
+        try:
+            return await asyncio.to_thread(work)
+        finally:
+            _in_flight.pop(key, None)
+
+    # Owned and not cancellable: cancelling the caller stops the wait, not the thread's work.
+    return await runtime.shielded(tracked(), role="storage-background-write")
 
 
 async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
@@ -318,6 +354,13 @@ async def outstanding_writers(session: AsyncSession) -> list[OutstandingWriter]:
             writers.append(OutstandingWriter(upload_id, None, None, label, started, "background"))
         else:
             writers.append(OutstandingWriter(upload_id, None, None, "", started, "proxied"))
+    # Storage calls still running after the request or task that made them stopped waiting: a
+    # cancelled upload or background write keeps changing storage until its thread returns.
+    from app.adapters.storage import workers
+
+    for n, worker in enumerate(workers.running()):
+        if worker.operation_id is None and worker.claim not in _in_flight:
+            writers.append(OutstandingWriter(f"worker:{n}", None, None, worker.label, worker.started_at, "background"))
     return writers
 
 

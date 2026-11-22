@@ -10,8 +10,9 @@ issued before this release settle after their expiry plus one hour, then by the 
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from urllib.parse import urlparse
 
 import pytest
@@ -20,6 +21,7 @@ from sqlalchemy import select, text
 
 from app.adapters.models import UploadSessionGrant, UploadSessionState, UploadSessionStatus
 from app.models.file import File
+from app.adapters.storage.s3 import S3StorageProvider
 from app.models.upload_checkpoint import UploadCheckpoint
 from app.services import storage_write_admission
 from app.services.upload_service import UploadService
@@ -682,3 +684,67 @@ async def test_an_upload_stopped_for_no_progress_says_it_timed_out(client, admin
     await _reconcile()
     [row] = (await client.get("/api/files/uploads/pending", headers=_auth(admin_token))).json()["uploads"]
     assert (row["upload_id"], row["state"], row["reason"]) == (upload_id, "stopping", "timed_out")
+
+
+@pytest.mark.asyncio
+async def test_s3_assembly_is_not_repeated_when_its_confirmation_was_lost(client, session, admin_user, admin_token):
+    """A completed S3 upload ID no longer exists: a retried completion checks the upload's actual
+    state instead of asking S3 to assemble it again."""
+    from botocore.exceptions import ClientError, EndpointConnectionError
+    from app.services.file_verification_service import FileVerificationService
+
+    class S3:
+        completed = False
+        head_calls = 0
+
+        def complete_multipart_upload(self, **kw):
+            if self.completed:
+                raise ClientError({"Error": {"Code": "NoSuchUpload"}}, "CompleteMultipartUpload")
+            self.completed = True
+            return {}
+
+        def list_parts(self, **kw):
+            assert self.completed
+            raise ClientError({"Error": {"Code": "NoSuchUpload"}}, "ListParts")
+
+        def head_object(self, **kw):
+            self.head_calls += 1
+            if self.head_calls == 1:
+                raise EndpointConnectionError(endpoint_url="https://s3.example")
+            return {"ContentLength": 4, "ETag": '"etag-1"'}
+
+    upload_id = str(uuid.uuid4())
+    session.add(
+        UploadCheckpoint(
+            id=upload_id,
+            organization_id=admin_user.organization_id,
+            user_id=admin_user.id,
+            kind="session",
+            stage="issued",
+            filename="review.txt",
+            reference="UPL-REVIEW",
+            source_uri=f"s3://review-ingest/uploads/{upload_id}/review.txt",
+            expected_size=4,
+            session_protocol="s3_multipart",
+            session_handle="upload-1",
+        )
+    )
+    await session.commit()
+    adapter = S3StorageProvider.__new__(S3StorageProvider)
+    cloud = S3()
+    body = {"upload_id": upload_id, "parts": [{"number": 1, "etag": '"part-1"'}]}
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch.object(S3StorageProvider, "is_local", property(lambda self: False)),
+        patch.object(adapter, "_get_credentials", AsyncMock(return_value=None)),
+        patch.object(adapter, "_get_s3_client", return_value=cloud),
+        patch.object(FileVerificationService, "begin", AsyncMock()),
+        patch("app.services.upload_service.enrich_from_header", AsyncMock()),
+    ):
+        first = await client.post("/api/files/upload/complete", json=body, headers=headers)
+        assert first.status_code == 409 and first.json()["code"] == "upload_not_finished", first.text
+        again = await client.post("/api/files/upload/complete", json=body, headers=headers)
+    assert again.status_code == 200, (
+        f"The browser's confirmation retry failed even though S3 stored the file: {again.text}"
+    )

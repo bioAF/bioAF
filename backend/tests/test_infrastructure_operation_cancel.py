@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,6 +19,10 @@ from sqlalchemy import select, text
 from app.exceptions import StateError
 from app.models.infrastructure_operation import InfrastructureOperation
 from app.services import infrastructure_operations as ops
+from app.adapters.storage.gcs import GcsStorageProvider
+from app.platform.platform_config_service import PlatformConfigService
+from app.services import storage_write_admission as admission
+from tests.support.blocking import BlockingCall
 from app.services.terraform_stream import INTERRUPTED_EVENT, TerraformProgressEvent
 
 
@@ -309,3 +314,70 @@ async def test_request_scoped_work_cancelled_before_it_starts_does_not_run(sessi
     assert ran == []
     session.expire_all()
     assert (await _op(session, op_id)).status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_destroy_keeps_exclusion_while_delete_thread_is_still_running(session, admin_user):
+    from app.services import stack_deployment as stack
+    from app.services.storage_identity import StoreHealth, StoreReport
+
+    user_id, org_id = admin_user.id, admin_user.organization_id
+    for key, value in {
+        "compute_deployed": "false",
+        "storage_deployed": "true",
+        "raw_bucket_name": "review-raw",
+    }.items():
+        await PlatformConfigService.set(session, key, value)
+    await session.commit()
+    adapter = GcsStorageProvider.__new__(GcsStorageProvider)
+    call = BlockingCall()
+    operation_id, _ = await ops.accept(action="storage_destroy", principal=ops.Principal(user_id))
+
+    async def body(handle):
+        return await ops.drive_stack(handle, lambda s: stack.destroy_storage(s, user_id, org_id=org_id))
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch.object(GcsStorageProvider, "is_local", property(lambda self: False)),
+        patch.object(
+            adapter,
+            "list_objects",
+            AsyncMock(
+                return_value=[
+                    SimpleNamespace(storage_uri="gs://review-raw/a", provider_details={"generation": 1}),
+                ]
+            ),
+        ),
+        patch.object(adapter, "_get_credentials", AsyncMock(return_value=None)),
+        patch.object(adapter, "_gcs_delete", side_effect=call),
+        patch(
+            "app.services.storage_identity.inspect_bucket",
+            AsyncMock(return_value=StoreReport("raw", "review-raw", StoreHealth.AVAILABLE)),
+        ),
+        patch.object(admission, "drain", AsyncMock(return_value=[])),
+    ):
+        task = asyncio.create_task(ops.run_operation(operation_id, body))
+        try:
+            await call.wait_until_started()
+            await ops.request_cancel(session, operation_id, user_id)
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not call.finished.is_set()
+            session.expire_all()
+            operation = await session.get(InfrastructureOperation, operation_id)
+            assert operation.exclusive_slot == 1, (
+                f"Destroy was marked {operation.status} and released exclusion while its delete call was still running"
+            )
+            # Recovery is refused while the call runs; once it stops, the outcome is recorded.
+            with pytest.raises(StateError):
+                await ops.recover(session, operation_id, user_id, reason="checked")
+            await session.rollback()
+        finally:
+            await call.stop()
+        for _ in range(50):
+            session.expire_all()
+            operation = await session.get(InfrastructureOperation, operation_id)
+            if operation.exclusive_slot is None:
+                break
+            await asyncio.sleep(0.05)
+        assert (operation.status, operation.exclusive_slot) == ("cancelled", None)

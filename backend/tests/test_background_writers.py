@@ -8,12 +8,17 @@ counts as a writer, so destroy waits for it.
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services import storage_write_admission as admission
+from tests.support.blocking import BlockingCall
+from app import database
+from app.adapters.storage.gcs import GcsStorageProvider
 
 
 async def _pause(session):
@@ -190,3 +195,75 @@ async def test_a_request_arriving_after_the_pause_is_refused_and_not_left_regist
         async with admission.admitted(session):
             pass
     assert await admission.outstanding_writers(session) == []
+
+
+# ---------------------------------------------------------------------------
+# a storage call outlives a cancelled awaiter (third review round)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxied_upload_remains_a_writer_until_its_sdk_thread_stops(session, admin_user):
+    from app.services.upload_service import UploadService
+
+    user_id, org_id = admin_user.id, admin_user.organization_id
+    adapter = GcsStorageProvider.__new__(GcsStorageProvider)
+    call = BlockingCall()
+
+    async def request():
+        async with database.async_session_factory() as request_session:
+            await UploadService.simple_upload(
+                request_session,
+                org_id,
+                user_id,
+                "a.fastq.gz",
+                io.BytesIO(b"data"),
+                size_bytes=4,
+            )
+
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch("app.services.storage_write_admission.require_store_usable", AsyncMock()),
+        patch.object(GcsStorageProvider, "is_local", property(lambda self: False)),
+        patch.object(adapter, "resolve_uri", AsyncMock(return_value="gs://review-ingest/uploads/review/a.fastq.gz")),
+        patch.object(adapter, "_get_credentials", AsyncMock(return_value=None)),
+        patch.object(adapter, "_gcs_upload_file", side_effect=call),
+    ):
+        task = asyncio.create_task(request())
+        try:
+            await call.wait_until_started()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not call.finished.is_set()
+            remaining = await admission.outstanding_writers(session)
+            assert remaining, "A cancelled upload lost every writer claim while its provider call was still running"
+        finally:
+            await call.stop()
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_remains_a_writer_until_its_sdk_thread_stops(session):
+    from app.services.thumbnail_service import ThumbnailService
+
+    adapter = GcsStorageProvider.__new__(GcsStorageProvider)
+    call = BlockingCall()
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=adapter),
+        patch.object(GcsStorageProvider, "is_local", property(lambda self: False)),
+        patch.object(adapter, "read_bytes", AsyncMock(return_value=b"pdf")),
+        patch.object(ThumbnailService, "render_pdf_thumbnail", return_value=b"png"),
+        patch.object(adapter, "_get_credentials", AsyncMock(return_value=None)),
+        patch.object(adapter, "_gcs_write_bytes", side_effect=call),
+    ):
+        task = asyncio.create_task(ThumbnailService.generate_and_upload(session, "gs://review-results/a.pdf", 1))
+        try:
+            await call.wait_until_started()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not call.finished.is_set()
+            remaining = await admission.outstanding_writers(session)
+            assert remaining, "Thumbnail writer disappeared while its storage SDK call was still running"
+        finally:
+            await call.stop()

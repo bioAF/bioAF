@@ -43,6 +43,8 @@ from app.adapters.models import (
     StoredObject,
 )
 
+from app.adapters.storage import workers as storage_workers  # noqa: E402
+
 logger = logging.getLogger("bioaf.adapters.storage.gcs")
 
 LOCAL_DATA_ROOT = os.environ.get("BIOAF_LOCAL_DATA_ROOT", "/tmp/bioaf-data")
@@ -436,7 +438,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_write_bytes, uri, data, content_type, creds)
+        await storage_workers.run("storage write", self._gcs_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(
         self,
@@ -451,7 +453,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_file, uri, file_obj, content_type, creds, metadata)
+        await storage_workers.run("storage upload", self._gcs_upload_file, uri, file_obj, content_type, creds, metadata)
 
     async def upload_filename(
         self,
@@ -466,7 +468,9 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_filename, uri, local_path, content_type, creds, metadata)
+        await storage_workers.run(
+            "storage upload", self._gcs_upload_filename, uri, local_path, content_type, creds, metadata
+        )
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -488,7 +492,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_delete, uri, generation, creds)
+        await storage_workers.run("storage delete", self._gcs_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
@@ -519,7 +523,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_copy, source_uri, dest_uri, creds)
+        await storage_workers.run("storage copy", self._gcs_copy, source_uri, dest_uri, creds)
         return dest_uri
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
@@ -527,7 +531,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_move, source_uri, dest_uri, creds)
+        await storage_workers.run("storage move", self._gcs_move, source_uri, dest_uri, creds)
         return dest_uri
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
@@ -1067,7 +1071,7 @@ class GcsStorageProvider(StorageProvider):
         OrphanedResourceService._cleanup_gcs_bucket (Phase 9 / Stage 3b.5).
         """
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_delete_bucket, bucket_name, creds)
+        await storage_workers.run("bucket delete", self._gcs_delete_bucket, bucket_name, creds)
 
     def _gcs_delete_bucket(self, bucket_name: str, creds) -> None:
         client = self._get_gcs_client(creds)

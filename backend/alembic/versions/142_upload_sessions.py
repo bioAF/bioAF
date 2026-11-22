@@ -31,6 +31,7 @@ def upgrade() -> None:
     op.add_column("upload_checkpoints", sa.Column("session_handle", sa.Text, nullable=True))
     op.add_column("upload_checkpoints", sa.Column("progress_bytes", sa.BigInteger, nullable=True))
     op.add_column("upload_checkpoints", sa.Column("progress_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("upload_checkpoints", sa.Column("assembly_requested_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("upload_checkpoints", sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column(
         "upload_checkpoints",
@@ -76,6 +77,7 @@ def downgrade() -> None:
         "reconcile_attempts",
         "cancel_requested_by_user_id",
         "cancel_requested_at",
+        "assembly_requested_at",
         "progress_at",
         "progress_bytes",
         "session_handle",
