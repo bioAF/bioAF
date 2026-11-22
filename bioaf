@@ -238,10 +238,18 @@ ensure_cloud_logging() {
     esac
 
     if [ ! -x "$OPS_AGENT_ENGINE" ] && ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+        local had_config=false
+        sudo test -e "$OPS_AGENT_CONFIG" && had_config=true
         bold "Installing Google Cloud Ops Agent..."
         curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
         sudo bash add-google-cloud-ops-agent-repo.sh --also-install
         rm -f add-google-cloud-ops-agent-repo.sh
+        # The package writes its own default config. bioAF installed the agent just now, so a config
+        # that was not there before is the package's, not the operator's: keep it aside and install
+        # bioAF's. An operator's config that predates the install is still never replaced.
+        if [ "$had_config" = false ] && sudo test -e "$OPS_AGENT_CONFIG"; then
+            sudo mv "$OPS_AGENT_CONFIG" "$OPS_AGENT_CONFIG.package-default"
+        fi
     fi
 
     local status=0

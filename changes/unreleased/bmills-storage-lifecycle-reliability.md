@@ -99,3 +99,9 @@
   completed; upload those files again.
 - Upload links issued before this release count as running uploads until an hour after they expire; then
   bioAF files any upload that arrived, and lists the rest for an administrator to release.
+
+### Installation
+
+- Setup on a new Google Cloud VM no longer stops at "Configure Cloud Logging": the Ops Agent's own default
+  config, written when setup installs the agent, is kept aside as `config.yaml.package-default` and
+  replaced by bioAF's. A config that existed before setup installed the agent is still left unchanged.

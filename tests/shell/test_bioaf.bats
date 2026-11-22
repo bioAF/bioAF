@@ -825,6 +825,41 @@ HARNESS
     grep -q '^systemctl is-active --quiet google-cloud-ops-agent-fluent-bit$' "$tmp/log"
 }
 
+@test "a fresh GCE host where setup installs the agent replaces the package's default config" {
+    # The agent package writes its own default config.yaml. bioAF installed the agent in this run, so
+    # that file is the package's, not the operator's: it is kept aside and the parser config installed.
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cat > "$tmp/bin/curl" <<STUB
+#!/bin/sh
+echo "curl \$*" >> "\$FAKE_LOG"
+cat > add-google-cloud-ops-agent-repo.sh <<'INSTALL'
+cp '$tmp/engine' '$tmp/installed-engine'
+printf 'logging:\\n  receivers:\\n    syslog: {type: files, include_paths: [/var/log/messages, /var/log/syslog]}\\n' > '$tmp/etc/config.yaml'
+INSTALL
+STUB
+    chmod +x "$tmp/bin/curl"
+    run env FAKE_LOG="$tmp/log" bash -c "cd '$tmp' && source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/installed-engine'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    head -1 "$tmp/etc/config.yaml" | grep -q '^# bioaf-managed: ops-agent-config/v2 sha256='
+    grep -q 'syslog' "$tmp/etc/config.yaml.package-default"
+    grep -q '^systemctl restart google-cloud-ops-agent$' "$tmp/log"
+}
+
+@test "an operator's config that existed before setup installed the agent is still kept" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'logging:\n  receivers:\n    mine: {type: files, include_paths: [/x/CUSTOM-MARKER]}\n' > "$tmp/etc/config.yaml"
+    cp "$tmp/etc/config.yaml" "$tmp/before"
+    cat > "$tmp/bin/curl" <<STUB
+#!/bin/sh
+echo "cp '$tmp/engine' '$tmp/installed-engine'" > add-google-cloud-ops-agent-repo.sh
+STUB
+    chmod +x "$tmp/bin/curl"
+    run env FAKE_LOG="$tmp/log" bash -c "cd '$tmp' && source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/installed-engine'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+    [ ! -e "$tmp/etc/config.yaml.package-default" ]
+}
+
 @test "an existing install's legacy config is migrated to the parser config" {
     tmp="$(mktemp -d)"; cloud_env "$tmp"
     cp "$LEGACY_OPS_CONFIG" "$tmp/etc/config.yaml"
