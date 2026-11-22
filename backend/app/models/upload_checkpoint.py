@@ -20,7 +20,8 @@ upload waits for Retry now or Cancel upload (mockup M12). ``reference`` is shown
 repeated in the server log.
 
 ``session_handle`` is the provider session (a GCS resumable session URL, which is a bearer
-credential, or an S3 multipart upload ID): never logged or returned in a listing.
+credential, or an S3 multipart upload ID): encrypted at rest (ADR-047), never logged or returned in a
+listing.
 ``reconcile_attempts`` / ``next_reconcile_at`` drive background settlement with the provider;
 ``released_*`` records an administrator's audited release of a writer whose outcome bioAF could
 not confirm.
@@ -45,6 +46,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.types import EncryptedString
 
 
 class UploadCheckpoint(Base):
@@ -75,7 +77,7 @@ class UploadCheckpoint(Base):
     grant_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     purpose: Mapped[str] = mapped_column(String(24), nullable=False, server_default=text("'file'"))
     session_protocol: Mapped[str | None] = mapped_column(String(24), nullable=True)
-    session_handle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_handle: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     progress_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # When bioAF first asked the provider to assemble an S3 multipart upload: a later completion
