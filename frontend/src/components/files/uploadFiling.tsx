@@ -109,9 +109,13 @@ export function useUploadFiling<T extends FilingItem>(
   itemsRef.current = items;
   const [cancelling, setCancelling] = useState<number | null>(null);
 
-  const patch = (idx: number, values: Partial<FilingItem>) =>
+  // Responses are applied by upload ID, never by position: rows can be removed while a request
+  // waits, and a response for a removed row changes nothing.
+  const patch = (uploadId: string, values: Partial<FilingItem>) =>
     setItems((prev) =>
-      prev.map((item, i) => (i === idx ? ({ ...item, ...values } as T) : item)),
+      prev.map((item) =>
+        item.uploadId === uploadId ? ({ ...item, ...values } as T) : item,
+      ),
     );
 
   useEffect(() => {
@@ -162,20 +166,21 @@ export function useUploadFiling<T extends FilingItem>(
 
   const retryNow = async (idx: number) => {
     const item = items[idx];
-    if (!item.uploadId) return;
+    const uploadId = item?.uploadId;
+    if (!uploadId) return;
     try {
       const result = await api.post<FileResponse | ReceivedNotFiled>(
-        `/api/files/uploads/${item.uploadId}/retry`,
+        `/api/files/uploads/${uploadId}/retry`,
         {},
       );
       if (receivedNotFiled(result)) {
-        patch(idx, { message: result.detail });
+        patch(uploadId, { message: result.detail });
       } else {
-        patch(idx, { status: "complete", message: undefined });
+        patch(uploadId, { status: "complete", message: undefined });
         onFiledRef.current();
       }
     } catch (err) {
-      patch(idx, {
+      patch(uploadId, {
         message:
           err instanceof Error ? err.message : exhaustedMessage(item.reference),
       });
@@ -185,12 +190,13 @@ export function useUploadFiling<T extends FilingItem>(
   const cancelUpload = async (idx: number) => {
     const item = items[idx];
     setCancelling(null);
-    if (!item.uploadId) return;
+    const uploadId = item?.uploadId;
+    if (!uploadId) return;
     try {
-      await api.post(`/api/files/uploads/${item.uploadId}/cancel`, {});
-      patch(idx, { status: "cancelled", message: undefined });
+      await api.post(`/api/files/uploads/${uploadId}/cancel`, {});
+      patch(uploadId, { status: "cancelled", message: undefined });
     } catch (err) {
-      patch(idx, {
+      patch(uploadId, {
         message:
           err instanceof Error
             ? err.message

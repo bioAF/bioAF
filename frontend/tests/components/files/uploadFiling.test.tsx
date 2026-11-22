@@ -102,3 +102,82 @@ test("an unreadable outcome keeps what is shown", async () => {
   await poll();
   expect(items()[0].status).toBe("pending");
 });
+
+describe("a response is applied to the upload it was for, after earlier rows are removed", () => {
+  const mockPost = api.post as jest.Mock;
+  const rows = (): (FilingItem & { name: string })[] => [
+    { name: "A", status: "complete" },
+    {
+      name: "B",
+      status: "needs_attention",
+      uploadId: "u-b",
+      reference: "UPL-B",
+    },
+    {
+      name: "C",
+      status: "needs_attention",
+      uploadId: "u-c",
+      reference: "UPL-C",
+    },
+  ];
+
+  function setup() {
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState(rows());
+      const filing = useUploadFiling(items, setItems, () => {});
+      return { items, setItems, filing };
+    });
+    return result;
+  }
+
+  test.each([
+    [
+      "retry",
+      (f: ReturnType<typeof setup>) => f.current.filing.retryNow(1),
+      "complete",
+    ],
+    [
+      "cancel",
+      (f: ReturnType<typeof setup>) => f.current.filing.cancelUpload(1),
+      "cancelled",
+    ],
+  ])("%s", async (_name, act_, expected) => {
+    let resolve!: (v: unknown) => void;
+    mockPost.mockReturnValue(new Promise((r) => (resolve = r)));
+    const result = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = act_(result);
+    });
+    act(() => result.current.setItems((prev) => prev.slice(1)));
+    await act(async () => {
+      resolve({ id: 1 });
+      await pending;
+    });
+    const byName = Object.fromEntries(
+      result.current.items.map((i) => [i.name, i.status]),
+    );
+    expect(byName).toEqual({ B: expected, C: "needs_attention" });
+  });
+
+  test("a response for a removed row changes nothing", async () => {
+    let resolve!: (v: unknown) => void;
+    mockPost.mockReturnValue(new Promise((r) => (resolve = r)));
+    const result = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.filing.retryNow(1);
+    });
+    act(() =>
+      result.current.setItems((prev) => prev.filter((i) => i.name !== "B")),
+    );
+    await act(async () => {
+      resolve({ id: 1 });
+      await pending;
+    });
+    expect(result.current.items.map((i) => [i.name, i.status])).toEqual([
+      ["A", "complete"],
+      ["C", "needs_attention"],
+    ]);
+  });
+});
