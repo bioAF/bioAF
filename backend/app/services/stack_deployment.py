@@ -1203,8 +1203,7 @@ async def destroy_storage(
     unconfirmed = [n for n, r in reports.items() if r.health is StoreHealth.NOT_CONFIRMED]
     if foreign:
         yield _stopped(
-            f"A bucket with this name exists but belongs to another installation: {foreign[0]}. "
-            "bioAF will not use, empty, or delete it. Nothing was changed.",
+            f"{foreign[0]} does not match bioAF's records. bioAF will not change or delete it. Nothing was changed.",
             category="wrong_owner",
         )
         return

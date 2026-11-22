@@ -403,7 +403,7 @@ async def latest_reports(session: AsyncSession) -> list[StoreReport]:
 async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], *, reason: str) -> list[StoreReport]:
     """Record an administrator's acknowledgment of the observed buckets as this installation's.
 
-    Refused for a bucket that is not observed, or that bioAF knows belongs to another installation.
+    Refused for a bucket that is not observed, or that does not match bioAF's records.
     The caller commits.
     """
     reason = (reason or "").strip()
@@ -421,7 +421,7 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
         seen = await adapter.inspect_container(adapter.build_uri(bucket_name, ""))
         report = await _classify(session, store, bucket_name, seen)
         if report.health is StoreHealth.WRONG_OWNER:
-            raise StateError(f"{bucket_name} belongs to another installation, so it cannot be confirmed.")
+            raise StateError(f"{bucket_name} does not match bioAF's records, so it cannot be confirmed.")
         if seen.presence is not ContainerPresence.PRESENT:
             raise StateError(f"{bucket_name} could not be observed, so it cannot be confirmed.")
         if seen.owner is None:

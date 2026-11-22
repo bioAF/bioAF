@@ -143,7 +143,7 @@ def _set_mirror(value: bool) -> None:
 async def require_store_usable(session: AsyncSession, store: str) -> None:
     """Refuse an upload before anything is written or signed when its store is known unusable.
 
-    Only definite answers refuse (missing, refused, another installation's, not mounted). A store
+    Only definite answers refuse (missing, refused, not matching bioAF's records, not mounted). A store
     that is not confirmed, cannot be checked or did not answer keeps accepting uploads: the
     transfer itself then reports any failure.
     """

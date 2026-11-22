@@ -74,7 +74,7 @@ Retrying an action through the API with the same `Idempotency-Key` header return
 ### Storage Health and Bucket Confirmation
 
 The **Storage** section of Components shows each bucket's state (Available, Not found, No access, Not
-responding, Not confirmed, Belongs to another installation, Not mounted, Cannot check). Checking is
+responding, Not confirmed, Does not match bioAF's records, Not mounted, Cannot check). Checking is
 read-only: bioAF never creates or recreates a bucket from a check. A missing bucket is created again only by
 **Check for Infrastructure Updates**.
 
@@ -85,16 +85,16 @@ Cloud, the bucket's creation time. On an installation deployed before this relea
 missing; uploads, downloads, pipelines and the Plot Archive keep working, but Destroy Storage and automatic
 repairs are unavailable until an administrator uses **Review and confirm buckets**, which records an
 audited baseline as of that day. On AWS, run **Check for Infrastructure Updates** first so the buckets carry
-bioAF's marker (ownership alone cannot tell a bucket from one recreated later). A bucket bioAF knows
-belongs to another installation, or whose marker differs from the one recorded, is never used, emptied or
-deleted, and cannot be confirmed. While a confirmed bucket has been replaced by another with the same name,
+bioAF's marker (ownership alone cannot tell a bucket from one recreated later). A bucket that does not
+match bioAF's records (a different owner, a different marker, or a different bucket under the same name)
+is never used, emptied or deleted, and cannot be confirmed. While a confirmed bucket has been replaced by another with the same name,
 or cannot be checked, storage deploys, **Check for Infrastructure Updates** and storage destroys are
 refused, so an update never gives the replacement the confirmed bucket's marker.
 
 ### Uploads and Destroy Storage
 
 Every upload is recorded before any byte is sent, and refused before anything is sent while its storage is
-missing, refused or another installation's. Direct uploads from the browser go to a provider upload session
+missing, refused or does not match bioAF's records. Direct uploads from the browser go to a provider upload session
 (a Google Cloud Storage resumable session or an S3 multipart upload) that bioAF can check and cancel.
 
 If the bytes arrive but filing them into their experiment fails, the uploader sees "Received, not yet
@@ -134,7 +134,7 @@ Files are marked as deleted as each object is confirmed deleted.
 
 ### Plot Archive Health
 
-When the results storage is missing, refused or known to belong to another installation, the Plot Archive
+When the results storage is missing, refused or known not to match bioAF's records, the Plot Archive
 says new plots are not being added (a readable bucket that is only waiting for confirmation keeps supplying
 plots) and bioAF checks the storage every 30 minutes instead of every minute; a temporary failure is
 retried with increasing waits up to 30 minutes. Administrators can **Check again**. Existing plots are not

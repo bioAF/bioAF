@@ -350,7 +350,7 @@ async def test_enrollment_is_refused_for_a_known_mismatch(session):
     user_id = await _seed_user(session)
     await _config(session, raw_bucket_name=RAW)
     with _patched(FakeAdapter({RAW: _present(owner="other-account")})):
-        with pytest.raises(StateError, match="another installation"):
+        with pytest.raises(StateError, match="does not match bioAF.s records"):
             await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
 
 
@@ -537,7 +537,7 @@ async def test_a_bucket_of_another_account_still_cannot_be_confirmed(session):
     user_id = await _seed_user(session)
     await _config(session, raw_bucket_name=RAW)
     with _patched(FakeAdapter({RAW: _aws(owner="other-account")})):
-        with pytest.raises(StateError, match="another installation"):
+        with pytest.raises(StateError, match="does not match bioAF.s records"):
             await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
 
 

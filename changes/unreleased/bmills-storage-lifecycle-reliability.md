@@ -5,6 +5,8 @@
   runs, every administrator's conflicting controls are unavailable and a banner names it; administrators
   open the same live status from the banner on any page. A second request is refused and told which action
   started first, instead of overlapping it.
+- A status window states each explanation once: a step's detail that the outcome repeats is shown only in the
+  outcome.
 - Each status window shows its own action's steps and outcome. A failure before Terraform starts (for
   example while emptying a bucket) is reported as that action's failure, never as an earlier run's success.
 - **Check for Infrastructure Updates** now asks for confirmation first, then plans and applies additive
@@ -36,8 +38,11 @@
   storage deployment reuses the same names.
 - Components shows each bucket's health (Available, Not found, No access, and so on) with **Check again**.
   Checking never creates a bucket.
+- A bucket whose owner, identity marker or creation time differs from bioAF's records is shown as **Does not
+  match bioAF's records**, whether it belongs to another project or was recreated in this one, and bioAF will
+  not change or delete it.
 - A confirmed bucket that went missing and that bioAF recreated (with its identity marker, during a
-  recorded storage change) is trusted again instead of being reported as another installation's.
+  recorded storage change) is trusted again instead of being reported as not matching bioAF's records.
 - A bucket missing or refused outside bioAF no longer stops the other buckets' details from loading on
   Components.
 - bioAF no longer takes bucket names from Terraform state alone.
@@ -73,7 +78,7 @@
 
 ### Plot Archive
 
-- When the results storage is missing, unreadable, or known to belong to another installation, the Plot
+- When the results storage is missing, unreadable, or known not to match bioAF's records, the Plot
   Archive says new plots are not being added, and bioAF checks the storage every 30 minutes instead of
   every minute. A readable results bucket that is only waiting for confirmation keeps supplying new plots.
 

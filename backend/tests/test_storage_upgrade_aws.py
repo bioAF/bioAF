@@ -181,7 +181,7 @@ async def test_another_accounts_bucket_with_the_same_name_is_a_known_mismatch(se
     cloud, user_id = aws
     cloud.add(RAW, owner="999999999999", tags={"managed_by": "bioaf", "storage_uid": "abc123"})
     assert (await _raw(session)).health is StoreHealth.WRONG_OWNER
-    with pytest.raises(StateError, match="another installation"):
+    with pytest.raises(StateError, match="does not match bioAF.s records"):
         await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
 
 

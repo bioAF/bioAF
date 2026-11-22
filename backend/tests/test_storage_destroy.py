@@ -194,6 +194,9 @@ async def test_another_installations_bucket_is_never_touched(session, deployed):
     with _health({RAW: [StoreHealth.WRONG_OWNER], RESULTS: [StoreHealth.AVAILABLE]}):
         events, calls = await _run(session, deployed)
     assert events[-1].extra["category"] == "wrong_owner"
+    assert events[-1].message == (
+        f"{RAW} does not match bioAF's records. bioAF will not change or delete it. Nothing was changed."
+    )
     assert calls == {"empty": [], "terraform": 0}
 
 
