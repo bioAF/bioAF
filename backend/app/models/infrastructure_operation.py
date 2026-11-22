@@ -92,6 +92,13 @@ class InfrastructureOperation(Base):
             "'interrupted', 'recovery_required')",
             name="ck_infrastructure_operations_status",
         ),
-        Index("ix_infrastructure_operations_idempotency", "principal", "idempotency_key"),
+        # One operation per principal and key: overlapping retries cannot both be accepted.
+        Index(
+            "uq_infrastructure_operations_idempotency",
+            "principal",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         Index("ix_infrastructure_operations_accepted_at", "accepted_at"),
     )

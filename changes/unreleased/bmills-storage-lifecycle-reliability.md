@@ -24,7 +24,8 @@
   image build still running in the cloud keeps other actions unavailable until its provider reports it
   finished.
 - An infrastructure update whose plan for a change fails is reported as failed, not up to date.
-- Retried API requests with the same `Idempotency-Key` return the same operation.
+- Retried API requests with the same `Idempotency-Key` return the same operation, including requests that
+  overlap or arrive after the first one finished; a key reused for different inputs is refused (422).
 
 ### Storage
 
@@ -68,6 +69,8 @@
 - While storage confirms the last bytes of an upload, the uploader shows **Confirming upload** instead of
   an error.
 - Uploads with a declared checksum are verified against it even when bioAF finds them finished on its own.
+- Upload session links (bearer credentials for one upload) are encrypted in the database and re-encrypted by
+  key rotation; links stored before this release are encrypted by the update.
 - An upload waiting to be filed is shown as done only once it is filed. If it is cancelled elsewhere (for
   example from **Files**) the uploader shows it as cancelled, and if filing fails for good it shows an error
   asking for the file to be uploaded again.

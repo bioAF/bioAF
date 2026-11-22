@@ -301,45 +301,82 @@ async def accept(
         if not idempotency_key or len(idempotency_key) > 255:
             raise ValidationError("Idempotency-Key must be 1-255 characters.")
     request_fingerprint = fingerprint(action, inputs)
-    async with _session_factory()() as session:
-        if idempotency_key:
-            prior = (
-                await session.execute(
-                    select(InfrastructureOperation)
-                    .where(
-                        InfrastructureOperation.principal == principal.key,
-                        InfrastructureOperation.idempotency_key == idempotency_key,
-                    )
-                    .order_by(InfrastructureOperation.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if prior is not None and (prior.exclusive_slot == 1 or prior.accepted_at >= _now() - IDEMPOTENCY_WINDOW):
-                if prior.request_fingerprint != request_fingerprint:
-                    raise IdempotencyKeyReusedError("This Idempotency-Key was already used for a different request.")
-                return prior.id, True
+    # A second pass runs only when the insert lost to an overlapping request with the same key: the
+    # unique principal/key index decided the winner, which this request then replays.
+    for _ in range(2):
+        async with _session_factory()() as session:
+            if idempotency_key:
+                replay = await _replay(session, principal, idempotency_key, request_fingerprint)
+                if replay is not None:
+                    return replay, True
+            op = InfrastructureOperation(
+                action=action,
+                status="accepted",
+                exclusive_slot=1,
+                started_by_user_id=principal.user_id,
+                started_by_api_key_id=principal.api_key_id,
+                principal=principal.key,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                inputs=inputs,
+                deployment_generation=generation,
+                steps=[{"key": "accepted", "label": "Accepted", "state": "done"}],
+            )
+            session.add(op)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                if idempotency_key and await _key_taken(session, principal, idempotency_key):
+                    continue
+                raise await _busy_error(session, action) from None
+            logger.info("Accepted infrastructure operation %s (%s)", op.id, action)
+            return op.id, False
+    raise await _busy_error_fresh(action)
 
-        op = InfrastructureOperation(
-            action=action,
-            status="accepted",
-            exclusive_slot=1,
-            started_by_user_id=principal.user_id,
-            started_by_api_key_id=principal.api_key_id,
-            principal=principal.key,
-            idempotency_key=idempotency_key,
-            request_fingerprint=request_fingerprint,
-            inputs=inputs,
-            deployment_generation=generation,
-            steps=[{"key": "accepted", "label": "Accepted", "state": "done"}],
+
+async def _key_taken(session: AsyncSession, principal: Principal, idempotency_key: str) -> bool:
+    return (
+        await session.scalar(
+            select(InfrastructureOperation.id).where(
+                InfrastructureOperation.principal == principal.key,
+                InfrastructureOperation.idempotency_key == idempotency_key,
+            )
         )
-        session.add(op)
-        try:
-            await session.commit()
-        except IntegrityError:
-            await session.rollback()
-            raise await _busy_error(session, action) from None
-        logger.info("Accepted infrastructure operation %s (%s)", op.id, action)
-        return op.id, False
+    ) is not None
+
+
+async def _replay(
+    session: AsyncSession, principal: Principal, idempotency_key: str, request_fingerprint: str
+) -> int | None:
+    """The operation this key already started, if it still answers for the key; else None.
+
+    An operation keeps answering while it holds exclusion or within the replay window. Past that the
+    key is released from it (the operation keeps its history) so the key can start a new operation.
+    Raises IdempotencyKeyReusedError when the key started a different request.
+    """
+    prior = (
+        await session.execute(
+            select(InfrastructureOperation).where(
+                InfrastructureOperation.principal == principal.key,
+                InfrastructureOperation.idempotency_key == idempotency_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if prior is None:
+        return None
+    if prior.exclusive_slot == 1 or prior.accepted_at >= _now() - IDEMPOTENCY_WINDOW:
+        if prior.request_fingerprint != request_fingerprint:
+            raise IdempotencyKeyReusedError("This Idempotency-Key was already used for a different request.")
+        return prior.id
+    prior.idempotency_key = None
+    await session.flush()
+    return None
+
+
+async def _busy_error_fresh(action: str) -> InfrastructureBusyError:
+    async with _session_factory()() as session:
+        return await _busy_error(session, action)
 
 
 async def ensure_admitted(session: AsyncSession, requested: str = "terraform_apply") -> None:

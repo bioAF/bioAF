@@ -646,3 +646,99 @@ class _NoLockCloud:
 
 def test_now_helper_is_timezone_aware():
     assert ops._now().tzinfo is not None and ops._now() <= datetime.now(timezone.utc) + timedelta(seconds=1)
+
+
+# ---------------------------------------------------------------------------
+# idempotency under overlapping requests (D2)
+#
+# Requests with the same key can both find no earlier operation before either commits. The database
+# holds one operation per principal and key, so the loser replays the winner's operation (or is told
+# the key was used for different inputs) instead of being refused as busy or starting a second one.
+# ---------------------------------------------------------------------------
+
+
+def _hold_inserts_until_both_looked_up(monkeypatch, *, delay_second_until=None):
+    """Hold each operation insert at commit until both requests reach it (after their lookups)."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.infrastructure_operation import InfrastructureOperation
+
+    original = AsyncSession.commit
+    both = asyncio.Event()
+    arrivals = 0
+
+    async def commit(current):
+        nonlocal arrivals
+        if any(isinstance(row, InfrastructureOperation) for row in current.new):
+            arrivals += 1
+            ordinal = arrivals
+            if arrivals == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), timeout=5)
+            if ordinal == 2 and delay_second_until is not None:
+                await asyncio.wait_for(delay_second_until.wait(), timeout=5)
+        await original(current)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_inputs", [False, True])
+async def test_overlapping_requests_with_one_key_keep_idempotency(session, monkeypatch, changed_inputs):
+    user_id = await _seed_user(session)
+    principal = ops.Principal(user_id)
+    _hold_inserts_until_both_looked_up(monkeypatch)
+    results = await asyncio.gather(
+        ops.accept(action="compute_deploy", principal=principal, idempotency_key="race", inputs={"r": "x"}),
+        ops.accept(
+            action="compute_deploy",
+            principal=principal,
+            idempotency_key="race",
+            inputs={"r": "y" if changed_inputs else "x"},
+        ),
+        return_exceptions=True,
+    )
+    accepted = [r for r in results if isinstance(r, tuple)]
+    if changed_inputs:
+        assert len(accepted) == 1, results
+        assert [type(r) for r in results if isinstance(r, Exception)] == [ops.IdempotencyKeyReusedError], results
+    else:
+        assert len(accepted) == 2 and accepted[0][0] == accepted[1][0], results
+        assert sorted(replayed for _, replayed in accepted) == [False, True], results
+
+
+@pytest.mark.asyncio
+async def test_a_delayed_duplicate_replays_the_finished_operation_instead_of_starting_again(session, monkeypatch):
+    user_id = await _seed_user(session)
+    principal = ops.Principal(user_id)
+    first_finished = asyncio.Event()
+    _hold_inserts_until_both_looked_up(monkeypatch, delay_second_until=first_finished)
+
+    async def request():
+        result = await ops.accept(
+            action="compute_deploy", principal=principal, idempotency_key="late", inputs={"r": "x"}
+        )
+        if not first_finished.is_set():
+            await ops.finish(result[0], ops.OperationResult("succeeded", "Completed"))
+            first_finished.set()
+        return result
+
+    results = await asyncio.gather(request(), request())
+    assert results[0][0] == results[1][0], results
+    assert sorted(replayed for _, replayed in results) == [False, True], results
+
+
+@pytest.mark.asyncio
+async def test_a_key_reused_after_the_window_starts_a_new_operation(session):
+    user_id = await _seed_user(session)
+    principal = ops.Principal(user_id)
+    first, _ = await ops.accept(action="compute_deploy", principal=principal, idempotency_key="reused")
+    await ops.finish(first, ops.OperationResult("succeeded", "Completed"))
+    await session.execute(
+        text("UPDATE infrastructure_operations SET accepted_at = now() - interval '3 days' WHERE id = :i").bindparams(
+            i=first
+        )
+    )
+    await session.commit()
+    again, replayed = await ops.accept(action="compute_deploy", principal=principal, idempotency_key="reused")
+    assert again != first and replayed is False
