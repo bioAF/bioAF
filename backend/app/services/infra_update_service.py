@@ -220,6 +220,11 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
     realigned = None
     if "storage" in modules:
         realigned = await realign_storage_naming(session)
+        # An approved update gives existing buckets bioAF's identity markers when they have none.
+        # After realigning: an install may have its storage generation recorded only just now.
+        from app.services.storage_generation import ensure_markers
+
+        await ensure_markers(session, origin="update")
         # Persist current storage bucket names from live state so platform_config
         # reflects what is actually deployed. This self-heals an instance whose
         # bucket (e.g. literature) exists but whose name was never recorded, so
@@ -566,15 +571,12 @@ async def run_update_check(handle, user_id: int):
     async with async_session_factory() as s:  # type: ignore[misc]
         # The definitions this update reconciles, captured before anything runs (M17).
         captured = await definitions.capture(s)
-        # An approved update gives existing buckets bioAF's identity markers when they have none,
-        # never a confirmed bucket's marker to a bucket that replaced it.
-        from app.services.storage_generation import ensure_markers
+        # Never give a confirmed bucket's marker to a bucket that replaced it.
         from app.services.storage_identity import require_confirmed_buckets_unchanged
 
         if await PlatformConfigService.get(s, "storage_deployed") not in _UNSET_MARKERS:
             await require_confirmed_buckets_unchanged(s)
             await s.commit()
-        await ensure_markers(s, origin="update")
         result = await check_for_updates(s, user_id)
         await s.commit()
     await handle.step("plan", state="done")
