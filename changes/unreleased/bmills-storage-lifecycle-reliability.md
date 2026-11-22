@@ -9,7 +9,8 @@
   example while emptying a bucket) is reported as that action's failure, never as an earlier run's success.
 - **Check for Infrastructure Updates** now asks for confirmation first, then plans and applies additive
   changes automatically with no second approval. Changes that would delete or replace an existing resource
-  are listed and never applied. An update stops at the first real failure.
+  are listed and never applied. An update stops at the first real failure. A finished update says
+  "Infrastructure updated." instead of a count, which called changes to existing resources "added".
 - Any administrator with infrastructure configure can **Cancel** a running action from its status window.
   bioAF stops at the next safe point and never undoes finished work. This replaces **Abort deployment**.
   Cancelling a notebook image build is now reported only once the build provider confirms it. A

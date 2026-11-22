@@ -347,11 +347,12 @@ def _out_of_scope(plan_json: dict | None, allowed: set[str]) -> list[str]:
     return offending
 
 
-def update_summary(added: int) -> str:
-    """The finished-update line signed off in mockup M1."""
-    if added == 0:
+def update_summary(applied: int) -> str:
+    """The finished-update line (mockup M1). An applied target may add a resource or change an
+    existing one, so the line states no count."""
+    if applied == 0:
         return "Your infrastructure is up to date."
-    return f"Updates applied: {added} resource{'s' if added != 1 else ''} added."
+    return "Infrastructure updated."
 
 
 async def apply_modules_sequentially(modules: list[str], user_id: int, handle=None):
@@ -371,7 +372,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
     if async_session_factory is None:  # pragma: no cover - app not initialized
         return failed("The application is not ready.", "not_ready")
 
-    added = 0
+    applied_count = 0
     for module in modules:
         label = f"Applying {module} changes"
         if handle is not None:
@@ -391,7 +392,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                 if handle is not None:
                     await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
                 return failed(
-                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", added=added
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", applied=applied_count
                 )
             except asyncio.CancelledError:
                 await s.rollback()
@@ -402,7 +403,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                 if handle is not None:
                     await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
                 return failed(
-                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", added=added
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", applied=applied_count
                 )
         if handle is not None:
             await handle.step(f"plan:{module}", state="done")
@@ -424,7 +425,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                     f"Applying {target} would also delete or replace an existing resource, so it was not applied. "
                     "Nothing else was applied.",
                     "scope_exceeded",
-                    added=added,
+                    applied=applied_count,
                     failed_target=target,
                     out_of_scope=exc.offending,
                 )
@@ -434,7 +435,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                 return failed(
                     f"Planning {module} changes failed. Nothing else was applied.",
                     "plan_failed",
-                    added=added,
+                    applied=applied_count,
                     failed_target=target,
                 )
             except TargetApplyFailed:
@@ -443,11 +444,11 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                 return failed(
                     f"Applying {module} changes failed. Nothing else was applied.",
                     "apply_failed",
-                    added=added,
+                    applied=applied_count,
                     failed_target=target,
                 )
             applied_any = applied or applied_any
-            added += 1 if applied else 0
+            applied_count += 1 if applied else 0
             if handle is not None:
                 await handle.step(f"apply:{module}", completed=index, total=len(targets))
 
@@ -463,7 +464,7 @@ async def apply_modules_sequentially(modules: list[str], user_id: int, handle=No
                     await s.rollback()
         if handle is not None:
             await handle.step(f"apply:{module}", state="done")
-    return succeeded(update_summary(added), added=added)
+    return succeeded(update_summary(applied_count), applied=applied_count)
 
 
 async def _apply_one_target(module: str, target: str, user_id: int, allowed: set[str] | None = None) -> bool:
@@ -543,10 +544,10 @@ async def _apply_one_target(module: str, target: str, user_id: int, allowed: set
             raise TargetApplyFailed(module, target) from exc
 
 
-def check_summary(added: int, destructive: list[dict]) -> str:
+def check_summary(applied: int, destructive: list[dict]) -> str:
     """The finished-update line signed off in mockup M1."""
     skipped = len(destructive)
-    parts = [] if added == 0 and skipped else [update_summary(added)]
+    parts = [] if applied == 0 and skipped else [update_summary(applied)]
     if skipped:
         parts.append(
             f"{skipped} change{' was' if skipped == 1 else 's were'} not applied because "
@@ -584,7 +585,7 @@ async def run_update_check(handle, user_id: int):
         {k: r.get(k) for k in ("address", "type", "action", "description", "stateful")}
         for r in result["destructive_resources"]
     ]
-    added = 0
+    applied_count = 0
     if result["has_additive"]:
         applied = await apply_modules_sequentially(result["modules_with_additive"], user_id, handle)
         if applied.status != "succeeded":
@@ -594,7 +595,7 @@ async def run_update_check(handle, user_id: int):
                 applied.category,
                 {**(applied.partial_effects or {}), "destructive": destructive},
             )
-        added = (applied.partial_effects or {}).get("added", 0)
+        applied_count = (applied.partial_effects or {}).get("applied", 0)
     # Every planned module is now reconciled: its additive changes applied, and any remaining
     # delete/replace changes recorded as pending rather than marked current.
     async with async_session_factory() as s:  # type: ignore[misc]
@@ -608,7 +609,7 @@ async def run_update_check(handle, user_id: int):
             )
         await definitions.refresh_notice(s)
         await s.commit()
-    return succeeded(check_summary(added, destructive), added=added, destructive=destructive)
+    return succeeded(check_summary(applied_count, destructive), applied=applied_count, destructive=destructive)
 
 
 def launch_update_check(user_id: int, *, operation_id: int) -> None:

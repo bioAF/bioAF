@@ -449,3 +449,13 @@ async def test_an_install_without_a_recorded_generation_still_gets_markers_on_it
 
     assert seen["storage"] is not None
     assert set(seen["storage"]) == {"ingest", "raw", "working", "results", "references", "literature", "config_backups"}
+
+
+def test_the_finished_line_never_counts_changes_as_additions():
+    """An applied target may change an existing resource, so the line states no count (owner)."""
+    assert infra_update_service.update_summary(0) == "Your infrastructure is up to date."
+    assert infra_update_service.update_summary(8) == "Infrastructure updated."
+    assert infra_update_service.check_summary(7, []) == "Infrastructure updated."
+    assert infra_update_service.check_summary(0, [{"address": "x"}]) == (
+        "1 change was not applied because it would delete or replace an existing resource."
+    )

@@ -36,7 +36,7 @@ function operation(extra: Record<string, unknown> = {}) {
     accepted_at: "2026-11-21T14:00:00Z",
     steps: [],
     message: "Your infrastructure is up to date.",
-    partial_effects: { added: 0, destructive: [] },
+    partial_effects: { applied: 0, destructive: [] },
     ...extra,
   };
 }
@@ -79,7 +79,7 @@ test("asks for confirmation before anything runs", async () => {
 
 test("confirming starts one operation and shows its outcome", async () => {
   checkUpdates.mockResolvedValue({ message: "Infrastructure update started", operation_id: 70 });
-  mockGet.mockResolvedValue(operation({ message: "Updates applied: 1 resource added.", partial_effects: { added: 1 } }));
+  mockGet.mockResolvedValue(operation({ message: "Infrastructure updated.", partial_effects: { applied: 1 } }));
   const onApplyStarted = jest.fn();
   render(<InfraUpdatesCard onApplyStarted={onApplyStarted} />);
 
@@ -89,7 +89,7 @@ test("confirming starts one operation and shows its outcome", async () => {
 
   await waitFor(() => expect(checkUpdates).toHaveBeenCalledWith(expect.any(String)));
   expect(onApplyStarted).toHaveBeenCalled();
-  expect(await screen.findByText("Updates applied: 1 resource added.")).toBeInTheDocument();
+  expect(await screen.findByText("Infrastructure updated.")).toBeInTheDocument();
   expect(mockGet).toHaveBeenCalledWith("/api/v1/infrastructure/operations/70", expect.anything());
 });
 
@@ -100,7 +100,7 @@ test("a skipped delete/replace is listed with the existing red list", async () =
       id: 71,
       message: "1 change was not applied because it would delete or replace an existing resource.",
       partial_effects: {
-        added: 0,
+        applied: 0,
         destructive: [
           {
             address: "module.storage.google_storage_bucket.raw",

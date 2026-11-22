@@ -35,7 +35,7 @@ async def test_a_failed_target_stops_later_targets_and_modules(session, admin_us
     result = await infra_update_service.apply_modules_sequentially(["compute", "storage"], admin_user.id)
 
     assert result.status == "failed"
-    assert result.partial_effects == {"added": 0, "failed_target": FIRST["address"]}
+    assert result.partial_effects == {"applied": 0, "failed_target": FIRST["address"]}
     # compute planned once to enumerate and once for the failed target; SECOND and storage never start.
     assert planned == ["compute", "compute"]
     applied = (
@@ -59,7 +59,7 @@ async def test_a_benign_noop_does_not_stop_the_batch(session, admin_user, monkey
     result = await infra_update_service.apply_modules_sequentially(["compute"], admin_user.id)
 
     assert result.status == "succeeded"
-    assert result.message == "Updates applied: 1 resource added."
+    assert result.message == "Infrastructure updated."
 
 
 @pytest.mark.asyncio
@@ -170,6 +170,6 @@ async def test_a_failed_target_plan_fails_the_update(session, admin_user, monkey
     assert result.status == "failed"
     assert result.category == "plan_failed"
     assert result.message == "Planning storage changes failed. Nothing else was applied."
-    assert result.partial_effects == {"added": 0, "failed_target": STORAGE["address"]}
+    assert result.partial_effects == {"applied": 0, "failed_target": STORAGE["address"]}
     run = (await session.execute(select(TerraformRun).where(TerraformRun.status == "failed"))).scalar_one()
     assert run.status == "failed"

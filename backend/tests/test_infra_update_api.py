@@ -147,7 +147,7 @@ async def test_check_updates_destructive_not_auto_applied(session, admin_user, m
     assert applied == [[LIT["address"]]]
     assert op.status == "succeeded"
     assert op.message == (
-        "Updates applied: 1 resource added. "
+        "Infrastructure updated. "
         "1 change was not applied because it would delete or replace an existing resource."
     )
     destructive = {r["address"]: r for r in op.partial_effects["destructive"]}
