@@ -17,6 +17,7 @@ from sqlalchemy import text
 from app.models.component import TerraformRun
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.terraform_executor import TerraformExecutor
+from tests.support.terraform_cli import terraform_cli
 
 
 def _hook(kind, addr):
@@ -53,7 +54,7 @@ def _terraform(process, outputs=None):
 
     with (
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)),
-        patch("app.services.terraform_executor.subprocess.run", side_effect=run),
+        terraform_cli(side_effect=run),
         patch.object(TerraformExecutor, "_prepare_work_dir", return_value=work_dir),
     ):
         yield work_dir

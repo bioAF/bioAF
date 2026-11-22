@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.qc.cache import write_metrics_cache
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import run_output_directory
 from app.services.qc.multiqc_registry import Roster, read_depth_and_samples, read_general_stats
@@ -713,7 +714,7 @@ async def extract(
             logger.info("No metrics found for run %d from any source", run.id)
             return dict(EMPTY_METRICS)
 
-        await adapter.write_text(cache_uri, json.dumps(metrics, indent=2), content_type="application/json")
+        await write_metrics_cache(adapter, cache_uri, metrics)
         logger.info("Wrote qc_metrics.json cache for run %d", run.id)
 
         return metrics

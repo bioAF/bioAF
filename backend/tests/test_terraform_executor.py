@@ -24,6 +24,7 @@ from app.exceptions import ConflictError, NotFoundError, StateError, ValidationE
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_cloud import GcpTerraformCloud
 from app.services.bootstrap_roles import seed_builtin_roles
+from tests.support.terraform_cli import terraform_cli
 
 
 @contextmanager
@@ -258,7 +259,7 @@ async def test_run_plan_creates_run_record(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(plan_stdout)
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+    with terraform_cli(side_effect=mock_run):
         with _patch_work_dir():
             run = await TerraformExecutor.run_plan(
                 session=session,
@@ -291,7 +292,7 @@ async def test_run_plan_stores_parsed_plan_json(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(2))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+    with terraform_cli(side_effect=mock_run):
         with _patch_work_dir():
             run = await TerraformExecutor.run_plan(
                 session=session,
@@ -323,7 +324,7 @@ async def test_run_apply_yields_progress_events(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run_plan):
+    with terraform_cli(side_effect=mock_run_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(
                 session=session,
@@ -336,7 +337,7 @@ async def test_run_apply_yields_progress_events(session):
 
     events = []
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
+        with terraform_cli(return_value=_mock_subprocess_run("")):
             with _patch_work_dir():
                 async for event in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                     events.append(event)
@@ -363,7 +364,7 @@ async def test_run_apply_updates_resources_completed(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+    with terraform_cli(side_effect=mock_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(
                 session=session,
@@ -375,7 +376,7 @@ async def test_run_apply_updates_resources_completed(session):
     mock_proc = _mock_async_process(apply_stdout)
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
+        with terraform_cli(return_value=_mock_subprocess_run("")):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                     pass
@@ -403,7 +404,7 @@ async def test_run_apply_handles_failure(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+    with terraform_cli(side_effect=mock_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(
                 session=session,
@@ -414,7 +415,7 @@ async def test_run_apply_handles_failure(session):
     mock_proc = _mock_async_process("", returncode=1, stderr="Error: some terraform error")
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
+        with terraform_cli(return_value=_mock_subprocess_run("")):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                     pass
@@ -442,7 +443,7 @@ async def test_run_apply_emits_failure_notification(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+    with terraform_cli(side_effect=mock_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
 
@@ -451,7 +452,7 @@ async def test_run_apply_emits_failure_notification(session):
 
     with patch.object(event_bus, "emit", emit_mock):
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("")):
+            with terraform_cli(return_value=_mock_subprocess_run("")):
                 with _patch_work_dir():
                     async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                         pass
@@ -476,7 +477,7 @@ async def test_run_apply_success_emits_no_failure_notification(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+    with terraform_cli(side_effect=mock_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="compute")
 
@@ -485,7 +486,7 @@ async def test_run_apply_success_emits_no_failure_notification(session):
 
     with patch.object(event_bus, "emit", emit_mock):
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            with patch("app.services.terraform_executor.subprocess.run", return_value=_mock_subprocess_run("{}")):
+            with terraform_cli(return_value=_mock_subprocess_run("{}")):
                 with _patch_work_dir():
                     async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                         pass
@@ -558,7 +559,7 @@ async def test_stale_lock_recovery(session):
         return _mock_subprocess_run(_make_plan_output(1))
 
     # Should not raise - stale run gets cleared
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+    with terraform_cli(side_effect=mock_run):
         with _patch_work_dir():
             run = await TerraformExecutor.run_plan(session=session, user_id=user_id, module_name="foundation")
 
@@ -625,7 +626,7 @@ async def test_bootstrap_creates_state_bucket_key(session):
     mock_proc = _mock_async_process(apply_stdout)
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+        with terraform_cli(side_effect=mock_run):
             with _patch_work_dir():
                 events = []
                 async for event in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id):
@@ -663,7 +664,7 @@ async def test_bootstrap_creates_audit_log_entry(session):
     mock_proc = _mock_async_process(apply_stdout)
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+        with terraform_cli(side_effect=mock_run):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id):
                     pass
@@ -723,7 +724,7 @@ async def test_bootstrap_creates_activity_feed_entry(session):
     mock_proc = _mock_async_process(apply_stdout)
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+        with terraform_cli(side_effect=mock_run):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.bootstrap_foundation(session=session, user_id=user.id, org_id=org.id):
                     pass
@@ -765,7 +766,7 @@ async def test_bootstrap_without_org_id_skips_activity_feed(session):
     mock_proc = _mock_async_process(apply_stdout)
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run):
+        with terraform_cli(side_effect=mock_run):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id):
                     pass
@@ -974,7 +975,7 @@ async def test_run_init_passes_backend_config_bucket():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1002,7 +1003,7 @@ async def test_run_init_local_backend_skips_bucket_config():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1030,7 +1031,7 @@ async def test_run_init_no_bucket_in_config_skips_backend_config():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1057,7 +1058,7 @@ async def test_run_init_passes_prefix_for_module_name():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1085,7 +1086,7 @@ async def test_run_init_no_prefix_without_module_name():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1116,7 +1117,7 @@ async def test_run_init_delegates_backend_args_to_cloud_seam():
         result.stderr = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=_fake_run):
+    with terraform_cli(side_effect=_fake_run):
         await TerraformExecutor._run_init(
             work_dir=Path("/tmp/fake"),
             env={},
@@ -1150,7 +1151,7 @@ async def test_run_apply_inits_workdir_and_applies_without_planfile(session):
             return _mock_subprocess_run(show_stdout)
         return _mock_subprocess_run(_make_plan_output(1))
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_plan):
+    with terraform_cli(side_effect=mock_plan):
         with _patch_work_dir():
             plan_run = await TerraformExecutor.run_plan(
                 session=session,
@@ -1174,7 +1175,7 @@ async def test_run_apply_inits_workdir_and_applies_without_planfile(session):
         return mock_proc
 
     with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
-        with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_init_run):
+        with terraform_cli(side_effect=mock_init_run):
             with _patch_work_dir():
                 async for _ in TerraformExecutor.run_apply(session=session, run_id=plan_run.id, user_id=user_id):
                     pass
@@ -1222,7 +1223,7 @@ async def test_read_module_outputs_returns_parsed_json(session):
             result.stdout = json.dumps(storage_outputs)
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_subprocess_run):
+    with terraform_cli(side_effect=mock_subprocess_run):
         with _patch_work_dir():
             with patch.object(TerraformExecutor, "_write_tfvars"):
                 outputs = await TerraformExecutor.read_module_outputs(session, "storage")
@@ -1247,7 +1248,7 @@ async def test_read_module_outputs_raises_on_failure(session):
             result.stdout = ""
         return result
 
-    with patch("app.services.terraform_executor.subprocess.run", side_effect=mock_subprocess_run):
+    with terraform_cli(side_effect=mock_subprocess_run):
         with _patch_work_dir():
             with patch.object(TerraformExecutor, "_write_tfvars"):
                 with pytest.raises(RuntimeError, match="terraform output failed"):
@@ -1257,6 +1258,19 @@ async def test_read_module_outputs_raises_on_failure(session):
 # ---------------------------------------------------------------------------
 # sync_storage_config
 # ---------------------------------------------------------------------------
+
+
+def _verified_buckets():
+    """Treat every inspected bucket as this installation's (storage lifecycle 11C).
+
+    Sync records an output bucket only when inspection establishes its identity.
+    """
+    from app.services import storage_identity
+
+    async def inspect(session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    return patch("app.services.storage_identity.inspect_bucket", side_effect=inspect)
 
 
 @pytest.mark.asyncio
@@ -1272,7 +1286,7 @@ async def test_sync_storage_config_writes_bucket_names(session):
         "config_backups_bucket_name": {"value": "bioaf-abc123-config-backups"},
     }
 
-    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs), _verified_buckets():
         populated = await sync_storage_config(session)
 
     await session.commit()
@@ -1296,7 +1310,7 @@ async def test_sync_storage_config_skips_empty_outputs(session):
         # Other keys absent -- simulates partial output
     }
 
-    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs):
+    with patch.object(TerraformExecutor, "read_module_outputs", return_value=storage_outputs), _verified_buckets():
         populated = await sync_storage_config(session)
 
     assert list(populated.keys()) == ["ingest_bucket_name"]
@@ -1609,7 +1623,7 @@ async def test_run_plan_passes_bootstrap_sa_email_to_build_env(session):
         return ({"TF_VAR_project_id": config.get("gcp_project_id", "")}, cleanup)
 
     with (
-        patch("app.services.terraform_executor.subprocess.run", side_effect=mock_run),
+        terraform_cli(side_effect=mock_run),
         patch(
             "app.adapters.credentials.credential_injector.GCPCredentialInjector.build_env",
             side_effect=spy_build_env,

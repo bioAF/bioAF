@@ -1,11 +1,14 @@
 import logging
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import ValidationError
+from app.exceptions import DomainError, StateError, UploadFailedError, ValidationError
 from app.models.file import File
+from app.models.upload_checkpoint import UploadCheckpoint
 from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
 from app.services.sequencing_enrichment import enrich_from_header
@@ -15,13 +18,141 @@ from app.services.post_commit_events import defer_event
 
 logger = logging.getLogger("bioaf.upload_service")
 
-# In-memory pending uploads (in production, use Redis or DB table)
-_pending_uploads: dict[str, dict] = {}
+# Presigned upload URLs (issued before upload sessions) were valid this long. Expiry is not proof
+# the upload finished; settlement waits a further hour (see upload_settlement).
+SIGNED_URL_SECONDS = 3600
+# Automatic filing retries after the first failure, then the upload waits for Retry now / Cancel.
+RETRY_DELAYS = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15))
+MAX_AUTOMATIC_ATTEMPTS = len(RETRY_DELAYS)
+# While storage writes are paused, filing waits this long before trying again (not a failed attempt).
+PAUSED_RETRY = timedelta(minutes=5)
 
 # One reading of the Illumina convention, shared with the sample-sheet builder.
 # These names are re-exported because callers already import them from here.
 ILLUMINA_PATTERN = sequencing_identity.ILLUMINA_PATTERN
 READ_TYPES = sequencing_identity.READ_TYPES
+
+
+# What the caller is told when an upload fails unexpectedly. The transfer
+# message promises nothing was saved: no file record exists yet at that stage.
+_TRANSFER_FAILED = "Upload failed because storage did not respond. Nothing was saved. Try again. Reference {ref}."
+_UPLOAD_FAILED = "Upload failed. Try again. Reference {ref}."
+
+
+class UploadReceivedNotFiled(DomainError):
+    """The bytes are stored but filing them failed; they stay tracked and filing is retried.
+
+    Answered as 202 Accepted with the upload's reference (mockup M12), never the raw error.
+    """
+
+    status_code = 202
+    code = "upload_received_not_filed"
+
+
+def _reference() -> str:
+    return f"UPL-{secrets.token_hex(3).upper()}"
+
+
+def _session_factory():
+    from app import database
+
+    return database.async_session_factory
+
+
+# First key of the per-upload filing lock (pg_advisory_xact_lock(namespace, hashtext(upload_id))).
+_FILING_LOCK_NAMESPACE = 11_0006
+
+
+async def _new_checkpoint(**fields) -> str:
+    """Record an upload in its own committed transaction, before any byte may arrive."""
+    fields.setdefault("reference", _reference())
+    async with _session_factory()() as s:
+        s.add(UploadCheckpoint(**fields))
+        await s.commit()
+    return fields["id"]
+
+
+async def _update_checkpoint(upload_id: str, **fields) -> None:
+    """Update an upload's checkpoint in its own committed transaction."""
+    from sqlalchemy import update
+
+    async with _session_factory()() as s:
+        await s.execute(update(UploadCheckpoint).where(UploadCheckpoint.id == upload_id).values(**fields))
+        await s.commit()
+
+
+async def _load_checkpoint(session: AsyncSession, org_id: int, upload_id: str) -> UploadCheckpoint | None:
+    checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+    if checkpoint is None or checkpoint.organization_id != org_id:
+        return None
+    return checkpoint
+
+
+async def lock_upload(session: AsyncSession, upload_id: str) -> None:
+    """Serialize completion, filing, cancellation and reconciliation of one upload.
+
+    Held until the caller's transaction ends. An advisory lock rather than a row lock, so the
+    holder can still record progress and failures on the checkpoint in separate transactions.
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, hashtext(:id))").bindparams(ns=_FILING_LOCK_NAMESPACE, id=upload_id)
+    )
+
+
+class UploadNotFinished(DomainError):
+    """Completion was reported before the provider has the whole object."""
+
+    status_code = 409
+    code = "upload_not_finished"
+
+
+async def _record_filing_failure(upload_id: str, exc: BaseException) -> int:
+    """Count a failed filing attempt and schedule the next automatic one; return the attempt count."""
+    async with _session_factory()() as s:
+        checkpoint = await s.get(UploadCheckpoint, upload_id, with_for_update=True)
+        if checkpoint is None:
+            return 0
+        checkpoint.attempts = (checkpoint.attempts or 0) + 1
+        due = checkpoint.attempts <= MAX_AUTOMATIC_ATTEMPTS
+        checkpoint.next_attempt_at = datetime.now(timezone.utc) + RETRY_DELAYS[checkpoint.attempts - 1] if due else None
+        checkpoint.last_error_category = "filing_failed"
+        attempts = checkpoint.attempts
+        reference = checkpoint.reference
+        await s.commit()
+    # Only the reference, the attempt and the error type: storage errors can carry URLs.
+    logger.error(
+        "Upload received but not filed (reference=%s, attempt=%d, error_type=%s)",
+        reference,
+        attempts,
+        type(exc).__name__,
+    )
+    return attempts
+
+
+def _pending_message(reference: str, attempts: int, experiment: str | None = None) -> str:
+    """The uploader's message for received bytes that are not filed yet (mockup M12)."""
+    target = experiment or "its experiment"
+    if attempts <= MAX_AUTOMATIC_ATTEMPTS:
+        return (
+            f"Received, not yet filed. Your file is stored safely but could not be added to {target} yet. "
+            f"bioAF will try again automatically. Reference {reference}."
+        )
+    return (
+        "Could not be filed. Your file is still stored. Retry now, or cancel the upload to remove it. "
+        f"Reference {reference}."
+    )
+
+
+def upload_failure(stage: str, exc: BaseException) -> UploadFailedError:
+    """Log an unexpected upload failure safely and return the error to raise.
+
+    Only the stage and the error's type are logged: storage SDK messages can
+    contain bucket URLs, signed URLs or credentials.
+    """
+    reference = f"UPL-{secrets.token_hex(3).upper()}"
+    logger.error("Upload failed (reference=%s, stage=%s, error_type=%s)", reference, stage, type(exc).__name__)
+    message = _TRANSFER_FAILED if stage == "transfer" else _UPLOAD_FAILED
+    return UploadFailedError(message.format(ref=reference), details={"reference": reference})
 
 
 class UploadService:
@@ -77,7 +208,17 @@ class UploadService:
         return name
 
     @staticmethod
-    async def initiate_upload(
+    async def initiate_upload(session: AsyncSession, *args, **kwargs) -> dict:
+        """Initiate a direct upload as an admitted storage writer (see ``_initiate_admitted``).
+
+        Registered before the pause is read, so it is either refused or waited for by destroy."""
+        from app.services.storage_write_admission import admitted
+
+        async with admitted(session):
+            return await UploadService._initiate_admitted(session, *args, **kwargs)
+
+    @staticmethod
+    async def _initiate_admitted(
         session: AsyncSession,
         org_id: int,
         user_id: int,
@@ -89,14 +230,19 @@ class UploadService:
         project_id: int | None = None,
         is_global: bool = False,
         external_id: str | None = None,
+        origin: str | None = None,
     ) -> dict:
-        """Initiate an upload, returning upload_id and signed URL.
+        """Initiate an upload, returning upload_id and the provider session the browser sends to.
 
-        ``external_id`` (optional) is stored with the pending upload and used at completion; completion
-        cannot substitute another. An identifier already used by a file of this organization is refused
-        now (and again by the unique index at completion, for a race)."""
+        The upload's checkpoint is recorded before the session exists, so the upload is tracked
+        from the moment bytes may arrive, and survives a restart. The session is one bioAF can
+        inspect and cancel with the provider (GCS resumable session or S3 multipart upload). ``external_id`` (optional) is
+        recorded with it and used at completion; completion cannot substitute another. An
+        identifier already used by a file of this organization is refused now (and again by the
+        unique index at completion, for a race)."""
         from app.exceptions import ConflictError
         from app.services.file_service import validate_external_id
+        from app.services.storage_write_admission import require_store_usable
 
         external_id = validate_external_id(external_id)
         await verify_association_targets(
@@ -110,36 +256,95 @@ class UploadService:
                 raise ConflictError("external_id_already_exists", plain_body=True)
         upload_id = str(uuid.uuid4())
         bucket_name = await UploadService._get_ingest_bucket(session)
+        await require_store_usable(session, "ingest")
         gcs_path = f"uploads/{upload_id}/{filename}"
 
-        # Generate signed PUT URL via the storage adapter
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
         gcs_uri = adapter.build_uri(bucket_name, gcs_path)
-        signed_url = await adapter.generate_signed_url(
-            gcs_uri, method="PUT", expiry_seconds=3600, content_type="application/octet-stream"
+        await _new_checkpoint(
+            id=upload_id,
+            organization_id=org_id,
+            user_id=user_id,
+            kind="session",
+            stage="issued",
+            filename=filename,
+            source_uri=gcs_uri,
+            expected_size=expected_size,
+            expected_md5=expected_md5,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            sample_ids=sample_ids or [],
+            is_global=is_global,
+            external_id=external_id,
+            progress_at=datetime.now(timezone.utc),
         )
+        try:
+            grant = await adapter.begin_upload_session(
+                gcs_uri, content_type="application/octet-stream", size_bytes=expected_size, origin=origin
+            )
+        except Exception:
+            # No session exists, so nothing can arrive: the upload settles as not sent.
+            await _update_checkpoint(upload_id, stage="failed", last_error_category="signing_failed")
+            raise
+        from app.services.upload_settlement import first_check
 
-        _pending_uploads[upload_id] = {
-            "org_id": org_id,
-            "user_id": user_id,
-            "filename": filename,
-            "gcs_uri": gcs_uri,
-            "expected_size": expected_size,
-            "expected_md5": expected_md5,
-            "project_id": project_id,
-            "experiment_id": experiment_id,
-            "sample_ids": sample_ids or [],
-            "is_global": is_global,
-            "external_id": external_id,
-        }
-
+        await _update_checkpoint(
+            upload_id,
+            session_protocol=grant.protocol,
+            session_handle=grant.handle,
+            next_reconcile_at=first_check(),
+        )
         return {
             "upload_id": upload_id,
-            "signed_url": signed_url,
+            # A GCS session also accepts one whole-file PUT, as the presigned URL did.
+            "signed_url": grant.url,
             "gcs_uri": gcs_uri,
+            "upload": {"protocol": grant.protocol, "url": grant.url, "part_size": grant.part_size},
         }
+
+    @staticmethod
+    async def sign_parts(session: AsyncSession, org_id: int, upload_id: str, part_numbers: list[int]) -> dict[int, str]:
+        """Signed URLs for parts of an issued S3 multipart session."""
+        from app.adapters.registry import get_storage_adapter
+
+        checkpoint = await _load_checkpoint(session, org_id, upload_id)
+        if checkpoint is None or checkpoint.kind != "session" or checkpoint.stage != "issued":
+            raise StateError("Only an upload that is still being sent can get part links.")
+        if checkpoint.session_protocol != "s3_multipart" or not checkpoint.session_handle:
+            raise StateError("This upload is not sent in parts.")
+        return await get_storage_adapter().sign_upload_parts(
+            checkpoint.source_uri, checkpoint.session_handle, part_numbers
+        )
+
+    @staticmethod
+    async def _assemble_once(adapter, upload_id: str, checkpoint: UploadCheckpoint, parts):
+        """Assemble an S3 multipart upload, never twice: a completed upload ID no longer exists, so
+        once assembly was requested, the upload's actual state is checked before asking again.
+        Returns the provider's status afterwards."""
+        from app.adapters.models import UploadSessionState
+
+        uri, handle = checkpoint.source_uri, checkpoint.session_handle
+        if checkpoint.assembly_requested_at is not None:
+            status = await adapter.inspect_upload_session(uri, handle)
+            if status.state is not UploadSessionState.ACTIVE:
+                # Completed (proceed), ended (refused below) or no answer (the caller checks again).
+                if status.state is UploadSessionState.ENDED:
+                    raise ValidationError("Invalid or expired upload_id")
+                return status
+        if not parts:
+            raise ValidationError("The uploaded parts are required to complete this upload.")
+        await _update_checkpoint(upload_id, assembly_requested_at=datetime.now(timezone.utc))
+        try:
+            await adapter.finish_upload_session(uri, handle, parts)
+        except Exception:
+            # The answer may be lost after the provider assembled it: decide from its actual state.
+            status = await adapter.inspect_upload_session(uri, handle)
+            if status.state in (UploadSessionState.COMPLETED, UploadSessionState.UNKNOWN):
+                return status
+            raise
+        return await adapter.inspect_upload_session(uri, handle)
 
     @staticmethod
     def _data_uploaded_event(
@@ -176,53 +381,264 @@ class UploadService:
         org_id: int,
         upload_id: str,
         actual_md5: str,
+        parts=None,
     ) -> File:
-        """Complete an upload: verify MD5, create file record, link to experiment/samples."""
+        """Complete a direct upload: assemble it (S3 parts), confirm the provider has the whole
+        object, verify the MD5 assertion, then file the received bytes.
+
+        A repeated completion of a filed upload returns its File. A cancelled upload is never
+        filed. If filing fails the bytes stay tracked and UploadReceivedNotFiled is raised (bioAF
+        retries automatically)."""
+        from app.adapters.models import UploadSessionState
+        from app.adapters.registry import get_storage_adapter
+        from app.services.file_verification_service import agreed_upload_md5
+
+        await lock_upload(session, upload_id)
+        checkpoint = await _load_checkpoint(session, org_id, upload_id)
+        if checkpoint is None or checkpoint.stage in ("cancelling", "cancelled", "failed", "transferring"):
+            raise ValidationError("Invalid or expired upload_id")
+        if checkpoint.stage == "filed" and checkpoint.file_id is not None:
+            existing = await FileService.get_file(session, checkpoint.file_id, org_id)
+            if existing is not None:
+                return existing
+        # Both MD5s are client assertions: they must agree, and the agreed value is then verified
+        # independently against the stored bytes. Neither is recorded as an observed checksum.
+        asserted_md5 = agreed_upload_md5(checkpoint.expected_md5, actual_md5)
+        if checkpoint.stage == "issued" and checkpoint.kind == "session":
+            adapter = get_storage_adapter()
+            uri, handle = checkpoint.source_uri, checkpoint.session_handle
+            if checkpoint.session_protocol == "s3_multipart":
+                status = await UploadService._assemble_once(adapter, upload_id, checkpoint, parts)
+            else:
+                status = await adapter.inspect_upload_session(uri, handle)
+            if status.state is not UploadSessionState.COMPLETED:
+                raise UploadNotFinished("The upload has not finished sending. Try again in a moment.")
+        if checkpoint.stage == "issued":
+            await _update_checkpoint(upload_id, stage="received", asserted_md5=asserted_md5, next_reconcile_at=None)
+        return await UploadService._file_or_wait(session, upload_id)
+
+    @staticmethod
+    async def simple_upload(session: AsyncSession, *args, **kwargs) -> File:
+        """A proxied upload as an admitted storage writer (see ``_simple_admitted``)."""
+        from app.services.storage_write_admission import admitted
+
+        async with admitted(session):
+            return await UploadService._simple_admitted(session, *args, **kwargs)
+
+    @staticmethod
+    async def _simple_admitted(
+        session: AsyncSession,
+        org_id: int,
+        user_id: int,
+        filename: str,
+        file_obj,
+        size_bytes: int | None = None,
+        file_type: str | None = None,
+        project_id: int | None = None,
+        experiment_id: int | None = None,
+        sample_ids: list[int] | None = None,
+        is_global: bool = False,
+        external_id: str | None = None,
+    ) -> File:
+        """Stream a file directly to storage without buffering the full content, then file it.
+
+        Builds the write URI via the adapter's backend-neutral resolve_uri so the
+        proxied upload path works on any storage backend (GCS, NFS, ...), not just
+        object stores (Phase 7). The checkpoint is recorded before the transfer; a filing failure
+        keeps the received bytes tracked and raises UploadReceivedNotFiled.
+        """
+        from app.services.storage_write_admission import require_store_usable, tracked_transfer
+
+        # Before the storage write (admission already checked the pause): an unusable store or a
+        # refused target leaves no object and no record.
+        await verify_association_targets(
+            session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
+        )
+        await require_store_usable(session, "ingest")
+        upload_id = str(uuid.uuid4())
+        gcs_path = f"uploads/{upload_id}/{filename}"
+
+        from app.adapters.models import StorageStore
+        from app.adapters.registry import get_storage_adapter
+
+        adapter = get_storage_adapter()
+        try:
+            gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
+        except DomainError:
+            raise
+        except Exception as exc:
+            raise upload_failure("transfer", exc) from None
+
+        await _new_checkpoint(
+            id=upload_id,
+            organization_id=org_id,
+            user_id=user_id,
+            kind="proxied",
+            stage="transferring",
+            filename=filename,
+            source_uri=gcs_uri,
+            expected_size=size_bytes,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            sample_ids=sample_ids or [],
+            is_global=is_global,
+            external_id=external_id,
+        )
+        async with tracked_transfer(upload_id):
+            try:
+                await adapter.upload_file(gcs_uri, file_obj)
+            except DomainError:
+                await _update_checkpoint(upload_id, stage="failed", last_error_category="transfer_refused")
+                raise
+            except Exception as exc:
+                await _update_checkpoint(upload_id, stage="failed", last_error_category="transfer_failed")
+                raise upload_failure("transfer", exc) from None
+            await _update_checkpoint(upload_id, stage="received", received_size=size_bytes)
+
+        return await UploadService._file_or_wait(session, upload_id, file_type=file_type)
+
+    # ------------------------------------------------------------------
+    # Filing: one path for completion, automatic retry and Retry now
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _file_or_wait(session: AsyncSession, upload_id: str, *, file_type: str | None = None) -> File:
+        """File received bytes now, or, while writes are paused, keep them for the automatic retry
+        (answered as received but not yet filed, like any deferred filing)."""
+        from app.services.storage_write_admission import StorageWritesPaused
+
+        try:
+            return await UploadService._file_or_defer(session, upload_id, file_type=file_type)
+        except StorageWritesPaused:
+            checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+            await _update_checkpoint(upload_id, next_attempt_at=datetime.now(timezone.utc) + PAUSED_RETRY)
+            experiment = None
+            if checkpoint.experiment_id is not None:
+                from app.models.experiment import Experiment
+
+                experiment = await session.scalar(
+                    select(Experiment.name).where(Experiment.id == checkpoint.experiment_id)
+                )
+            raise UploadReceivedNotFiled(
+                _pending_message(checkpoint.reference, checkpoint.attempts, experiment),
+                details={
+                    "upload_id": upload_id,
+                    "reference": checkpoint.reference,
+                    "experiment_id": checkpoint.experiment_id,
+                },
+            ) from None
+
+    @staticmethod
+    async def _file_or_defer(session: AsyncSession, upload_id: str, *, file_type: str | None = None) -> File:
+        """File a received upload on the caller's session, or record the failure and defer.
+
+        The filing runs in a savepoint: a failure leaves the caller's session usable and no File,
+        link or event behind, while the checkpoint (committed separately) keeps the bytes tracked.
+        Domain errors (a target that no longer exists or is not permitted) propagate unchanged.
+        """
+        checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+        if checkpoint is None:
+            raise ValidationError("Invalid or expired upload_id")
+        # Read before the attempt: a failed savepoint expires the object.
+        reference, experiment_id = checkpoint.reference, checkpoint.experiment_id
+        # Completion, Retry now and the automatic retry may overlap: they take turns on a lock held
+        # until the caller's transaction ends, and a later attempt then sees the filed checkpoint
+        # and returns its File. An advisory lock, not a row lock, so the attempt can still record
+        # its planned destination and a failure in separate transactions.
+        await lock_upload(session, upload_id)
+        checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
+        if checkpoint is None or checkpoint.stage not in ("received", "filed"):
+            raise StateError("Only a received upload that has not been filed can be filed.")
+        from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused, admitted
+
+        try:
+            # Filing moves bytes between stores: an admitted writer, refused while writes are paused.
+            async with admitted(session, error=StorageWritesPaused, message=STORAGE_PAUSED):
+                async with session.begin_nested():
+                    return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type)
+        except DomainError:
+            raise
+        except Exception as exc:
+            attempts = await _record_filing_failure(upload_id, exc)
+            experiment = None
+            if experiment_id is not None:
+                from app.models.experiment import Experiment
+
+                experiment = await session.scalar(select(Experiment.name).where(Experiment.id == experiment_id))
+            raise UploadReceivedNotFiled(
+                _pending_message(reference, attempts, experiment),
+                details={"upload_id": upload_id, "reference": reference, "experiment_id": experiment_id},
+            ) from None
+
+    @staticmethod
+    async def _file_checkpoint(
+        session: AsyncSession, checkpoint: UploadCheckpoint, *, file_type: str | None = None
+    ) -> File:
+        """Register the received bytes as a File, link and move them, and start readiness.
+
+        Idempotent across retries: a filed checkpoint returns its File, and bytes a previous attempt
+        already moved are found at their planned destination, never copied twice.
+        """
+        from app.adapters.registry import get_storage_adapter
         from app.services.file_verification_service import Expectation, FileVerificationService, agreed_upload_md5
 
-        pending = _pending_uploads.pop(upload_id, None)
-        if not pending or pending["org_id"] != org_id:
-            raise ValidationError("Invalid or expired upload_id")
-        # Checked at initiation; checked again because the targets may have changed since.
+        org_id = checkpoint.organization_id
+        if checkpoint.stage == "filed" and checkpoint.file_id is not None:
+            existing = await FileService.get_file(session, checkpoint.file_id, org_id)
+            if existing is not None:
+                return existing
+        # Checked when the upload started; checked again because the targets may have changed since.
         await verify_association_targets(
             session,
             org_id,
-            project_id=pending.get("project_id"),
-            experiment_id=pending.get("experiment_id"),
-            sample_ids=pending.get("sample_ids") or [],
+            project_id=checkpoint.project_id,
+            experiment_id=checkpoint.experiment_id,
+            sample_ids=list(checkpoint.sample_ids or []),
         )
 
-        # Both MD5s are client assertions: they must agree, and the agreed value is then verified
-        # independently against the stored bytes. Neither is recorded as an observed checksum.
-        asserted_md5 = agreed_upload_md5(pending.get("expected_md5"), actual_md5)
+        adapter = get_storage_adapter()
+        storage_uri = checkpoint.source_uri
+        experiment_id = checkpoint.experiment_id
+        if experiment_id:
+            from app.services.file_organization import FileOrganizationService
 
-        # Determine file type from extension
-        filename = pending["filename"]
-        file_type = UploadService._detect_file_type(filename)
+            planned = await FileOrganizationService.planned_location(
+                session, checkpoint.source_uri, experiment_id, checkpoint.filename
+            )
+            if checkpoint.planned_destination != planned:
+                await _update_checkpoint(checkpoint.id, planned_destination=planned)
+                checkpoint.planned_destination = planned
+            if planned != checkpoint.source_uri and not await adapter.exists(checkpoint.source_uri):
+                # An earlier attempt moved the bytes and then failed: adopt them where they are.
+                if not await adapter.exists(planned):
+                    await _update_checkpoint(checkpoint.id, stage="failed", last_error_category="bytes_missing")
+                    raise StateError("The received copy of this upload is no longer stored.")
+                storage_uri = planned
 
-        # Parse Illumina filename for tags
+        filename = checkpoint.filename
+        file_type = file_type or UploadService._detect_file_type(filename)
         illumina_info = UploadService.parse_illumina_filename(filename)
-        tags = []
+        tags: list[str] = []
         if illumina_info:
             tags.append(f"lane:{illumina_info['lane']}")
             tags.append(f"read:{illumina_info['read']}")
             tags.append(f"sample:{illumina_info['sample_name']}")
 
-        # Create file record
+        user_id = checkpoint.user_id
         file = await FileService.create_file_record(
             session,
             org_id=org_id,
-            user_id=pending["user_id"],
+            user_id=user_id,
             filename=filename,
-            storage_uri=pending["gcs_uri"],
-            size_bytes=pending["expected_size"],
+            storage_uri=storage_uri,
+            size_bytes=checkpoint.expected_size if checkpoint.expected_size is not None else checkpoint.received_size,
             md5_checksum=None,
             file_type=file_type,
             tags=tags,
-            project_id=pending.get("project_id"),
-            experiment_id=pending["experiment_id"],
-            is_global=pending.get("is_global", False),
-            external_id=pending.get("external_id"),
+            project_id=checkpoint.project_id,
+            experiment_id=experiment_id,
+            is_global=checkpoint.is_global,
+            external_id=checkpoint.external_id,
         )
 
         # Sequencing identity as typed columns. The tags above are kept for one
@@ -247,16 +663,16 @@ class UploadService:
         # they are and the sheet treats everything unknown as one unit.
         await enrich_from_header(file)
 
-        # Link to samples
-        for sample_id in pending["sample_ids"]:
+        for sample_id in checkpoint.sample_ids or []:
             await FileService.link_file_to_sample(session, file.id, sample_id)
 
         # Move file from ingest to raw bucket under experiment prefix
-        experiment_id = pending["experiment_id"]
         if experiment_id:
             from app.services.file_organization import FileOrganizationService
 
-            await FileOrganizationService.assign_file_to_experiment(session, file.id, experiment_id, pending["user_id"])
+            await FileOrganizationService.assign_file_to_experiment(
+                session, file.id, experiment_id, user_id, commit=False
+            )
 
         # Announce the registration with its final context and links, then start readiness: an
         # asserted MD5 is verified against the stored bytes; without one, existence and size suffice.
@@ -264,16 +680,26 @@ class UploadService:
         await session.flush()
         await session.refresh(file)
         await FileService.finalize_registration(session, file)
+        # The completion's assertion, or (when nobody reported completion and reconciliation found
+        # the upload finished) the checksum declared when the upload started.
+        asserted_md5 = checkpoint.asserted_md5 or agreed_upload_md5(checkpoint.expected_md5, None)
         await FileVerificationService.begin(
             session,
             file,
             Expectation.md5("upload_assertion", asserted_md5) if asserted_md5 else Expectation.none("upload"),
-            expected_size=pending.get("expected_size"),
+            expected_size=checkpoint.expected_size
+            if checkpoint.expected_size is not None
+            else checkpoint.received_size,
         )
 
-        # Auto-update experiment status if FASTQs uploaded
-        if experiment_id and file_type == "fastq":
-            await UploadService._auto_update_experiment_status(session, experiment_id, org_id, pending["user_id"])
+        if experiment_id and file_type == "fastq" and user_id is not None:
+            await UploadService._auto_update_experiment_status(session, experiment_id, org_id, user_id)
+
+        # Filed with the File, in the same transaction: both commit or neither does.
+        checkpoint.stage = "filed"
+        checkpoint.file_id = file.id
+        checkpoint.next_attempt_at = None
+        await session.flush()
 
         # Announced once the caller commits the file; dropped if it never does.
         defer_event(
@@ -281,92 +707,121 @@ class UploadService:
             DATA_UPLOADED,
             UploadService._data_uploaded_event(
                 org_id=org_id,
-                user_id=pending["user_id"],
+                user_id=user_id or 0,
                 file_id=file.id,
                 filename=filename,
                 file_type=file_type,
                 experiment_id=experiment_id,
             ),
         )
-
         return file
 
     @staticmethod
-    async def simple_upload(
-        session: AsyncSession,
-        org_id: int,
-        user_id: int,
-        filename: str,
-        file_obj,
-        size_bytes: int | None = None,
-        file_type: str | None = None,
-        project_id: int | None = None,
-        experiment_id: int | None = None,
-        sample_ids: list[int] | None = None,
-        is_global: bool = False,
-        external_id: str | None = None,
-    ) -> File:
-        """Stream a file directly to storage without buffering the full content.
+    async def retry_upload(session: AsyncSession, org_id: int, upload_id: str) -> File:
+        """Retry filing now (Retry now). Raises UploadReceivedNotFiled if it fails again."""
+        checkpoint = await _load_checkpoint(session, org_id, upload_id)
+        if checkpoint is None:
+            from app.exceptions import NotFoundError
 
-        Builds the write URI via the adapter's backend-neutral resolve_uri so the
-        proxied upload path works on any storage backend (GCS, NFS, ...), not just
-        object stores (Phase 7).
+            raise NotFoundError("Upload not found")
+        if checkpoint.stage == "filed" and checkpoint.file_id is not None:
+            existing = await FileService.get_file(session, checkpoint.file_id, org_id)
+            if existing is not None:
+                return existing
+        if checkpoint.stage != "received":
+            raise StateError("Only a received upload that has not been filed can be retried.")
+        return await UploadService._file_or_defer(session, upload_id)
+
+    @staticmethod
+    async def cancel_upload(
+        session: AsyncSession, org_id: int, upload_id: str, user_id: int, *, reason: str = "cancelled"
+    ) -> str:
+        """Cancel an unfiled upload; returns its stage afterwards.
+
+        Received bytes (bioAF's own upload object) are deleted and the upload settles at once. An
+        upload still being sent is recorded as cancelling: filing is refused from now on, but it
+        keeps counting as a possible writer until the provider confirms nothing more can arrive
+        (``upload_settlement.settle``, run right after the caller commits and in the background).
         """
-        # Before the storage write: a refused target leaves no object and no record behind.
-        await verify_association_targets(
-            session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
-        )
-        upload_id = str(uuid.uuid4())
-        gcs_path = f"uploads/{upload_id}/{filename}"
-
-        # Stream to storage -- raises on failure so no dangling DB records are created
-        from app.adapters.models import StorageStore
         from app.adapters.registry import get_storage_adapter
+        from app.services.audit_service import log_action
 
-        adapter = get_storage_adapter()
-        gcs_uri = await adapter.resolve_uri(StorageStore.INGEST, gcs_path)
-        await adapter.upload_file(gcs_uri, file_obj)
+        await lock_upload(session, upload_id)
+        checkpoint = await _load_checkpoint(session, org_id, upload_id)
+        if checkpoint is None:
+            from app.exceptions import NotFoundError
 
-        if not file_type:
-            file_type = UploadService._detect_file_type(filename)
-
-        file = await FileService.create_file_record(
+            raise NotFoundError("Upload not found")
+        if checkpoint.stage in ("filed", "cancelled"):
+            raise StateError("This upload is already filed or cancelled.")
+        if checkpoint.stage == "cancelling":
+            return "cancelling"
+        now = datetime.now(timezone.utc)
+        if checkpoint.stage == "issued":
+            checkpoint.stage = "cancelling"
+            # "interrupted": the browser stopped it after a failure, not the uploader's choice.
+            checkpoint.last_error_category = reason
+            checkpoint.cancel_requested_at = now
+            checkpoint.cancel_requested_by_user_id = user_id
+            checkpoint.next_reconcile_at = now
+            checkpoint.reconcile_attempts = 0
+        else:
+            expected_prefix = f"uploads/{upload_id}/"
+            adapter = get_storage_adapter()
+            _bucket, key = adapter.parse_uri(checkpoint.source_uri)
+            if key.startswith(expected_prefix):
+                await adapter.delete(checkpoint.source_uri)
+            checkpoint.stage = "cancelled"
+            checkpoint.cancel_requested_at = now
+            checkpoint.cancel_requested_by_user_id = user_id
+            checkpoint.next_attempt_at = None
+        await log_action(
             session,
-            org_id=org_id,
             user_id=user_id,
-            filename=filename,
-            storage_uri=gcs_uri,
-            size_bytes=size_bytes,
-            md5_checksum=None,
-            file_type=file_type,
-            project_id=project_id,
-            experiment_id=experiment_id,
-            is_global=is_global,
-            external_id=external_id,
+            entity_type="upload",
+            entity_id=0,
+            action="upload_cancelled",
+            details={"upload_id": upload_id, "reference": checkpoint.reference, "filename": checkpoint.filename},
         )
-
-        if sample_ids:
-            for sample_id in sample_ids:
-                await FileService.link_file_to_sample(session, file.id, sample_id)
-
-        # Move file from ingest to raw bucket under experiment prefix
-        if experiment_id:
-            from app.services.file_organization import FileOrganizationService
-
-            await FileOrganizationService.assign_file_to_experiment(session, file.id, experiment_id, user_id)
-
-        from app.services.file_verification_service import Expectation, FileVerificationService
-
-        # Flush pending attribute changes, then reload what file organization rewrote with SQL.
         await session.flush()
-        await session.refresh(file)
-        await FileService.finalize_registration(session, file)
-        await FileVerificationService.begin(session, file, Expectation.none("upload"), expected_size=size_bytes)
+        return checkpoint.stage
 
-        if experiment_id and file_type == "fastq":
-            await UploadService._auto_update_experiment_status(session, experiment_id, org_id, user_id)
+    @staticmethod
+    async def retry_due(session_factory, *, limit: int = 20) -> int:
+        """Run the automatic filing retries that are due. Returns how many were filed."""
+        from app.services.storage_write_admission import StorageWritesPaused
 
-        return file
+        now = datetime.now(timezone.utc)
+        async with session_factory() as session:
+            due = (
+                await session.execute(
+                    select(UploadCheckpoint.id, UploadCheckpoint.organization_id)
+                    .where(
+                        UploadCheckpoint.stage == "received",
+                        UploadCheckpoint.next_attempt_at.is_not(None),
+                        UploadCheckpoint.next_attempt_at <= now,
+                    )
+                    .order_by(UploadCheckpoint.next_attempt_at)
+                    .limit(limit)
+                )
+            ).all()
+        filed = 0
+        for upload_id, org_id in due:
+            async with session_factory() as session:
+                try:
+                    await UploadService._file_or_defer(session, upload_id)
+                    await session.commit()
+                    filed += 1
+                except UploadReceivedNotFiled:
+                    await session.rollback()
+                except StorageWritesPaused:
+                    # Writes are paused: try again later without counting a failed attempt.
+                    await session.rollback()
+                    await _update_checkpoint(upload_id, next_attempt_at=datetime.now(timezone.utc) + PAUSED_RETRY)
+                except DomainError as exc:
+                    await session.rollback()
+                    await _update_checkpoint(upload_id, next_attempt_at=None, last_error_category=exc.code[:48])
+        return filed
 
     @staticmethod
     async def _auto_update_experiment_status(
@@ -415,3 +870,33 @@ class UploadService:
         if lower.endswith(".csv"):
             return "csv"
         return "other"
+
+
+async def reconcile_transfers_on_startup(session: AsyncSession) -> dict[str, int]:
+    """Settle proxied transfers a restart cut off: kept as received when the bytes are stored,
+    otherwise recorded as not sent. The caller commits."""
+    from app.adapters.registry import get_storage_adapter
+
+    adapter = get_storage_adapter()
+    counts = {"received": 0, "failed": 0}
+    rows = (
+        (await session.execute(select(UploadCheckpoint).where(UploadCheckpoint.stage == "transferring")))
+        .scalars()
+        .all()
+    )
+    for checkpoint in rows:
+        try:
+            stored = await adapter.exists(checkpoint.source_uri)
+        except Exception as exc:
+            logger.warning("Could not check an interrupted upload (error_type=%s)", type(exc).__name__)
+            continue
+        if stored:
+            checkpoint.stage = "received"
+            checkpoint.next_attempt_at = datetime.now(timezone.utc)
+            counts["received"] += 1
+        else:
+            checkpoint.stage = "failed"
+            checkpoint.last_error_category = "interrupted"
+            counts["failed"] += 1
+    await session.flush()
+    return counts

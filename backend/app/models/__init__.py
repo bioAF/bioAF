@@ -26,6 +26,15 @@ from app.models.cellxgene_publication import CellxgenePublication
 from app.models.qc_dashboard import QCDashboard
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.models.storage_stats import StorageStatsCache
+from app.models.storage_identity import StorageIdentity, StorageStoreCheck
+from app.models.infrastructure_operation import InfrastructureOperation
+from app.models.upload_checkpoint import UploadCheckpoint
+from app.models.plot_scan_state import PlotScanState
+from app.models.infrastructure_definition import (
+    InfrastructureDefinitionBaseline,
+    InfrastructureDefinitionNotice,
+    InfrastructureNoticeAcknowledgment,
+)
 from app.models.gitops_repo import GitOpsRepo
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
@@ -160,6 +169,14 @@ __all__ = [
     "QCDashboard",
     "PlotArchiveEntry",
     "StorageStatsCache",
+    "StorageIdentity",
+    "StorageStoreCheck",
+    "InfrastructureOperation",
+    "UploadCheckpoint",
+    "PlotScanState",
+    "InfrastructureDefinitionBaseline",
+    "InfrastructureDefinitionNotice",
+    "InfrastructureNoticeAcknowledgment",
     "GitOpsRepo",
     "Environment",
     "EnvironmentVersion",

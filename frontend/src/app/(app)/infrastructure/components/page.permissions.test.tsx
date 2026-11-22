@@ -199,7 +199,12 @@ describe("a stack not yet deployed", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: /^Deploy/ }));
     await waitFor(() =>
-      expect(mockPost).toHaveBeenCalledWith("/api/v1/infrastructure/stack/deploy-background", { stack_type: "kubernetes" }),
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/v1/infrastructure/stack/deploy-background",
+        { stack_type: "kubernetes" },
+        // One confirmation carries one Idempotency-Key (storage lifecycle 11D).
+        { idempotencyKey: expect.any(String) },
+      ),
     );
   });
 

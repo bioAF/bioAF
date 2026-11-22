@@ -22,6 +22,7 @@ from app.models.component import TerraformRun
 from app.services import terraform_stream
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.terraform_executor import TerraformExecutor, _active_processes
+from tests.support.terraform_cli import cli_fake
 
 
 class FakeProcess:
@@ -137,7 +138,7 @@ def harness(monkeypatch):
         h.journal.append("lock_deleted")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", h.create)
-    monkeypatch.setattr("app.services.terraform_executor.subprocess.run", lambda *a, **k: completed)
+    monkeypatch.setattr(TerraformExecutor, "_run_captured", cli_fake(return_value=completed))
     monkeypatch.setattr(TerraformExecutor, "_prepare_work_dir", staticmethod(lambda *a: h.work_dir))
     monkeypatch.setattr(TerraformExecutor, "_delete_gcs_lock_file", staticmethod(delete_lock))
     monkeypatch.setattr(TerraformExecutor, "_load_gcs_credentials", AsyncMock(return_value=None))

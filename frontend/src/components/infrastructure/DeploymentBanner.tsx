@@ -34,7 +34,11 @@ const TOAST_MESSAGES: Record<string, { text: string; link: string; linkText: str
   },
 };
 
-export function DeploymentBanner() {
+/**
+ * Announces a finished deployment. ``showBanner`` keeps the older run-based "deploying" banner for
+ * callers that still want it; the app shell shows the operation banner instead (mockup M3).
+ */
+export function DeploymentBanner({ showBanner = true }: { showBanner?: boolean } = {}) {
   const [toast, setToast] = useState<{ text: string; link: string; linkText: string } | null>(null);
   const previouslyDeployingRef = useRef(false);
   const lastSeenModuleRef = useRef<string | null>(null);
@@ -82,7 +86,7 @@ export function DeploymentBanner() {
 
   return (
     <>
-      {deploying && (
+      {showBanner && deploying && (
         <div
           data-testid="deployment-banner"
           className="bg-amber-50 border-b border-amber-300 px-6 py-2 flex items-center justify-between"

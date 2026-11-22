@@ -24,7 +24,9 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { StaleNotice } from "@/components/shared/StaleNotice";
 import { Button } from "@/components/ui/Button";
-import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { useInfrastructureActions, usePermissionGate } from "@/hooks/useInfrastructureActions";
+import { useInfrastructureOperations } from "@/hooks/useInfrastructureOperations";
+import { useStartInfrastructureAction } from "@/hooks/useStartInfrastructureAction";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ClusterStatusCard } from "./ClusterStatusCard";
 import { AddOnComponentsSection } from "./AddOnComponentsSection";
@@ -82,7 +84,12 @@ function InfraComponentsContent() {
   const toast = useToast();
   // Each mutation needs its endpoint's permission (configure / deploy / create); reading needs view.
   const actions = useInfrastructureActions();
+  // The shared operation source: confirmed actions open their own operation's status (M2).
+  const operations = useInfrastructureOperations();
+  const startAction = useStartInfrastructureAction();
+  const runningOp = operations?.active?.busy ? (operations.active.operation ?? null) : null;
   const configureGate = actions.gate("configure");
+  const cancelGate = usePermissionGate<"configure">("infrastructure").gate("configure");
   const deployGate = actions.gate("deploy");
   const createGate = actions.gate("create");
   const [showBootstrapModal, setShowBootstrapModal] = useState(false);
@@ -181,6 +188,17 @@ function InfraComponentsContent() {
       },
     },
   );
+  // Destroy Storage acts only on buckets established as this installation's (mockup M15).
+  const storageDestroyable = Boolean(stack.data?.storage_deployed) && !stack.data?.compute_deployed;
+  const storageHealth = useResource<{ unconfirmed: number }>(
+    storageDestroyable ? "infra:storage-health" : null,
+    (signal) => api.get<{ unconfirmed: number }>("/api/v1/infrastructure/storage/health", { signal }),
+    { onError: logRead("the storage health") },
+  );
+  const unconfirmedBuckets = (storageHealth.data?.unconfirmed ?? 0) > 0;
+  const destroyGate = unconfirmedBuckets
+    ? { disabled: true, title: "Unavailable until an administrator confirms the storage buckets." }
+    : configureGate;
   const tfStatus = tf.data ?? null;
   const runs = runList.data?.runs ?? [];
   const stackStatus = stack.data ?? null;
@@ -241,9 +259,7 @@ function InfraComponentsContent() {
       if (!isAws && useSpecificZone && deployZone) {
         body.compute_zone = deployZone;
       }
-      await api.post("/api/v1/infrastructure/stack/deploy-background", body);
-      setDeployStarted(true);
-      setShowDeployModal(true);
+      await startAction("/api/v1/infrastructure/stack/deploy-background", body, "compute deployment");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to start deployment";
       toast.error(message);
@@ -270,11 +286,11 @@ function InfraComponentsContent() {
     // Orphans were cleaned by the modal, now start fresh deploy
     setDeployLoading(true);
     try {
-      await api.post("/api/v1/infrastructure/stack/deploy-background", {
-        stack_type: "kubernetes",
-      });
-      setDeployStarted(true);
-      setShowDeployModal(true);
+      await startAction(
+        "/api/v1/infrastructure/stack/deploy-background",
+        { stack_type: "kubernetes" },
+        "compute deployment",
+      );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to start deployment";
       toast.error(message);
@@ -304,9 +320,7 @@ function InfraComponentsContent() {
     setShowTeardownModal(false);
     if (!actions.stillAllowed("configure")) return;
     try {
-      await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
-      setDeployStarted(true);
-      setShowTeardownProgress(true);
+      await startAction("/api/v1/infrastructure/stack/teardown-background", { confirm: true }, "compute teardown");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Teardown failed to start";
       toast.error(msg);
@@ -317,9 +331,7 @@ function InfraComponentsContent() {
     setShowDestroyStorageModal(false);
     if (!actions.stillAllowed("configure")) return;
     try {
-      await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
-      setDeployStarted(true);
-      setShowDestroyStorageProgress(true);
+      await startAction("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true }, "storage destroy");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
       toast.error(msg);
@@ -442,7 +454,7 @@ function InfraComponentsContent() {
                     onClick={() => {
                       setShowDestroyStorageModal(true);
                     }}
-                    {...configureGate}
+                    {...destroyGate}
                     className="ml-4 shrink-0 text-sm text-red-600 hover:text-red-800 font-medium"
                   >
                     Destroy Storage
@@ -487,16 +499,30 @@ function InfraComponentsContent() {
                         )}
                         <div className="flex gap-2">
                           <Button size="sm"
-                            onClick={() => setShowDeployModal(true)}>
+                            onClick={() =>
+                              runningOp ? operations?.open(runningOp.id) : setShowDeployModal(true)
+                            }>
                             View Progress
                           </Button>
-                          <button
-                            onClick={() => setShowAbortConfirm(true)}
-                            {...createGate}
-                            className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
-                          >
-                            Abort
-                          </button>
+                          {runningOp ? (
+                            // Cancelling is the running operation's own control (M16): it stays
+                            // available while that operation holds exclusion.
+                            <button
+                              onClick={() => operations?.open(runningOp.id)}
+                              {...cancelGate}
+                              className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
+                            >
+                              Cancel {runningOp.label.toLowerCase()}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setShowAbortConfirm(true)}
+                              {...createGate}
+                              className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
+                            >
+                              Abort
+                            </button>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -542,7 +568,7 @@ function InfraComponentsContent() {
                     Compute Stack: {k8sStackLabel}
                   </span>
                   <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                    Active
+                    {runningOp?.action === "compute_teardown" ? "Tearing down" : "Active"}
                   </span>
                   <button
                     onClick={() => {
@@ -564,7 +590,7 @@ function InfraComponentsContent() {
                     stale: cluster.stale,
                     retry: () => void cluster.refresh(),
                   }}
-                  onApplied={() => setShowDeployModal(true)}
+                  onApplied={() => reloadAll()}
                 />
 
                 <AddOnComponentsSection
@@ -646,7 +672,9 @@ function InfraComponentsContent() {
           onDismiss={() => setShowDeployModal(false)}
           onAbort={() => {
             setShowDeployModal(false);
-            setShowAbortConfirm(true);
+            // A deployment that runs as an operation is cancelled from its status popup (M16).
+            if (runningOp) operations?.open(runningOp.id);
+            else setShowAbortConfirm(true);
           }}
           onDone={handleDeployComplete}
         />

@@ -7,6 +7,7 @@ Mode is the resolved settings.compute_mode (BIOAF_COMPUTE_MODE), fixed when the 
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import BinaryIO
 
@@ -22,11 +23,17 @@ from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
+    UploadedPart,
+    UploadSessionGrant,
+    UploadSessionState,
+    UploadSessionStatus,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
+    ContainerObservation,
+    ContainerPresence,
     ObjectMetadata,
     validate_object_metadata,
     StorageMetrics,
@@ -35,6 +42,8 @@ from app.adapters.models import (
     StorageStore,
     StoredObject,
 )
+
+from app.adapters.storage import workers as storage_workers  # noqa: E402
 
 logger = logging.getLogger("bioaf.adapters.storage.gcs")
 
@@ -429,7 +438,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_write_bytes, uri, data, content_type, creds)
+        await storage_workers.run("storage write", self._gcs_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(
         self,
@@ -444,7 +453,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_file, uri, file_obj, content_type, creds, metadata)
+        await storage_workers.run("storage upload", self._gcs_upload_file, uri, file_obj, content_type, creds, metadata)
 
     async def upload_filename(
         self,
@@ -459,7 +468,9 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_upload_filename, uri, local_path, content_type, creds, metadata)
+        await storage_workers.run(
+            "storage upload", self._gcs_upload_filename, uri, local_path, content_type, creds, metadata
+        )
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -481,7 +492,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_delete, uri, generation, creds)
+        await storage_workers.run("storage delete", self._gcs_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
@@ -512,7 +523,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_copy, source_uri, dest_uri, creds)
+        await storage_workers.run("storage copy", self._gcs_copy, source_uri, dest_uri, creds)
         return dest_uri
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
@@ -520,7 +531,7 @@ class GcsStorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_move, source_uri, dest_uri, creds)
+        await storage_workers.run("storage move", self._gcs_move, source_uri, dest_uri, creds)
         return dest_uri
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
@@ -563,6 +574,22 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_get_bucket_info, uri, creds)
 
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        bucket_name, _ = self._parse_uri(uri)
+        if self.is_local:
+            root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket_name)
+            present = await asyncio.to_thread(os.path.isdir, root)
+            return ContainerObservation(
+                presence=ContainerPresence.PRESENT if present else ContainerPresence.MISSING,
+                simulated=True,
+            )
+        try:
+            creds = await self._get_credentials()
+            return await asyncio.to_thread(self._gcs_inspect_container, bucket_name, creds)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+
     async def generate_signed_url(
         self,
         uri: str,
@@ -593,6 +620,72 @@ class GcsStorageProvider(StorageProvider):
         return await asyncio.to_thread(
             self._gcs_create_resumable_upload_url, uri, content_type, size_bytes, origin, creds
         )
+
+    # -- Direct-upload sessions: GCS resumable sessions (11F/11G) --
+    #
+    # The session URL is a bearer credential: it is never logged. A status query is a PUT with
+    # an empty body and ``Content-Range: bytes */*``; cancellation is a DELETE (answered 499).
+
+    async def begin_upload_session(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> UploadSessionGrant:
+        if self.is_local:
+            return await super().begin_upload_session(uri, content_type=content_type, size_bytes=size_bytes)
+        url = await self.create_resumable_upload_url(
+            uri, content_type=content_type, size_bytes=size_bytes, origin=origin
+        )
+        return UploadSessionGrant(protocol="gcs_resumable", handle=url, url=url)
+
+    async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
+        # A resumable session stores the object when its last byte arrives.
+        return None
+
+    async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_session_status, uri, handle, "PUT", creds)
+
+    async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_session_status, uri, handle, "DELETE", creds)
+
+    def _gcs_session_request(self, method: str, url: str, headers: dict) -> tuple[int, dict]:
+        import httpx
+
+        response = httpx.request(method, url, headers=headers, timeout=30)
+        return response.status_code, dict(response.headers)
+
+    def _gcs_session_status(self, uri: str, handle: str, method: str, creds) -> UploadSessionStatus:
+        headers = {"Content-Length": "0"}
+        if method == "PUT":
+            headers["Content-Range"] = "bytes */*"
+        try:
+            status, answer = self._gcs_session_request(method, handle, headers)
+        except Exception as exc:
+            logger.warning("Upload session %s did not answer (error_type=%s)", method.lower(), type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        if status in (200, 201):
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED)
+        if status == 308 and method == "PUT":
+            received = 0
+            match = re.match(r"bytes=0-(\d+)", answer.get("Range") or answer.get("range") or "")
+            if match:
+                received = int(match.group(1)) + 1
+            return UploadSessionStatus(state=UploadSessionState.ACTIVE, received_bytes=received)
+        if status in (404, 410, 499):
+            # The session accepts nothing more. Its object may still have landed just before.
+            try:
+                stored = self._gcs_exists(uri, creds)
+            except Exception as exc:
+                logger.warning("Could not check an ended upload's object (error_type=%s)", type(exc).__name__)
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED if stored else UploadSessionState.ENDED)
+        logger.warning("Upload session %s answered %s", method.lower(), status)
+        return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
 
     # -- GCS-mode object-store helpers (run inside asyncio.to_thread) --
 
@@ -803,6 +896,27 @@ class GcsStorageProvider(StorageProvider):
         bucket = self._get_gcs_client(creds).get_bucket(bucket_name)
         return {"versioning_enabled": bool(bucket.versioning_enabled)}
 
+    def _gcs_inspect_container(self, bucket_name: str, creds) -> ContainerObservation:
+        from google.api_core import exceptions as gexc
+
+        try:
+            bucket = self._get_gcs_client(creds).get_bucket(bucket_name)
+        except gexc.NotFound:
+            return ContainerObservation(presence=ContainerPresence.MISSING)
+        except (gexc.Forbidden, gexc.Unauthorized):
+            return ContainerObservation(presence=ContainerPresence.FORBIDDEN)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+        project_number = getattr(bucket, "project_number", None)
+        return ContainerObservation(
+            presence=ContainerPresence.PRESENT,
+            owner=str(project_number) if project_number is not None else None,
+            created_at=getattr(bucket, "time_created", None),
+            labels=dict(getattr(bucket, "labels", None) or {}),
+            limits=() if project_number is not None else ("owner",),
+        )
+
     def _gcs_create_resumable_upload_url(self, uri: str, content_type, size_bytes, origin, creds) -> str:
         bucket, key = self._parse_uri(uri)
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
@@ -957,7 +1071,7 @@ class GcsStorageProvider(StorageProvider):
         OrphanedResourceService._cleanup_gcs_bucket (Phase 9 / Stage 3b.5).
         """
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._gcs_delete_bucket, bucket_name, creds)
+        await storage_workers.run("bucket delete", self._gcs_delete_bucket, bucket_name, creds)
 
     def _gcs_delete_bucket(self, bucket_name: str, creds) -> None:
         client = self._get_gcs_client(creds)

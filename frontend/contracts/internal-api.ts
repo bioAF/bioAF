@@ -2196,6 +2196,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/uploads/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pending Uploads
+         * @description Uploads that need following: stored but not yet filed, cancelled but not yet confirmed
+         *     stopped, or whose outcome storage could not confirm. The caller's own, or everyone's for
+         *     files edit.
+         */
+        get: operations["pending_uploads_api_files_uploads_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Upload Outcome
+         * @description One upload's outcome: filed (with its file), cancelled, failed, or still pending.
+         */
+        get: operations["upload_outcome_api_files_uploads__upload_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Pending Upload
+         * @description Cancel an unfiled upload. A received copy is deleted at once; an upload still being sent is
+         *     cancelled with the provider, and keeps counting as a writer until the provider confirms it.
+         */
+        post: operations["cancel_pending_upload_api_files_uploads__upload_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Part Links
+         * @description Signed links for parts of the caller's own S3 multipart upload.
+         */
+        post: operations["upload_part_links_api_files_uploads__upload_id__parts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/uploads/{upload_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Pending Upload
+         * @description Retry filing a received upload now. 202 with the reference if it still cannot be filed.
+         */
+        post: operations["retry_pending_upload_api_files_uploads__upload_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{file_id}": {
         parameters: {
             query?: never;
@@ -4738,6 +4841,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plots/scan/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Plot Scanning
+         * @description Check the results store now and scan it if it is available (Check again, mockup M13).
+         *
+         *     Read-only toward the cloud: a missing store is never recreated here.
+         */
+        post: operations["check_plot_scanning_api_plots_scan_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plots/{plot_id}": {
         parameters: {
             query?: never;
@@ -6895,6 +7020,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/definition-notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Definition Notice Endpoint */
+        get: operations["definition_notice_endpoint_api_v1_infrastructure_definition_notice_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/definition-notice/{notice_id}/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Definition Notice Endpoint
+         * @description This admin chose Later. It never marks the infrastructure updated, and no other admin's view changes.
+         */
+        post: operations["acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/notebook-image/build-status": {
         parameters: {
             query?: never;
@@ -6926,9 +7088,116 @@ export interface paths {
         put?: never;
         /**
          * Notebook Image Cancel
-         * @description Cancel the active notebook image build.
+         * @description Request cancellation of the active notebook image build; the poller confirms it.
          */
         post: operations["notebook_image_cancel_api_v1_infrastructure_notebook_image_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations Endpoint */
+        get: operations["list_operations_endpoint_api_v1_infrastructure_operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active Operation Endpoint */
+        get: operations["active_operation_endpoint_api_v1_infrastructure_operations_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Operation Endpoint */
+        get: operations["get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Operation Endpoint
+         * @description Request that the operation stop at its next safe point (M16). Finished work is never undone.
+         *
+         *     Repeating the request changes nothing; stopping and settlement are reported by the status reads.
+         */
+        post: operations["cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover Operation Endpoint */
+        post: operations["recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/operations/{operation_id}/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Operation Seen Endpoint */
+        post: operations["mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7120,14 +7389,12 @@ export interface paths {
         put?: never;
         /**
          * Check Infra Updates Endpoint
-         * @description Re-align deployed naming, re-plan every deployed module, and report the
-         *     pending changes split into additive vs destructive.
+         * @description Start the confirmed "Check for infrastructure updates" action (mockup M1).
          *
-         *     When there are additive changes and no destructive (delete/replace) ones,
-         *     the additive resources start applying immediately in the background. When
-         *     a destructive change is present, nothing is auto-applied; the caller can
-         *     apply the additive subset via /apply-updates (which only ever targets
-         *     additive resources).
+         *     The popup confirmation is the authorization: one accepted operation plans every deployed
+         *     module and applies the additive changes automatically, with no second approval. Changes that
+         *     would delete or replace an existing resource are listed in the operation's outcome and never
+         *     applied. Progress and outcome are read from the operation.
          */
         post: operations["check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post"];
         delete?: never;
@@ -7168,6 +7435,10 @@ export interface paths {
         /**
          * Stack Component Toggle
          * @description Toggle a component's enabled state with dependency enforcement.
+         *
+         *     The whole change is one infrastructure operation: it holds the shared lock from before the
+         *     state is read until it commits, so no other action can start in between (M3/M6). An image
+         *     build it starts belongs to it, and the lock is kept until the provider reports that build.
          */
         post: operations["stack_component_toggle_api_v1_infrastructure_stack_components__component_key__toggle_post"];
         delete?: never;
@@ -7253,8 +7524,8 @@ export interface paths {
          * Stack Destroy Storage Endpoint
          * @description Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
          *
-         *     Only allowed when compute stack is torn down. Resets storage_uid so the
-         *     next deploy creates fresh bucket names (avoids GCS soft-delete conflicts).
+         *     Only allowed when compute stack is torn down. A confirmed destroy retires
+         *     the storage generation so the next deploy creates new bucket names.
          */
         post: operations["stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post"];
         delete?: never;
@@ -7430,6 +7701,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/storage/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Storage Health
+         * @description The last read-only inspection of each configured bucket; inspects once if none is recorded.
+         */
+        get: operations["get_storage_health_api_v1_infrastructure_storage_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/health/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Storage Health
+         * @description Inspect every configured bucket now. Read-only: nothing is created or changed in the cloud.
+         */
+        post: operations["check_storage_health_api_v1_infrastructure_storage_health_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/identity/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Storage Buckets
+         * @description Record an administrator's confirmation that the observed buckets belong to this installation.
+         */
+        post: operations["confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/storage/metrics": {
         parameters: {
             query?: never;
@@ -7467,6 +7798,63 @@ export interface paths {
          *     Terraform will only create or modify resources that have changed.
          */
         post: operations["update_storage_api_v1_infrastructure_storage_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage Writes Status */
+        get: operations["storage_writes_status_api_v1_infrastructure_storage_writes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/writes/allow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow Storage Writes
+         * @description Reopen uploads after a refused or failed storage destroy, without destroying anything (Allow uploads).
+         */
+        post: operations["allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/storage/writes/{upload_id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Storage Writer
+         * @description Release an upload bioAF lost track of, so it no longer blocks Destroy Storage (audited).
+         */
+        post: operations["release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8699,6 +9087,16 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ActiveOperationResponse */
+        ActiveOperationResponse: {
+            /** Busy */
+            busy: boolean;
+            /** Interrupted */
+            interrupted?: components["schemas"]["OperationView"][];
+            operation?: components["schemas"]["OperationView"] | null;
+            /** State */
+            state?: ("running" | "recovery_required") | null;
+        };
         /** ActivityFeedItem */
         ActivityFeedItem: {
             /**
@@ -9444,6 +9842,15 @@ export interface components {
             /** Reassigned Count */
             reassigned_count: number;
         };
+        /** CancelUploadRequest */
+        CancelUploadRequest: {
+            /**
+             * Reason
+             * @default cancelled
+             * @enum {string}
+             */
+            reason: "cancelled" | "interrupted";
+        };
         /** CellCountPoint */
         CellCountPoint: {
             /** Cell Count */
@@ -9549,30 +9956,12 @@ export interface components {
             /** New Password */
             new_password: string;
         };
-        /** CheckUpdatesResponse */
-        CheckUpdatesResponse: {
-            /** Additive Resources */
-            additive_resources: components["schemas"]["ResourceInfo"][];
-            /** Applying */
-            applying: boolean;
-            /** Destructive Resources */
-            destructive_resources: components["schemas"]["DestructiveResourceInfo"][];
-            /** Has Additive */
-            has_additive: boolean;
-            /** Has Changes */
-            has_changes: boolean;
-            /** Has Destructive */
-            has_destructive: boolean;
-            /** Modules */
-            modules: components["schemas"]["ModuleUpdateInfo"][];
-            /** Modules With Additive */
-            modules_with_additive: string[];
-            /** Realigned */
-            realigned: {
-                [key: string]: unknown;
-            } | null;
-            /** Requires Approval */
-            requires_approval: boolean;
+        /** CheckUpdatesAccepted */
+        CheckUpdatesAccepted: {
+            /** Message */
+            message: string;
+            /** Operation Id */
+            operation_id: number;
         };
         /** CitationBulkRequest */
         CitationBulkRequest: {
@@ -9903,6 +10292,18 @@ export interface components {
             port: number;
             /** Username */
             username: string;
+        };
+        /** ConfirmBucketsRequest */
+        ConfirmBucketsRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Stores */
+            stores: string[];
         };
         /** ConfirmResponse */
         ConfirmResponse: {
@@ -10610,6 +11011,30 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** DefinitionNotice */
+        DefinitionNotice: {
+            /** Id */
+            id: number;
+            /** Modules */
+            modules: string[];
+            /** Unknown Baseline */
+            unknown_baseline: boolean;
+            /** Version */
+            version: string;
+        };
+        /** DefinitionNoticeResponse */
+        DefinitionNoticeResponse: {
+            /** Destructive Only Modules */
+            destructive_only_modules?: string[];
+            notice?: components["schemas"]["DefinitionNotice"] | null;
+            /** Pending */
+            pending: boolean;
+            /**
+             * Seen
+             * @default false
+             */
+            seen: boolean;
+        };
         /** DeployProgressResponse */
         DeployProgressResponse: {
             /** Active */
@@ -10654,19 +11079,6 @@ export interface components {
         DepositOverrideRequest: {
             /** Reason */
             reason: string;
-        };
-        /** DestructiveResourceInfo */
-        DestructiveResourceInfo: {
-            /** Action */
-            action: string;
-            /** Address */
-            address: string;
-            /** Description */
-            description: string;
-            /** Stateful */
-            stateful: boolean;
-            /** Type */
-            type: string;
         };
         /**
          * DifferentialDesignRequest
@@ -11336,6 +11748,8 @@ export interface components {
              * @default
              */
             actual_md5: string;
+            /** Parts */
+            parts?: components["schemas"]["UploadedPartRef"][] | null;
             /** Upload Id */
             upload_id: string;
         };
@@ -11369,12 +11783,13 @@ export interface components {
             /** Gcs Uri */
             gcs_uri: string;
             /** Signed Url */
-            signed_url: string;
+            signed_url?: string | null;
             /**
              * Storage Uri
              * @description Neutral alias of gcs_uri (retained legacy mirror); read storage_uri.
              */
             readonly storage_uri: string;
+            upload: components["schemas"]["UploadSessionView"];
             /** Upload Id */
             upload_id: string;
         };
@@ -12307,19 +12722,6 @@ export interface components {
             /** Text */
             text?: string | null;
         };
-        /** ModuleUpdateInfo */
-        ModuleUpdateInfo: {
-            /** Add Count */
-            add_count: number;
-            /** Change Count */
-            change_count: number;
-            /** Destroy Count */
-            destroy_count: number;
-            /** Has Changes */
-            has_changes: boolean;
-            /** Module */
-            module: string;
-        };
         /** NamingProfileCreate */
         NamingProfileCreate: {
             /**
@@ -12666,6 +13068,81 @@ export interface components {
             /** Openalex Id */
             openalex_id?: string | null;
         };
+        /** OperationListResponse */
+        OperationListResponse: {
+            /** Operations */
+            operations: components["schemas"]["OperationView"][];
+        };
+        /** OperationResources */
+        OperationResources: {
+            /** Completed */
+            completed?: string[];
+            /** Planned */
+            planned?: string[];
+        };
+        /** OperationStep */
+        OperationStep: {
+            /** Completed */
+            completed?: number | null;
+            /** Detail */
+            detail?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** State */
+            state: string;
+            /** Total */
+            total?: number | null;
+        };
+        /** OperationView */
+        OperationView: {
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+            /** Action */
+            action: string;
+            /** Cancel Deadline */
+            cancel_deadline?: string | null;
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
+            /** Cancel Requested By */
+            cancel_requested_by?: string | null;
+            /** Error Category */
+            error_category?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Message */
+            message?: string | null;
+            /** Outcome Seen At */
+            outcome_seen_at?: string | null;
+            /** Partial Effects */
+            partial_effects?: {
+                [key: string]: unknown;
+            } | null;
+            /** Phase */
+            phase?: string | null;
+            /** Recovered At */
+            recovered_at?: string | null;
+            resources?: components["schemas"]["OperationResources"] | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Started By */
+            started_by?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "running" | "stopping" | "succeeded" | "failed" | "cancelled" | "interrupted" | "recovery_required";
+            /** Steps */
+            steps?: components["schemas"]["OperationStep"][];
+        };
         /** OrphanedResourceListResponse */
         OrphanedResourceListResponse: {
             /** Items */
@@ -12838,6 +13315,43 @@ export interface components {
             scheduled_at: string;
             /** Status */
             status: string;
+        };
+        /** PendingUpload */
+        PendingUpload: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Experiment Id */
+            experiment_id?: number | null;
+            /** Experiment Name */
+            experiment_name?: string | null;
+            /** Filename */
+            filename: string;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Reference */
+            reference: string;
+            /** Stage */
+            stage: string;
+            /** State */
+            state: string;
+            /** Upload Id */
+            upload_id: string;
+            /** Uploaded By */
+            uploaded_by?: string | null;
+            /** Uploaded By User Id */
+            uploaded_by_user_id?: number | null;
+        };
+        /** PendingUploadsResponse */
+        PendingUploadsResponse: {
+            /** Uploads */
+            uploads: components["schemas"]["PendingUpload"][];
         };
         /** PermissionDetail */
         PermissionDetail: {
@@ -13329,6 +13843,7 @@ export interface components {
             page_size: number;
             /** Plots */
             plots: components["schemas"]["PlotArchiveResponse"][];
+            scan_health?: components["schemas"]["PlotScanHealth"] | null;
             /** Total */
             total: number;
         };
@@ -13367,6 +13882,20 @@ export interface components {
             thumbnail_url?: string | null;
             /** Title */
             title: string | null;
+        };
+        /** PlotScanHealth */
+        PlotScanHealth: {
+            /** Last Attempt At */
+            last_attempt_at?: string | null;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "missing" | "no_access" | "not_confirmed" | "temporary";
         };
         /** PlotUpdateRequest */
         PlotUpdateRequest: {
@@ -13992,6 +14521,16 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** RecoverRequest */
+        RecoverRequest: {
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
         /** RecoveryCheckItem */
         RecoveryCheckItem: {
             /** Detected At */
@@ -14373,6 +14912,13 @@ export interface components {
             /** Versions */
             versions: components["schemas"]["RegistryVersion"][];
         };
+        /** ReleaseWriterRequest */
+        ReleaseWriterRequest: {
+            /** Acknowledge Transfer May Exist */
+            acknowledge_transfer_may_exist: boolean;
+            /** Reason */
+            reason: string;
+        };
         /**
          * ReportFormat
          * @enum {string}
@@ -14438,17 +14984,6 @@ export interface components {
             supported_finding_kinds: string[];
             /** Tools */
             tools?: unknown[] | null;
-        };
-        /** ResourceInfo */
-        ResourceInfo: {
-            /** Action */
-            action: string;
-            /** Address */
-            address: string;
-            /** Description */
-            description: string;
-            /** Type */
-            type: string;
         };
         /** RestoreRequest */
         RestoreRequest: {
@@ -16251,6 +16786,45 @@ export interface components {
              */
             confirm: boolean;
         };
+        /** StorageHealthResponse */
+        StorageHealthResponse: {
+            /** Checked At */
+            checked_at?: string | null;
+            /** Stores */
+            stores: components["schemas"]["StoreHealthItem"][];
+            /**
+             * Unconfirmed
+             * @default 0
+             */
+            unconfirmed: number;
+        };
+        /** StorageWritesResponse */
+        StorageWritesResponse: {
+            /** Operation Id */
+            operation_id?: number | null;
+            /** Paused */
+            paused: boolean;
+            /** Since */
+            since?: string | null;
+        };
+        /** StoreHealthItem */
+        StoreHealthItem: {
+            /** Basis */
+            basis?: string | null;
+            /** Bucket Name */
+            bucket_name: string;
+            /**
+             * Health
+             * @enum {string}
+             */
+            health: "available" | "not_found" | "no_access" | "not_responding" | "not_confirmed" | "wrong_owner" | "not_mounted" | "cannot_check";
+            /** Observed Created At */
+            observed_created_at?: string | null;
+            /** Observed Owner */
+            observed_owner?: string | null;
+            /** Store */
+            store: string;
+        };
         /** SubItemPayload */
         SubItemPayload: {
             /** Default On */
@@ -16613,6 +17187,88 @@ export interface components {
             total: number;
             /** Upgrades */
             upgrades: components["schemas"]["UpgradeHistoryItem"][];
+        };
+        /**
+         * UploadOutcome
+         * @description Where one upload ended up. Leaving the pending list does not say which: it may have been
+         *     filed, cancelled or have failed, so an uploader following it asks for this.
+         */
+        UploadOutcome: {
+            /** File Id */
+            file_id?: number | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pending" | "filed" | "cancelled" | "failed";
+            /** Reference */
+            reference?: string | null;
+            /** Stage */
+            stage: string;
+            /** State */
+            state?: string | null;
+            /** Upload Id */
+            upload_id: string;
+        };
+        /** UploadPartsRequest */
+        UploadPartsRequest: {
+            /** Part Numbers */
+            part_numbers: number[];
+        };
+        /** UploadPartsResponse */
+        UploadPartsResponse: {
+            /** Urls */
+            urls: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * UploadReceivedNotFiled
+         * @description 202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).
+         *
+         *     bioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.
+         */
+        UploadReceivedNotFiled: {
+            /**
+             * Code
+             * @default upload_received_not_filed
+             * @constant
+             */
+            code: "upload_received_not_filed";
+            /** Detail */
+            detail: string;
+            details: components["schemas"]["UploadReceivedNotFiledDetails"];
+        };
+        /** UploadReceivedNotFiledDetails */
+        UploadReceivedNotFiledDetails: {
+            /** Experiment Id */
+            experiment_id?: number | null;
+            /** Reference */
+            reference: string;
+            /** Upload Id */
+            upload_id: string;
+        };
+        /**
+         * UploadSessionView
+         * @description Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.
+         */
+        UploadSessionView: {
+            /** Part Size */
+            part_size?: number | null;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "gcs_resumable" | "s3_multipart";
+            /** Url */
+            url?: string | null;
+        };
+        /** UploadedPartRef */
+        UploadedPartRef: {
+            /** Etag */
+            etag: string;
+            /** Number */
+            number: number;
         };
         /** UpsertProviderRequest */
         UpsertProviderRequest: {
@@ -21247,6 +21903,15 @@ export interface operations {
                     "application/json": components["schemas"]["FileResponse"];
                 };
             };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21317,6 +21982,174 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FileResponse"];
+                };
+            };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pending_uploads_api_files_uploads_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingUploadsResponse"];
+                };
+            };
+        };
+    };
+    upload_outcome_api_files_uploads__upload_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOutcome"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_pending_upload_api_files_uploads__upload_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelUploadRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_part_links_api_files_uploads__upload_id__parts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadPartsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_pending_upload_api_files_uploads__upload_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileResponse"];
+                };
+            };
+            /** @description Received, not yet filed; bioAF retries automatically. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceivedNotFiled"];
                 };
             };
             /** @description Validation Error */
@@ -26785,6 +27618,26 @@ export interface operations {
             };
         };
     };
+    check_plot_scanning_api_plots_scan_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlotScanHealth"];
+                };
+            };
+        };
+    };
     get_plot_api_plots__plot_id__get: {
         parameters: {
             query?: never;
@@ -31022,7 +31875,9 @@ export interface operations {
     update_cluster_config_api_v1_infrastructure_cluster_config_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31107,6 +31962,57 @@ export interface operations {
             };
         };
     };
+    definition_notice_endpoint_api_v1_infrastructure_definition_notice_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefinitionNoticeResponse"];
+                };
+            };
+        };
+    };
+    acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefinitionNoticeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     notebook_image_build_status_api_v1_infrastructure_notebook_image_build_status_get: {
         parameters: {
             query?: never;
@@ -31145,6 +32051,185 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_operations_endpoint_api_v1_infrastructure_operations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    active_operation_endpoint_api_v1_infrastructure_operations_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveOperationResponse"];
+                };
+            };
+        };
+    };
+    get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -31336,7 +32421,9 @@ export interface operations {
     apply_infra_updates_endpoint_api_v1_infrastructure_stack_apply_updates_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31371,7 +32458,9 @@ export interface operations {
     check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31383,7 +32472,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CheckUpdatesResponse"];
+                    "application/json": components["schemas"]["CheckUpdatesAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -31444,7 +32542,9 @@ export interface operations {
     stack_deploy_endpoint_api_v1_infrastructure_stack_deploy_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31477,7 +32577,9 @@ export interface operations {
     stack_deploy_background_endpoint_api_v1_infrastructure_stack_deploy_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31530,7 +32632,9 @@ export interface operations {
     stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31563,7 +32667,9 @@ export interface operations {
     stack_destroy_storage_background_endpoint_api_v1_infrastructure_stack_destroy_storage_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31660,7 +32766,9 @@ export interface operations {
     stack_teardown_endpoint_api_v1_infrastructure_stack_teardown_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31693,7 +32801,9 @@ export interface operations {
     stack_teardown_background_endpoint_api_v1_infrastructure_stack_teardown_background_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -31763,6 +32873,79 @@ export interface operations {
             };
         };
     };
+    get_storage_health_api_v1_infrastructure_storage_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+        };
+    };
+    check_storage_health_api_v1_infrastructure_storage_health_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+        };
+    };
+    confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmBucketsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_storage_metrics_api_v1_infrastructure_storage_metrics_get: {
         parameters: {
             query?: never;
@@ -31799,6 +32982,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageDeployResponse"];
+                };
+            };
+        };
+    };
+    storage_writes_status_api_v1_infrastructure_storage_writes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageWritesResponse"];
+                };
+            };
+        };
+    };
+    allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageWritesResponse"];
+                };
+            };
+        };
+    };
+    release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseWriterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

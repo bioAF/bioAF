@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -17,9 +18,49 @@ class FileUploadInitiate(BaseModel):
     external_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
+class UploadedPartRef(BaseModel):
+    number: int = Field(ge=1, le=10_000)
+    etag: str = Field(min_length=1, max_length=256)
+
+
 class FileUploadComplete(BaseModel):
     upload_id: str
     actual_md5: str = ""
+    # The parts of an S3 multipart upload, as the provider acknowledged them (ETag per part).
+    parts: list[UploadedPartRef] | None = Field(default=None, max_length=10_000)
+
+
+class UploadSessionView(BaseModel):
+    """Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for."""
+
+    protocol: Literal["gcs_resumable", "s3_multipart"]
+    url: str | None = None
+    part_size: int | None = None
+
+
+class UploadReceivedNotFiledDetails(BaseModel):
+    upload_id: str
+    reference: str
+    experiment_id: int | None = None
+
+
+class UploadReceivedNotFiled(BaseModel):
+    """202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).
+
+    bioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.
+    """
+
+    detail: str
+    code: Literal["upload_received_not_filed"] = "upload_received_not_filed"
+    details: UploadReceivedNotFiledDetails
+
+
+class UploadPartsRequest(BaseModel):
+    part_numbers: list[int] = Field(min_length=1, max_length=100)
+
+
+class UploadPartsResponse(BaseModel):
+    urls: dict[int, str]
 
 
 class PipelineRunRef(BaseModel):
@@ -132,8 +173,10 @@ class FileLinkRequest(BaseModel):
 
 class FileUploadInitiateResponse(BaseModel):
     upload_id: str
-    signed_url: str
+    # A GCS session URL (accepts one whole-file PUT); None for an S3 multipart upload.
+    signed_url: str | None = None
     gcs_uri: str
+    upload: UploadSessionView
 
     @computed_field  # type: ignore[prop-decorator]
     @property

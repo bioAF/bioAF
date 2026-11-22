@@ -25,11 +25,26 @@ from app.database import get_session
 from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.billing_export_service import BillingExportService
+from app.services import infrastructure_operations as ops
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 
 logger = logging.getLogger("bioaf.billing_export_api")
 
 router = APIRouter(tags=["billing_export"])
+
+
+async def _deploy_as_operation(session: AsyncSession, current_user: dict) -> dict:
+    """Configure and deploy billing export as one accepted infrastructure operation."""
+    op_id, _ = await ops.accept(action="billing_export_enable", principal=ops.Principal.from_user(current_user))
+    async with ops.owned(op_id):
+        result = await deploy_billing_export_module(session, int(current_user["sub"]))
+    await ops.finish(
+        op_id,
+        ops.succeeded("Billing export dataset created.")
+        if result.get("status") == "completed"
+        else ops.failed("Creating the billing export dataset failed.", "apply_failed"),
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +170,7 @@ async def billing_export_enable(
             detail="Terraform has not been initialized. Run infrastructure bootstrap first.",
         )
 
-    user_id = int(current_user["sub"])
-    result = await deploy_billing_export_module(session, user_id)
+    result = await _deploy_as_operation(session, current_user)
     return BillingExportEnableResponse(**result)
 
 
@@ -197,8 +211,7 @@ async def billing_export_verify(
         # billing_export module (as the impersonated bootstrap SA, which owns
         # the dataset) to move the grant onto the runtime SA, then retry once.
         logger.warning("BQ verify denied; re-applying billing_export to reconcile dataset IAM")
-        user_id = int(current_user["sub"])
-        heal = await deploy_billing_export_module(session, user_id)
+        heal = await _deploy_as_operation(session, current_user)
         if heal.get("status") != "completed":
             raise HTTPException(
                 status_code=500,
@@ -276,28 +289,19 @@ async def billing_export_teardown(
         )
 
     user_id = int(current_user["sub"])
+    # One operation across Terraform destroy and the final configuration cleanup.
+    op_id, _ = await ops.accept(action="billing_export_teardown", principal=ops.Principal.from_user(current_user))
 
-    gen = TerraformExecutor.run_destroy(
-        session=session,
-        user_id=user_id,
-        module_name="billing_export",
-    )
-
-    async def event_generator():
+    async def teardown_events():
         completed = False
         try:
-            async with aclosing(gen) as events:
+            async with aclosing(
+                TerraformExecutor.run_destroy(session=session, user_id=user_id, module_name="billing_export")
+            ) as events:
                 async for event in events:
                     if event.event_type == "apply_complete":
                         completed = True
-                    yield _sse_event(client_event(event))
-        except Exception as exc:
-            logger.error("Billing export apply error: %s", exc, exc_info=True)
-            error_event = TerraformProgressEvent(
-                event_type="apply_error",
-                message="Apply failed unexpectedly",
-            )
-            yield _sse_event(error_event)
+                    yield event
         finally:
             with anyio.CancelScope(shield=True):
                 if completed:
@@ -308,6 +312,21 @@ async def billing_export_teardown(
                     ):
                         await PlatformConfigService.set(session, key, None)
                 await session.commit()
+
+    gen = ops.operation_stream(op_id, teardown_events(), terminal="terraform")
+
+    async def event_generator():
+        try:
+            async with aclosing(gen) as events:
+                async for event in events:
+                    yield _sse_event(client_event(event))
+        except Exception as exc:
+            logger.error("Billing export apply error: %s", exc, exc_info=True)
+            error_event = TerraformProgressEvent(
+                event_type="apply_error",
+                message="Apply failed unexpectedly",
+            )
+            yield _sse_event(error_event)
 
     return ClosingStreamingResponse(
         event_generator(),

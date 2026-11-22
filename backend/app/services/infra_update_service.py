@@ -39,7 +39,6 @@ from app.exceptions import StateError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
 from app.services.terraform_stream import INTERRUPTED_EVENT, commit_interruption
-from app import runtime
 
 logger = logging.getLogger("bioaf.infra_update_service")
 
@@ -168,18 +167,11 @@ async def realign_storage_naming(session: AsyncSession) -> dict | None:
     want to replace the live cluster. org_slug is shared and identical for both,
     so it is safe to align.
 
-    Reads a known deployed bucket name (raw) from platform_config, falling back
-    to live Terraform outputs. Returns the values it changed, or None when
-    nothing needed changing or the name could not be parsed."""
+    Reads the recorded raw bucket name from platform_config. Terraform outputs
+    are not identity, so an unrecorded name is never taken from them. Returns
+    the values it changed, or None when nothing needed changing or the name
+    could not be parsed."""
     name = await PlatformConfigService.get(session, "raw_bucket_name")
-    if not name or name == "null":
-        try:
-            outputs = await TerraformExecutor.read_module_outputs(session, "storage")
-            entry = outputs.get("raw_bucket_name") or {}
-            name = entry.get("value") if isinstance(entry, dict) else None
-        except Exception as exc:  # pragma: no cover - depends on live state
-            logger.warning("realign: could not read storage outputs: %s", exc)
-            name = None
     if not name or name == "null":
         return None
 
@@ -228,6 +220,11 @@ async def check_for_updates(session: AsyncSession, user_id: int) -> dict:
     realigned = None
     if "storage" in modules:
         realigned = await realign_storage_naming(session)
+        # An approved update gives existing buckets bioAF's identity markers when they have none.
+        # After realigning: an install may have its storage generation recorded only just now.
+        from app.services.storage_generation import ensure_markers
+
+        await ensure_markers(session, origin="update")
         # Persist current storage bucket names from live state so platform_config
         # reflects what is actually deployed. This self-heals an instance whose
         # bucket (e.g. literature) exists but whose name was never recorded, so
@@ -317,36 +314,143 @@ def _is_benign_apply_error(message: str | None) -> bool:
     return any(token in message for token in _BENIGN_APPLY_DIAGNOSTICS)
 
 
-async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
+class TargetApplyFailed(Exception):
+    """A targeted apply failed for a reason other than a classified benign no-op."""
+
+    def __init__(self, module: str, target: str):
+        super().__init__(f"{module}: {target}")
+        self.module = module
+        self.target = target
+
+
+class TargetPlanFailed(TargetApplyFailed):
+    """The plan for one target failed, so whether it still needs applying is unknown."""
+
+
+class TargetOutOfScope(TargetApplyFailed):
+    """Applying the target would also change something the confirmed update may not change."""
+
+    def __init__(self, module: str, target: str, offending: list[str]):
+        super().__init__(module, target)
+        self.offending = offending
+
+
+def _out_of_scope(plan_json: dict | None, allowed: set[str]) -> list[str]:
+    """What a targeted plan would change beyond the confirmed additive scope.
+
+    A targeted apply also applies the target's dependencies, so ``-target`` alone does not keep
+    an update additive: every change in the targeted plan must be an additive change the update
+    already enumerated, and nothing may be deleted or replaced.
+    """
+    offending = [r["address"] for r in list_destructive(plan_json)]
+    offending += [r["address"] for r in additive_resources(plan_json) if r["address"] not in allowed]
+    return offending
+
+
+def update_summary(applied: int) -> str:
+    """The finished-update line (mockup M1). An applied target may add a resource or change an
+    existing one, so the line states no count."""
+    if applied == 0:
+        return "Your infrastructure is up to date."
+    return "Infrastructure updated."
+
+
+async def apply_modules_sequentially(modules: list[str], user_id: int, handle=None):
     """Re-plan each module and apply ONLY its additive resources, one resource
     at a time (targeted), one module at a time. Never applies a delete/replace.
 
-    Applying each additive resource on its own run isolates failures: a single
-    benign no-op update (which GCP rejects with "Must specify a field to update")
-    is logged and skipped, so the real new resources still land and the batch is
-    never aborted or stranded by it."""
+    Applying each additive resource on its own run isolates a classified benign
+    no-op update (GCP rejects it with "Must specify a field to update"): it is
+    logged and skipped. Any other failure stops the batch: no later target or
+    module starts, and the outcome says what was applied before it.
+
+    ``handle`` is the infrastructure operation's handle when this runs as one;
+    returns the operation outcome either way."""
     from app.database import async_session_factory
+    from app.services.infrastructure_operations import failed, succeeded
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
-        return
+        return failed("The application is not ready.", "not_ready")
 
+    applied_count = 0
     for module in modules:
+        label = f"Applying {module} changes"
+        if handle is not None:
+            await handle.step(f"plan:{module}", f"Planning {module} changes", "running")
         # Plan once to enumerate the additive resources, then retire the run.
         async with async_session_factory() as s:  # type: ignore[misc]
             try:
                 run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
-                targets = additive_addresses(run.plan_json) if run.status == "awaiting_confirmation" else []
+                if run.status != "awaiting_confirmation":
+                    await s.commit()
+                    raise TargetApplyFailed(module, "plan")
+                targets = additive_addresses(run.plan_json)
                 run.status = "cancelled"
                 run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
+            except TargetApplyFailed:
+                if handle is not None:
+                    await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", applied=applied_count
+                )
+            except asyncio.CancelledError:
+                await s.rollback()
+                raise
             except Exception:
                 logger.exception("Infrastructure update plan failed for module %s", module)
                 await s.rollback()
-                continue
+                if handle is not None:
+                    await handle.step(f"plan:{module}", state="failed", detail="Planning failed.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.", "plan_failed", applied=applied_count
+                )
+        if handle is not None:
+            await handle.step(f"plan:{module}", state="done")
+            await handle.step(f"apply:{module}", label, "running", completed=0, total=len(targets))
 
         applied_any = False
-        for target in targets:
-            applied_any = await _apply_one_target(module, target, user_id) or applied_any
+        allowed = set(targets)
+        for index, target in enumerate(targets, start=1):
+            try:
+                applied = await _apply_one_target(module, target, user_id, allowed)
+            except TargetOutOfScope as exc:
+                if handle is not None:
+                    await handle.step(
+                        f"apply:{module}",
+                        state="failed",
+                        detail="It would also delete or replace an existing resource.",
+                    )
+                return failed(
+                    f"Applying {target} would also delete or replace an existing resource, so it was not applied. "
+                    "Nothing else was applied.",
+                    "scope_exceeded",
+                    applied=applied_count,
+                    failed_target=target,
+                    out_of_scope=exc.offending,
+                )
+            except TargetPlanFailed:
+                if handle is not None:
+                    await handle.step(f"apply:{module}", state="failed", detail=f"Could not plan {target}.")
+                return failed(
+                    f"Planning {module} changes failed. Nothing else was applied.",
+                    "plan_failed",
+                    applied=applied_count,
+                    failed_target=target,
+                )
+            except TargetApplyFailed:
+                if handle is not None:
+                    await handle.step(f"apply:{module}", state="failed", detail=f"Could not apply {target}.")
+                return failed(
+                    f"Applying {module} changes failed. Nothing else was applied.",
+                    "apply_failed",
+                    applied=applied_count,
+                    failed_target=target,
+                )
+            applied_any = applied or applied_any
+            applied_count += 1 if applied else 0
+            if handle is not None:
+                await handle.step(f"apply:{module}", completed=index, total=len(targets))
 
         # Persist new resource names (e.g. the literature bucket) once a real
         # change landed. Best-effort.
@@ -358,15 +462,20 @@ async def apply_modules_sequentially(modules: list[str], user_id: int) -> None:
                 except Exception:
                     logger.exception("Persisting %s outputs after apply failed", module)
                     await s.rollback()
+        if handle is not None:
+            await handle.step(f"apply:{module}", state="done")
+    return succeeded(update_summary(applied_count), applied=applied_count)
 
 
-async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
-    """Re-plan the module and apply a single additive target. Returns True when a
-    real change was applied.
+async def _apply_one_target(module: str, target: str, user_id: int, allowed: set[str] | None = None) -> bool:
+    """Plan exactly what applying ``target`` would change, check it stays within the confirmed
+    additive scope, and apply it. Returns True when a real change was applied.
 
     A benign no-op update (GCP "Must specify a field to update") is logged and
     treated as applied-nothing (returns False) instead of failing, so it cannot
-    abort the surrounding batch or strand the module."""
+    abort the surrounding batch or strand the module. A targeted plan that would
+    delete, replace, or change anything outside ``allowed`` raises TargetOutOfScope
+    before anything is applied."""
     from app.database import async_session_factory
 
     if async_session_factory is None:  # pragma: no cover - app not initialized
@@ -375,14 +484,25 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
     async with async_session_factory() as s:  # type: ignore[misc]
         applying = False
         try:
-            run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
+            run = await TerraformExecutor.run_plan(s, user_id, module_name=module, targets=[target])
+            if run.status != "awaiting_confirmation":
+                # The plan failed: whether this target still needs applying is unknown.
+                await s.commit()
+                raise TargetPlanFailed(module, target)
             # The target may have already been applied (or turned destructive)
             # since enumeration; only apply it while it is still additive.
-            if run.status != "awaiting_confirmation" or target not in set(additive_addresses(run.plan_json)):
+            if target not in set(additive_addresses(run.plan_json)):
                 run.status = "cancelled"
                 run.completed_at = datetime.now(timezone.utc)
                 await s.commit()
                 return False
+            offending = _out_of_scope(run.plan_json, allowed if allowed is not None else {target})
+            if offending:
+                run.status = "cancelled"
+                run.completed_at = datetime.now(timezone.utc)
+                await s.commit()
+                logger.warning("Infrastructure update: %s would also change %s; not applied", target, offending)
+                raise TargetOutOfScope(module, target, offending)
             run.status = "applying"
             await s.flush()
             applying = True
@@ -406,6 +526,8 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 return False
             applied = run.status == "completed"
             await s.commit()
+            if run.status == "failed":
+                raise TargetApplyFailed(module, target)
             return applied
         except asyncio.CancelledError:
             if applying:
@@ -414,13 +536,97 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 # Nothing ran yet: leave no half-planned run behind.
                 await s.rollback()
             raise
-        except Exception:
+        except TargetApplyFailed:
+            raise
+        except Exception as exc:
             logger.exception("Infrastructure update apply failed for target %s", target)
             await s.rollback()
-            return False
+            raise TargetApplyFailed(module, target) from exc
 
 
-def launch_background_apply(modules: list[str], user_id: int) -> None:
-    """Kick off the additive-only apply in the background. Isolated as a seam
-    so endpoints can trigger it and tests can assert it was scheduled."""
-    runtime.spawn(apply_modules_sequentially(modules, user_id), role="infra-update-apply")
+def check_summary(applied: int, destructive: list[dict]) -> str:
+    """The finished-update line signed off in mockup M1."""
+    skipped = len(destructive)
+    parts = [] if applied == 0 and skipped else [update_summary(applied)]
+    if skipped:
+        parts.append(
+            f"{skipped} change{' was' if skipped == 1 else 's were'} not applied because "
+            f"{'it' if skipped == 1 else 'they'} would delete or replace an existing resource."
+        )
+    return " ".join(parts)
+
+
+async def run_update_check(handle, user_id: int):
+    """The confirmed "Check for infrastructure updates" action (M1), as one operation.
+
+    Plans every deployed module, then applies only the additive changes automatically, with no
+    second approval. Changes that would delete or replace a resource are listed in the outcome
+    and never applied.
+    """
+    from app.database import async_session_factory
+    from app.services.infrastructure_operations import OperationResult, succeeded
+
+    from app.services import infrastructure_definitions as definitions
+
+    await handle.step("plan", "Planning changes", "running")
+    async with async_session_factory() as s:  # type: ignore[misc]
+        # The definitions this update reconciles, captured before anything runs (M17).
+        captured = await definitions.capture(s)
+        # Never give a confirmed bucket's marker to a bucket that replaced it.
+        from app.services.storage_identity import require_confirmed_buckets_unchanged
+
+        if await PlatformConfigService.get(s, "storage_deployed") not in _UNSET_MARKERS:
+            await require_confirmed_buckets_unchanged(s)
+            await s.commit()
+        result = await check_for_updates(s, user_id)
+        await s.commit()
+    await handle.step("plan", state="done")
+    destructive = [
+        {k: r.get(k) for k in ("address", "type", "action", "description", "stateful")}
+        for r in result["destructive_resources"]
+    ]
+    applied_count = 0
+    if result["has_additive"]:
+        applied = await apply_modules_sequentially(result["modules_with_additive"], user_id, handle)
+        if applied.status != "succeeded":
+            return OperationResult(
+                applied.status,
+                applied.message,
+                applied.category,
+                {**(applied.partial_effects or {}), "destructive": destructive},
+            )
+        applied_count = (applied.partial_effects or {}).get("applied", 0)
+    # Every planned module is now reconciled: its additive changes applied, and any remaining
+    # delete/replace changes recorded as pending rather than marked current.
+    async with async_session_factory() as s:  # type: ignore[misc]
+        for planned in result["modules"]:
+            await definitions.record_reconciled(
+                s,
+                captured,
+                planned["module"],
+                destructive_pending=bool(planned["destroy_count"]),
+                operation_id=handle.id,
+            )
+        await definitions.refresh_notice(s)
+        await s.commit()
+    return succeeded(check_summary(applied_count, destructive), applied=applied_count, destructive=destructive)
+
+
+def launch_update_check(user_id: int, *, operation_id: int) -> None:
+    """Run the confirmed update check in the background as the accepted operation (seam)."""
+    from app.services.infrastructure_operations import spawn_operation
+
+    spawn_operation(operation_id, lambda handle: run_update_check(handle, user_id), role="infra-update-check")
+
+
+def launch_background_apply(modules: list[str], user_id: int, *, operation_id: int) -> None:
+    """Run the additive-only apply in the background as the accepted operation.
+    Isolated as a seam so endpoints can trigger it and tests can assert it was
+    scheduled."""
+    from app.services.infrastructure_operations import spawn_operation
+
+    spawn_operation(
+        operation_id,
+        lambda handle: apply_modules_sequentially(modules, user_id, handle),
+        role="infra-update-apply",
+    )

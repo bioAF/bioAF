@@ -102,3 +102,43 @@ async def test_get_bucket_metrics_requires_deployed(session):
 # The fail-safe copy-verify-delete move behavior is covered by
 # test_gcs_object_store.py (test_move_is_failsafe_on_partial_failure and
 # test_move_deletes_source_after_verified_copy).
+
+
+@pytest.mark.asyncio
+async def test_a_missing_bucket_does_not_hide_the_others(session):
+    """A bucket deleted outside bioAF is reported by storage health ("Not found"); the bucket cards
+    still show every bucket that answers instead of the whole request failing."""
+    from google.api_core.exceptions import NotFound
+
+    for key, value in [
+        ("storage_deployed", "true"),
+        ("raw_bucket_name", "bioaf-raw-demo"),
+        ("literature_bucket_name", "bioaf-literature-demo"),
+    ]:
+        await session.execute(
+            text(
+                "INSERT INTO platform_config (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ).bindparams(k=key, v=value)
+        )
+    await session.commit()
+    admin = BucketAdminMetrics(
+        size_bytes=1,
+        object_count=1,
+        storage_class="STANDARD",
+        versioning_enabled=False,
+        lifecycle_summaries=[],
+        created_at="2026-03-11T00:00:00Z",
+    )
+
+    async def metrics_for(self, bucket_name):
+        if "literature" in bucket_name:
+            raise NotFound("404 GET https://storage.googleapis.com/storage/v1/b/bioaf-literature-demo")
+        return admin
+
+    with patch("app.adapters.storage.gcs.GcsStorageProvider.get_bucket_admin_metrics", metrics_for):
+        from app.services.gcs_storage import GcsStorageService
+
+        metrics = await GcsStorageService.get_bucket_metrics(session)
+
+    assert [m.purpose for m in metrics] == ["raw"]

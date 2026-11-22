@@ -37,11 +37,17 @@ from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join
 from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
+    UploadedPart,
+    UploadSessionGrant,
+    UploadSessionState,
+    UploadSessionStatus,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
     BucketAdminMetrics,
     BucketMetrics,
+    ContainerObservation,
+    ContainerPresence,
     ObjectMetadata,
     validate_object_metadata,
     SignedDownload,
@@ -51,7 +57,38 @@ from app.adapters.models import (
     StoredObject,
 )
 
+from app.adapters.storage import workers as storage_workers  # noqa: E402
+
 logger = logging.getLogger("bioaf.adapters.storage.s3")
+
+_MIB = 1024 * 1024
+_MIN_PART = 8 * _MIB  # S3's floor is 5 MiB; 8 MiB keeps requests few for small files
+_DEFAULT_PART = 64 * _MIB  # when the size is not declared
+_MAX_PARTS = 10_000
+
+
+def multipart_part_size(size_bytes: int | None) -> int:
+    """Part size for a multipart upload: at most 10,000 parts, whole MiB, at least 8 MiB."""
+    if size_bytes is None:
+        return _DEFAULT_PART
+    needed = -(-size_bytes // _MAX_PARTS)
+    return max(_MIN_PART, -(-needed // _MIB) * _MIB)
+
+
+def _bucket_status(exc) -> str:
+    """ "missing", "forbidden" or "other" for a bucket-level ClientError."""
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if code in ("404", "NoSuchBucket", "NotFound") or status == 404:
+        return "missing"
+    if code in ("403", "AccessDenied", "Forbidden") or status == 403:
+        return "forbidden"
+    return "other"
+
+
+def _error_code(exc) -> str:
+    return str(exc.response.get("Error", {}).get("Code", ""))[:40]
+
 
 # Local mode emulates the object store on the filesystem, exactly like the GCS
 # adapter (``s3://<bucket>/<key>`` maps to LOCAL_DATA_ROOT/_objects/<bucket>/<key>),
@@ -423,7 +460,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_bytes, uri, data)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_write_bytes, uri, data, content_type, creds)
+        await storage_workers.run("storage write", self._s3_write_bytes, uri, data, content_type, creds)
 
     async def upload_file(
         self,
@@ -438,7 +475,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().write_stream, uri, file_obj, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_file, uri, file_obj, content_type, creds, metadata)
+        await storage_workers.run("storage upload", self._s3_upload_file, uri, file_obj, content_type, creds, metadata)
 
     async def upload_filename(
         self,
@@ -453,7 +490,9 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().upload_filename, uri, local_path, metadata)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_upload_filename, uri, local_path, content_type, creds, metadata)
+        await storage_workers.run(
+            "storage upload", self._s3_upload_filename, uri, local_path, content_type, creds, metadata
+        )
 
     async def download_to_file(self, uri: str, file_obj: BinaryIO) -> None:
         if self.is_local:
@@ -475,7 +514,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().delete, uri)
             return
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_delete, uri, generation, creds)
+        await storage_workers.run("storage delete", self._s3_delete, uri, generation, creds)
 
     async def exists(self, uri: str) -> bool:
         if self.is_local:
@@ -506,7 +545,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_copy, source_uri, dest_uri, creds)
+        await storage_workers.run("storage copy", self._s3_copy, source_uri, dest_uri, creds)
         return dest_uri
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
@@ -514,7 +553,7 @@ class S3StorageProvider(StorageProvider):
             await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_move, source_uri, dest_uri, creds)
+        await storage_workers.run("storage move", self._s3_move, source_uri, dest_uri, creds)
         return dest_uri
 
     async def get_object_metadata(self, uri: str) -> ObjectMetadata:
@@ -557,6 +596,23 @@ class S3StorageProvider(StorageProvider):
             return {"versioning_enabled": False}
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_get_bucket_info, uri, creds)
+
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        bucket_name, _ = self._parse_uri(uri)
+        if self.is_local:
+            root = os.path.join(LOCAL_DATA_ROOT, _LOCAL_OBJECTS_DIR, bucket_name)
+            present = await asyncio.to_thread(os.path.isdir, root)
+            return ContainerObservation(
+                presence=ContainerPresence.PRESENT if present else ContainerPresence.MISSING,
+                simulated=True,
+            )
+        try:
+            creds = await self._get_credentials()
+            account_id = await self._account_id()
+            return await asyncio.to_thread(self._s3_inspect_container, bucket_name, creds, account_id)
+        except Exception as exc:
+            logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
 
     # -- Object-store interface (Phase 3): signed URLs + resumable (6a.4) ------
     #
@@ -607,6 +663,133 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_create_presigned_put, uri, content_type, creds)
 
+    # -- Direct-upload sessions: S3 multipart uploads (11F/11G) ---------------
+    #
+    # The browser uploads parts to presigned UploadPart URLs it asks for as it goes, then bioAF
+    # assembles the object. Cancelling aborts the upload and is confirmed only when the provider
+    # no longer lists it: a part still in flight during the abort can keep it listed.
+
+    async def begin_upload_session(
+        self,
+        uri: str,
+        *,
+        content_type: str = "application/octet-stream",
+        size_bytes: int | None = None,
+        origin: str | None = None,
+    ) -> UploadSessionGrant:
+        if self.is_local:
+            return await super().begin_upload_session(uri, content_type=content_type, size_bytes=size_bytes)
+        creds = await self._get_credentials()
+        upload_id = await asyncio.to_thread(self._s3_begin_multipart, uri, content_type, creds)
+        return UploadSessionGrant(protocol="s3_multipart", handle=upload_id, part_size=multipart_part_size(size_bytes))
+
+    async def sign_upload_parts(self, uri: str, handle: str, part_numbers: list[int]) -> dict[int, str]:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_sign_parts, uri, handle, part_numbers, creds)
+
+    async def finish_upload_session(self, uri: str, handle: str, parts: list[UploadedPart]) -> None:
+        creds = await self._get_credentials()
+        await storage_workers.run("multipart assembly", self._s3_finish_multipart, uri, handle, parts, creds)
+
+    async def inspect_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_multipart_status, uri, handle, creds)
+
+    async def cancel_upload_session(self, uri: str, handle: str) -> UploadSessionStatus:
+        creds = await self._get_credentials()
+        return await storage_workers.run("multipart abort", self._s3_abort_multipart, uri, handle, creds)
+
+    def _s3_begin_multipart(self, uri: str, content_type: str, creds) -> str:
+        bucket, key = self._parse_uri(uri)
+        answer = self._get_s3_client(creds).create_multipart_upload(Bucket=bucket, Key=key, ContentType=content_type)
+        return answer["UploadId"]
+
+    def _s3_sign_parts(self, uri: str, handle: str, part_numbers: list[int], creds) -> dict[int, str]:
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        return {
+            number: client.generate_presigned_url(
+                "upload_part",
+                Params={"Bucket": bucket, "Key": key, "UploadId": handle, "PartNumber": number},
+                ExpiresIn=3600,
+            )
+            for number in part_numbers
+        }
+
+    def _s3_finish_multipart(self, uri: str, handle: str, parts: list[UploadedPart], creds) -> None:
+        bucket, key = self._parse_uri(uri)
+        ordered = sorted(parts, key=lambda p: p.number)
+        self._get_s3_client(creds).complete_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            UploadId=handle,
+            MultipartUpload={"Parts": [{"PartNumber": p.number, "ETag": p.etag} for p in ordered]},
+        )
+
+    def _s3_multipart_status(self, uri: str, handle: str, creds) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        try:
+            # ListParts returns at most 1,000 parts per page: progress beyond the first page counts too.
+            received = 0
+            marker = None
+            while True:
+                kwargs = {"Bucket": bucket, "Key": key, "UploadId": handle}
+                if marker is not None:
+                    kwargs["PartNumberMarker"] = marker
+                answer = client.list_parts(**kwargs)
+                received += sum(int(p.get("Size") or 0) for p in answer.get("Parts", []))
+                if not answer.get("IsTruncated"):
+                    break
+                marker = answer.get("NextPartNumberMarker")
+                if marker is None:
+                    break
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "NoSuchUpload":
+                logger.warning("Multipart status did not complete (error_code=%s)", _error_code(exc))
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+            return self._s3_ended_or_completed(client, bucket, key)
+        except BotoCoreError as exc:
+            logger.warning("Multipart status did not complete (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        return UploadSessionStatus(state=UploadSessionState.ACTIVE, received_bytes=received)
+
+    def _s3_ended_or_completed(self, client, bucket: str, key: str) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        # The upload ID is gone: either it was completed (the object exists) or it ended.
+        try:
+            client.head_object(Bucket=bucket, Key=key)
+            return UploadSessionStatus(state=UploadSessionState.COMPLETED)
+        except ClientError as exc:
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if _error_code(exc) in ("404", "NoSuchKey", "NotFound") or status == 404:
+                return UploadSessionStatus(state=UploadSessionState.ENDED)
+            logger.warning("Could not check an ended upload's object (error_code=%s)", _error_code(exc))
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        except BotoCoreError as exc:
+            logger.warning("Could not check an ended upload's object (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+
+    def _s3_abort_multipart(self, uri: str, handle: str, creds) -> UploadSessionStatus:
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        bucket, key = self._parse_uri(uri)
+        client = self._get_s3_client(creds)
+        try:
+            client.abort_multipart_upload(Bucket=bucket, Key=key, UploadId=handle)
+        except ClientError as exc:
+            if _error_code(exc) != "NoSuchUpload":
+                logger.warning("Multipart abort did not complete (error_code=%s)", _error_code(exc))
+                return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        except BotoCoreError as exc:
+            logger.warning("Multipart abort did not complete (error_type=%s)", type(exc).__name__)
+            return UploadSessionStatus(state=UploadSessionState.UNKNOWN)
+        # Confirmed only once the provider no longer lists the upload.
+        return self._s3_multipart_status(uri, handle, creds)
+
     # -- Bucket-admin enumeration (Tier-2): real S3 only, no local mode -------
 
     async def get_bucket_admin_metrics(self, bucket_name: str) -> BucketAdminMetrics:
@@ -621,7 +804,7 @@ class S3StorageProvider(StorageProvider):
         bucket. Used by orphaned-resource cleanup.
         """
         creds = await self._get_credentials()
-        await asyncio.to_thread(self._s3_delete_bucket, bucket_name, creds)
+        await storage_workers.run("bucket delete", self._s3_delete_bucket, bucket_name, creds)
 
     def native_upload_client(self, credentials=None):
         """Raw synchronous boto3 S3 client (transitional escape hatch), mirroring the
@@ -688,6 +871,15 @@ class S3StorageProvider(StorageProvider):
             "total_size_gb": 4.51,
             "total_cost_monthly_usd": total_monthly,
         }
+
+    async def _account_id(self) -> str | None:
+        """The installation's AWS account ID, as the installer recorded it."""
+        from app.database import async_session_factory
+        from app.platform.platform_config_service import PlatformConfigService
+
+        async with async_session_factory() as session:
+            value = await PlatformConfigService.get(session, "aws_account_id")
+        return value.strip() if value and value.strip() and value.strip() != "null" else None
 
     async def _read_storage_config(self) -> dict[str, str]:
         """Read storage_deployed + the per-store bucket-name keys (parity with GCS)."""
@@ -907,6 +1099,58 @@ class S3StorageProvider(StorageProvider):
                 raise ObjectChanged(identity.uri) from e
             raise
         return resp["Body"]
+
+    def _s3_inspect_container(self, bucket_name: str, creds, account_id: str | None = None) -> ContainerObservation:
+        """Presence and ownership through HeadBucket, which needs only the bucket permissions the
+        installer grants. With the installation's account ID, ``ExpectedBucketOwner`` confirms the
+        owner; AWS's bucket creation date is not reported because it can change (for example after
+        a bucket policy edit), so identity rests on the owner and bioAF's marker tag."""
+        from botocore.exceptions import ClientError
+
+        client = self._get_s3_client(creds)
+
+        def head(**kwargs):
+            client.head_bucket(Bucket=bucket_name, **kwargs)
+
+        owner: str | None = None
+        limits: list[str] = []
+        try:
+            if account_id:
+                try:
+                    head(ExpectedBucketOwner=account_id)
+                    owner = "own-account"
+                except ClientError as exc:
+                    if _bucket_status(exc) != "forbidden":
+                        raise
+                    # Refused with the expected owner: another account's bucket, or no access at all.
+                    head()
+                    owner = "other-account"
+            else:
+                head()
+                limits.append("owner")
+        except ClientError as exc:
+            status = _bucket_status(exc)
+            if status == "missing":
+                return ContainerObservation(presence=ContainerPresence.MISSING)
+            if status == "forbidden":
+                return ContainerObservation(presence=ContainerPresence.FORBIDDEN)
+            logger.warning("Bucket inspection did not complete (error_code=%s)", _error_code(exc))
+            return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
+
+        labels: dict[str, str] = {}
+        try:
+            tag_set = client.get_bucket_tagging(Bucket=bucket_name).get("TagSet", [])
+            labels = {t["Key"]: t["Value"] for t in tag_set if "Key" in t}
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "NoSuchTagSet":
+                limits.append("labels")
+        return ContainerObservation(
+            presence=ContainerPresence.PRESENT,
+            owner=owner,
+            created_at=None,
+            labels=labels,
+            limits=tuple(limits),
+        )
 
     def _s3_get_bucket_info(self, uri: str, creds) -> dict:
         bucket_name, _ = self._parse_uri(uri)

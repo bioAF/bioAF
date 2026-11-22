@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay, type StorageDisplay } from "@/lib/storageDisplay";
 import { AutoIngestControls } from "./AutoIngestControls";
+import { StorageHealthPanel } from "./StorageHealthPanel";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
 import { Button } from "@/components/ui/Button";
@@ -242,10 +243,10 @@ export function StorageSection({
     );
   }
 
-  if (buckets.length === 0) return null;
-
   return (
     <div className="space-y-4">
+      <StorageHealthPanel />
+      {buckets.length > 0 && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {buckets.map((bucket) => (
           <BucketCard
@@ -257,6 +258,7 @@ export function StorageSection({
           />
         ))}
       </div>
+      )}
     </div>
   );
 }

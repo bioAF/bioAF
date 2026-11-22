@@ -141,8 +141,11 @@ async def test_realign_noop_when_already_aligned(session):
 
 
 def _fake_run_plan(plans: dict[str, dict]):
-    async def run_plan(session, user_id, module_name):
+    async def run_plan(session, user_id, module_name, targets=None, **_kwargs):
         plan = plans.get(module_name, _plan([]))
+        if targets:
+            # A targeted plan covers only the targets (these fakes model no dependencies).
+            plan = _plan([r for r in plan["resources"] if r["address"] in targets])
         run = TerraformRun(
             triggered_by_user_id=user_id,
             action="plan",
@@ -271,6 +274,15 @@ async def test_check_self_heals_storage_bucket_names(session, admin_user, monkey
         }
 
     monkeypatch.setattr(TerraformExecutor, "read_module_outputs", fake_outputs)
+
+    # The unrecorded buckets are recorded because inspection establishes them as
+    # this installation's; outputs alone would not (storage lifecycle 11C).
+    from app.services import storage_identity
+
+    async def verified(_session, store, bucket_name):
+        return storage_identity.StoreReport(store, bucket_name, storage_identity.StoreHealth.AVAILABLE, "discovered")
+
+    monkeypatch.setattr(storage_identity, "inspect_bucket", verified)
 
     await infra_update_service.check_for_updates(session, admin_user.id)
 
@@ -406,3 +418,44 @@ async def test_deployed_modules_excludes_image_build_on_gcp(session):
     modules = await infra_update_service._deployed_modules(session)
     assert modules == ["storage", "compute"]
     assert "image_build" not in modules
+
+
+@pytest.mark.asyncio
+async def test_an_install_without_a_recorded_generation_still_gets_markers_on_its_first_update(
+    session, admin_user, monkeypatch
+):
+    """Realigning naming may record the storage generation for the first time; the markers for that
+    generation must exist before storage is planned, or the update applies without them."""
+    from app.services.storage_generation import markers_for_tfvars
+
+    monkeypatch.setattr(infra_update_service, "_persist_module_outputs", _noop_persist)
+    await _seed(
+        session,
+        terraform_initialized="true",
+        storage_deployed="true",
+        raw_bucket_name="bioaf-raw-bioaf-co-41aae5",
+    )
+    seen: dict = {}
+    fake = _fake_run_plan({"storage": _plan([])})
+
+    async def run_plan(s, user_id, module_name, targets=None, **kwargs):
+        config = await PlatformConfigService.get_many(s, ["storage_stack_uid", "storage_bucket_markers"])
+        seen[module_name] = markers_for_tfvars(config, config.get("storage_stack_uid"))
+        return await fake(s, user_id, module_name, targets, **kwargs)
+
+    monkeypatch.setattr(TerraformExecutor, "run_plan", run_plan)
+
+    await infra_update_service.check_for_updates(session, admin_user.id)
+
+    assert seen["storage"] is not None
+    assert set(seen["storage"]) == {"ingest", "raw", "working", "results", "references", "literature", "config_backups"}
+
+
+def test_the_finished_line_never_counts_changes_as_additions():
+    """An applied target may change an existing resource, so the line states no count (owner)."""
+    assert infra_update_service.update_summary(0) == "Your infrastructure is up to date."
+    assert infra_update_service.update_summary(8) == "Infrastructure updated."
+    assert infra_update_service.check_summary(7, []) == "Infrastructure updated."
+    assert infra_update_service.check_summary(0, [{"address": "x"}]) == (
+        "1 change was not applied because it would delete or replace an existing resource."
+    )

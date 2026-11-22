@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.experiment import Experiment
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
+from app.models.plot_scan_state import PlotScanState
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.file_service import FileService
@@ -16,7 +18,30 @@ from app.services.thumbnail_service import THUMBNAIL_PREFIX, ThumbnailService
 logger = logging.getLogger("bioaf.plot_archive_service")
 
 # Track last scan timestamp per org
-_last_scan: dict[int, datetime] = {}
+# How long the watcher waits before probing a results store that is missing, refused, or not
+# confirmed as this installation's, and the capped backoff after a temporary failure (11H).
+SLOW_PROBE = timedelta(minutes=30)
+TEMPORARY_BACKOFF = (
+    timedelta(minutes=1),
+    timedelta(minutes=2),
+    timedelta(minutes=4),
+    timedelta(minutes=8),
+    timedelta(minutes=16),
+    timedelta(minutes=30),
+)
+
+
+class PlotScanFailed(Exception):
+    """Listing the results store failed; nothing about the scan is recorded as successful."""
+
+
+@dataclass(frozen=True)
+class ScanHealth:
+    status: str  # "ok", "missing", "no_access", "not_confirmed", "temporary"
+    last_success_at: datetime | None
+    last_attempt_at: datetime | None
+    next_attempt_at: datetime | None
+
 
 # Directories that hold an HTML report's own furniture rather than its figures.
 #
@@ -187,128 +212,200 @@ class PlotArchiveService:
         return plot
 
     @staticmethod
-    async def scan_and_index(session: AsyncSession) -> int:
-        """Scan the results store for new image files and auto-index them."""
-        indexed = 0
-        try:
-            from app.adapters.registry import get_storage_adapter
+    async def _scan_state(session: AsyncSession) -> PlotScanState:
+        state = await session.get(PlotScanState, 1)
+        if state is None:
+            state = PlotScanState(id=1, status="ok", failures=0)
+            session.add(state)
+            await session.flush()
+        return state
 
-            adapter = get_storage_adapter()
+    @staticmethod
+    def _health(state: PlotScanState | None) -> ScanHealth:
+        if state is None:
+            return ScanHealth("ok", None, None, None)
+        return ScanHealth(state.status, state.last_success_at, state.last_attempt_at, state.next_attempt_at)
 
-            # Get all organizations (simplified -- in practice scope by active orgs)
-            from app.models.organization import Organization
+    @staticmethod
+    async def scan_health(session: AsyncSession) -> ScanHealth:
+        return PlotArchiveService._health(await session.get(PlotScanState, 1))
 
-            orgs_result = await session.execute(select(Organization))
-            orgs = list(orgs_result.scalars().all())
+    @staticmethod
+    async def scheduled_scan(session: AsyncSession, *, force: bool = False) -> ScanHealth:
+        """The watcher's pass: list the results store only when it is due and healthy (11H).
 
-            results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
-            if not results_bucket or results_bucket == "null":
-                logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
-                return 0
+        Checks the store read-only first. A missing, refused, or unconfirmed store is not listed
+        and is probed again slowly; a temporary failure backs off with a cap. A configuration change
+        or ``force`` (an administrator's Check again) makes it due at once. Nothing is ever created.
+        Logs only state changes. Commits its own state.
+        """
+        from app.services import storage_identity
+        from app.services.deployment_outputs import identifier_value
+        from app.services.storage_identity import StoreHealth
 
-            from app.models.experiment import Experiment
-            from app.models.pipeline_run import PipelineRun
-            from app.services.file_verification_service import Expectation, FileVerificationService
+        bucket = identifier_value(await PlatformConfigService.get(session, "results_bucket_name"))
+        if not bucket:
+            return await PlotArchiveService.scan_health(session)
+        state = await PlotArchiveService._scan_state(session)
+        now = datetime.now(timezone.utc)
+        if state.results_bucket != bucket:
+            state.results_bucket, state.failures, state.next_attempt_at, state.status = bucket, 0, None, "ok"
+        if not force and state.next_attempt_at is not None and now < state.next_attempt_at:
+            await session.commit()
+            return PlotArchiveService._health(state)
 
-            async def owner_of(experiment_id: int | None, pipeline_run_id: int | None) -> int | None:
-                """The one organization owning the object's experiment/run, or None (unscoped/conflict)."""
-                owners = set()
-                if experiment_id is not None:
-                    org = await session.scalar(select(Experiment.organization_id).where(Experiment.id == experiment_id))
-                    if org is None:
-                        return None
-                    owners.add(org)
-                if pipeline_run_id is not None:
-                    org = await session.scalar(
-                        select(PipelineRun.organization_id).where(PipelineRun.id == pipeline_run_id)
-                    )
-                    if org is None:
-                        return None
-                    owners.add(org)
-                return owners.pop() if len(owners) == 1 else None
-
-            skipped = 0
+        state.last_attempt_at = now
+        report = await storage_identity.inspect_bucket(session, "results", bucket)
+        status = {
+            StoreHealth.NOT_FOUND: "missing",
+            StoreHealth.NOT_MOUNTED: "missing",
+            StoreHealth.NO_ACCESS: "no_access",
+            # Owner decision: a readable store that is only missing confirmation keeps supplying
+            # plots (an upgrade must not stop them); a known mismatch stops scanning.
+            StoreHealth.WRONG_OWNER: "not_confirmed",
+            StoreHealth.NOT_RESPONDING: "temporary",
+        }.get(report.health)
+        if status is None:
             try:
-                objs = await adapter.list_objects(adapter.build_uri(results_bucket, ""))
-                for obj in objs:
-                    gcs_uri = obj.storage_uri
-                    name = adapter.parse_uri(gcs_uri)[1]
+                await PlotArchiveService.scan_and_index(session, bucket)
+            except PlotScanFailed:
+                await session.rollback()
+                state = await PlotArchiveService._scan_state(session)
+                state.results_bucket, state.last_attempt_at = bucket, now
+                status = "temporary"
 
-                    # Skip generated thumbnails
-                    if name.startswith(THUMBNAIL_PREFIX):
-                        continue
+        previous = state.status
+        if status is None:
+            state.status, state.failures, state.next_attempt_at, state.last_success_at = "ok", 0, None, now
+            if previous != "ok":
+                logger.info("Plot archive scanning resumed")
+        else:
+            state.failures = (state.failures or 0) + 1
+            delay = (
+                TEMPORARY_BACKOFF[min(state.failures, len(TEMPORARY_BACKOFF)) - 1]
+                if status == "temporary"
+                else SLOW_PROBE
+            )
+            state.status, state.next_attempt_at = status, now + delay
+            if previous != status:
+                logger.warning("Plot archive scanning paused: results store is %s", status)
+        await session.commit()
+        return PlotArchiveService._health(state)
 
-                    # Filter image files
-                    if not name.lower().endswith((".png", ".svg", ".pdf")):
-                        continue
+    @staticmethod
+    async def scan_and_index(session: AsyncSession, results_bucket: str | None = None) -> int:
+        """Scan the results store for new image files and auto-index them.
 
-                    # An image file is not automatically a plot. Skip the
-                    # furniture of any HTML report published alongside it.
-                    if is_report_asset(name):
-                        continue
+        Raises PlotScanFailed when the store cannot be listed, so a failed listing is never
+        recorded as a scan.
+        """
+        indexed = 0
+        from app.adapters.registry import get_storage_adapter
 
-                    # Check not already in archive
-                    existing = await session.execute(select(File.id).where(File.storage_uri == gcs_uri))
-                    if existing.scalar_one_or_none():
-                        continue
+        adapter = get_storage_adapter()
 
-                    # Ownership comes from the experiment/run the path names, never from the scan
-                    # order: an object no organization provably owns is left alone.
-                    experiment_id, pipeline_run_id = PlotArchiveService._parse_ids_from_path(gcs_uri)
-                    org_id = await owner_of(experiment_id, pipeline_run_id)
-                    if org_id is None:
-                        skipped += 1
-                        continue
+        if results_bucket is None:
+            results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
+        if not results_bucket or results_bucket == "null":
+            logger.warning("results_bucket_name not configured in platform_config, skipping plot scan")
+            return 0
 
-                    ext = name.rsplit(".", 1)[-1].lower()
-                    file_type = ext if ext in ("png", "svg", "pdf") else "other"
+        from app.models.experiment import Experiment
+        from app.models.pipeline_run import PipelineRun
+        from app.services.file_verification_service import Expectation, FileVerificationService
 
-                    file = await FileService.create_file_record(
-                        session,
-                        org_id=org_id,
-                        user_id=None,
-                        filename=name.split("/")[-1],
-                        storage_uri=gcs_uri,
-                        size_bytes=obj.size_bytes,
-                        md5_checksum=None,
-                        file_type=file_type,
-                        experiment_id=experiment_id,
-                        source_type="plot_archive",
-                        source_pipeline_run_id=pipeline_run_id,
-                    )
+        async def owner_of(experiment_id: int | None, pipeline_run_id: int | None) -> int | None:
+            """The one organization owning the object's experiment/run, or None (unscoped/conflict)."""
+            owners = set()
+            if experiment_id is not None:
+                org = await session.scalar(select(Experiment.organization_id).where(Experiment.id == experiment_id))
+                if org is None:
+                    return None
+                owners.add(org)
+            if pipeline_run_id is not None:
+                org = await session.scalar(select(PipelineRun.organization_id).where(PipelineRun.id == pipeline_run_id))
+                if org is None:
+                    return None
+                owners.add(org)
+            return owners.pop() if len(owners) == 1 else None
 
-                    entry = await PlotArchiveService.index_plot(
-                        session,
-                        org_id=org_id,
-                        file_id=file.id,
-                        experiment_id=experiment_id,
-                        pipeline_run_id=pipeline_run_id,
-                        title=name.split("/")[-1],
-                    )
-                    await FileService.finalize_registration(session, file)
-                    await FileVerificationService.begin(session, file, Expectation.none("plot_archive"))
+        skipped = 0
+        try:
+            objs = await adapter.list_objects(adapter.build_uri(results_bucket, ""))
+        except Exception as exc:
+            # Storage errors can carry URLs: the type is enough to diagnose.
+            logger.debug("Listing the results store failed (error_type=%s)", type(exc).__name__)
+            raise PlotScanFailed from None
+        for obj in objs:
+            gcs_uri = obj.storage_uri
+            name = adapter.parse_uri(gcs_uri)[1]
 
-                    if ext == "pdf":
-                        thumb_uri = await ThumbnailService.generate_and_upload(session, gcs_uri, entry.id)
-                        if thumb_uri:
-                            entry.thumbnail_gcs_uri = thumb_uri
+            # Skip generated thumbnails
+            if name.startswith(THUMBNAIL_PREFIX):
+                continue
 
-                    indexed += 1
-            except Exception as e:
-                logger.warning("Failed to scan the results store for plots: %s", e)
-            if skipped:
-                logger.info("Plot scan left %d image(s) with no single owning organization unindexed", skipped)
+            # Filter image files
+            if not name.lower().endswith((".png", ".svg", ".pdf")):
+                continue
 
-            now = datetime.now(timezone.utc)
-            for org in orgs:
-                _last_scan[org.id] = now
+            # An image file is not automatically a plot. Skip the
+            # furniture of any HTML report published alongside it.
+            if is_report_asset(name):
+                continue
 
-            if indexed > 0:
-                await session.commit()
-                logger.info("Plot archive watcher indexed %d new plots", indexed)
+            # Check not already in archive
+            existing = await session.execute(select(File.id).where(File.storage_uri == gcs_uri))
+            if existing.scalar_one_or_none():
+                continue
 
-        except Exception as e:
-            logger.error("Plot archive scan failed: %s", e)
+            # Ownership comes from the experiment/run the path names, never from the scan
+            # order: an object no organization provably owns is left alone.
+            experiment_id, pipeline_run_id = PlotArchiveService._parse_ids_from_path(gcs_uri)
+            org_id = await owner_of(experiment_id, pipeline_run_id)
+            if org_id is None:
+                skipped += 1
+                continue
+
+            ext = name.rsplit(".", 1)[-1].lower()
+            file_type = ext if ext in ("png", "svg", "pdf") else "other"
+
+            file = await FileService.create_file_record(
+                session,
+                org_id=org_id,
+                user_id=None,
+                filename=name.split("/")[-1],
+                storage_uri=gcs_uri,
+                size_bytes=obj.size_bytes,
+                md5_checksum=None,
+                file_type=file_type,
+                experiment_id=experiment_id,
+                source_type="plot_archive",
+                source_pipeline_run_id=pipeline_run_id,
+            )
+
+            entry = await PlotArchiveService.index_plot(
+                session,
+                org_id=org_id,
+                file_id=file.id,
+                experiment_id=experiment_id,
+                pipeline_run_id=pipeline_run_id,
+                title=name.split("/")[-1],
+            )
+            await FileService.finalize_registration(session, file)
+            await FileVerificationService.begin(session, file, Expectation.none("plot_archive"))
+
+            if ext == "pdf":
+                thumb_uri = await ThumbnailService.generate_and_upload(session, gcs_uri, entry.id)
+                if thumb_uri:
+                    entry.thumbnail_gcs_uri = thumb_uri
+
+            indexed += 1
+        if skipped:
+            logger.info("Plot scan left %d image(s) with no single owning organization unindexed", skipped)
+
+        if indexed > 0:
+            await session.commit()
+            logger.info("Plot archive watcher indexed %d new plots", indexed)
 
         return indexed
 

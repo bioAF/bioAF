@@ -15,8 +15,9 @@ def _storage_adapter():
     adapter, and file-linking moves objects through it; both go through this one
     adapter. move() echoes the destination URI.
     """
-    adapter = AsyncMock()
-    adapter.generate_signed_url.return_value = "https://storage.googleapis.com/fake-signed-url"
+    from tests.support.uploads import with_upload_session
+
+    adapter = with_upload_session(AsyncMock(), "https://storage.googleapis.com/fake-signed-url")
     adapter.move.side_effect = lambda src, dst: dst
     # resolve_uri is the backend-neutral URI factory (Phase 7); echo a realistic
     # store-scoped URI so callers that build write URIs through it get a string.
@@ -465,14 +466,15 @@ async def test_signed_upload_without_experiment_id(client, admin_token, configur
             json={"filename": "nolink.fastq.gz", "expected_size_bytes": 5000},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    assert initiate_resp.status_code == 200
-    upload_id = initiate_resp.json()["upload_id"]
+        assert initiate_resp.status_code == 200
+        upload_id = initiate_resp.json()["upload_id"]
 
-    complete_resp = await client.post(
-        "/api/files/upload/complete",
-        json={"upload_id": upload_id},
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
+        # Completion asks the provider whether the session stored the whole object (11F).
+        complete_resp = await client.post(
+            "/api/files/upload/complete",
+            json={"upload_id": upload_id},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
     assert complete_resp.status_code == 200
     assert complete_resp.json()["experiment_id"] is None
 
@@ -489,19 +491,20 @@ async def test_complete_upload_omitting_actual_md5_returns_200(client, admin_tok
     field must be optional when no expected_md5 was set during initiate.
     """
     # Seed a pending upload directly in the in-memory store
-    from app.services.upload_service import _pending_uploads
+    from tests.support.uploads import seed_signed_upload
 
     upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = {
-        "org_id": 1,
-        "user_id": 1,
-        "filename": "big.fastq.gz",
-        "gcs_uri": f"gs://bioaf-ingest-test-abc123/uploads/{upload_id}/big.fastq.gz",
-        "expected_size": None,
-        "expected_md5": None,  # No MD5 check
-        "experiment_id": None,
-        "sample_ids": [],
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=1,
+        user_id=1,
+        filename="big.fastq.gz",
+        gcs_uri=f"gs://bioaf-ingest-test-abc123/uploads/{upload_id}/big.fastq.gz",
+        expected_size=None,
+        expected_md5=None,
+        experiment_id=None,
+        sample_ids=[],
+    )
 
     resp = await client.post(
         "/api/files/upload/complete",
@@ -515,19 +518,20 @@ async def test_complete_upload_omitting_actual_md5_returns_200(client, admin_tok
 @pytest.mark.asyncio
 async def test_complete_upload_with_explicit_empty_md5_returns_200(client, admin_token, configured_ingest_bucket):
     """complete_upload must accept actual_md5 as empty string when no MD5 check needed."""
-    from app.services.upload_service import _pending_uploads
+    from tests.support.uploads import seed_signed_upload
 
     upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = {
-        "org_id": 1,
-        "user_id": 1,
-        "filename": "big2.fastq.gz",
-        "gcs_uri": f"gs://bioaf-ingest-test-abc123/uploads/{upload_id}/big2.fastq.gz",
-        "expected_size": None,
-        "expected_md5": None,
-        "experiment_id": None,
-        "sample_ids": [],
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=1,
+        user_id=1,
+        filename="big2.fastq.gz",
+        gcs_uri=f"gs://bioaf-ingest-test-abc123/uploads/{upload_id}/big2.fastq.gz",
+        expected_size=None,
+        expected_md5=None,
+        experiment_id=None,
+        sample_ids=[],
+    )
 
     resp = await client.post(
         "/api/files/upload/complete",

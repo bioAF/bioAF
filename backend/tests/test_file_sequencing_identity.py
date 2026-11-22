@@ -35,7 +35,8 @@ from sqlalchemy import select, text
 from app.models.file import File
 from app.services import sample_sheet_service
 from app.services.samplesheet_inputs import SheetSampleInput
-from app.services.upload_service import UploadService, _pending_uploads
+from app.services.upload_service import UploadService
+from tests.support.uploads import seed_signed_upload
 
 MIGRATION = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "119_file_sequencing_identity.py"
 
@@ -202,18 +203,19 @@ def test_a_non_integer_lane_attribute_is_not_trusted():
 
 async def _complete_upload(session, admin_user, filename: str) -> File:
     upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = {
-        "org_id": admin_user.organization_id,
-        "user_id": admin_user.id,
-        "filename": filename,
-        "gcs_uri": f"gs://bioaf-ingest-test/uploads/{upload_id}/{filename}",
-        "expected_size": None,
-        "expected_md5": None,
-        "project_id": None,
-        "experiment_id": None,
-        "sample_ids": [],
-        "is_global": False,
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        filename=filename,
+        gcs_uri=f"gs://bioaf-ingest-test/uploads/{upload_id}/{filename}",
+        expected_size=None,
+        expected_md5=None,
+        project_id=None,
+        experiment_id=None,
+        sample_ids=[],
+        is_global=False,
+    )
     return await UploadService.complete_upload(session, admin_user.organization_id, upload_id, "")
 
 

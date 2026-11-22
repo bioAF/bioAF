@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from app import runtime
@@ -24,6 +25,7 @@ from app.models.reference_dataset import (
     pipeline_run_references,
 )
 from app.models.reference_import_progress import ReferenceImportProgress
+from app.models.upload_checkpoint import UploadCheckpoint
 from app.platform.platform_config_service import PlatformConfigService
 from app.schemas.reference_dataset import (
     ImpactPipelineRun,
@@ -37,6 +39,8 @@ from app.schemas.reference_dataset import (
 from app.services.audit_service import log_action
 from app.services.post_commit_events import defer_event
 from app.services.event_types import REFERENCE_DEPRECATED
+
+from app.services.storage_write_admission import admits_writes  # noqa: E402
 
 logger = logging.getLogger("bioaf.reference_data")
 
@@ -475,6 +479,7 @@ class ReferenceDataService:
         )
 
     @staticmethod
+    @admits_writes
     async def init_upload(
         session: AsyncSession,
         org_id: int,
@@ -491,6 +496,9 @@ class ReferenceDataService:
         """
         if not request.files:
             raise ValidationError("init_upload requires at least one file in `files`")
+        from app.services.storage_write_admission import require_store_usable
+
+        # Admitted (registered, then refused while writes are paused) before any session exists.
 
         # Up-front uniqueness check so we don't create a GCS session before failing
         existing = await session.execute(
@@ -504,9 +512,13 @@ class ReferenceDataService:
             raise ConflictError(f"Reference '{request.name}' version '{request.version}' already exists")
 
         bucket_name = await ReferenceDataService._get_references_bucket(session)
+        await require_store_usable(session, "references")
 
-        # GCS prefix: {category}/{slug-name}/{slug-version}/
-        gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/"
+        # GCS prefix: {category}/{slug-name}/{slug-version}/{upload}/. The last segment is unique to
+        # this upload, so an aborted upload's session (still settling with the provider) and a new
+        # upload of the same name and version never share an object path: settling the old one
+        # can only ever find and remove its own object.
+        gcs_prefix = f"{request.category}/{_slugify(request.name)}/{_slugify(request.version)}/{uuid.uuid4().hex[:8]}/"
 
         dataset = ReferenceDataset(
             organization_id=org_id,
@@ -525,6 +537,8 @@ class ReferenceDataService:
 
         from app.adapters.registry import get_storage_adapter
         from app.services.upload_service import UploadService
+        from app.services.upload_service import _reference as upload_reference
+        from app.services.upload_settlement import first_check
 
         adapter = get_storage_adapter()
         credentials = await UploadService._get_gcs_credentials(session)
@@ -551,6 +565,26 @@ class ReferenceDataService:
                 size_bytes=spec.size_bytes,
                 origin=request_origin,
                 credentials=credentials,
+            )
+            # A writer to the references bucket until finalized, aborted and confirmed, or ended
+            # (storage lifecycle 11G). Committed with the dataset, before the browser has the URL.
+            session.add(
+                UploadCheckpoint(
+                    id=str(uuid.uuid4()),
+                    organization_id=org_id,
+                    user_id=user_id,
+                    purpose="reference",
+                    kind="session",
+                    stage="issued",
+                    filename=spec.filename,
+                    source_uri=adapter.build_uri(bucket_name, blob_path),
+                    expected_size=spec.size_bytes,
+                    reference=upload_reference(),
+                    session_protocol="gcs_resumable",
+                    session_handle=session_url,
+                    progress_at=datetime.now(timezone.utc),
+                    next_reconcile_at=first_check(),
+                )
             )
             uploads.append(
                 {
@@ -580,6 +614,30 @@ class ReferenceDataService:
         return dataset, uploads
 
     # --- Upload finalize / abort -----------------------------------------------
+
+    @staticmethod
+    async def settle_upload_sessions(session: AsyncSession, dataset: ReferenceDataset, *, stage: str) -> None:
+        """Settle this dataset's upload sessions: ``filed`` once its objects are verified, or
+        ``cancelling`` when they are discarded (the provider then confirms each session ended)."""
+        from sqlalchemy import update
+
+        uris = [f.storage_uri for f in dataset.files]
+        if not uris:
+            return
+        values: dict = {"stage": stage, "next_reconcile_at": None}
+        if stage == "cancelling":
+            now = datetime.now(timezone.utc)
+            values.update(cancel_requested_at=now, next_reconcile_at=now, reconcile_attempts=0)
+        await session.execute(
+            update(UploadCheckpoint)
+            .where(
+                UploadCheckpoint.organization_id == dataset.organization_id,
+                UploadCheckpoint.purpose == "reference",
+                UploadCheckpoint.source_uri.in_(uris),
+                UploadCheckpoint.stage.in_(("issued", "received")),
+            )
+            .values(**values)
+        )
 
     @staticmethod
     def _list_uploaded_blobs(bucket_name: str, prefix: str, credentials=None):
@@ -654,6 +712,7 @@ class ReferenceDataService:
                     f"md5 mismatch for {file_row.filename}: declared {file_row.md5_checksum}, bucket reports {gcs_md5}"
                 )
                 await session.flush()
+                await ReferenceDataService.settle_upload_sessions(session, dataset, stage="cancelling")
                 try:
                     ReferenceDataService._delete_blobs(bucket_name, dataset.gcs_prefix, credentials=credentials)
                 except Exception as e:
@@ -676,6 +735,7 @@ class ReferenceDataService:
         dataset.md5_manifest_json = manifest
         dataset.total_size_bytes = total_size
         dataset.status = "pending_approval" if dataset.scope == "public" else "active"
+        await ReferenceDataService.settle_upload_sessions(session, dataset, stage="filed")
         await session.flush()
 
         await log_action(
@@ -712,6 +772,8 @@ class ReferenceDataService:
         from app.services.upload_service import UploadService
 
         credentials = await UploadService._get_gcs_credentials(session)
+        # Deleting objects does not stop a session still sending: cancel each with the provider.
+        await ReferenceDataService.settle_upload_sessions(session, dataset, stage="cancelling")
         try:
             ReferenceDataService._delete_blobs(bucket_name, dataset.gcs_prefix, credentials=credentials)
         except Exception as e:
@@ -746,6 +808,24 @@ class ReferenceDataService:
         job_id = f"refimport-{dataset_id}-inproc"
         runtime.spawn(ReferenceDataService._run_import_inproc(dataset_id, request), role="reference-import")
         return job_id
+
+    @staticmethod
+    async def _run_admitted_import(dataset_id: int, run) -> bool:
+        """Run the import's blocking work as an admitted background write (11G).
+
+        While storage writes are paused nothing is written and the import is recorded as failed
+        with the reason. Returns whether it ran."""
+        from app.services.storage_write_admission import StorageWritesPaused, write_in_thread
+
+        try:
+            # Tracked until the import thread itself stops, even if this task is cancelled.
+            await write_in_thread("reference import", run)
+        except StorageWritesPaused as exc:
+            await ReferenceDataService._record_progress_in_new_session(
+                dataset_id, status="failed", error_message=str(exc)
+            )
+            return False
+        return True
 
     @staticmethod
     async def _run_import_inproc(dataset_id: int, request: ReferenceImportRequest) -> None:
@@ -838,7 +918,8 @@ class ReferenceDataService:
 
         result_holder: dict[str, object] = {}
         try:
-            await asyncio.to_thread(_build_and_run)
+            if not await ReferenceDataService._run_admitted_import(dataset_id, _build_and_run):
+                return
         except Exception:
             # ReferenceImporter already emitted a 'failed' callback before
             # raising; log and exit. Pod-style re-raise would only matter
@@ -911,6 +992,10 @@ class ReferenceDataService:
         """Create the dataset, progress row, and launch the importer GKE Job."""
         # Up-front uniqueness check
         runtime.require_admission("reference import")
+        from app.services.storage_write_admission import require_writes_open
+
+        # Refused before anything is written while storage is being changed (11G).
+        await require_writes_open(session)
         existing = await session.execute(
             select(ReferenceDataset.id).where(
                 ReferenceDataset.organization_id == org_id,

@@ -1,181 +1,175 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { api } from "@/lib/api";
 import { useInfrastructureActions } from "@/hooks/useInfrastructureActions";
+import { useInfrastructureOperations } from "@/hooks/useInfrastructureOperations";
+import { useResource } from "@/hooks/useResource";
+import { logError } from "@/lib/errorReporting";
+import { isActive, type OperationView } from "@/lib/infrastructureOperations";
+import { infrastructure, type DestructiveResourceInfo } from "@/lib/infrastructure";
+import { DEFINITION_NOTICE_PATH, displayVersion, isDefinitionNotice, type DefinitionNotice } from "@/lib/definitionNotice";
+import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
-import {
-  infrastructure,
-  type CheckUpdatesResult,
-  type ResourceInfo,
-} from "@/lib/infrastructure";
-
-type Phase = "idle" | "checking" | "up_to_date" | "review" | "applying" | "error";
 
 interface Props {
-  // Called once an apply has been kicked off so the parent can refresh status
-  // and surface the in-progress banner / progress.
+  // Called once the confirmed update is accepted so the parent can refresh status.
   onApplyStarted?: () => void;
 }
 
-function ResourceLine({ r }: { r: ResourceInfo }) {
+function newKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function SkippedList({ resources }: { resources: DestructiveResourceInfo[] }) {
   return (
-    <li>
-      <span className="font-mono uppercase">{r.action}</span>{" "}
-      {r.description || r.address}
-    </li>
+    <div className="mt-2 rounded border border-red-200 bg-red-50 p-3">
+      <p className="text-sm font-medium text-red-800">
+        Will NOT be applied: would destroy or replace existing resources ({resources.length})
+      </p>
+      <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-red-900">
+        {resources.map((r) => (
+          <li key={r.address}>
+            <span className="font-mono uppercase">{r.action}</span> {r.description || r.address}
+            {r.stateful ? <span className="ml-1 font-semibold">(stored data)</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
-// "Check for Infrastructure Updates": re-plans deployed modules (re-aligning
-// naming to the live deployment first). Additive changes apply automatically;
-// destructive changes (delete/replace) are shown but never applied by this
-// flow, so existing data buckets are never destroyed.
+/**
+ * "Check for Infrastructure Updates" (mockup M1). The popup confirmation is the only approval:
+ * once accepted, one operation plans every deployed module and applies the additive changes
+ * automatically. Changes that would delete or replace an existing resource are listed and never
+ * applied. The card shows the outcome of the operation it started, and nothing older.
+ */
 export function InfraUpdatesCard({ onApplyStarted }: Props) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [result, setResult] = useState<CheckUpdatesResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Checking plans (and may start an apply); applying applies. Both need infrastructure deploy.
   const actions = useInfrastructureActions();
   const deployReason = actions.reason("deploy");
+  const operations = useInfrastructureOperations();
+  const [confirming, setConfirming] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [operationId, setOperationId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function check() {
-    if (!actions.allowed("deploy")) return;
-    setPhase("checking");
-    setError(null);
-    setResult(null);
-    try {
-      const r = await infrastructure.checkUpdates();
-      setResult(r);
-      if (!r.has_changes) {
-        setPhase("up_to_date");
-      } else if (r.applying) {
-        setPhase("applying");
-        onApplyStarted?.();
-      } else {
-        setPhase("review");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not check for updates.");
-      setPhase("error");
-    }
-  }
+  const outcome = useResource<OperationView>(
+    operationId === null ? null : `infrastructure:update-outcome:${operationId}`,
+    useCallback(
+      (signal: AbortSignal) => api.get<OperationView>(`/api/v1/infrastructure/operations/${operationId}`, { signal }),
+      [operationId],
+    ),
+    {
+      poll: ({ data }) => (data && !isActive(data) ? false : 5_000),
+      onError: (e) => logError("reading the infrastructure update outcome", e),
+    },
+  );
+  const op = outcome.data;
+  // Infrastructure changes from a bioAF update that wait to be applied (mockup M17).
+  const definitions = useResource<DefinitionNotice>(
+    `infrastructure:definition-notice:${op && !isActive(op) ? op.id : "current"}`,
+    useCallback((signal: AbortSignal) => api.get<DefinitionNotice>(DEFINITION_NOTICE_PATH, { signal }), []),
+    { onError: (e) => logError("reading pending infrastructure changes", e) },
+  );
+  const pending = isDefinitionNotice(definitions.data) ? definitions.data : null;
+  const settled = op && !isActive(op) ? op : null;
+  const skipped = ((settled?.partial_effects as { destructive?: DestructiveResourceInfo[] } | null)?.destructive ??
+    []) as DestructiveResourceInfo[];
 
-  async function applyAdditive() {
-    if (!result || !actions.allowed("deploy")) return;
-    setPhase("checking");
+  async function confirm() {
+    setConfirming(false);
+    // Permission and availability are checked again: either may have changed while the popup was open.
+    if (!actions.stillAllowed("deploy")) return;
+    setStarting(true);
     setError(null);
     try {
-      await infrastructure.applyUpdates(result.modules_with_additive);
-      setPhase("applying");
+      const accepted = await infrastructure.checkUpdates(newKey());
+      setOperationId(accepted.operation_id);
+      operations?.refresh();
+      operations?.open(accepted.operation_id);
       onApplyStarted?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not apply updates.");
-      setPhase("error");
+      if (operations?.showConflict(e, "check for infrastructure updates")) return;
+      setError(e instanceof Error ? e.message : "Could not check for updates.");
+    } finally {
+      setStarting(false);
     }
   }
 
   return (
-    <div className="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+    <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">
-            Infrastructure updates
-          </h3>
-          <p className="text-xs text-gray-600 mt-1 max-w-2xl">
-            Re-check deployed infrastructure against the latest configuration,
-            for example to add a newly introduced storage bucket. New resources
-            are added automatically. Changes that would delete or replace
-            existing data are shown but never applied here.
+          <h3 className="text-sm font-semibold text-gray-900">Infrastructure updates</h3>
+          <p className="mt-1 max-w-2xl text-xs text-gray-600">
+            Compare deployed infrastructure with this version of bioAF and add any new resources it needs. Changes
+            that would delete or replace existing resources are listed, never applied here.
           </p>
         </div>
-        <Button size="sm" className="ml-4 shrink-0"
-          onClick={check}
-          disabled={phase === "checking" || deployReason !== null}
-          title={deployReason ?? undefined}>
-          {phase === "checking" ? "Checking..." : "Check for Infrastructure Updates"}
+        <Button
+          size="sm"
+          className="ml-4 shrink-0"
+          onClick={() => setConfirming(true)}
+          disabled={starting || deployReason !== null}
+          title={deployReason ?? undefined}
+        >
+          {starting ? "Starting..." : "Check for Infrastructure Updates"}
         </Button>
       </div>
 
-      {result?.realigned && (
-        <div className="mt-3 text-xs text-gray-500">
-          Re-aligned naming to the live deployment
-          {result.realigned.stack_uid ? ` (stack ${result.realigned.stack_uid})` : ""}.
+      {pending?.pending && pending.notice && (
+        <p className="mt-3 text-sm text-amber-700">
+          {pending.notice.unknown_baseline
+            ? "bioAF can't tell which infrastructure changes were applied before this update. Run a check to add anything this version needs."
+            : `Infrastructure changes from bioAF ${displayVersion(pending.notice.version)} are waiting to be applied.`}
+        </p>
+      )}
+      {pending && pending.destructive_only_modules.length > 0 && (
+        <p className="mt-3 text-sm text-gray-700">
+          Some infrastructure changes in this version would delete or replace existing resources. bioAF does not apply
+          these automatically. They take effect the next time you tear down and redeploy.
+        </p>
+      )}
+
+      {error && <div className="mt-3 text-sm text-red-700">{error}</div>}
+
+      {settled?.message && (
+        <div className={`mt-3 text-sm ${settled.status === "succeeded" ? "text-green-700" : "text-red-700"}`}>
+          {settled.message}
         </div>
       )}
+      {settled && skipped.length > 0 && <SkippedList resources={skipped} />}
 
-      {phase === "up_to_date" && (
-        <div className="mt-3 text-sm text-green-700">
-          Your infrastructure is up to date.
-        </div>
-      )}
-
-      {phase === "applying" && (
-        <div className="mt-3 text-sm text-bioaf-700">
-          Applying updates in the background. Progress appears below.
-        </div>
-      )}
-
-      {phase === "error" && (
-        <div className="mt-3 text-sm text-red-700">{error}</div>
-      )}
-
-      {phase === "review" && result && (
-        <div className="mt-3 space-y-3">
-          {result.has_additive && (
-            <div className="border border-green-200 bg-green-50 rounded p-3">
-              <p className="text-sm font-medium text-green-800">
-                New resources to add ({result.additive_resources.length})
-              </p>
-              <ul className="mt-2 text-xs text-green-900 list-disc pl-5 space-y-0.5">
-                {result.additive_resources.map((r) => (
-                  <ResourceLine key={r.address} r={r} />
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {result.has_destructive && (
-            <div className="border border-red-200 bg-red-50 rounded p-3">
-              <p className="text-sm font-medium text-red-800">
-                Will NOT be applied: would destroy or replace existing resources
-                ({result.destructive_resources.length})
-              </p>
-              <p className="text-xs text-red-700 mt-1">
-                These are skipped to protect your data. Resolve them with a full
-                deploy/teardown if you really intend to change them.
-              </p>
-              <ul className="mt-2 text-xs text-red-900 list-disc pl-5 space-y-0.5">
-                {result.destructive_resources.map((r) => (
-                  <li key={r.address}>
-                    <span className="font-mono uppercase">{r.action}</span>{" "}
-                    {r.description || r.address}
-                    {r.stateful ? (
-                      <span className="ml-1 font-semibold">(stored data)</span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPhase("idle")}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
-            >
+      <Modal
+        open={confirming}
+        title="Check for infrastructure updates"
+        onClose={() => setConfirming(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
               Cancel
-            </button>
-            {result.has_additive && (
-              <Button size="sm"
-                onClick={applyAdditive}
-                disabled={deployReason !== null}
-                title={deployReason ?? undefined}>
-                Apply additive changes only
-              </Button>
-            )}
-          </div>
+            </Button>
+            <Button onClick={confirm} disabled={deployReason !== null} title={deployReason ?? undefined}>
+              Check and apply updates
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm text-gray-700">
+          <p>
+            bioAF will compare your deployed infrastructure with this version of bioAF and add anything new it needs,
+            such as a new storage bucket.
+          </p>
+          <p>
+            Existing resources are never deleted or replaced by this check. If an update would delete or replace
+            something, bioAF lists it for you and leaves it unchanged.
+          </p>
+          <p>
+            While this runs, deploy, teardown, storage, and image build actions are unavailable to every administrator.
+          </p>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

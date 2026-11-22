@@ -433,6 +433,8 @@ case "$args" in
         echo "reset_install_metrics_identity args=[$args]" >> "$log"; exit 0 ;;
     *"app.cli.record_upgrade_metric"*)
         echo "record_upgrade_metric args=[$args]" >> "$log"; exit "${FAKE_RECORD_STATUS:-0}" ;;
+    *"app.cli.record_infrastructure_notice"*)
+        echo "record_infrastructure_notice args=[$args]" >> "$log"; exit "${FAKE_NOTICE_STATUS:-0}" ;;
 esac
 exit 0
 STUB
@@ -821,6 +823,41 @@ HARNESS
     grep -q '^engine .*-in .*config.yaml.bioaf-staged' "$tmp/log"
     grep -q '^systemctl restart google-cloud-ops-agent$' "$tmp/log"
     grep -q '^systemctl is-active --quiet google-cloud-ops-agent-fluent-bit$' "$tmp/log"
+}
+
+@test "a fresh GCE host where setup installs the agent replaces the package's default config" {
+    # The agent package writes its own default config.yaml. bioAF installed the agent in this run, so
+    # that file is the package's, not the operator's: it is kept aside and the parser config installed.
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    cat > "$tmp/bin/curl" <<STUB
+#!/bin/sh
+echo "curl \$*" >> "\$FAKE_LOG"
+cat > add-google-cloud-ops-agent-repo.sh <<'INSTALL'
+cp '$tmp/engine' '$tmp/installed-engine'
+printf 'logging:\\n  receivers:\\n    syslog: {type: files, include_paths: [/var/log/messages, /var/log/syslog]}\\n' > '$tmp/etc/config.yaml'
+INSTALL
+STUB
+    chmod +x "$tmp/bin/curl"
+    run env FAKE_LOG="$tmp/log" bash -c "cd '$tmp' && source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/installed-engine'; ensure_cloud_logging" </dev/null
+    [ "$status" -eq 0 ]
+    head -1 "$tmp/etc/config.yaml" | grep -q '^# bioaf-managed: ops-agent-config/v2 sha256='
+    grep -q 'syslog' "$tmp/etc/config.yaml.package-default"
+    grep -q '^systemctl restart google-cloud-ops-agent$' "$tmp/log"
+}
+
+@test "an operator's config that existed before setup installed the agent is still kept" {
+    tmp="$(mktemp -d)"; cloud_env "$tmp"
+    printf 'logging:\n  receivers:\n    mine: {type: files, include_paths: [/x/CUSTOM-MARKER]}\n' > "$tmp/etc/config.yaml"
+    cp "$tmp/etc/config.yaml" "$tmp/before"
+    cat > "$tmp/bin/curl" <<STUB
+#!/bin/sh
+echo "cp '$tmp/engine' '$tmp/installed-engine'" > add-google-cloud-ops-agent-repo.sh
+STUB
+    chmod +x "$tmp/bin/curl"
+    run env FAKE_LOG="$tmp/log" bash -c "cd '$tmp' && source '$tmp/cloud.sh'; OPS_AGENT_ENGINE='$tmp/installed-engine'; ensure_cloud_logging" </dev/null
+    [ "$status" -ne 0 ]
+    cmp -s "$tmp/etc/config.yaml" "$tmp/before"
+    [ ! -e "$tmp/etc/config.yaml.package-default" ]
 }
 
 @test "an existing install's legacy config is migrated to the parser config" {
@@ -1702,6 +1739,32 @@ run_update() {
     # The backend is asked once, after the database upgrade, with the operation's own facts.
     grep -q "^record_upgrade_metric args=.*--operation-id $id --from-version 1.0.0 --to-version 2.0.0 " "$tmp/log"
     [ "$(grep -E '^(schema_upgrade run|record_upgrade_metric)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'schema_upgrade\nrecord_upgrade_metric')" ]
+}
+
+@test "a completed update records the infrastructure notice after the upgrade metric" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0
+    [ "$status" -eq 0 ]
+    grep -q "^record_infrastructure_notice args=.*--to-version 2.0.0" "$tmp/log"
+    [ "$(grep -E '^(record_upgrade_metric|record_infrastructure_notice)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'record_upgrade_metric\nrecord_infrastructure_notice')" ]
+}
+
+@test "a failed infrastructure notice does not change a completed update" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_NOTICE_STATUS=1
+    [ "$status" -eq 0 ]
+    [ "$(operation "$tmp" status)" = completed ]
+    [[ "$output" == *"will retry at startup"* ]]
+}
+
+@test "a failed update records no infrastructure notice" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run_update "$tmp" 2.0.0 FAKE_RUN_STATUS=1 FAKE_SCHEMA_STATUS='{"settled": false}'
+    [ "$status" -ne 0 ]
+    ! grep -q record_infrastructure_notice "$tmp/log"
 }
 
 @test "a failed update keeps its operation unfinished and records no upgrade" {

@@ -462,10 +462,21 @@ async def _upload_version_build_context(
     object_path = f"builds/{safe_name}/v{version.version_number}/source.tar.gz"
     adapter = get_storage_adapter()
     context_uri = adapter.build_uri(working_bucket, object_path)
-    await adapter.upload_file(context_uri, buf, content_type="application/gzip")
+    await upload_build_context(context_uri, buf)
     logger.info("Uploaded build context to %s", context_uri)
 
     return object_path
+
+
+async def upload_build_context(context_uri: str, data) -> None:
+    """Upload a build context, admitted like any background write: refused with
+    StorageWritesPaused before anything is written while storage is being changed (11G)."""
+    from app.adapters.registry import get_storage_adapter
+    from app.services.storage_write_admission import background_write
+
+    body = io.BytesIO(data) if isinstance(data, (bytes, bytearray)) else data
+    async with background_write("environment build context"):
+        await get_storage_adapter().upload_file(context_uri, body, content_type="application/gzip")
 
 
 async def _upload_vm_build_context(
@@ -498,7 +509,7 @@ async def _upload_vm_build_context(
     object_path = f"builds/{safe_name}/v{version.version_number}/work_node_ami.tar.gz"
     adapter = get_storage_adapter()
     context_uri = adapter.build_uri(working_bucket, object_path)
-    await adapter.upload_file(context_uri, buf, content_type="application/gzip")
+    await upload_build_context(context_uri, buf)
     logger.info("Uploaded AMI build context to %s", context_uri)
 
     return object_path
@@ -694,14 +705,16 @@ class EnvironmentBuildService:
         safe_name = env.name.lower().replace(" ", "-").replace("_", "-")
         env_yml_path = f"builds/{safe_name}/v{version.version_number}/environment.yml"
         env_yml_gcs = adapter.build_uri(working_bucket, env_yml_path)
-        await adapter.write_text(env_yml_gcs, version.definition_content, content_type="text/yaml")
-
-        # Upload Packer template, filling the cloud-selected download command from
-        # the storage adapter (the build VM has the cloud CLI installed).
+        # Packer template, filling the cloud-selected download command from the storage adapter
+        # (the build VM has the cloud CLI installed). Both are admitted like any background write.
         packer_path = f"builds/{safe_name}/v{version.version_number}/work_node.pkr.hcl"
         packer_gcs = adapter.build_uri(working_bucket, packer_path)
         packer_template = _render_packer_vm_template(adapter, env_yml_gcs)
-        await adapter.write_text(packer_gcs, packer_template, content_type="text/plain")
+        from app.services.storage_write_admission import background_write
+
+        async with background_write("environment definition"):
+            await adapter.write_text(env_yml_gcs, version.definition_content, content_type="text/yaml")
+            await adapter.write_text(packer_gcs, packer_template, content_type="text/plain")
 
         # Build image name and URI
         image_name = _get_vm_image_name(env.name, version.version_number, version.build_number)

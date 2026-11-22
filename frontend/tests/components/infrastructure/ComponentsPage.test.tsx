@@ -286,9 +286,11 @@ describe("InfraComponentsPage", () => {
     });
 
     await waitFor(() => {
+      // One confirmation carries one Idempotency-Key (storage lifecycle 11D).
       expect(mockApiPost).toHaveBeenCalledWith(
         "/api/v1/infrastructure/stack/deploy-background",
         { stack_type: "kubernetes" },
+        { idempotencyKey: expect.any(String) },
       );
     });
   });

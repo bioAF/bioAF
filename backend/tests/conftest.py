@@ -49,6 +49,10 @@ TEST_DATABASE_URL = database_url()
 def _isolated_state():
     """In-process caches and registries start every test as they were after import."""
     with lifecycle.isolated_state():
+        # Storage writes start open in every test (a test pauses them through pause_writes).
+        from app.services import storage_write_admission
+
+        storage_write_admission._paused_mirror = False
         yield
 
 

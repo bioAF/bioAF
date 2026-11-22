@@ -428,6 +428,42 @@ async def glossary_orphans(ctx: StartupContext) -> None:
             logger.info("Marked %d orphaned glossary scan jobs as failed on startup", count)
 
 
+async def infrastructure_operations(ctx: StartupContext) -> None:
+    """Settle infrastructure operations a restart left behind, from recorded runner evidence (D1)."""
+    from app.database import async_session_factory
+    from app.services.infrastructure_operations import reconcile_on_startup, resume_cancel_watchdogs
+
+    async with async_session_factory() as session:
+        counts = await reconcile_on_startup(session)
+        await session.commit()
+    await resume_cancel_watchdogs()
+    if any(counts.values()):
+        logger.info("Reconciled infrastructure operations after restart: %s", counts)
+
+
+async def interrupted_uploads(ctx: StartupContext) -> None:
+    """Settle proxied uploads a restart cut off (storage lifecycle 11F)."""
+    from app.database import async_session_factory
+    from app.services.upload_service import reconcile_transfers_on_startup
+
+    async with async_session_factory() as session:
+        counts = await reconcile_transfers_on_startup(session)
+        await session.commit()
+    if any(counts.values()):
+        logger.info("Reconciled uploads interrupted by the restart: %s", counts)
+
+
+async def infrastructure_notice(ctx: StartupContext) -> None:
+    """Record whether this release's infrastructure definitions await applying (M17; no cloud calls)."""
+    from app.config import settings
+    from app.database import async_session_factory
+    from app.services.infrastructure_definitions import reconcile_notice
+
+    async with async_session_factory() as session:
+        await reconcile_notice(session, settings.app_version)
+        await session.commit()
+
+
 async def install_metrics(ctx: StartupContext) -> None:
     """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
     from app.database import async_session_factory
@@ -502,6 +538,19 @@ NORMAL_STEPS = [
         interrupted_local_jobs,
         "optional",
         "Could not mark jobs interrupted by the restart as failed: %s",
+    ),
+    Step(
+        "infrastructure_operations",
+        infrastructure_operations,
+        "optional",
+        "Could not reconcile infrastructure operations after restart: %s",
+    ),
+    Step("interrupted_uploads", interrupted_uploads, "optional", "Could not reconcile interrupted uploads: %s"),
+    Step(
+        "infrastructure_notice",
+        infrastructure_notice,
+        "optional",
+        "Infrastructure definition notice not reconciled: %s",
     ),
     Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
 ]

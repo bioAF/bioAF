@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import DataUploadPage from "@/app/(app)/data/upload/page";
 
 jest.mock("@/lib/auth", () => ({
@@ -96,6 +96,22 @@ describe("DataUploadPage", () => {
     expect(calledFile).toBe(file);
     expect(calledOptions.experimentId).toBeUndefined();
     expect(calledOptions.isGlobal).toBe(true);
+  });
+
+  it("shows Confirming upload while storage confirms the file (W8)", async () => {
+    mockUploadSigned.mockImplementation((_file: File, options: { onConfirming?: () => void }) => {
+      options.onConfirming?.();
+      return new Promise(() => {});
+    });
+    render(<DataUploadPage />);
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), { target: { value: "global" } });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["data"], "sample.fastq.gz")] } });
+    await waitFor(() => screen.getByText(/Upload 1 file/));
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+
+    expect(await screen.findByText("Confirming upload")).toBeInTheDocument();
+    expect(screen.getByText("bioAF is checking that your file has finished uploading.")).toBeInTheDocument();
   });
 
   it("fetches experiments and displays them in a dropdown", async () => {
@@ -204,5 +220,66 @@ describe("DataUploadPage", () => {
     });
 
     expect(screen.queryByText("RNA-seq Batch A")).not.toBeInTheDocument();
+  });
+});
+
+describe("received but not yet filed (M12)", () => {
+  const RECEIVED = {
+    detail:
+      "Received, not yet filed. Your file is stored safely but could not be added yet. bioAF will try again automatically. Reference UPL-7F3A21.",
+    code: "upload_received_not_filed",
+    details: { upload_id: "u-1", reference: "UPL-7F3A21", experiment_id: null },
+  };
+
+  async function uploadOne() {
+    render(<DataUploadPage />);
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), { target: { value: "global" } });
+    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["data"], "sample.fastq.gz")] } });
+    await waitFor(() => screen.getByText(/Upload 1 file/));
+    fireEvent.click(screen.getByText(/Upload 1 file/));
+  }
+
+  it.each([
+    ["direct", true],
+    ["proxied", false],
+  ])("a %s upload the server could not file yet is shown as pending, not Done", async (_path, signed) => {
+    mockHas.mockImplementation((flag: string) => (flag === "signed_url_upload" ? signed : true));
+    mockUploadSigned.mockResolvedValue(RECEIVED);
+    mockUploadProxied.mockResolvedValue(RECEIVED);
+    await uploadOne();
+
+    expect(await screen.findByText("Not filed yet")).toBeInTheDocument();
+    expect(screen.getByText(RECEIVED.detail)).toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Upload 1 file/)).not.toBeInTheDocument();
+  });
+
+  it("follows the upload: when retries run out it offers Retry now and Cancel upload", async () => {
+    jest.useFakeTimers();
+    try {
+      mockUploadSigned.mockResolvedValue(RECEIVED);
+      const outcome = { upload_id: "u-1", reference: "UPL-7F3A21", stage: "received", outcome: "pending", state: "needs_attention" };
+      const base = mockGet.getMockImplementation()!;
+      mockGet.mockImplementation((path: string) =>
+        path === "/api/files/uploads/u-1" ? Promise.resolve(outcome) : base(path),
+      );
+      await uploadOne();
+      await screen.findByText("Not filed yet");
+
+      await act(async () => {
+        jest.advanceTimersByTime(30_000);
+      });
+
+      expect(
+        await screen.findByText(
+          "Could not be filed. Your file is still stored. Retry now, or cancel the upload to remove it. Reference UPL-7F3A21.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry now" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cancel upload" })).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

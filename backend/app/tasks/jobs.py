@@ -115,7 +115,7 @@ async def _job_status_sync(session) -> None:
 
 
 def _plot_archive_watcher() -> Iteration:
-    """Scan the results bucket for new images; backfill metadata once per job lifetime."""
+    """Scan the results bucket for new images when due (11H); backfill metadata once per job lifetime."""
     from app.services.plot_archive_service import PlotArchiveService
 
     factory = _factory()
@@ -126,7 +126,7 @@ def _plot_archive_watcher() -> Iteration:
             if not state["backfilled"]:
                 await PlotArchiveService.backfill_metadata(session)
                 state["backfilled"] = True
-            await PlotArchiveService.scan_and_index(session)
+            await PlotArchiveService.scheduled_scan(session)
 
     return iteration
 
@@ -140,8 +140,14 @@ def _scheduled_backup(kind: str, label: str) -> Callable[[], Iteration]:
         factory = _factory()
 
         async def iteration() -> None:
+            from app.services.storage_write_admission import paused
+
             async with factory() as session:
                 if not await BackupService.is_backup_due(session, kind):
+                    return
+                if await paused(session) is not None:
+                    # Storage is being changed: the backup waits until writes reopen (D5).
+                    logger.info("Scheduled %s deferred: storage writes are paused", label)
                     return
                 if kind == "postgres":
                     result = await BackupService.run_postgres_backup(session, org_id=1)
@@ -425,6 +431,32 @@ def _install_metrics_sender() -> Iteration:
     return iteration
 
 
+def _upload_filing_retries() -> Iteration:
+    """File received uploads whose automatic retry is due (mockup M12)."""
+    from app.services.upload_service import UploadService
+
+    factory = _factory()
+
+    async def iteration() -> None:
+        filed = await UploadService.retry_due(factory)
+        if filed:
+            logger.info("Upload filing retries: filed %d upload(s)", filed)
+
+    return iteration
+
+
+def _upload_session_reconcile() -> Iteration:
+    """Settle direct uploads with the provider: cancellations, abandoned sessions, unreported completions."""
+    from app.services.upload_settlement import reconcile_due
+
+    factory = _factory()
+
+    async def iteration() -> None:
+        await reconcile_due(factory)
+
+    return iteration
+
+
 def _job(role, prepare, first, interval, message, enabled=None) -> PeriodicJob:
     return PeriodicJob(
         role=role, prepare=prepare, first_delay=first, interval=interval, error_message=message, enabled=enabled
@@ -505,6 +537,14 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         "Work node heartbeat check error: %s",
     ),
     _job("export-cleanup", _with_session(_export_cleanup), HOUR, HOUR, "Export cleanup error: %s"),
+    _job("upload-filing-retries", _upload_filing_retries, MINUTE, MINUTE, "Upload filing retry error: %s"),
+    _job(
+        "upload-session-reconcile",
+        _upload_session_reconcile,
+        MINUTE,
+        MINUTE,
+        "Upload settlement check error: %s",
+    ),
     # Warm the cache 60 s after startup so the first browse modal is populated, then daily.
     _job(
         "nf-core-registry-refresh",

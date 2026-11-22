@@ -1,19 +1,45 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
+import {
+  CancelUploadDialog,
+  FilingBadge,
+  FilingDetails,
+  pendingFrom,
+  receivedNotFiled,
+  useUploadFiling,
+  type ReceivedNotFiled,
+} from "@/components/files/uploadFiling";
 
-type FileStatus = "queued" | "uploading" | "complete" | "error";
+// "pending": stored but not yet filed (bioAF retries); "needs_attention": retries ran out;
+// "not_sent": refused before anything was stored (uploads paused or store unusable); "cancelled": removed;
+// "confirming": sent, and bioAF is checking with storage that the whole file arrived (W8).
+type FileStatus =
+  | "queued"
+  | "uploading"
+  | "confirming"
+  | "complete"
+  | "error"
+  | "pending"
+  | "needs_attention"
+  | "not_sent"
+  | "cancelled";
 
 interface FileItem {
   file: File;
   status: FileStatus;
   progress: number;
   error?: string;
+  /** The server's plain explanation for a pending or exhausted upload (mockup M12). */
+  message?: string;
+  uploadId?: string;
+  reference?: string;
   suggestedName: string | null;
   nameAccepted: boolean | null;
 }
@@ -38,6 +64,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
   const [experimentCode, setExperimentCode] = useState<string | null>(null);
   const [projectCode, setProjectCode] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [experimentName, setExperimentName] = useState<string | null>(null);
 
   // Pull experiment + project codes for filename suggestion
   useEffect(() => {
@@ -47,6 +74,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       .then((exp) => {
         if (cancelled) return;
         setExperimentCode(exp.code ?? null);
+        setExperimentName(exp.name ?? null);
         if (exp.project) {
           api
             .get<Project>(`/api/projects/${exp.project.id}`)
@@ -160,7 +188,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
     let anySucceeded = false;
 
     for (let i = 0; i < items.length; i++) {
-      if (items[i].status === "complete") continue;
+      if (items[i].status !== "queued" && items[i].status !== "error") continue;
       setItemState(i, { status: "uploading", progress: 0 });
       const item = items[i];
       // Keep the original name by default; only rename when the suggestion was
@@ -171,14 +199,24 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
       // the server-proxied path (e.g. NFS, signed_url_upload=False).
       const upload = has("signed_url_upload") ? api.uploadSigned : api.uploadProxied;
       try {
-        await upload<FileResponse>(item.file, {
+        const result = await upload<FileResponse | ReceivedNotFiled>(item.file, {
           ...opts,
           filename: useFilename,
           onProgress: (pct) => setItemState(i, { progress: pct }),
+          onConfirming: () => setItemState(i, { status: "confirming", progress: 100 }),
         });
-        setItemState(i, { status: "complete", progress: 100 });
-        anySucceeded = true;
+        if (receivedNotFiled(result)) {
+          setItemState(i, pendingFrom(result));
+        } else {
+          setItemState(i, { status: "complete", progress: 100 });
+          anySucceeded = true;
+        }
       } catch (err) {
+        // Refused before anything was sent: storage is paused (M11) or known to be unusable (11F).
+        if (err instanceof ApiError && (err.code === "uploads_paused" || err.code === "upload_storage_unavailable")) {
+          setItemState(i, { status: "not_sent", error: err.message });
+          continue;
+        }
         setItemState(i, {
           status: "error",
           error: err instanceof Error ? err.message : "Upload failed",
@@ -190,7 +228,12 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
     if (anySucceeded) onUploaded();
   };
 
-  const pendingCount = items.filter((i) => i.status !== "complete").length;
+  // Follow received uploads until they are filed, or retries run out (mockup M12).
+  const filing = useUploadFiling(items, setItems, onUploaded);
+
+  // Why the files were not sent: storage paused (M11) or an unusable upload store (11F).
+  const notSentReason = items.find((i) => i.status === "not_sent")?.error ?? null;
+  const pendingCount = items.filter((i) => i.status === "queued" || i.status === "error").length;
 
   const associationSummary = () => {
     if (sampleId) {
@@ -283,6 +326,11 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                   Original filenames are kept unless you accept a suggestion.
                 </p>
               )}
+              {notSentReason && (
+                <p role="status" className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-2">
+                  {notSentReason}
+                </p>
+              )}
               <ul className="space-y-3">
                 {items.map((item, idx) => (
                   <li
@@ -360,6 +408,14 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                     {item.status === "error" && item.error && (
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
                     )}
+                    {item.status === "confirming" && (
+                      <p className="text-xs text-gray-600 mt-1">bioAF is checking that your file has finished uploading.</p>
+                    )}
+                    <FilingDetails
+                      item={item}
+                      onRetry={() => void filing.retryNow(idx)}
+                      onCancel={() => filing.requestCancel(idx)}
+                    />
                   </li>
                 ))}
               </ul>
@@ -377,9 +433,17 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           )}
         </div>
       )}
+      {filing.cancelling !== null && (
+        <CancelUploadDialog
+          destination={experimentName}
+          onKeep={() => filing.requestCancel(null)}
+          onRemove={() => void filing.cancelUpload(filing.cancelling as number)}
+        />
+      )}
     </>
   );
 }
+
 
 function dedupeNames(items: FileItem[]): FileItem[] {
   const nameCounts = new Map<string, number>();
@@ -399,11 +463,19 @@ function dedupeNames(items: FileItem[]): FileItem[] {
 }
 
 function StatusLabel({ item }: { item: FileItem }) {
+  const filing = FilingBadge({ status: item.status });
+  if (filing) return filing;
+  if (item.status === "not_sent") {
+    return <span className="text-xs font-medium text-amber-700 shrink-0">Not sent</span>;
+  }
   if (item.status === "complete") {
     return <span className="text-xs font-medium text-green-600 shrink-0">Done</span>;
   }
   if (item.status === "error") {
     return <span className="text-xs font-medium text-red-600 shrink-0">Failed</span>;
+  }
+  if (item.status === "confirming") {
+    return <span className="text-xs font-medium text-bioaf-600 shrink-0">Confirming upload</span>;
   }
   if (item.status === "uploading") {
     return (
@@ -417,7 +489,7 @@ function StatusLabel({ item }: { item: FileItem }) {
 }
 
 function ProgressBar({ item }: { item: FileItem }) {
-  if (item.status === "queued") return null;
+  if (item.status === "queued" || item.status === "not_sent" || item.status === "cancelled") return null;
   const barColor =
     item.status === "complete"
       ? "bg-green-500"

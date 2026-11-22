@@ -136,6 +136,8 @@ export interface PlotArchiveListResponse {
   total: number;
   page: number;
   page_size: number;
+  /** Whether new plots are being added from the results store (mockup M13). */
+  scan_health?: import("@/components/plots/PlotScanNotice").PlotScanHealth | null;
 }
 
 export interface ReferenceDataset {

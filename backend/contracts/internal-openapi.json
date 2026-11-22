@@ -106,6 +106,51 @@
         "title": "AccessLogListResponse",
         "type": "object"
       },
+      "ActiveOperationResponse": {
+        "properties": {
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "interrupted": {
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "title": "Interrupted",
+            "type": "array"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "running",
+                  "recovery_required"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "busy"
+        ],
+        "title": "ActiveOperationResponse",
+        "type": "object"
+      },
       "ActivityFeedItem": {
         "properties": {
           "created_at": {
@@ -2572,6 +2617,21 @@
         "title": "BulkReassignResponse",
         "type": "object"
       },
+      "CancelUploadRequest": {
+        "properties": {
+          "reason": {
+            "default": "cancelled",
+            "enum": [
+              "cancelled",
+              "interrupted"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "CancelUploadRequest",
+        "type": "object"
+      },
       "CellCountPoint": {
         "properties": {
           "cell_count": {
@@ -2861,82 +2921,22 @@
         "title": "ChangePasswordRequest",
         "type": "object"
       },
-      "CheckUpdatesResponse": {
+      "CheckUpdatesAccepted": {
         "properties": {
-          "additive_resources": {
-            "items": {
-              "$ref": "#/components/schemas/ResourceInfo"
-            },
-            "title": "Additive Resources",
-            "type": "array"
+          "message": {
+            "title": "Message",
+            "type": "string"
           },
-          "applying": {
-            "title": "Applying",
-            "type": "boolean"
-          },
-          "destructive_resources": {
-            "items": {
-              "$ref": "#/components/schemas/DestructiveResourceInfo"
-            },
-            "title": "Destructive Resources",
-            "type": "array"
-          },
-          "has_additive": {
-            "title": "Has Additive",
-            "type": "boolean"
-          },
-          "has_changes": {
-            "title": "Has Changes",
-            "type": "boolean"
-          },
-          "has_destructive": {
-            "title": "Has Destructive",
-            "type": "boolean"
-          },
-          "modules": {
-            "items": {
-              "$ref": "#/components/schemas/ModuleUpdateInfo"
-            },
-            "title": "Modules",
-            "type": "array"
-          },
-          "modules_with_additive": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Modules With Additive",
-            "type": "array"
-          },
-          "realigned": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Realigned"
-          },
-          "requires_approval": {
-            "title": "Requires Approval",
-            "type": "boolean"
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "integer"
           }
         },
         "required": [
-          "has_changes",
-          "has_additive",
-          "has_destructive",
-          "requires_approval",
-          "applying",
-          "realigned",
-          "modules_with_additive",
-          "modules",
-          "additive_resources",
-          "destructive_resources"
+          "message",
+          "operation_id"
         ],
-        "title": "CheckUpdatesResponse",
+        "title": "CheckUpdatesAccepted",
         "type": "object"
       },
       "CitationBulkRequest": {
@@ -3905,6 +3905,36 @@
           "from_address"
         ],
         "title": "ConfigureSmtpRequest",
+        "type": "object"
+      },
+      "ConfirmBucketsRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "stores": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Stores",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stores",
+          "reason"
+        ],
+        "title": "ConfirmBucketsRequest",
         "type": "object"
       },
       "ConfirmResponse": {
@@ -5935,6 +5965,72 @@
         "title": "DeclineRequest",
         "type": "object"
       },
+      "DefinitionNotice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "modules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "unknown_baseline": {
+            "title": "Unknown Baseline",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "unknown_baseline",
+          "modules"
+        ],
+        "title": "DefinitionNotice",
+        "type": "object"
+      },
+      "DefinitionNoticeResponse": {
+        "properties": {
+          "destructive_only_modules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Destructive Only Modules",
+            "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinitionNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "seen": {
+            "default": false,
+            "title": "Seen",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "title": "DefinitionNoticeResponse",
+        "type": "object"
+      },
       "DeployProgressResponse": {
         "properties": {
           "active": {
@@ -6032,39 +6128,6 @@
           "reason"
         ],
         "title": "DepositOverrideRequest",
-        "type": "object"
-      },
-      "DestructiveResourceInfo": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "address": {
-            "title": "Address",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "stateful": {
-            "title": "Stateful",
-            "type": "boolean"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "address",
-          "type",
-          "action",
-          "description",
-          "stateful"
-        ],
-        "title": "DestructiveResourceInfo",
         "type": "object"
       },
       "DifferentialDesignRequest": {
@@ -8268,6 +8331,21 @@
             "title": "Actual Md5",
             "type": "string"
           },
+          "parts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UploadedPartRef"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parts"
+          },
           "upload_id": {
             "title": "Upload Id",
             "type": "string"
@@ -8369,14 +8447,24 @@
             "type": "string"
           },
           "signed_url": {
-            "title": "Signed Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed Url"
           },
           "storage_uri": {
             "description": "Neutral alias of gcs_uri (retained legacy mirror); read storage_uri.",
             "readOnly": true,
             "title": "Storage Uri",
             "type": "string"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadSessionView"
           },
           "upload_id": {
             "title": "Upload Id",
@@ -8385,8 +8473,8 @@
         },
         "required": [
           "upload_id",
-          "signed_url",
           "gcs_uri",
+          "upload",
           "storage_uri"
         ],
         "title": "FileUploadInitiateResponse",
@@ -11413,39 +11501,6 @@
         "title": "MessageResponse",
         "type": "object"
       },
-      "ModuleUpdateInfo": {
-        "properties": {
-          "add_count": {
-            "title": "Add Count",
-            "type": "integer"
-          },
-          "change_count": {
-            "title": "Change Count",
-            "type": "integer"
-          },
-          "destroy_count": {
-            "title": "Destroy Count",
-            "type": "integer"
-          },
-          "has_changes": {
-            "title": "Has Changes",
-            "type": "boolean"
-          },
-          "module": {
-            "title": "Module",
-            "type": "string"
-          }
-        },
-        "required": [
-          "module",
-          "add_count",
-          "change_count",
-          "destroy_count",
-          "has_changes"
-        ],
-        "title": "ModuleUpdateInfo",
-        "type": "object"
-      },
       "NamingProfileCreate": {
         "properties": {
           "delimiter": {
@@ -12398,6 +12453,298 @@
         "title": "OpenAlexContextResponse",
         "type": "object"
       },
+      "OperationListResponse": {
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationView"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "OperationListResponse",
+        "type": "object"
+      },
+      "OperationResources": {
+        "properties": {
+          "completed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Completed",
+            "type": "array"
+          },
+          "planned": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Planned",
+            "type": "array"
+          }
+        },
+        "title": "OperationResources",
+        "type": "object"
+      },
+      "OperationStep": {
+        "properties": {
+          "completed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "state"
+        ],
+        "title": "OperationStep",
+        "type": "object"
+      },
+      "OperationView": {
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "cancel_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Deadline"
+          },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
+          "cancel_requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested By"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "outcome_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Seen At"
+          },
+          "partial_effects": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Effects"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "recovered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovered At"
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationResources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "started_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started By"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "running",
+              "stopping",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted",
+              "recovery_required"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/OperationStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "label",
+          "status",
+          "accepted_at"
+        ],
+        "title": "OperationView",
+        "type": "object"
+      },
       "OrphanedResourceListResponse": {
         "properties": {
           "items": {
@@ -12945,6 +13292,133 @@
           "status"
         ],
         "title": "PendingAutoRunResponse",
+        "type": "object"
+      },
+      "PendingUpload": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "experiment_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Name"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "uploaded_by_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By User Id"
+          }
+        },
+        "required": [
+          "upload_id",
+          "filename",
+          "reference",
+          "stage",
+          "state",
+          "attempts",
+          "created_at"
+        ],
+        "title": "PendingUpload",
+        "type": "object"
+      },
+      "PendingUploadsResponse": {
+        "properties": {
+          "uploads": {
+            "items": {
+              "$ref": "#/components/schemas/PendingUpload"
+            },
+            "title": "Uploads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "uploads"
+        ],
+        "title": "PendingUploadsResponse",
         "type": "object"
       },
       "PermissionDetail": {
@@ -14599,6 +15073,16 @@
             "title": "Plots",
             "type": "array"
           },
+          "scan_health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlotScanHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -14762,6 +15246,62 @@
           "indexed_at"
         ],
         "title": "PlotArchiveResponse",
+        "type": "object"
+      },
+      "PlotScanHealth": {
+        "properties": {
+          "last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "missing",
+              "no_access",
+              "not_confirmed",
+              "temporary"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PlotScanHealth",
         "type": "object"
       },
       "PlotUpdateRequest": {
@@ -16705,6 +17245,26 @@
         "title": "RecommendationPayload",
         "type": "object"
       },
+      "RecoverRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RecoverRequest",
+        "type": "object"
+      },
       "RecoveryCheckItem": {
         "properties": {
           "detected_at": {
@@ -17889,6 +18449,26 @@
         "title": "RegistryVersionsResponse",
         "type": "object"
       },
+      "ReleaseWriterRequest": {
+        "properties": {
+          "acknowledge_transfer_may_exist": {
+            "title": "Acknowledge Transfer May Exist",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "acknowledge_transfer_may_exist"
+        ],
+        "title": "ReleaseWriterRequest",
+        "type": "object"
+      },
       "ReportFormat": {
         "enum": [
           "json",
@@ -18133,34 +18713,6 @@
           "id"
         ],
         "title": "ReproductionPlanResponse",
-        "type": "object"
-      },
-      "ResourceInfo": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "address": {
-            "title": "Address",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "address",
-          "type",
-          "action",
-          "description"
-        ],
-        "title": "ResourceInfo",
         "type": "object"
       },
       "RestoreRequest": {
@@ -24084,6 +24636,142 @@
         "title": "StorageDestroyRequest",
         "type": "object"
       },
+      "StorageHealthResponse": {
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "stores": {
+            "items": {
+              "$ref": "#/components/schemas/StoreHealthItem"
+            },
+            "title": "Stores",
+            "type": "array"
+          },
+          "unconfirmed": {
+            "default": 0,
+            "title": "Unconfirmed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stores"
+        ],
+        "title": "StorageHealthResponse",
+        "type": "object"
+      },
+      "StorageWritesResponse": {
+        "properties": {
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "StorageWritesResponse",
+        "type": "object"
+      },
+      "StoreHealthItem": {
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis"
+          },
+          "bucket_name": {
+            "title": "Bucket Name",
+            "type": "string"
+          },
+          "health": {
+            "enum": [
+              "available",
+              "not_found",
+              "no_access",
+              "not_responding",
+              "not_confirmed",
+              "wrong_owner",
+              "not_mounted",
+              "cannot_check"
+            ],
+            "title": "Health",
+            "type": "string"
+          },
+          "observed_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Created At"
+          },
+          "observed_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Owner"
+          },
+          "store": {
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "bucket_name",
+          "health"
+        ],
+        "title": "StoreHealthItem",
+        "type": "object"
+      },
       "SubItemPayload": {
         "properties": {
           "default_on": {
@@ -25215,6 +25903,218 @@
           "total"
         ],
         "title": "UpgradeHistoryListResponse",
+        "type": "object"
+      },
+      "UploadOutcome": {
+        "description": "Where one upload ended up. Leaving the pending list does not say which: it may have been\nfiled, cancelled or have failed, so an uploader following it asks for this.",
+        "properties": {
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "filed",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "stage",
+          "outcome"
+        ],
+        "title": "UploadOutcome",
+        "type": "object"
+      },
+      "UploadPartsRequest": {
+        "properties": {
+          "part_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Part Numbers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "part_numbers"
+        ],
+        "title": "UploadPartsRequest",
+        "type": "object"
+      },
+      "UploadPartsResponse": {
+        "properties": {
+          "urls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "UploadPartsResponse",
+        "type": "object"
+      },
+      "UploadReceivedNotFiled": {
+        "description": "202 Accepted: the bytes are stored, but filing them is still pending (mockup M12).\n\nbioAF retries automatically; the uploader follows the upload in ``/api/files/uploads/pending``.",
+        "properties": {
+          "code": {
+            "const": "upload_received_not_filed",
+            "default": "upload_received_not_filed",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/UploadReceivedNotFiledDetails"
+          }
+        },
+        "required": [
+          "detail",
+          "details"
+        ],
+        "title": "UploadReceivedNotFiled",
+        "type": "object"
+      },
+      "UploadReceivedNotFiledDetails": {
+        "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "reference"
+        ],
+        "title": "UploadReceivedNotFiledDetails",
+        "type": "object"
+      },
+      "UploadSessionView": {
+        "description": "Where the browser sends the bytes: one GCS resumable session URL, or S3 parts it asks for.",
+        "properties": {
+          "part_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Size"
+          },
+          "protocol": {
+            "enum": [
+              "gcs_resumable",
+              "s3_multipart"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "protocol"
+        ],
+        "title": "UploadSessionView",
+        "type": "object"
+      },
+      "UploadedPartRef": {
+        "properties": {
+          "etag": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Etag",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "etag"
+        ],
+        "title": "UploadedPartRef",
         "type": "object"
       },
       "UpsertProviderRequest": {
@@ -33109,6 +34009,16 @@
             },
             "description": "Successful Response"
           },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -33272,6 +34182,16 @@
             },
             "description": "Successful Response"
           },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -33284,6 +34204,230 @@
           }
         },
         "summary": "Simple Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/pending": {
+      "get": {
+        "description": "Uploads that need following: stored but not yet filed, cancelled but not yet confirmed\nstopped, or whose outcome storage could not confirm. The caller's own, or everyone's for\nfiles edit.",
+        "operationId": "pending_uploads_api_files_uploads_pending_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingUploadsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pending Uploads",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}": {
+      "get": {
+        "description": "One upload's outcome: filed (with its file), cancelled, failed, or still pending.",
+        "operationId": "upload_outcome_api_files_uploads__upload_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOutcome"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Outcome",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/cancel": {
+      "post": {
+        "description": "Cancel an unfiled upload. A received copy is deleted at once; an upload still being sent is\ncancelled with the provider, and keeps counting as a writer until the provider confirms it.",
+        "operationId": "cancel_pending_upload_api_files_uploads__upload_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CancelUploadRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Pending Upload",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/parts": {
+      "post": {
+        "description": "Signed links for parts of the caller's own S3 multipart upload.",
+        "operationId": "upload_part_links_api_files_uploads__upload_id__parts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadPartsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Part Links",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}/retry": {
+      "post": {
+        "description": "Retry filing a received upload now. 202 with the reference if it still cannot be filed.",
+        "operationId": "retry_pending_upload_api_files_uploads__upload_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadReceivedNotFiled"
+                }
+              }
+            },
+            "description": "Received, not yet filed; bioAF retries automatically."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Pending Upload",
         "tags": [
           "files"
         ]
@@ -41415,6 +42559,28 @@
         ]
       }
     },
+    "/api/plots/scan/check": {
+      "post": {
+        "description": "Check the results store now and scan it if it is available (Check again, mockup M13).\n\nRead-only toward the cloud: a missing store is never recreated here.",
+        "operationId": "check_plot_scanning_api_plots_scan_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlotScanHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Plot Scanning",
+        "tags": [
+          "plots"
+        ]
+      }
+    },
     "/api/plots/{plot_id}": {
       "get": {
         "operationId": "get_plot_api_plots__plot_id__get",
@@ -47314,6 +48480,24 @@
       "post": {
         "description": "Update cluster config, plan, and auto-apply.",
         "operationId": "update_cluster_config_api_v1_infrastructure_cluster_config_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47418,6 +48602,70 @@
         ]
       }
     },
+    "/api/v1/infrastructure/definition-notice": {
+      "get": {
+        "operationId": "definition_notice_endpoint_api_v1_infrastructure_definition_notice_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionNoticeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Definition Notice Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/definition-notice/{notice_id}/seen": {
+      "post": {
+        "description": "This admin chose Later. It never marks the infrastructure updated, and no other admin's view changes.",
+        "operationId": "acknowledge_definition_notice_endpoint_api_v1_infrastructure_definition_notice__notice_id__seen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionNoticeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Definition Notice Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
     "/api/v1/infrastructure/notebook-image/build-status": {
       "get": {
         "description": "Return current notebook image build status.",
@@ -47442,7 +48690,7 @@
     },
     "/api/v1/infrastructure/notebook-image/cancel": {
       "post": {
-        "description": "Cancel the active notebook image build.",
+        "description": "Request cancellation of the active notebook image build; the poller confirms it.",
         "operationId": "notebook_image_cancel_api_v1_infrastructure_notebook_image_cancel_post",
         "responses": {
           "200": {
@@ -47461,6 +48709,249 @@
         "summary": "Notebook Image Cancel",
         "tags": [
           "stack_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations": {
+      "get": {
+        "operationId": "list_operations_endpoint_api_v1_infrastructure_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Operations Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/active": {
+      "get": {
+        "operationId": "active_operation_endpoint_api_v1_infrastructure_operations_active_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Active Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}": {
+      "get": {
+        "operationId": "get_operation_endpoint_api_v1_infrastructure_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/cancel": {
+      "post": {
+        "description": "Request that the operation stop at its next safe point (M16). Finished work is never undone.\n\nRepeating the request changes nothing; stopping and settlement are reported by the status reads.",
+        "operationId": "cancel_operation_endpoint_api_v1_infrastructure_operations__operation_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/recover": {
+      "post": {
+        "operationId": "recover_operation_endpoint_api_v1_infrastructure_operations__operation_id__recover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recover Operation Endpoint",
+        "tags": [
+          "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/operations/{operation_id}/seen": {
+      "post": {
+        "operationId": "mark_operation_seen_endpoint_api_v1_infrastructure_operations__operation_id__seen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Operation Seen Endpoint",
+        "tags": [
+          "infrastructure_operations"
         ]
       }
     },
@@ -47713,6 +49204,24 @@
       "post": {
         "description": "Apply the named modules in the background, additive-only.\n\nUsed after the user reviews a plan that also contains destructive changes:\neach module is re-planned and only its create/update resources are applied\n(targeted), so a delete/replace is never carried out by this flow.",
         "operationId": "apply_infra_updates_endpoint_api_v1_infrastructure_stack_apply_updates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47755,18 +49264,46 @@
     },
     "/api/v1/infrastructure/stack/check-updates": {
       "post": {
-        "description": "Re-align deployed naming, re-plan every deployed module, and report the\npending changes split into additive vs destructive.\n\nWhen there are additive changes and no destructive (delete/replace) ones,\nthe additive resources start applying immediately in the background. When\na destructive change is present, nothing is auto-applied; the caller can\napply the additive subset via /apply-updates (which only ever targets\nadditive resources).",
+        "description": "Start the confirmed \"Check for infrastructure updates\" action (mockup M1).\n\nThe popup confirmation is the authorization: one accepted operation plans every deployed\nmodule and applies the additive changes automatically, with no second approval. Changes that\nwould delete or replace an existing resource are listed in the operation's outcome and never\napplied. Progress and outcome are read from the operation.",
         "operationId": "check_infra_updates_endpoint_api_v1_infrastructure_stack_check_updates_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckUpdatesResponse"
+                  "$ref": "#/components/schemas/CheckUpdatesAccepted"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Check Infra Updates Endpoint",
@@ -47799,7 +49336,7 @@
     },
     "/api/v1/infrastructure/stack/components/{component_key}/toggle": {
       "post": {
-        "description": "Toggle a component's enabled state with dependency enforcement.",
+        "description": "Toggle a component's enabled state with dependency enforcement.\n\nThe whole change is one infrastructure operation: it holds the shared lock from before the\nstate is read until it commits, so no other action can start in between (M3/M6). An image\nbuild it starts belongs to it, and the lock is kept until the provider reports that build.",
         "operationId": "stack_component_toggle_api_v1_infrastructure_stack_components__component_key__toggle_post",
         "parameters": [
           {
@@ -47854,6 +49391,24 @@
       "post": {
         "description": "Deploy the full compute stack via SSE stream.",
         "operationId": "stack_deploy_endpoint_api_v1_infrastructure_stack_deploy_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47901,6 +49456,24 @@
       "post": {
         "description": "Start a stack deploy in the background and return immediately.\n\nUsed by the setup wizard to kick off deployment without maintaining\nan SSE connection. The DeploymentBanner polls terraform status to\ntrack progress.",
         "operationId": "stack_deploy_background_endpoint_api_v1_infrastructure_stack_deploy_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -47968,8 +49541,26 @@
     },
     "/api/v1/infrastructure/stack/destroy-storage": {
       "post": {
-        "description": "Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.\n\nOnly allowed when compute stack is torn down. Resets storage_uid so the\nnext deploy creates fresh bucket names (avoids GCS soft-delete conflicts).",
+        "description": "Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.\n\nOnly allowed when compute stack is torn down. A confirmed destroy retires\nthe storage generation so the next deploy creates new bucket names.",
         "operationId": "stack_destroy_storage_endpoint_api_v1_infrastructure_stack_destroy_storage_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48017,6 +49608,24 @@
       "post": {
         "description": "Start storage destruction in the background and return immediately.",
         "operationId": "stack_destroy_storage_background_endpoint_api_v1_infrastructure_stack_destroy_storage_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48134,6 +49743,24 @@
       "post": {
         "description": "Teardown the compute stack via SSE stream.",
         "operationId": "stack_teardown_endpoint_api_v1_infrastructure_stack_teardown_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48181,6 +49808,24 @@
       "post": {
         "description": "Start a stack teardown in the background and return immediately.",
         "operationId": "stack_teardown_background_endpoint_api_v1_infrastructure_stack_teardown_background_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -48268,6 +49913,92 @@
         ]
       }
     },
+    "/api/v1/infrastructure/storage/health": {
+      "get": {
+        "description": "The last read-only inspection of each configured bucket; inspects once if none is recorded.",
+        "operationId": "get_storage_health_api_v1_infrastructure_storage_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Storage Health",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/health/check": {
+      "post": {
+        "description": "Inspect every configured bucket now. Read-only: nothing is created or changed in the cloud.",
+        "operationId": "check_storage_health_api_v1_infrastructure_storage_health_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Storage Health",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/identity/confirm": {
+      "post": {
+        "description": "Record an administrator's confirmation that the observed buckets belong to this installation.",
+        "operationId": "confirm_storage_buckets_api_v1_infrastructure_storage_identity_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBucketsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Storage Buckets",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
     "/api/v1/infrastructure/storage/metrics": {
       "get": {
         "description": "Returns storage metrics from the active storage adapter.",
@@ -48307,6 +50038,95 @@
           }
         },
         "summary": "Update Storage",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes": {
+      "get": {
+        "operationId": "storage_writes_status_api_v1_infrastructure_storage_writes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageWritesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Storage Writes Status",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes/allow": {
+      "post": {
+        "description": "Reopen uploads after a refused or failed storage destroy, without destroying anything (Allow uploads).",
+        "operationId": "allow_storage_writes_api_v1_infrastructure_storage_writes_allow_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageWritesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Allow Storage Writes",
+        "tags": [
+          "storage_deploy"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/storage/writes/{upload_id}/release": {
+      "post": {
+        "description": "Release an upload bioAF lost track of, so it no longer blocks Destroy Storage (audited).",
+        "operationId": "release_storage_writer_api_v1_infrastructure_storage_writes__upload_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseWriterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Storage Writer",
         "tags": [
           "storage_deploy"
         ]

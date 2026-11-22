@@ -29,9 +29,12 @@ from app.services import audit_service
 from app.services.literature import extraction, storage
 from app import runtime
 
+from app.services.storage_write_admission import admits_writes  # noqa: E402
+
 logger = logging.getLogger("bioaf.literature.upload_service")
 
 
+@admits_writes
 async def upload_pdf_to_gcs(
     session: AsyncSession,
     *,
@@ -43,9 +46,13 @@ async def upload_pdf_to_gcs(
     Returns the storage URI on success. Returns None when the Literature bucket
     is not provisioned yet (e.g., dev install without storage stack); the
     caller leaves gcs_pdf_uri NULL but proceeds with extraction-from-bytes."""
+    # Admitted (registered, then refused while storage writes are paused) before any byte is stored (D5).
     bucket = await storage.get_literature_bucket(session)
     if not bucket:
         return None
+    from app.services.storage_write_admission import require_store_usable
+
+    await require_store_usable(session, "literature")
     path = storage.pdf_blob_path(paper_id)
 
     from app.adapters.registry import get_storage_adapter

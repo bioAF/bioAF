@@ -70,6 +70,35 @@ class TestAwsTerraformCloud:
         )
         assert tf == {"region": "us-west-1", "org_slug": "acme", "stack_uid": "abc123"}
 
+    def test_write_tfvars_storage_passes_the_generations_identity_markers(self, tmp_path):
+        markers = json.dumps({"generation": "abc123", "origin": "deploy", "markers": {"raw": "9f1c"}})
+        tf = self.cloud.write_tfvars(
+            tmp_path,
+            "storage",
+            {
+                "aws_region": "us-west-1",
+                "org_slug": "acme",
+                "storage_stack_uid": "abc123",
+                "storage_bucket_markers": markers,
+            },
+        )
+        assert tf["bucket_markers"] == {"raw": "9f1c"}
+        assert "storage_bucket_markers" in self.cloud.config_keys()
+
+    def test_write_tfvars_storage_ignores_markers_of_another_generation(self, tmp_path):
+        markers = json.dumps({"generation": "old000", "origin": "deploy", "markers": {"raw": "9f1c"}})
+        tf = self.cloud.write_tfvars(
+            tmp_path,
+            "storage",
+            {
+                "aws_region": "us-west-1",
+                "org_slug": "acme",
+                "storage_stack_uid": "abc123",
+                "storage_bucket_markers": markers,
+            },
+        )
+        assert "bucket_markers" not in tf
+
     def test_write_tfvars_storage_omits_stack_uid_on_destroy(self, tmp_path):
         tf = self.cloud.write_tfvars(tmp_path, "storage", {"aws_region": "us-west-1", "org_slug": "acme"})
         assert "stack_uid" not in tf  # omitted so destroy uses the state value
@@ -168,6 +197,21 @@ class TestGcpTerraformCloud:
         args = self.cloud.backend_init_args({"terraform_state_bucket": "bioaf-state"}, "storage", local_backend=False)
         assert "-backend-config=bucket=bioaf-state" in args
         assert "-backend-config=prefix=storage" in args  # GCS prefix, not S3 key
+
+    def test_write_tfvars_storage_passes_the_generations_identity_markers(self, tmp_path):
+        markers = json.dumps({"generation": "abc123", "origin": "update", "markers": {"raw": "9f1c"}})
+        tf = self.cloud.write_tfvars(
+            tmp_path,
+            "storage",
+            {
+                "gcp_project_id": "proj-x",
+                "gcp_region": "us-central1",
+                "storage_stack_uid": "abc123",
+                "storage_bucket_markers": markers,
+            },
+        )
+        assert tf["bucket_markers"] == {"raw": "9f1c"}
+        assert "storage_bucket_markers" in self.cloud.config_keys()
 
     def test_write_tfvars_delegates_to_executor(self, tmp_path):
         # The GCP column routes through the existing executor logic, so a foundation

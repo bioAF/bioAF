@@ -232,6 +232,75 @@ class StorageStore(str, Enum):
     BACKUPS = "backups"
 
 
+class ContainerPresence(str, Enum):
+    """What a provider says about a store's container (bucket, export root).
+
+    Container absence is distinct from object absence and from a refused read:
+    only ``MISSING`` means the provider confirmed the container does not exist.
+    """
+
+    PRESENT = "present"
+    MISSING = "missing"
+    FORBIDDEN = "forbidden"
+    UNAVAILABLE = "unavailable"
+    NOT_MOUNTED = "not_mounted"
+    UNSUPPORTED = "unsupported"
+
+
+class ContainerObservation(BaseModel):
+    """One read-only inspection of a container; never carries raw provider error text.
+
+    ``owner`` is the provider's native owner evidence (GCS project number, or
+    ``own-account`` / ``other-account`` for S3); ``created_at`` is the native
+    incarnation evidence. ``limits`` names what this backend could not check.
+    """
+
+    presence: ContainerPresence
+    owner: str | None = None
+    created_at: datetime | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    limits: tuple[str, ...] = ()
+    simulated: bool = False
+
+
+class UploadSessionState(str, Enum):
+    """What the provider says about a direct-upload session.
+
+    ``ACTIVE``: it may still accept bytes. ``COMPLETED``: the object is stored. ``ENDED``: it can
+    accept nothing more and stored nothing (cancelled or expired). ``UNKNOWN``: the provider did
+    not give an answer, so nothing may be concluded.
+    """
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ENDED = "ended"
+    UNKNOWN = "unknown"
+
+
+class UploadSessionStatus(BaseModel):
+    state: UploadSessionState
+    received_bytes: int | None = None
+
+
+class UploadSessionGrant(BaseModel):
+    """A provider session a browser uploads to directly, and bioAF can inspect and cancel.
+
+    ``handle`` identifies the session to the provider (a GCS resumable session URL, itself a
+    bearer credential, or an S3 multipart upload ID). ``url`` is where a GCS client sends bytes;
+    an S3 client asks for a signed URL per part of ``part_size`` bytes.
+    """
+
+    protocol: Literal["gcs_resumable", "s3_multipart"]
+    handle: str
+    url: str | None = None
+    part_size: int | None = None
+
+
+class UploadedPart(BaseModel):
+    number: int = Field(ge=1, le=10_000)
+    etag: str = Field(min_length=1, max_length=256)
+
+
 class StorageObjectNotFound(Exception):
     """Raised when a read/download/metadata op targets an object that is absent.
 

@@ -72,6 +72,9 @@ DECLARED_ROUTES = {
     ("GET", "/api/vocabularies"),
     ("GET", "/api/vocabularies/fields"),
     ("GET", "/api/components"),
+    # Every signed-in user sees whether infrastructure maintenance is running (busy signal only);
+    # the operation itself is returned only to infrastructure deploy or configure (mockups M4, M5).
+    ("GET", "/api/v1/infrastructure/operations/active"),
 }
 
 # No dependency can gate these: their URLs go in <img> tags and carry a token with

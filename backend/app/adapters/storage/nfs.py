@@ -30,6 +30,8 @@ from app.platform.run_output_layout import directory_prefix
 from app.platform.shell_args import ShellExpr, absolute_path, shell_join, shell_word
 from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
+    ContainerObservation,
+    ContainerPresence,
     ObjectDigest,
     ObjectIdentity,
     BucketMetrics,
@@ -60,6 +62,9 @@ def _dir_size_and_count(path: str) -> tuple[int, int]:
 
 class NfsStorageProvider(StorageProvider):
     """Shared-filesystem (NFS) storage backend."""
+
+    # Each store is a directory named after the store, not a configured bucket.
+    named_containers = False
 
     def __init__(self, root: str | None = None):
         self._root = root or _DEFAULT_ROOT
@@ -378,6 +383,15 @@ class NfsStorageProvider(StorageProvider):
 
     def managed_preflight(self, store: str, producer_uids) -> None:
         nfs_managed_copy.preflight(self._root, store, producer_uids=producer_uids)
+
+    async def inspect_container(self, uri: str) -> ContainerObservation:
+        # The export root must itself be a mount point: a plain local directory at
+        # that path (an unmounted fallback) is not the shared store. Nothing is
+        # created; a store subdirectory appears on first write.
+        mounted = await asyncio.to_thread(os.path.ismount, os.path.realpath(self._root))
+        if not mounted:
+            return ContainerObservation(presence=ContainerPresence.NOT_MOUNTED)
+        return ContainerObservation(presence=ContainerPresence.PRESENT, limits=("identity",))
 
     async def get_bucket_info(self, uri: str) -> dict:
         # A filesystem store has no object versioning.

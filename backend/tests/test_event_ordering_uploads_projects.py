@@ -29,7 +29,8 @@ from app.services.event_types import (
     INTEGRATION_PROJECT_UPDATED,
 )
 from app.services.notification_router import NotificationRouter
-from app.services.upload_service import UploadService, _pending_uploads
+from app.services.upload_service import UploadService
+from tests.support.uploads import seed_signed_upload
 from tests.support.committed_view import CommittedView
 
 pytestmark = pytest.mark.asyncio
@@ -94,19 +95,20 @@ async def _pending(store, admin_user, *, experiment_id=None) -> str:
     upload_id = str(uuid.uuid4())
     uri = f"s3://bioaf-ingest-t/uploads/{upload_id}/notes.txt"
     await store.write_bytes(uri, DATA)
-    _pending_uploads[upload_id] = {
-        "org_id": admin_user.organization_id,
-        "user_id": admin_user.id,
-        "filename": "notes.txt",
-        "gcs_uri": uri,
-        "expected_size": len(DATA),
-        "expected_md5": None,
-        "project_id": None,
-        "experiment_id": experiment_id,
-        "sample_ids": [],
-        "is_global": experiment_id is None,
-        "external_id": None,
-    }
+    await seed_signed_upload(
+        upload_id=upload_id,
+        org_id=admin_user.organization_id,
+        user_id=admin_user.id,
+        filename="notes.txt",
+        gcs_uri=uri,
+        expected_size=len(DATA),
+        expected_md5=None,
+        project_id=None,
+        experiment_id=experiment_id,
+        sample_ids=[],
+        is_global=experiment_id is None,
+        external_id=None,
+    )
     return upload_id
 
 

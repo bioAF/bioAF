@@ -187,6 +187,19 @@ class StorageUnavailableError(DomainError):
     code = "storage_unavailable"
 
 
+class UploadFailedError(DomainError):
+    """An upload could not be stored or registered for an unexpected reason.
+
+    The message is plain and carries ``details["reference"]``, which the
+    server log repeats with the failing stage. The underlying error text never
+    reaches the caller: storage SDK errors can contain bucket URLs, signed URLs
+    or credentials.
+    """
+
+    status_code = 500
+    code = "upload_failed"
+
+
 class ExportLimitError(DomainError):
     """A data export is larger than the supported limits; a smaller scope may fit."""
 

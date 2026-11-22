@@ -81,7 +81,13 @@ class GcsStorageService:
             if not bucket_name or bucket_name == "null":
                 continue
 
-            admin = await adapter.get_bucket_admin_metrics(bucket_name)
+            try:
+                admin = await adapter.get_bucket_admin_metrics(bucket_name)
+            except Exception as exc:
+                # A bucket deleted or refused outside bioAF is reported by storage health; the
+                # buckets that answer are still listed.
+                logger.warning("Could not read metrics for the %s bucket (error_type=%s)", purpose, type(exc).__name__)
+                continue
 
             metrics.append(
                 BucketMetrics(

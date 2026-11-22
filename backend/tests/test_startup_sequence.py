@@ -110,8 +110,9 @@ async def test_startup_runs_its_steps_in_order_and_starts_owned_workers(startup)
         roles = owner.roles()
         # 31 with the checksum verification worker (01 webhooks plan, 01C.2); 32 with the notebook
         # lifecycle pass (notebook launch recovery); 33 with the GEO association advisory (one-shot,
-        # still waiting out its startup delay here).
-        assert len(roles) == 33
+        # still waiting out its startup delay here); 34 with the upload filing retries (storage
+        # lifecycle 11F); 35 with upload settlement checks (provider upload sessions).
+        assert len(roles) == 35
         assert {
             "pipeline-monitor",
             "pubsub-listener",

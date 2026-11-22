@@ -90,7 +90,8 @@ COMPUTE_TEARDOWN_CLEARED_KEYS: tuple[str, ...] = (
     "gke_cluster_location",
 )
 
-# Set to "null" by storage destroy, so the next deploy generates fresh names.
+# Set to "null" by storage destroy. The storage generation (storage_stack_uid) is
+# deleted separately, and only after a confirmed destroy: see storage_generation.
 STORAGE_DESTROY_CLEARED_KEYS: tuple[str, ...] = (
     "storage_deployed",
     "ingest_bucket_name",
@@ -115,6 +116,21 @@ STORAGE_BUCKETS_TO_EMPTY: tuple[str, ...] = (
     "literature_bucket_name",
     "config_backups_bucket_name",
 )
+
+
+_BLANK_IDENTIFIERS = frozenset({"", "null", "none"})
+
+
+def identifier_value(value: str | None) -> str:
+    """A configured identifier, or "" when it is unset.
+
+    Configuration marks a cleared value with the literal string "null", and
+    older rows can hold blanks. Neither may become a resource name or suffix.
+    """
+    if value is None:
+        return ""
+    stripped = value.strip()
+    return "" if stripped.lower() in _BLANK_IDENTIFIERS else stripped
 
 
 async def persist_outputs(

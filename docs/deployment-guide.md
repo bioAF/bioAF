@@ -349,6 +349,11 @@ set `BIOAF_INSTALL_METRICS_DISABLED=1` in `docker/.env` and restart the backend.
 installation that keeps running beside the original needs its own identity:
 `./bioaf reset-install-metrics-identity --confirm`.
 
+An update never changes cloud infrastructure. When the new release's infrastructure definitions differ from
+what this installation last applied, the updater asks the backend to record a notice (the backend also
+checks at startup), and administrators apply the changes from the app. See
+[Infrastructure Changes After an Update](user-guide-admin.md#infrastructure-changes-after-an-update).
+
 ### The update agent
 
 The agent is the `bioaf-update-agent` systemd service. It runs as the
@@ -731,6 +736,11 @@ buckets. **Destroy Storage** is a separate destructive operation offered after c
 and deletes managed buckets and removes storage-module messaging resources, including GCP Pub/Sub topics
 and subscriptions. On AWS it can also remove managed image-build infrastructure when deployed. Preserve
 and verify files and required configuration first. See [Life After bioAF](life-after-bioaf.md).
+
+Destroy Storage acts only on buckets bioAF has established as this installation's, pauses uploads and
+stops before deleting anything while uploads are still running, and can be run again after a failure to
+continue where it stopped. The next storage deployment creates buckets with new names. See
+[Uploads and Destroy Storage](user-guide-admin.md#uploads-and-destroy-storage).
 
 ### Stop the Application Host
 

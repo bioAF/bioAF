@@ -263,7 +263,8 @@ async def test_background_drain_commits_interruption_on_cancellation(
         while not created:
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.05)
-        teardown = next(t for t in asyncio.all_tasks() if "_run_teardown" in repr(t.get_coro()))
+        # The teardown runs as its accepted infrastructure operation (storage lifecycle 11D).
+        teardown = next(t for t in asyncio.all_tasks() if "run_operation" in repr(t.get_coro()))
         teardown.cancel()
         with pytest.raises(asyncio.CancelledError):
             await teardown
@@ -470,7 +471,7 @@ async def test_infra_update_plan_cancellation_leaves_no_active_run(admin_user, s
 
     planning = asyncio.Event()
 
-    async def plan(s, user_id, module_name):
+    async def plan(s, user_id, module_name, **_kwargs):
         await s.execute(
             text(
                 "INSERT INTO terraform_runs (triggered_by_user_id, action, module_name, status) "

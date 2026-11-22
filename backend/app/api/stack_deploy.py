@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
-from typing import AsyncGenerator, Literal
+from fastapi import APIRouter, Depends, Header, HTTPException
+from typing import Annotated, AsyncGenerator, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -34,6 +34,7 @@ from app.services.component_service import KUBERNETES_COMPONENTS, ComponentServi
 from app.services.terraform_cloud import AwsTerraformCloud, GcpTerraformCloud, get_terraform_cloud
 from app.services.notebook_image_service import cancel_build
 from app.services import infra_update_service
+from app.services import infrastructure_operations as ops
 from app.services.stack_deployment import (
     StackStatus,
     deploy_stack,
@@ -43,6 +44,7 @@ from app.services.stack_deployment import (
     sync_storage_config,
     teardown_stack,
 )
+from app.services.storage_generation import UNRESOLVED_PARTIAL_MESSAGE
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
 from app import runtime
@@ -63,6 +65,7 @@ _KNOWN_STACK_ERROR_MESSAGES = frozenset(
         "Compute stack is not deployed",
         "Cannot destroy storage while compute stack is deployed. Teardown compute first.",
         "Storage is not deployed.",
+        UNRESOLVED_PARTIAL_MESSAGE,
     }
 )
 
@@ -115,6 +118,24 @@ def _stack_sse_response(
 
 
 router = APIRouter(tags=["stack_deploy"])
+
+# Repeat clicks and network retries of one confirmed action send the same key (ADR-050).
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key")]
+
+
+async def _accept(current_user: dict, action: str, key: str | None, inputs: dict | None = None) -> tuple[int, bool]:
+    return await ops.accept(
+        action=action, principal=ops.Principal.from_user(current_user), idempotency_key=key, inputs=inputs
+    )
+
+
+def _operation_sse(session: AsyncSession, operation_id: int, events) -> ClosingStreamingResponse:
+    """Serve a stack generator over SSE as the accepted operation."""
+    return _stack_sse_response(session, ops.operation_stream(operation_id, events))
+
+
+def _spawn_stack(operation_id: int, make_events, role: str) -> None:
+    ops.spawn_operation(operation_id, lambda handle: ops.drive_stack(handle, make_events), role=role)
 
 
 # -----------------------------------------------------------------------
@@ -229,6 +250,7 @@ async def stack_deploy_endpoint(
     body: StackDeployRequest | None = None,
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Deploy the full compute stack via SSE stream."""
     runtime.require_admission("deployment")
@@ -236,7 +258,8 @@ async def stack_deploy_endpoint(
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
 
-    return _stack_sse_response(session, deploy_stack(session, stack_type, user_id, org_id=org_id))
+    op_id, _ = await _accept(current_user, "compute_deploy", idempotency_key, {"stack_type": stack_type})
+    return _operation_sse(session, op_id, deploy_stack(session, stack_type, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/deploy-background")
@@ -244,6 +267,7 @@ async def stack_deploy_background_endpoint(
     body: StackDeployRequest | None = None,
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Start a stack deploy in the background and return immediately.
 
@@ -270,35 +294,35 @@ async def stack_deploy_background_endpoint(
     if tf_val != "true":
         raise HTTPException(status_code=400, detail="Terraform has not been initialized")
 
+    op_id, replayed = await _accept(
+        current_user,
+        "compute_deploy",
+        idempotency_key,
+        {"stack_type": stack_type, "compute_region": compute_region, "compute_zone": compute_zone},
+    )
+    if replayed:
+        return {"message": "Deployment started", "operation_id": op_id}
+
     # Record the chosen compute_stack now so downstream views (the wizard's
     # Select Components step, the post-install components page) can resolve
     # the right component list before the compute module finishes applying.
+    # Written after acceptance: no configuration changes before the operation owns it.
     await PlatformConfigService.set(session, "compute_stack", stack_type)
     await session.commit()
 
-    async def _run_deploy():
-        """Drain the deploy_stack generator in the background with its own session."""
-        async with async_session_factory() as bg_session:
-            try:
-                async with owned_event_stream(
-                    bg_session,
-                    deploy_stack(
-                        bg_session,
-                        stack_type,
-                        user_id,
-                        org_id=org_id,
-                        compute_region=compute_region,
-                        compute_zone=compute_zone,
-                    ),
-                ) as events:
-                    async for _event in events:
-                        await bg_session.commit()
-            except Exception:
-                logger.exception("Background deploy failed")
-
-    runtime.spawn(_run_deploy(), role="stack-deploy")
-
-    return {"message": "Deployment started"}
+    _spawn_stack(
+        op_id,
+        lambda bg_session: deploy_stack(
+            bg_session,
+            stack_type,
+            user_id,
+            org_id=org_id,
+            compute_region=compute_region,
+            compute_zone=compute_zone,
+        ),
+        role="stack-deploy",
+    )
+    return {"message": "Deployment started", "operation_id": op_id}
 
 
 @router.post("/api/v1/infrastructure/stack/teardown-background")
@@ -306,6 +330,7 @@ async def stack_teardown_background_endpoint(
     body: StackTeardownRequest | None = None,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Start a stack teardown in the background and return immediately."""
     runtime.require_admission("deployment")
@@ -320,18 +345,12 @@ async def stack_teardown_background_endpoint(
     if compute_deployed != "true":
         raise HTTPException(status_code=400, detail="Compute stack is not deployed")
 
-    async def _run_teardown():
-        async with async_session_factory() as bg_session:
-            try:
-                async with owned_event_stream(bg_session, teardown_stack(bg_session, user_id, org_id=org_id)) as events:
-                    async for _event in events:
-                        await bg_session.commit()
-            except Exception:
-                logger.exception("Background teardown failed")
-
-    runtime.spawn(_run_teardown(), role="stack-teardown")
-
-    return {"message": "Teardown started"}
+    op_id, replayed = await _accept(current_user, "compute_teardown", idempotency_key)
+    if not replayed:
+        _spawn_stack(
+            op_id, lambda bg_session: teardown_stack(bg_session, user_id, org_id=org_id), role="stack-teardown"
+        )
+    return {"message": "Teardown started", "operation_id": op_id}
 
 
 @router.post("/api/v1/infrastructure/stack/destroy-storage-background")
@@ -339,6 +358,7 @@ async def stack_destroy_storage_background_endpoint(
     body: StorageDestroyRequest | None = None,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Start storage destruction in the background and return immediately."""
     runtime.require_admission("deployment")
@@ -357,20 +377,14 @@ async def stack_destroy_storage_background_endpoint(
     if storage_deployed != "true":
         raise HTTPException(status_code=400, detail="Storage is not deployed")
 
-    async def _run_destroy_storage():
-        async with async_session_factory() as bg_session:
-            try:
-                async with owned_event_stream(
-                    bg_session, destroy_storage(bg_session, user_id, org_id=org_id)
-                ) as events:
-                    async for _event in events:
-                        await bg_session.commit()
-            except Exception:
-                logger.exception("Background storage destroy failed")
-
-    runtime.spawn(_run_destroy_storage(), role="stack-destroy-storage")
-
-    return {"message": "Storage destruction started"}
+    op_id, replayed = await _accept(current_user, "storage_destroy", idempotency_key)
+    if not replayed:
+        _spawn_stack(
+            op_id,
+            lambda bg_session: destroy_storage(bg_session, user_id, org_id=org_id),
+            role="stack-destroy-storage",
+        )
+    return {"message": "Storage destruction started", "operation_id": op_id}
 
 
 @router.get(
@@ -439,6 +453,7 @@ async def stack_teardown_endpoint(
     body: StackTeardownRequest | None = None,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Teardown the compute stack via SSE stream."""
     runtime.require_admission("deployment")
@@ -448,7 +463,8 @@ async def stack_teardown_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    return _stack_sse_response(session, teardown_stack(session, user_id, org_id=org_id))
+    op_id, _ = await _accept(current_user, "compute_teardown", idempotency_key)
+    return _operation_sse(session, op_id, teardown_stack(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/destroy-storage")
@@ -456,11 +472,12 @@ async def stack_destroy_storage_endpoint(
     body: StorageDestroyRequest | None = None,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ):
     """Destroy the storage module (GCS buckets + Pub/Sub) via SSE stream.
 
-    Only allowed when compute stack is torn down. Resets storage_uid so the
-    next deploy creates fresh bucket names (avoids GCS soft-delete conflicts).
+    Only allowed when compute stack is torn down. A confirmed destroy retires
+    the storage generation so the next deploy creates new bucket names.
     """
     # A missing body is treated as confirmed -- the UI enforces the 3-step
     # confirmation (warning, checkbox, typed phrase) before calling this endpoint.
@@ -471,7 +488,8 @@ async def stack_destroy_storage_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    return _stack_sse_response(session, destroy_storage(session, user_id, org_id=org_id))
+    op_id, _ = await _accept(current_user, "storage_destroy", idempotency_key)
+    return _operation_sse(session, op_id, destroy_storage(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/sync-storage-config")
@@ -485,12 +503,17 @@ async def sync_storage_config_endpoint(
     output-persistence was in place (i.e. bucket names are missing from
     platform_config but the GCS buckets exist).
     """
+    op_id, _ = await _accept(current_user, "config_sync", None, {"module": "storage"})
     try:
-        populated = await sync_storage_config(session)
-        await session.commit()
-        return {"status": "ok", "populated": populated}
+        async with ops.owned(op_id):
+            populated = await sync_storage_config(session)
+            await session.commit()
+        await ops.finish(op_id, ops.succeeded())
+        return {"status": "ok", "populated": populated, "operation_id": op_id}
+    except DomainError:
+        raise
     except Exception as exc:
-        logger.error("Storage config sync failed: %s", exc, exc_info=True)
+        logger.error("Storage config sync failed (error_type=%s)", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="Storage config sync failed")
 
 
@@ -504,9 +527,12 @@ async def sync_compute_config_endpoint(
     Use this after a deployment where the terraform output capture failed,
     leaving gke_cluster_endpoint as 'null' in platform_config.
     """
+    op_id, _ = await _accept(current_user, "config_sync", None, {"module": "compute"})
     try:
-        populated = await sync_compute_config(session)
-        await session.commit()
+        async with ops.owned(op_id):
+            populated = await sync_compute_config(session)
+            await session.commit()
+        await ops.finish(op_id, ops.succeeded())
         # Force the compute adapter to reload cluster config from DB
         try:
             from app.adapters.registry import get_compute_adapter
@@ -516,9 +542,11 @@ async def sync_compute_config_endpoint(
                 await adapter.load_cluster_config(force=True)
         except Exception:
             pass  # Adapter may not be initialized yet
-        return {"status": "ok", "populated": populated}
+        return {"status": "ok", "populated": populated, "operation_id": op_id}
+    except DomainError:
+        raise
     except Exception as exc:
-        logger.error("Compute config sync failed: %s", exc, exc_info=True)
+        logger.error("Compute config sync failed (error_type=%s)", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="Compute config sync failed")
 
 
@@ -536,126 +564,39 @@ async def stack_status_endpoint(
 # -----------------------------------------------------------------------
 
 
-class ResourceInfo(BaseModel):
-    address: str
-    type: str
-    action: str
-    description: str
-
-
-class DestructiveResourceInfo(ResourceInfo):
-    stateful: bool
-
-
-class ModuleUpdateInfo(BaseModel):
-    module: str
-    add_count: int
-    change_count: int
-    destroy_count: int
-    has_changes: bool
-
-
-class CheckUpdatesResponse(BaseModel):
-    has_changes: bool
-    has_additive: bool
-    has_destructive: bool
-    requires_approval: bool
-    applying: bool
-    realigned: dict | None
-    modules_with_additive: list[str]
-    modules: list[ModuleUpdateInfo]
-    additive_resources: list[ResourceInfo]
-    destructive_resources: list[DestructiveResourceInfo]
-
-
 class ApplyUpdatesRequest(BaseModel):
     modules: list[str]
 
 
-def _to_check_response(result: dict, *, applying: bool) -> CheckUpdatesResponse:
-    return CheckUpdatesResponse(
-        has_changes=result["has_changes"],
-        has_additive=result["has_additive"],
-        has_destructive=result["has_destructive"],
-        requires_approval=result["requires_approval"],
-        applying=applying,
-        realigned=result["realigned"],
-        modules_with_additive=result["modules_with_additive"],
-        modules=[
-            ModuleUpdateInfo(
-                module=m["module"],
-                add_count=m["add_count"],
-                change_count=m["change_count"],
-                destroy_count=m["destroy_count"],
-                has_changes=m["has_changes"],
-            )
-            for m in result["modules"]
-        ],
-        additive_resources=[
-            ResourceInfo(
-                address=r["address"],
-                type=r["type"],
-                action=r["action"],
-                description=r.get("description", ""),
-            )
-            for r in result["additive_resources"]
-        ],
-        destructive_resources=[
-            DestructiveResourceInfo(
-                address=r["address"],
-                type=r["type"],
-                action=r["action"],
-                description=r.get("description", ""),
-                stateful=bool(r.get("stateful")),
-            )
-            for r in result["destructive_resources"]
-        ],
-    )
+class CheckUpdatesAccepted(BaseModel):
+    message: str
+    operation_id: int
 
 
-@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesResponse)
+@router.post("/api/v1/infrastructure/stack/check-updates", response_model=CheckUpdatesAccepted)
 async def check_infra_updates_endpoint(
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
-) -> CheckUpdatesResponse:
-    """Re-align deployed naming, re-plan every deployed module, and report the
-    pending changes split into additive vs destructive.
+    idempotency_key: IdempotencyKey = None,
+) -> CheckUpdatesAccepted:
+    """Start the confirmed "Check for infrastructure updates" action (mockup M1).
 
-    When there are additive changes and no destructive (delete/replace) ones,
-    the additive resources start applying immediately in the background. When
-    a destructive change is present, nothing is auto-applied; the caller can
-    apply the additive subset via /apply-updates (which only ever targets
-    additive resources).
+    The popup confirmation is the authorization: one accepted operation plans every deployed
+    module and applies the additive changes automatically, with no second approval. Changes that
+    would delete or replace an existing resource are listed in the operation's outcome and never
+    applied. Progress and outcome are read from the operation.
     """
+    runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
+    # Refuse early what cannot run at all, before taking exclusion.
     try:
-        result = await infra_update_service.check_for_updates(session, user_id)
-    except (DomainError, ValueError) as exc:
-        # DomainError comes from infra_update_service (e.g. not-initialized,
-        # nothing-deployed, plan-failed); the bare ValueError still guards the
-        # "Another Terraform operation is in progress" raised deeper in
-        # TerraformExecutor, which is not part of this migration.
-        msg = str(exc)
-        if msg in ("Terraform has not been initialized", "No infrastructure is deployed"):
-            await session.rollback()
-            raise HTTPException(status_code=400, detail=msg)
-        if msg.startswith("Another Terraform operation is in progress"):
-            await session.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="Another Terraform operation is in progress. Try again when it finishes.",
-            )
-        logger.error("check_for_updates failed: %s", msg, exc_info=True)
-        await session.rollback()
-        raise HTTPException(status_code=400, detail="Could not check for infrastructure updates. See server logs.")
-
-    applying = False
-    if result["has_additive"] and not result["has_destructive"]:
-        infra_update_service.launch_background_apply(result["modules_with_additive"], user_id)
-        applying = True
-
-    await session.commit()
-    return _to_check_response(result, applying=applying)
+        await infra_update_service._deployed_modules(session)
+    except DomainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    op_id, replayed = await _accept(current_user, "infrastructure_update", idempotency_key)
+    if not replayed:
+        infra_update_service.launch_update_check(user_id, operation_id=op_id)
+    return CheckUpdatesAccepted(message="Infrastructure update started", operation_id=op_id)
 
 
 @router.post("/api/v1/infrastructure/stack/apply-updates")
@@ -663,6 +604,7 @@ async def apply_infra_updates_endpoint(
     body: ApplyUpdatesRequest,
     current_user: dict = require_permission("infrastructure", "deploy"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ) -> dict:
     """Apply the named modules in the background, additive-only.
 
@@ -671,12 +613,18 @@ async def apply_infra_updates_endpoint(
     (targeted), so a delete/replace is never carried out by this flow."""
     runtime.require_admission("deployment")
     user_id = int(current_user["sub"])
-    allowed = {module for module, _flag in infra_update_service._CANDIDATE_MODULES}
-    modules = [m for m in body.modules if m in allowed]
+    # The server owns the scope: only known modules that are actually deployed.
+    try:
+        deployed = set(await infra_update_service._deployed_modules(session))
+    except DomainError:
+        deployed = set()
+    modules = [m for m in body.modules if m in deployed]
     if not modules:
         raise HTTPException(status_code=400, detail="No valid modules to apply")
-    infra_update_service.launch_background_apply(modules, user_id)
-    return {"applying": True, "modules": modules}
+    op_id, replayed = await _accept(current_user, "infrastructure_update", idempotency_key, {"modules": modules})
+    if not replayed:
+        infra_update_service.launch_background_apply(modules, user_id, operation_id=op_id)
+    return {"applying": True, "modules": modules, "operation_id": op_id}
 
 
 # -----------------------------------------------------------------------
@@ -756,20 +704,40 @@ async def stack_component_toggle(
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
-    """Toggle a component's enabled state with dependency enforcement."""
+    """Toggle a component's enabled state with dependency enforcement.
+
+    The whole change is one infrastructure operation: it holds the shared lock from before the
+    state is read until it commits, so no other action can start in between (M3/M6). An image
+    build it starts belongs to it, and the lock is kept until the provider reports that build.
+    """
+    user_id = int(current_user["sub"])
     try:
-        result = await ComponentService.toggle_stack_component(
-            session,
-            component_key,
-            user_id=int(current_user["sub"]),
-            force_rebuild=force_rebuild,
-        )
+        ComponentService.stack_component(component_key)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    await session.commit()
+    operation_id, _ = await ops.accept(
+        action="component_change",
+        principal=ops.Principal(user_id),
+        inputs={"component_key": component_key, "force_rebuild": force_rebuild},
+    )
+    try:
+        async with ops.owned(operation_id):
+            result = await ComponentService.toggle_stack_component(
+                session,
+                component_key,
+                user_id=user_id,
+                force_rebuild=force_rebuild,
+            )
+            await session.commit()
+    except ValidationError as exc:
+        # owned() recorded the failed outcome; the caller gets the reason.
+        raise HTTPException(status_code=400, detail=str(exc))
+    await ops.finish(
+        operation_id, ops.succeeded(f"{result.component_key} {'enabled' if result.enabled else 'disabled'}.")
+    )
 
     return ComponentToggleResponse(
         component_key=result.component_key,
@@ -828,8 +796,8 @@ async def notebook_image_cancel(
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Cancel the active notebook image build."""
-    build_id = await cancel_build(session)
+    """Request cancellation of the active notebook image build; the poller confirms it."""
+    build_id = await cancel_build(session, int(current_user["sub"]))
     await session.commit()
     return {"cancelled": True, "build_id": build_id}
 
@@ -900,6 +868,7 @@ async def update_cluster_config(
     body: ClusterConfigUpdate,
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
+    idempotency_key: IdempotencyKey = None,
 ) -> dict:
     """Update cluster config, plan, and auto-apply."""
     runtime.require_admission("deployment")
@@ -920,35 +889,60 @@ async def update_cluster_config(
     if verdict.status == "block":
         raise HTTPException(status_code=400, detail=verdict.message)
 
-    # Update config values
-    for key, value in updates.items():
-        await PlatformConfigService.set(session, key, str(value).lower() if isinstance(value, bool) else str(value))
-    await session.flush()
-
-    # Generate terraform plan
+    # One operation from the configuration change through plan and apply; the
+    # explicit configure action is the authorization.
     user_id = int(current_user["sub"])
-    run = await TerraformExecutor.run_plan(session, user_id, module_name="compute")
+    op_id, replayed = await _accept(current_user, "cluster_config", idempotency_key, {"updates": updates})
+    if replayed:
+        return {"message": "Cluster configuration update started", "operation_id": op_id}
 
-    if run.status == "failed":
+    async with ops.owned(op_id) as handle:
+        await handle.step("plan", "Planning changes", "running")
+        for key, value in updates.items():
+            await PlatformConfigService.set(session, key, str(value).lower() if isinstance(value, bool) else str(value))
+        await session.flush()
+        run = await TerraformExecutor.run_plan(session, user_id, module_name="compute")
+        if run.status == "failed":
+            await session.commit()
+            await handle.step("plan", state="failed")
+            await ops.finish(op_id, ops.failed("Planning the cluster change failed.", "plan_failed"))
+            raise HTTPException(status_code=500, detail=run.error_message or "Terraform plan failed")
+        # Auto-apply: transition to applying and continue the operation in the background.
+        run.status = "applying"
         await session.commit()
-        raise HTTPException(status_code=500, detail=run.error_message or "Terraform plan failed")
+        await handle.step("plan", state="done")
 
-    # Auto-apply: transition to applying and kick off background apply
-    run.status = "applying"
-    await session.commit()
-    runtime.spawn(_run_apply_background(run.id, user_id), role="cluster-config-apply")
-
-    return {"message": "Cluster configuration update started", "run_id": run.id}
+    ops.spawn_operation(
+        op_id, lambda handle: _apply_cluster_change(handle, run.id, user_id), role="cluster-config-apply"
+    )
+    return {"message": "Cluster configuration update started", "run_id": run.id, "operation_id": op_id}
 
 
-async def _run_apply_background(run_id: int, user_id: int) -> None:
-    """Run TerraformExecutor.run_apply in the background with its own session."""
+async def _apply_cluster_change(handle: ops.OperationHandle, run_id: int, user_id: int) -> ops.OperationResult:
+    """Apply the planned cluster change as the operation's last phase."""
+    from app.services.terraform_stream import INTERRUPTED_EVENT
+
+    await handle.step("apply", "Applying cluster changes", "running")
+    outcome = await _run_apply_background(run_id, user_id)
+    if outcome.succeeded:
+        return ops.succeeded("Cluster settings applied.")
+    if outcome.terminal_event == INTERRUPTED_EVENT:
+        return ops.OperationResult("interrupted", "The cluster change was interrupted.", "interrupted")
+    return ops.failed("Applying the cluster change failed.", "apply_failed")
+
+
+async def _run_apply_background(run_id: int, user_id: int):
+    """Run TerraformExecutor.run_apply with its own session; return what its events established."""
+    from app.services.terraform_stream import OperationOutcome
+
+    outcome = OperationOutcome()
     async with async_session_factory() as bg_session:
         try:
             async with owned_event_stream(
                 bg_session, TerraformExecutor.run_apply(bg_session, run_id, user_id)
             ) as events:
-                async for _event in events:
-                    pass
+                async for event in events:
+                    outcome.observe(event)
         except Exception:
             logger.exception("Background terraform apply failed for run %d", run_id)
+    return outcome

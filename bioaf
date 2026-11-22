@@ -238,10 +238,18 @@ ensure_cloud_logging() {
     esac
 
     if [ ! -x "$OPS_AGENT_ENGINE" ] && ! command -v google_cloud_ops_agent_engine &>/dev/null; then
+        local had_config=false
+        sudo test -e "$OPS_AGENT_CONFIG" && had_config=true
         bold "Installing Google Cloud Ops Agent..."
         curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
         sudo bash add-google-cloud-ops-agent-repo.sh --also-install
         rm -f add-google-cloud-ops-agent-repo.sh
+        # The package writes its own default config. bioAF installed the agent just now, so a config
+        # that was not there before is the package's, not the operator's: keep it aside and install
+        # bioAF's. An operator's config that predates the install is still never replaced.
+        if [ "$had_config" = false ] && sudo test -e "$OPS_AGENT_CONFIG"; then
+            sudo mv "$OPS_AGENT_CONFIG" "$OPS_AGENT_CONFIG.package-default"
+        fi
     fi
 
     local status=0
@@ -1392,6 +1400,15 @@ record_upgrade_metric() {
         || yellow "Note: the backend did not record this upgrade for installation metrics; it will retry from the update status."
 }
 
+record_infrastructure_notice() {
+    # Ask the backend to record whether this release's infrastructure definitions are waiting to be
+    # applied (they are applied only from the app, after an admin confirms). It runs no Terraform and
+    # does not depend on installation metrics. A failure never changes the update's outcome: the
+    # backend reconciles the same notice at startup.
+    $DC exec -T backend python -m app.cli.record_infrastructure_notice --to-version "$_update_to" >/dev/null 2>&1 \
+        || yellow "Note: the backend did not record whether infrastructure changes are waiting; it will retry at startup."
+}
+
 update_failed() {
     # update_failed <step> <message>: record the failure where the UI and agent read it, then stop.
     write_update_status failed "$1" "$2" || red "The failure could not be recorded in update-status/current.json."
@@ -1631,6 +1648,7 @@ cmd_update() {
     fi
     write_update_status completed done
     record_upgrade_metric
+    record_infrastructure_notice
 
     echo ""
     green "=================================================="
