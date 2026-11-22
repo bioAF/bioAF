@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -55,10 +55,16 @@ def on_settled(callback: Callable[[StorageWorker], None]) -> None:
 
 
 async def run(label: str, fn: Callable[..., Any], *args: Any) -> Any:
-    """Run a storage-changing call in a thread, tracked until the thread itself returns.
+    """Run a storage-changing call in a thread, tracked until the thread itself returns."""
+    return await track(label, asyncio.to_thread(fn, *args))
 
-    The call runs as owned, non-cancellable work: cancelling the caller stops the wait, not the
-    call, and the registration (and server shutdown) lasts until the thread returns.
+
+async def track(label: str, work: Coroutine[Any, Any, Any]) -> Any:
+    """Run ``work`` (a storage change, and anything that must finish with it) tracked to the end.
+
+    It runs as owned, non-cancellable work: cancelling the caller stops the wait, not the work,
+    and the registration (and server shutdown) lasts until it returns. A caller that pairs a
+    deletion with recording it passes both as one ``work``, so an operation cannot settle between.
     """
     from app import runtime
 
@@ -68,7 +74,7 @@ async def run(label: str, fn: Callable[..., Any], *args: Any) -> Any:
 
     async def tracked() -> Any:
         try:
-            return await asyncio.to_thread(fn, *args)
+            return await work
         finally:
             _running.pop(key, None)
             for callback in list(_on_settled):

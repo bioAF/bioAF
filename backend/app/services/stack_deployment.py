@@ -1000,17 +1000,27 @@ async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
     adapter = get_storage_adapter()
     uri_prefix = adapter.build_uri(bucket_name, "")
 
+    from app import database
+    from app.adapters.storage import workers
+
+    async def delete_and_record(uri: str, generation) -> None:
+        # One unit: the deletion and its durable record finish together even if the destroy is
+        # cancelled while the provider call runs, and the operation cannot settle in between.
+        await adapter.delete(uri, generation=generation)
+        async with database.async_session_factory() as record:
+            await record.execute(
+                text(
+                    "UPDATE files SET storage_deleted = true WHERE storage_deleted = false AND storage_uri = :uri"
+                ).bindparams(uri=uri)
+            )
+            await record.commit()
+
     deleted = 0
     try:
         for obj in await adapter.list_objects(uri_prefix, include_versions=True):
             generation = obj.provider_details.get("generation")
-            await adapter.delete(obj.storage_uri, generation=generation)
+            await workers.track("delete and record", delete_and_record(obj.storage_uri, generation))
             deleted += 1
-            await session.execute(
-                text(
-                    "UPDATE files SET storage_deleted = true WHERE storage_deleted = false AND storage_uri = :uri"
-                ).bindparams(uri=obj.storage_uri)
-            )
     except Exception as exc:
         await session.flush()
         raise PartialEmptyError(deleted, exc) from exc
