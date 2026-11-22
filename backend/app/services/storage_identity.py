@@ -232,6 +232,16 @@ async def _discoverable(session: AsyncSession, store: str, bucket_name: str, see
     return generation
 
 
+async def _recreated_by_bioaf(session: AsyncSession, recorded: StorageIdentity, seen: ContainerObservation) -> bool:
+    """A newer bucket under a recorded name that bioAF itself created: the recorded marker, the
+    recorded owner, and a creation time inside a recorded storage apply of this generation."""
+    if None in (recorded.marker, recorded.provider_created_at, seen.created_at, recorded.owner, seen.owner):
+        return False
+    if _marker(seen) != recorded.marker or seen.created_at <= recorded.provider_created_at:
+        return False
+    return await _created_by_recorded_apply(session, recorded.storage_uid, seen.created_at)
+
+
 async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: ContainerObservation) -> StoreReport:
     if seen.presence is not ContainerPresence.PRESENT:
         return StoreReport(store, bucket_name, _PRESENCE_HEALTH[seen.presence])
@@ -245,6 +255,13 @@ async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: C
         seen_marker = _marker(seen)
         owner_differs = None not in (recorded.owner, seen.owner) and recorded.owner != seen.owner
         marker_differs = None not in (recorded.marker, seen_marker) and recorded.marker != seen_marker
+        if not (owner_differs or marker_differs) and await _recreated_by_bioaf(session, recorded, seen):
+            # Storage changes may run while a confirmed bucket is missing, so bioAF can create it
+            # again: the bucket it created carries the recorded marker and was created by a recorded
+            # storage apply. Record its creation time instead of taking it for someone else's.
+            recorded.provider_created_at = seen.created_at
+            await session.flush()
+            logger.info("Recorded the creation time of store %s's bucket, recreated by bioAF", store)
         if owner_differs or marker_differs or not _same_instant(recorded.provider_created_at, seen.created_at):
             return StoreReport(store, bucket_name, StoreHealth.WRONG_OWNER, recorded.basis)
         # Evidence that cannot be read now is not matching evidence: the bucket keeps serving

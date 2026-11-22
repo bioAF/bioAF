@@ -36,6 +36,10 @@
   storage deployment reuses the same names.
 - Components shows each bucket's health (Available, Not found, No access, and so on) with **Check again**.
   Checking never creates a bucket.
+- A confirmed bucket that went missing and that bioAF recreated (with its identity marker, during a
+  recorded storage change) is trusted again instead of being reported as another installation's.
+- A bucket missing or refused outside bioAF no longer stops the other buckets' details from loading on
+  Components.
 - bioAF no longer takes bucket names from Terraform state alone.
 
 ### Uploads

@@ -571,3 +571,58 @@ async def test_a_bucket_policy_edit_does_not_change_its_identity(session):
     edited.created_at = T0 + timedelta(days=90)
     with _patched(FakeAdapter({RAW: edited})):
         assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
+
+
+# ---------------------------------------------------------------------------
+# a confirmed bucket that went missing and bioAF recreated
+#
+# Storage changes are allowed while a confirmed bucket is missing so bioAF can create it again. The
+# bucket bioAF creates carries the recorded marker and was created by a recorded storage apply; it
+# replaces the record's creation time instead of being taken for another installation's bucket.
+# ---------------------------------------------------------------------------
+
+MARKED = {"managed_by": "bioaf", "purpose": "raw-data", "bioaf_marker": "m-raw"}
+
+
+async def _confirmed_then_recreated(session, *, labels, recreated_by_apply: bool):
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    await _apply_run(session, user_id)
+    with _patched(FakeAdapter({RAW: _present(labels=MARKED)})):
+        assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
+    await session.commit()
+    recreated = T0 + timedelta(days=40)
+    if recreated_by_apply:
+        await _apply_run(
+            session, user_id, started=recreated - timedelta(minutes=3), completed=recreated + timedelta(minutes=1)
+        )
+    with _patched(FakeAdapter({RAW: _present(created=recreated, labels=labels)})):
+        return await _raw_report(session), recreated
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_bioaf_recreated_with_its_marker_is_trusted_again(session):
+    report, recreated = await _confirmed_then_recreated(session, labels=MARKED, recreated_by_apply=True)
+    assert report.health is StoreHealth.AVAILABLE
+    await session.commit()
+    recorded = await storage_identity._active_identity(session, RAW)
+    assert recorded.provider_created_at == recreated
+    # And it stays trusted on the next check.
+    with _patched(FakeAdapter({RAW: _present(created=recreated, labels=MARKED)})):
+        assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "labels, recreated_by_apply",
+    [
+        ({"managed_by": "bioaf", "purpose": "raw-data"}, True),  # no marker
+        ({**MARKED, "bioaf_marker": "someone-else"}, True),  # another marker
+        (MARKED, False),  # marker, but no recorded bioAF apply created it
+    ],
+)
+async def test_a_recreated_bucket_without_both_marker_and_recorded_apply_stays_a_mismatch(
+    session, labels, recreated_by_apply
+):
+    report, _ = await _confirmed_then_recreated(session, labels=labels, recreated_by_apply=recreated_by_apply)
+    assert report.health is StoreHealth.WRONG_OWNER
