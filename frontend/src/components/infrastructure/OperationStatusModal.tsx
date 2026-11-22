@@ -47,15 +47,9 @@ function StepRow({
     <li className="py-1.5">
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className="text-gray-800">{step.label}</span>
-        <span
-          className={`text-xs font-medium ${STEP_TONES[step.state] ?? "text-gray-500"}`}
-        >
-          {stepStateText(step)}
-        </span>
+        <span className={`text-xs font-medium ${STEP_TONES[step.state] ?? "text-gray-500"}`}>{stepStateText(step)}</span>
       </div>
-      {step.detail && !outcome?.includes(step.detail) && (
-        <p className="mt-0.5 text-xs text-gray-600">{step.detail}</p>
-      )}
+      {step.detail && !outcome?.includes(step.detail) && <p className="mt-0.5 text-xs text-gray-600">{step.detail}</p>}
       {showResources && (
         <ul className="mt-1 max-h-40 overflow-y-auto pl-3 text-xs text-gray-500">
           {planned.map((address) => (
@@ -70,13 +64,7 @@ function StepRow({
   );
 }
 
-function RecoveryForm({
-  op,
-  onRecovered,
-}: {
-  op: OperationView;
-  onRecovered: () => void;
-}) {
+function RecoveryForm({ op, onRecovered }: { op: OperationView; onRecovered: () => void }) {
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -86,18 +74,11 @@ function RecoveryForm({
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/api/v1/infrastructure/operations/${op.id}/recover`, {
-        reason: reason.trim(),
-        confirm: true,
-      });
+      await api.post(`/api/v1/infrastructure/operations/${op.id}/recover`, { reason: reason.trim(), confirm: true });
       onRecovered();
     } catch (e) {
       logError("recording infrastructure recovery", e);
-      setError(
-        e instanceof ApiError
-          ? e.message
-          : "The recovery could not be recorded. Try again.",
-      );
+      setError(e instanceof ApiError ? e.message : "The recovery could not be recorded. Try again.");
     } finally {
       setBusy(false);
     }
@@ -106,21 +87,15 @@ function RecoveryForm({
   return (
     <div className="mt-4 space-y-3 border-t border-gray-200 pt-4">
       <p className="text-sm text-gray-700">
-        bioAF could not confirm that Terraform stopped. Starting another action
-        while it might still run could damage your infrastructure records.
+        bioAF could not confirm that Terraform stopped. Starting another action while it might still run could damage
+        your infrastructure records.
       </p>
       <p className="text-sm text-gray-700">
-        On the bioAF server, check that no Terraform process is running, for
-        example with{" "}
-        <code className="rounded bg-gray-100 px-1">
-          ps -ef | grep &apos;[t]erraform&apos;
-        </code>
-        . Then record the recovery below.
+        On the bioAF server, check that no Terraform process is running, for example with{" "}
+        <code className="rounded bg-gray-100 px-1">ps -ef | grep &apos;[t]erraform&apos;</code>. Then record the recovery
+        below.
       </p>
-      <label
-        className="block text-sm font-medium text-gray-700"
-        htmlFor={`recover-reason-${op.id}`}
-      >
+      <label className="block text-sm font-medium text-gray-700" htmlFor={`recover-reason-${op.id}`}>
         Reason (saved in the audit log)
       </label>
       <textarea
@@ -131,23 +106,12 @@ function RecoveryForm({
         onChange={(e) => setReason(e.target.value)}
       />
       <label className="flex items-start gap-2 text-sm text-gray-700">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-        />
-        <span>
-          I confirmed that this Terraform process is no longer running.
-        </span>
+        <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+        <span>I confirmed that this Terraform process is no longer running.</span>
       </label>
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex justify-end">
-        <Button
-          variant="danger"
-          onClick={submit}
-          disabled={busy || !confirmed || !reason.trim()}
-        >
+        <Button variant="danger" onClick={submit} disabled={busy || !confirmed || !reason.trim()}>
           Mark as recovered
         </Button>
       </div>
@@ -178,19 +142,11 @@ interface UploadsRefusal {
 }
 
 /** When to try destroy again, and the uploads storage could not confirm (11G). */
-function UploadsRefusalDetail({
-  effects,
-  canRelease,
-}: {
-  effects: UploadsRefusal;
-  canRelease: boolean;
-}) {
+function UploadsRefusalDetail({ effects, canRelease }: { effects: UploadsRefusal; canRelease: boolean }) {
   const [releasing, setReleasing] = useState<UnconfirmedUpload | null>(null);
   const [released, setReleased] = useState<string[]>([]);
   const [changed, setChanged] = useState<string | null>(null);
-  const unconfirmed = (effects.unconfirmed ?? []).filter(
-    (u) => !released.includes(u.upload_id),
-  );
+  const unconfirmed = (effects.unconfirmed ?? []).filter((u) => !released.includes(u.upload_id));
   return (
     <>
       {(effects.activities ?? []).length > 0 && (
@@ -204,8 +160,8 @@ function UploadsRefusalDetail({
       )}
       {effects.retry_after && (
         <p className="mt-3 text-sm text-gray-700">
-          Try Destroy Storage again after {timeWithDay(effects.retry_after)}.
-          bioAF will check the uploads again before proceeding.
+          Try Destroy Storage again after {timeWithDay(effects.retry_after)}. bioAF will check the uploads again before
+          proceeding.
         </p>
       )}
       {unconfirmed.length > 0 && (
@@ -213,21 +169,10 @@ function UploadsRefusalDetail({
           <p>bioAF cannot confirm whether these uploads have stopped:</p>
           <ul className="mt-1 space-y-1">
             {unconfirmed.map((u) => (
-              <li
-                key={u.upload_id}
-                className="flex items-center justify-between gap-3"
-              >
-                <span>
-                  {[u.filename, u.name, u.reference]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
+              <li key={u.upload_id} className="flex items-center justify-between gap-3">
+                <span>{[u.filename, u.name, u.reference].filter(Boolean).join(" · ")}</span>
                 {canRelease && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setReleasing(u)}
-                  >
+                  <Button size="sm" variant="secondary" onClick={() => setReleasing(u)}>
                     Stop waiting…
                   </Button>
                 )}
@@ -259,9 +204,7 @@ function UploadsRefusalDetail({
 
 /** Reopen uploads after a refused or failed storage destroy, without destroying anything (M7, M11). */
 function AllowUploads() {
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">(
-    "idle",
-  );
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const allow = async () => {
     setState("busy");
     try {
@@ -272,28 +215,20 @@ function AllowUploads() {
       setState("error");
     }
   };
-  if (state === "done")
-    return (
-      <p className="mt-3 text-sm text-green-700">Uploads are allowed again.</p>
-    );
+  if (state === "done") return <p className="mt-3 text-sm text-green-700">Uploads are allowed again.</p>;
   return (
     <div className="mt-3 flex items-center gap-3">
       <Button variant="secondary" onClick={allow} disabled={state === "busy"}>
         Allow uploads
       </Button>
-      {state === "error" && (
-        <span className="text-sm text-red-700">
-          Uploads could not be allowed. Try again.
-        </span>
-      )}
+      {state === "error" && <span className="text-sm text-red-700">Uploads could not be allowed. Try again.</span>}
     </div>
   );
 }
 
 /** What finished work means for each action, shown before a cancellation (M16). */
 function cancelConsequence(op: OperationView): string | null {
-  if (op.action === "storage_destroy")
-    return "Those objects are permanently deleted.";
+  if (op.action === "storage_destroy") return "Those objects are permanently deleted.";
   if (op.action === "compute_deploy") {
     return "Created resources stay in place. Run Teardown to remove them, or Deploy again to finish.";
   }
@@ -312,10 +247,7 @@ function CancelConfirm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const action = `Cancel ${op.label.toLowerCase()}`;
-  const done = (op.steps ?? []).filter(
-    (s) =>
-      s.state === "done" && s.key !== "accepted" && s.key !== "prerequisites",
-  );
+  const done = (op.steps ?? []).filter((s) => s.state === "done" && s.key !== "accepted" && s.key !== "prerequisites");
   const consequence = cancelConsequence(op);
 
   const submit = async () => {
@@ -326,11 +258,7 @@ function CancelConfirm({
       onCancelled();
     } catch (e) {
       logError("cancelling an infrastructure operation", e);
-      setError(
-        e instanceof ApiError
-          ? e.message
-          : "The cancellation could not be requested. Try again.",
-      );
+      setError(e instanceof ApiError ? e.message : "The cancellation could not be requested. Try again.");
     } finally {
       setBusy(false);
     }
@@ -353,10 +281,7 @@ function CancelConfirm({
       }
     >
       <p className="text-xs text-gray-500">Operation #{op.id}</p>
-      <p className="mt-2 text-sm text-gray-700">
-        bioAF will stop as soon as it safely can. Work already done is not
-        undone.
-      </p>
+      <p className="mt-2 text-sm text-gray-700">bioAF will stop as soon as it safely can. Work already done is not undone.</p>
       {done.length > 0 && (
         <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3 text-sm">
           <p className="font-medium text-gray-800">Already done</p>
@@ -368,9 +293,7 @@ function CancelConfirm({
           {consequence && <p className="mt-2 text-gray-700">{consequence}</p>}
         </div>
       )}
-      {done.length === 0 && consequence && (
-        <p className="mt-3 text-sm text-gray-700">{consequence}</p>
-      )}
+      {done.length === 0 && consequence && <p className="mt-3 text-sm text-gray-700">{consequence}</p>}
       {error && (
         <Alert tone="error" className="mt-3">
           {error}
@@ -400,11 +323,7 @@ export function OperationStatusModal({
   const read = useResource<OperationView>(
     `infrastructure:operation:${operationId}`,
     useCallback(
-      (signal: AbortSignal) =>
-        api.get<OperationView>(
-          `/api/v1/infrastructure/operations/${operationId}`,
-          { signal },
-        ),
+      (signal: AbortSignal) => api.get<OperationView>(`/api/v1/infrastructure/operations/${operationId}`, { signal }),
       [operationId],
     ),
     {
@@ -417,20 +336,12 @@ export function OperationStatusModal({
   // Opening an interrupted outcome is what ends its one-time banner (M9).
   const marked = useRef(false);
   useEffect(() => {
-    if (
-      !op ||
-      marked.current ||
-      op.status !== "interrupted" ||
-      op.outcome_seen_at
-    )
-      return;
+    if (!op || marked.current || op.status !== "interrupted" || op.outcome_seen_at) return;
     marked.current = true;
     api
       .post(`/api/v1/infrastructure/operations/${op.id}/seen`, {})
       .then(onSettled)
-      .catch((e) =>
-        logError("recording that an operation outcome was seen", e),
-      );
+      .catch((e) => logError("recording that an operation outcome was seen", e));
   }, [op, onSettled]);
 
   // Refresh shared availability once this operation settles.
@@ -448,18 +359,11 @@ export function OperationStatusModal({
   // Any admin with infrastructure configure may cancel any active operation (M16-a). This is the
   // operation's own control, so it stays available while the operation holds exclusion.
   const canCancel =
-    op !== undefined &&
-    ["accepted", "running", "stopping"].includes(op.status) &&
-    configure.allowed("configure");
-  const stopping =
-    op?.status === "stopping" ||
-    Boolean(op?.cancel_requested_at && op && isActive(op));
+    op !== undefined && ["accepted", "running", "stopping"].includes(op.status) && configure.allowed("configure");
+  const stopping = op?.status === "stopping" || Boolean(op?.cancel_requested_at && op && isActive(op));
   // The outcome box shows the operation's message once it has finished (not while running, stopping or
   // after a cancel, whose own line says who cancelled).
-  const shownOutcome =
-    op?.message && !["running", "stopping", "cancelled"].includes(op.status)
-      ? op.message
-      : null;
+  const shownOutcome = op?.message && !["running", "stopping", "cancelled"].includes(op.status) ? op.message : null;
 
   return (
     <Modal
@@ -490,18 +394,14 @@ export function OperationStatusModal({
     >
       {!op ? (
         read.error ? (
-          <Alert tone="error">
-            {loadFailureMessage("The operation status")}
-          </Alert>
+          <Alert tone="error">{loadFailureMessage("The operation status")}</Alert>
         ) : (
           <p className="text-sm text-gray-500">Loading…</p>
         )
       ) : (
         <div>
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <span className="text-xs font-medium text-gray-500">
-              Operation #{op.id}
-            </span>
+            <span className="text-xs font-medium text-gray-500">Operation #{op.id}</span>
             {op.started_by && (
               <span className="text-xs text-gray-500">
                 Started by {op.started_by} at {shortTime(op.accepted_at)}
@@ -509,77 +409,47 @@ export function OperationStatusModal({
             )}
           </div>
           {stopping && (
-            <p className="mb-2 text-sm text-amber-700">
-              Stopping: waiting for Terraform to save its state.
-            </p>
+            <p className="mb-2 text-sm text-amber-700">Stopping: waiting for Terraform to save its state.</p>
           )}
           <ul className="divide-y divide-gray-100">
             {(op.steps ?? []).map((step) => (
-              <StepRow
-                key={step.key}
-                step={step}
-                resources={op.resources ?? null}
-                outcome={shownOutcome}
-              />
+              <StepRow key={step.key} step={step} resources={op.resources ?? null} outcome={shownOutcome} />
             ))}
           </ul>
           {op.status === "cancelled" && op.cancel_requested_by && (
             <p className="mt-3 text-sm text-gray-600">
-              Cancelled by {op.cancel_requested_by} at{" "}
-              {shortTime(op.cancel_requested_at)}.
+              Cancelled by {op.cancel_requested_by} at {shortTime(op.cancel_requested_at)}.
             </p>
           )}
           {shownOutcome && (
-            <Alert
-              tone={
-                op.status === "succeeded"
-                  ? "success"
-                  : op.status === "failed"
-                    ? "error"
-                    : "warning"
-              }
-              className="mt-4"
-            >
+            <Alert tone={op.status === "succeeded" ? "success" : op.status === "failed" ? "error" : "warning"} className="mt-4">
               {op.message}
             </Alert>
           )}
           {op.action === "storage_destroy" &&
             op.error_category === "uploads_in_progress" &&
-            (
-              (op.partial_effects as { uploads?: UploadInProgress[] } | null)
-                ?.uploads ?? []
-            ).length > 0 && (
+            ((op.partial_effects as { uploads?: UploadInProgress[] } | null)?.uploads ?? []).length > 0 && (
               <ul className="mt-3 space-y-1 text-sm text-gray-700">
-                {(
-                  (op.partial_effects as { uploads?: UploadInProgress[] })
-                    .uploads ?? []
-                ).map((u, i) => (
+                {((op.partial_effects as { uploads?: UploadInProgress[] }).uploads ?? []).map((u, i) => (
                   <li key={i}>
-                    {u.name ?? "Someone"} · {u.files} file
-                    {u.files === 1 ? "" : "s"}
-                    {u.experiment ? ` · ${u.experiment}` : ""}, started{" "}
-                    {shortTime(u.started_at)}
+                    {u.name ?? "Someone"} · {u.files} file{u.files === 1 ? "" : "s"}
+                    {u.experiment ? ` · ${u.experiment}` : ""}, started {shortTime(u.started_at)}
                   </li>
                 ))}
               </ul>
             )}
-          {op.action === "storage_destroy" &&
-            op.error_category === "uploads_in_progress" && (
-              <UploadsRefusalDetail
-                effects={(op.partial_effects as UploadsRefusal | null) ?? {}}
-                canRelease={configure.allowed("configure")}
-              />
-            )}
-          {op.action === "storage_destroy" &&
-            op.status === "failed" &&
-            configure.allowed("configure") && <AllowUploads />}
-          {op.status === "recovery_required" &&
-            configure.allowed("configure") && (
-              <RecoveryForm
-                op={op}
-                onRecovered={() => void read.refresh().then(onSettled)}
-              />
-            )}
+          {op.action === "storage_destroy" && op.error_category === "uploads_in_progress" && (
+            <UploadsRefusalDetail
+              effects={(op.partial_effects as UploadsRefusal | null) ?? {}}
+              canRelease={configure.allowed("configure")}
+            />
+          )}
+          {op.action === "storage_destroy" && op.status === "failed" && configure.allowed("configure") && (
+            <AllowUploads />
+          )}
+          {op.status === "recovery_required" && configure.allowed("configure") && (
+            <RecoveryForm op={op} onRecovered={() => void read.refresh().then(onSettled)} />
+          )}
           {confirmingCancel && (
             <CancelConfirm
               op={op}

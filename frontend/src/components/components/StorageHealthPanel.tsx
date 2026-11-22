@@ -40,10 +40,7 @@ const HEALTH_TONES: Record<Health, string> = {
 
 function checkedAgo(checkedAt: string | null | undefined): string | null {
   if (!checkedAt) return null;
-  const minutes = Math.max(
-    0,
-    Math.round((Date.now() - new Date(checkedAt).getTime()) / 60_000),
-  );
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(checkedAt).getTime()) / 60_000));
   if (minutes < 1) return "Checked just now";
   if (minutes === 1) return "Checked 1 minute ago";
   if (minutes < 60) return `Checked ${minutes} minutes ago`;
@@ -54,8 +51,7 @@ function checkedAgo(checkedAt: string | null | undefined): string | null {
 function observedLine(item: StoreHealthItem): string | null {
   const parts: string[] = [];
   if (item.observed_owner) parts.push(`project ${item.observed_owner}`);
-  if (item.observed_created_at)
-    parts.push(`created ${item.observed_created_at.slice(0, 10)}`);
+  if (item.observed_created_at) parts.push(`created ${item.observed_created_at.slice(0, 10)}`);
   return parts.length ? parts.join(" · ") : null;
 }
 
@@ -81,22 +77,15 @@ function ConfirmBucketsDialog({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.post<StorageHealth>(
-        "/api/v1/infrastructure/storage/identity/confirm",
-        {
-          stores: buckets.map((b) => b.store),
-          reason: reason.trim(),
-          confirm: true,
-        },
-      );
+      const result = await api.post<StorageHealth>("/api/v1/infrastructure/storage/identity/confirm", {
+        stores: buckets.map((b) => b.store),
+        reason: reason.trim(),
+        confirm: true,
+      });
       onConfirmed(result);
     } catch (e) {
       logError("confirming storage buckets", e);
-      setError(
-        e instanceof ApiError
-          ? e.message
-          : "The buckets could not be confirmed. Try again.",
-      );
+      setError(e instanceof ApiError ? e.message : "The buckets could not be confirmed. Try again.");
     } finally {
       setBusy(false);
     }
@@ -112,10 +101,7 @@ function ConfirmBucketsDialog({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            onClick={submit}
-            disabled={busy || !acknowledged || !reason.trim()}
-          >
+          <Button onClick={submit} disabled={busy || !acknowledged || !reason.trim()}>
             Confirm buckets
           </Button>
         </>
@@ -125,18 +111,11 @@ function ConfirmBucketsDialog({
         {buckets.map((b) => (
           <li key={b.store} className="text-sm">
             <span className="font-mono text-gray-800">{b.bucket_name}</span>
-            {observedLine(b) && (
-              <span className="block text-xs text-gray-500">
-                {observedLine(b)}
-              </span>
-            )}
+            {observedLine(b) && <span className="block text-xs text-gray-500">{observedLine(b)}</span>}
           </li>
         ))}
       </ul>
-      <label
-        className="block text-sm font-medium text-gray-700"
-        htmlFor="confirm-buckets-reason"
-      >
+      <label className="block text-sm font-medium text-gray-700" htmlFor="confirm-buckets-reason">
         Reason (saved in the audit log)
       </label>
       <textarea
@@ -154,8 +133,8 @@ function ConfirmBucketsDialog({
           onChange={(e) => setAcknowledged(e.target.checked)}
         />
         <span>
-          I confirm these buckets belong to this bioAF installation. This
-          records them as of today; it does not prove their earlier history.
+          I confirm these buckets belong to this bioAF installation. This records them as of today; it does not
+          prove their earlier history.
         </span>
       </label>
       {error && (
@@ -214,16 +193,9 @@ export function StorageHealthPanel() {
       {/* The Components page's "Storage" heading names this section (mockup M14). */}
       <div className="flex items-center justify-end">
         <div className="flex items-center gap-3 text-xs text-gray-500">
-          {checkedAgo(health.checked_at) && (
-            <span>{checkedAgo(health.checked_at)}</span>
-          )}
+          {checkedAgo(health.checked_at) && <span>{checkedAgo(health.checked_at)}</span>}
           {isAdmin && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={checkAgain}
-              disabled={checking}
-            >
+            <Button variant="secondary" size="sm" onClick={checkAgain} disabled={checking}>
               Check again
             </Button>
           )}
@@ -236,9 +208,7 @@ export function StorageHealthPanel() {
             data-testid={`store-health-${s.bucket_name}`}
             className="flex items-center justify-between px-3 py-2"
           >
-            <span className="font-mono text-sm text-gray-800">
-              {s.bucket_name}
-            </span>
+            <span className="font-mono text-sm text-gray-800">{s.bucket_name}</span>
             <span
               data-testid="health-chip"
               className={`rounded-full px-2 py-0.5 text-xs font-medium ${HEALTH_TONES[s.health]}`}
@@ -250,17 +220,13 @@ export function StorageHealthPanel() {
       </ul>
       {missing > 0 && (
         <Alert tone="error">
-          {missing === 1
-            ? "1 bucket was not found."
-            : `${missing} buckets were not found.`}{" "}
-          Files stored there cannot be read and new results cannot be saved. To
-          create it again, use Check for Infrastructure Updates.
+          {missing === 1 ? "1 bucket was not found." : `${missing} buckets were not found.`} Files stored there
+          cannot be read and new results cannot be saved. To create it again, use Check for Infrastructure Updates.
         </Alert>
       )}
       {foreign && (
         <Alert tone="error">
-          This storage does not match bioAF&apos;s records. bioAF will not
-          change or delete it.
+          This storage does not match bioAF&apos;s records. bioAF will not change or delete it.
         </Alert>
       )}
       {canConfirm && unconfirmed.length > 0 && (
@@ -273,12 +239,9 @@ export function StorageHealthPanel() {
           }
         >
           bioAF could not confirm that{" "}
-          {unconfirmed.length === 1
-            ? "1 storage bucket is the one"
-            : `${unconfirmed.length} storage buckets are the ones`}{" "}
-          it created. Uploads, downloads, and pipelines keep working. Destroy
-          Storage and automatic repairs are unavailable for these buckets until
-          an administrator confirms them.
+          {unconfirmed.length === 1 ? "1 storage bucket is the one" : `${unconfirmed.length} storage buckets are the ones`}{" "}
+          it created. Uploads, downloads, and pipelines keep working. Destroy Storage and automatic repairs are
+          unavailable for these buckets until an administrator confirms them.
         </Alert>
       )}
       {confirming && (

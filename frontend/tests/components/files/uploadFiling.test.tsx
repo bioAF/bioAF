@@ -4,12 +4,7 @@
  */
 import { act, renderHook } from "@testing-library/react";
 import { useState } from "react";
-import {
-  pendingFrom,
-  useUploadFiling,
-  type FilingItem,
-  type ReceivedNotFiled,
-} from "@/components/files/uploadFiling";
+import { pendingFrom, useUploadFiling, type FilingItem, type ReceivedNotFiled } from "@/components/files/uploadFiling";
 
 jest.mock("@/lib/api", () => ({ api: { get: jest.fn(), post: jest.fn() } }));
 import { api } from "@/lib/api";
@@ -37,9 +32,7 @@ function outcome(value: Record<string, unknown>) {
 
 function follow(onFiled = jest.fn()) {
   const { result } = renderHook(() => {
-    const [items, setItems] = useState<(FilingItem & { error?: string })[]>([
-      pendingFrom(receipt),
-    ]);
+    const [items, setItems] = useState<(FilingItem & { error?: string })[]>([pendingFrom(receipt)]);
     useUploadFiling(items, setItems, onFiled);
     return items;
   });
@@ -71,9 +64,7 @@ test("an upload whose filing failed is shown as an error, never as filed", async
   const { items, onFiled } = follow();
   await poll();
   expect(items()[0].status).toBe("error");
-  expect(items()[0].error).toBe(
-    "Could not be filed. Upload the file again. Reference UPL-7F3A21.",
-  );
+  expect(items()[0].error).toBe("Could not be filed. Upload the file again. Reference UPL-7F3A21.");
   expect(onFiled).not.toHaveBeenCalled();
 });
 
@@ -131,16 +122,8 @@ describe("a response is applied to the upload it was for, after earlier rows are
   }
 
   test.each([
-    [
-      "retry",
-      (f: ReturnType<typeof setup>) => f.current.filing.retryNow(1),
-      "complete",
-    ],
-    [
-      "cancel",
-      (f: ReturnType<typeof setup>) => f.current.filing.cancelUpload(1),
-      "cancelled",
-    ],
+    ["retry", (f: ReturnType<typeof setup>) => f.current.filing.retryNow(1), "complete"],
+    ["cancel", (f: ReturnType<typeof setup>) => f.current.filing.cancelUpload(1), "cancelled"],
   ])("%s", async (_name, act_, expected) => {
     let resolve!: (v: unknown) => void;
     mockPost.mockReturnValue(new Promise((r) => (resolve = r)));
@@ -154,9 +137,7 @@ describe("a response is applied to the upload it was for, after earlier rows are
       resolve({ id: 1 });
       await pending;
     });
-    const byName = Object.fromEntries(
-      result.current.items.map((i) => [i.name, i.status]),
-    );
+    const byName = Object.fromEntries(result.current.items.map((i) => [i.name, i.status]));
     expect(byName).toEqual({ B: expected, C: "needs_attention" });
   });
 
@@ -168,9 +149,7 @@ describe("a response is applied to the upload it was for, after earlier rows are
     act(() => {
       pending = result.current.filing.retryNow(1);
     });
-    act(() =>
-      result.current.setItems((prev) => prev.filter((i) => i.name !== "B")),
-    );
+    act(() => result.current.setItems((prev) => prev.filter((i) => i.name !== "B")));
     await act(async () => {
       resolve({ id: 1 });
       await pending;

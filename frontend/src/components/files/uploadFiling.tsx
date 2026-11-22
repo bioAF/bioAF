@@ -5,13 +5,7 @@
  * every uploader: recognizing the 202 receipt, following the upload until it is filed or retries
  * run out, and the uploader's Retry now and Cancel upload actions.
  */
-import {
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
@@ -21,8 +15,7 @@ import type { FileResponse } from "@/lib/types";
 export type ReceivedNotFiled = components["schemas"]["UploadReceivedNotFiled"];
 
 /** The statuses filing moves an upload through after its bytes arrived. */
-export type FilingStatus =
-  "pending" | "needs_attention" | "complete" | "cancelled";
+export type FilingStatus = "pending" | "needs_attention" | "complete" | "cancelled";
 
 export interface FilingItem {
   status: string;
@@ -38,9 +31,7 @@ type UploadOutcome = components["schemas"]["UploadOutcome"];
 const PENDING_POLL_MS = 30_000;
 
 export function receivedNotFiled(value: unknown): value is ReceivedNotFiled {
-  return (
-    (value as { code?: string } | null)?.code === "upload_received_not_filed"
-  );
+  return (value as { code?: string } | null)?.code === "upload_received_not_filed";
 }
 
 /** The item state for a 202 receipt: stored, not yet filed, followed until filed. */
@@ -63,28 +54,17 @@ function failedMessage(reference: string | null | undefined): string {
 }
 
 /** The item update for an upload's outcome, or null when what is shown still holds. */
-function fromOutcome(
-  item: FilingItem,
-  found: UploadOutcome,
-): Partial<FilingItem> | null {
+function fromOutcome(item: FilingItem, found: UploadOutcome): Partial<FilingItem> | null {
   switch (found.outcome) {
     case "filed":
       return { status: "complete", message: undefined };
     case "cancelled":
       return { status: "cancelled", message: undefined };
     case "failed":
-      return {
-        status: "error",
-        message: undefined,
-        error: failedMessage(found.reference ?? item.reference),
-      };
+      return { status: "error", message: undefined, error: failedMessage(found.reference ?? item.reference) };
     default:
-      return found.state === "needs_attention" &&
-        item.status !== "needs_attention"
-        ? {
-            status: "needs_attention",
-            message: exhaustedMessage(found.reference ?? item.reference),
-          }
+      return found.state === "needs_attention" && item.status !== "needs_attention"
+        ? { status: "needs_attention", message: exhaustedMessage(found.reference ?? item.reference) }
         : null;
   }
 }
@@ -112,11 +92,7 @@ export function useUploadFiling<T extends FilingItem>(
   // Responses are applied by upload ID, never by position: rows can be removed while a request
   // waits, and a response for a removed row changes nothing.
   const patch = (uploadId: string, values: Partial<FilingItem>) =>
-    setItems((prev) =>
-      prev.map((item) =>
-        item.uploadId === uploadId ? ({ ...item, ...values } as T) : item,
-      ),
-    );
+    setItems((prev) => prev.map((item) => (item.uploadId === uploadId ? ({ ...item, ...values } as T) : item)));
 
   useEffect(() => {
     if (!waiting) return;
@@ -124,42 +100,26 @@ export function useUploadFiling<T extends FilingItem>(
     // a cancelled or failed upload leaves it too.
     const timer = setInterval(() => {
       const ids = Array.from(
-        new Set(
-          itemsRef.current
-            .filter((item) => following(item) && item.uploadId)
-            .map((item) => item.uploadId!),
-        ),
+        new Set(itemsRef.current.filter((item) => following(item) && item.uploadId).map((item) => item.uploadId!)),
       );
-      Promise.allSettled(
-        ids.map((id) =>
-          api.get<UploadOutcome>(
-            `/api/files/uploads/${encodeURIComponent(id)}`,
-          ),
-        ),
-      ).then((results) => {
-        const byId = new Map<string, UploadOutcome>();
-        results.forEach(
-          (r) =>
-            r.status === "fulfilled" && byId.set(r.value.upload_id, r.value),
-        );
-        const update = (item: T) => {
-          const found =
-            following(item) && item.uploadId
-              ? byId.get(item.uploadId)
-              : undefined;
-          return found ? fromOutcome(item, found) : null;
-        };
-        const filed = itemsRef.current.some(
-          (item) => update(item)?.status === "complete",
-        );
-        setItems((prev) =>
-          prev.map((item) => {
-            const values = update(item);
-            return values ? ({ ...item, ...values } as T) : item;
-          }),
-        );
-        if (filed) onFiledRef.current();
-      });
+      Promise.allSettled(ids.map((id) => api.get<UploadOutcome>(`/api/files/uploads/${encodeURIComponent(id)}`))).then(
+        (results) => {
+          const byId = new Map<string, UploadOutcome>();
+          results.forEach((r) => r.status === "fulfilled" && byId.set(r.value.upload_id, r.value));
+          const update = (item: T) => {
+            const found = following(item) && item.uploadId ? byId.get(item.uploadId) : undefined;
+            return found ? fromOutcome(item, found) : null;
+          };
+          const filed = itemsRef.current.some((item) => update(item)?.status === "complete");
+          setItems((prev) =>
+            prev.map((item) => {
+              const values = update(item);
+              return values ? ({ ...item, ...values } as T) : item;
+            }),
+          );
+          if (filed) onFiledRef.current();
+        },
+      );
     }, PENDING_POLL_MS);
     return () => clearInterval(timer);
   }, [waiting, setItems]);
@@ -169,10 +129,7 @@ export function useUploadFiling<T extends FilingItem>(
     const uploadId = item?.uploadId;
     if (!uploadId) return;
     try {
-      const result = await api.post<FileResponse | ReceivedNotFiled>(
-        `/api/files/uploads/${uploadId}/retry`,
-        {},
-      );
+      const result = await api.post<FileResponse | ReceivedNotFiled>(`/api/files/uploads/${uploadId}/retry`, {});
       if (receivedNotFiled(result)) {
         patch(uploadId, { message: result.detail });
       } else {
@@ -180,10 +137,7 @@ export function useUploadFiling<T extends FilingItem>(
         onFiledRef.current();
       }
     } catch (err) {
-      patch(uploadId, {
-        message:
-          err instanceof Error ? err.message : exhaustedMessage(item.reference),
-      });
+      patch(uploadId, { message: err instanceof Error ? err.message : exhaustedMessage(item.reference) });
     }
   };
 
@@ -196,12 +150,7 @@ export function useUploadFiling<T extends FilingItem>(
       await api.post(`/api/files/uploads/${uploadId}/cancel`, {});
       patch(uploadId, { status: "cancelled", message: undefined });
     } catch (err) {
-      patch(uploadId, {
-        message:
-          err instanceof Error
-            ? err.message
-            : "The upload could not be cancelled.",
-      });
+      patch(uploadId, { message: err instanceof Error ? err.message : "The upload could not be cancelled." });
     }
   };
 
@@ -220,9 +169,7 @@ export function FilingDetails({
 }) {
   return (
     <>
-      {following(item) && item.message && (
-        <p className="text-xs text-amber-700 mt-1">{item.message}</p>
-      )}
+      {following(item) && item.message && <p className="text-xs text-amber-700 mt-1">{item.message}</p>}
       {item.status === "needs_attention" && (
         <div className="mt-1 flex gap-2">
           <Button size="sm" variant="secondary" onClick={onCancel}>
@@ -240,18 +187,10 @@ export function FilingDetails({
 /** The status label for an upload filing follows, or null for other statuses. */
 export function FilingBadge({ status }: { status: string }) {
   if (status === "pending" || status === "needs_attention") {
-    return (
-      <span className="text-xs font-medium text-amber-700 shrink-0">
-        Not filed yet
-      </span>
-    );
+    return <span className="text-xs font-medium text-amber-700 shrink-0">Not filed yet</span>;
   }
   if (status === "cancelled") {
-    return (
-      <span className="text-xs font-medium text-gray-500 shrink-0">
-        Cancelled
-      </span>
-    );
+    return <span className="text-xs font-medium text-gray-500 shrink-0">Cancelled</span>;
   }
   return null;
 }
@@ -283,8 +222,7 @@ export function CancelUploadDialog({
       }
     >
       <p className="text-sm text-gray-700">
-        Remove this upload? The stored copy is deleted and nothing is added to{" "}
-        {destination ?? "the experiment"}.
+        Remove this upload? The stored copy is deleted and nothing is added to {destination ?? "the experiment"}.
       </p>
     </Modal>
   );
