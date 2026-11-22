@@ -574,3 +574,56 @@ def test_the_received_not_filed_receipt_is_part_of_the_api_contract():
         "upload_id",
         "reference",
     }
+
+
+# ---------------------------------------------------------------------------
+# explicit outcome: leaving the pending list does not mean filed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_uploads_outcome_tells_filed_from_cancelled(client, admin_token, storage, session):
+    exp = await _experiment(session)
+    adapter = _adapter(move_failures=99)
+    await _simple(client, admin_token, exp.id, adapter)
+    [cp] = await _checkpoints(session)
+
+    waiting = (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(admin_token))).json()
+    assert (waiting["outcome"], waiting["state"], waiting["file_id"]) == ("pending", "retrying", None)
+
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        await client.post(f"/api/files/uploads/{cp.id}/cancel", headers=_auth(admin_token))
+    cancelled = (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(admin_token))).json()
+    assert (cancelled["outcome"], cancelled["file_id"]) == ("cancelled", None)
+
+
+@pytest.mark.asyncio
+async def test_a_filed_uploads_outcome_names_its_file(client, admin_token, storage, session):
+    exp = await _experiment(session)
+    adapter = _adapter(move_failures=1)
+    await _simple(client, admin_token, exp.id, adapter)
+    [cp] = await _checkpoints(session)
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        filed = (await client.post(f"/api/files/uploads/{cp.id}/retry", headers=_auth(admin_token))).json()
+
+    outcome = (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(admin_token))).json()
+    assert (outcome["outcome"], outcome["file_id"]) == ("filed", filed["id"])
+
+
+@pytest.mark.asyncio
+async def test_a_failed_uploads_outcome_is_failed(client, admin_token, storage, session):
+    exp = await _experiment(session)
+    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    [cp] = await _checkpoints(session)
+    await session.execute(text("UPDATE upload_checkpoints SET stage='failed' WHERE id=:i").bindparams(i=cp.id))
+    await session.commit()
+    outcome = (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(admin_token))).json()
+    assert outcome["outcome"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_upload_outcome_is_not_found_for_bench(client, admin_token, bench_token, storage, session):
+    exp = await _experiment(session)
+    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    [cp] = await _checkpoints(session)
+    assert (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(bench_token))).status_code == 404

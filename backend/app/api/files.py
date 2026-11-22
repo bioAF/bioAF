@@ -317,6 +317,41 @@ async def pending_uploads(
     )
 
 
+class UploadOutcome(BaseModel):
+    """Where one upload ended up. Leaving the pending list does not say which: it may have been
+    filed, cancelled or have failed, so an uploader following it asks for this."""
+
+    upload_id: str
+    reference: str | None = None
+    stage: str
+    outcome: Literal["pending", "filed", "cancelled", "failed"]
+    # The pending list's state while the outcome is pending.
+    state: str | None = None
+    file_id: int | None = None
+
+
+_OUTCOMES = {"filed": "filed", "cancelled": "cancelled", "failed": "failed"}
+
+
+@router.get("/uploads/{upload_id}", response_model=UploadOutcome)
+async def upload_outcome(
+    upload_id: str,
+    current_user: dict = require_permission("files", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """One upload's outcome: filed (with its file), cancelled, failed, or still pending."""
+    cp = await _pending_checkpoint(session, current_user, upload_id)
+    outcome = _OUTCOMES.get(cp.stage, "pending")
+    return UploadOutcome(
+        upload_id=cp.id,
+        reference=cp.reference,
+        stage=cp.stage,
+        outcome=outcome,
+        state=_attention_state(cp) if outcome == "pending" else None,
+        file_id=cp.file_id,
+    )
+
+
 def _stop_reason(cp: UploadCheckpoint) -> str | None:
     from app.services.upload_settlement import needs_release, stop_reason
 

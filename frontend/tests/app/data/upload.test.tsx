@@ -1,4 +1,10 @@
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import DataUploadPage from "@/app/(app)/data/upload/page";
 
 jest.mock("@/lib/auth", () => ({
@@ -50,8 +56,10 @@ beforeEach(() => {
   mockUploadProxied.mockResolvedValue({ id: 1, filename: "sample.fastq.gz" });
   mockGet.mockReset();
   mockGet.mockImplementation((path: string) => {
-    if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
-    if (path.startsWith("/api/experiments")) return Promise.resolve(experimentsResponse);
+    if (path.startsWith("/api/projects"))
+      return Promise.resolve(projectsResponse);
+    if (path.startsWith("/api/experiments"))
+      return Promise.resolve(experimentsResponse);
     return Promise.resolve([]);
   });
 });
@@ -64,8 +72,12 @@ describe("DataUploadPage", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), {
       target: { value: "global" },
     });
-    const file = new File(["data"], "sample.fastq.gz", { type: "application/gzip" });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["data"], "sample.fastq.gz", {
+      type: "application/gzip",
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => screen.getByText(/Upload 1 file/));
@@ -84,8 +96,12 @@ describe("DataUploadPage", () => {
       target: { value: "global" },
     });
 
-    const file = new File(["data"], "sample.fastq.gz", { type: "application/gzip" });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["data"], "sample.fastq.gz", {
+      type: "application/gzip",
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => screen.getByText(/Upload 1 file/));
@@ -99,19 +115,31 @@ describe("DataUploadPage", () => {
   });
 
   it("shows Confirming upload while storage confirms the file (W8)", async () => {
-    mockUploadSigned.mockImplementation((_file: File, options: { onConfirming?: () => void }) => {
-      options.onConfirming?.();
-      return new Promise(() => {});
-    });
+    mockUploadSigned.mockImplementation(
+      (_file: File, options: { onConfirming?: () => void }) => {
+        options.onConfirming?.();
+        return new Promise(() => {});
+      },
+    );
     render(<DataUploadPage />);
-    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), { target: { value: "global" } });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(["data"], "sample.fastq.gz")] } });
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), {
+      target: { value: "global" },
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["data"], "sample.fastq.gz")] },
+    });
     await waitFor(() => screen.getByText(/Upload 1 file/));
     fireEvent.click(screen.getByText(/Upload 1 file/));
 
     expect(await screen.findByText("Confirming upload")).toBeInTheDocument();
-    expect(screen.getByText("bioAF is checking that your file has finished uploading.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "bioAF is checking that your file has finished uploading.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("fetches experiments and displays them in a dropdown", async () => {
@@ -140,8 +168,12 @@ describe("DataUploadPage", () => {
       target: { value: "10" },
     });
 
-    const file = new File(["data"], "sample.fastq.gz", { type: "application/gzip" });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["data"], "sample.fastq.gz", {
+      type: "application/gzip",
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => screen.getByText(/Upload 1 file/));
@@ -153,10 +185,18 @@ describe("DataUploadPage", () => {
   });
 
   const withExperimentCode = (path: string) => {
-    if (path.startsWith("/api/projects")) return Promise.resolve(projectsResponse);
+    if (path.startsWith("/api/projects"))
+      return Promise.resolve(projectsResponse);
     if (path.startsWith("/api/experiments"))
       return Promise.resolve({
-        experiments: [{ id: 10, name: "RNA-seq Batch A", code: "EXP-A", status: "registered" }],
+        experiments: [
+          {
+            id: 10,
+            name: "RNA-seq Batch A",
+            code: "EXP-A",
+            status: "registered",
+          },
+        ],
         total: 1,
         page: 1,
         page_size: 100,
@@ -173,8 +213,12 @@ describe("DataUploadPage", () => {
       target: { value: "10" },
     });
 
-    const file = new File(["data"], "reads.fastq.gz", { type: "application/gzip" });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["data"], "reads.fastq.gz", {
+      type: "application/gzip",
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
     // A suggestion is offered, but the default is to keep the original name.
@@ -194,22 +238,34 @@ describe("DataUploadPage", () => {
       target: { value: "10" },
     });
 
-    const file = new File(["data"], "reads.fastq.gz", { type: "application/gzip" });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["data"], "reads.fastq.gz", {
+      type: "application/gzip",
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
     fireEvent.click(await screen.findByRole("button", { name: /accept all/i }));
     fireEvent.click(screen.getByText(/Upload 1 file/));
 
     await waitFor(() => expect(mockUploadSigned).toHaveBeenCalledTimes(1));
-    expect(mockUploadSigned.mock.calls[0][1].filename).toMatch(/^EXP-A_.*\.fastq\.gz$/);
+    expect(mockUploadSigned.mock.calls[0][1].filename).toMatch(
+      /^EXP-A_.*\.fastq\.gz$/,
+    );
   });
 
   it("shows empty state when no experiments exist", async () => {
     mockGet.mockImplementation((path: string) => {
-      if (path.startsWith("/api/projects")) return Promise.resolve({ projects: [], total: 0 });
+      if (path.startsWith("/api/projects"))
+        return Promise.resolve({ projects: [], total: 0 });
       if (path.startsWith("/api/experiments"))
-        return Promise.resolve({ experiments: [], total: 0, page: 1, page_size: 100 });
+        return Promise.resolve({
+          experiments: [],
+          total: 0,
+          page: 1,
+          page_size: 100,
+        });
       return Promise.resolve([]);
     });
     render(<DataUploadPage />);
@@ -233,9 +289,15 @@ describe("received but not yet filed (M12)", () => {
 
   async function uploadOne() {
     render(<DataUploadPage />);
-    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), { target: { value: "global" } });
-    const input = document.querySelector("input[type='file']") as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(["data"], "sample.fastq.gz")] } });
+    fireEvent.change(screen.getByRole("combobox", { name: /scope/i }), {
+      target: { value: "global" },
+    });
+    const input = document.querySelector(
+      "input[type='file']",
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["data"], "sample.fastq.gz")] },
+    });
     await waitFor(() => screen.getByText(/Upload 1 file/));
     fireEvent.click(screen.getByText(/Upload 1 file/));
   }
@@ -243,26 +305,39 @@ describe("received but not yet filed (M12)", () => {
   it.each([
     ["direct", true],
     ["proxied", false],
-  ])("a %s upload the server could not file yet is shown as pending, not Done", async (_path, signed) => {
-    mockHas.mockImplementation((flag: string) => (flag === "signed_url_upload" ? signed : true));
-    mockUploadSigned.mockResolvedValue(RECEIVED);
-    mockUploadProxied.mockResolvedValue(RECEIVED);
-    await uploadOne();
+  ])(
+    "a %s upload the server could not file yet is shown as pending, not Done",
+    async (_path, signed) => {
+      mockHas.mockImplementation((flag: string) =>
+        flag === "signed_url_upload" ? signed : true,
+      );
+      mockUploadSigned.mockResolvedValue(RECEIVED);
+      mockUploadProxied.mockResolvedValue(RECEIVED);
+      await uploadOne();
 
-    expect(await screen.findByText("Not filed yet")).toBeInTheDocument();
-    expect(screen.getByText(RECEIVED.detail)).toBeInTheDocument();
-    expect(screen.queryByText("Done")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Upload 1 file/)).not.toBeInTheDocument();
-  });
+      expect(await screen.findByText("Not filed yet")).toBeInTheDocument();
+      expect(screen.getByText(RECEIVED.detail)).toBeInTheDocument();
+      expect(screen.queryByText("Done")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Upload 1 file/)).not.toBeInTheDocument();
+    },
+  );
 
   it("follows the upload: when retries run out it offers Retry now and Cancel upload", async () => {
     jest.useFakeTimers();
     try {
       mockUploadSigned.mockResolvedValue(RECEIVED);
-      const pending = { uploads: [{ upload_id: "u-1", reference: "UPL-7F3A21", state: "needs_attention" }] };
+      const outcome = {
+        upload_id: "u-1",
+        reference: "UPL-7F3A21",
+        stage: "received",
+        outcome: "pending",
+        state: "needs_attention",
+      };
       const base = mockGet.getMockImplementation()!;
       mockGet.mockImplementation((path: string) =>
-        path === "/api/files/uploads/pending" ? Promise.resolve(pending) : base(path),
+        path === "/api/files/uploads/u-1"
+          ? Promise.resolve(outcome)
+          : base(path),
       );
       await uploadOne();
       await screen.findByText("Not filed yet");
@@ -276,8 +351,12 @@ describe("received but not yet filed (M12)", () => {
           "Could not be filed. Your file is still stored. Retry now, or cancel the upload to remove it. Reference UPL-7F3A21.",
         ),
       ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Retry now" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Cancel upload" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Retry now" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Cancel upload" }),
+      ).toBeInTheDocument();
     } finally {
       jest.useRealTimers();
     }

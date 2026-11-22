@@ -25905,6 +25905,69 @@
         "title": "UpgradeHistoryListResponse",
         "type": "object"
       },
+      "UploadOutcome": {
+        "description": "Where one upload ended up. Leaving the pending list does not say which: it may have been\nfiled, cancelled or have failed, so an uploader following it asks for this.",
+        "properties": {
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "outcome": {
+            "enum": [
+              "pending",
+              "filed",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "stage",
+          "outcome"
+        ],
+        "title": "UploadOutcome",
+        "type": "object"
+      },
       "UploadPartsRequest": {
         "properties": {
           "part_numbers": {
@@ -34163,6 +34226,49 @@
           }
         },
         "summary": "Pending Uploads",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/files/uploads/{upload_id}": {
+      "get": {
+        "description": "One upload's outcome: filed (with its file), cancelled, failed, or still pending.",
+        "operationId": "upload_outcome_api_files_uploads__upload_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOutcome"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Outcome",
         "tags": [
           "files"
         ]

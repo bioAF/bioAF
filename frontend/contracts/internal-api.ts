@@ -2218,6 +2218,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Upload Outcome
+         * @description One upload's outcome: filed (with its file), cancelled, failed, or still pending.
+         */
+        get: operations["upload_outcome_api_files_uploads__upload_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/uploads/{upload_id}/cancel": {
         parameters: {
             query?: never;
@@ -17168,6 +17188,28 @@ export interface components {
             /** Upgrades */
             upgrades: components["schemas"]["UpgradeHistoryItem"][];
         };
+        /**
+         * UploadOutcome
+         * @description Where one upload ended up. Leaving the pending list does not say which: it may have been
+         *     filed, cancelled or have failed, so an uploader following it asks for this.
+         */
+        UploadOutcome: {
+            /** File Id */
+            file_id?: number | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pending" | "filed" | "cancelled" | "failed";
+            /** Reference */
+            reference?: string | null;
+            /** Stage */
+            stage: string;
+            /** State */
+            state?: string | null;
+            /** Upload Id */
+            upload_id: string;
+        };
         /** UploadPartsRequest */
         UploadPartsRequest: {
             /** Part Numbers */
@@ -21978,6 +22020,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PendingUploadsResponse"];
+                };
+            };
+        };
+    };
+    upload_outcome_api_files_uploads__upload_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOutcome"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
