@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("storage_uid", sa.String(32), nullable=True),
         sa.Column("owner", sa.String(64), nullable=True),
         sa.Column("provider_created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("marker", sa.String(64), nullable=True),
         sa.Column("basis", sa.String(16), nullable=False),
         sa.Column("reason", sa.Text, nullable=True),
         sa.Column("recorded_by_user_id", sa.Integer, sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),

@@ -463,3 +463,111 @@ async def test_retiring_the_storage_generation_retires_bucket_identities(session
     rows = (await session.execute(select(StorageIdentity))).scalars().all()
     assert len(rows) == 1 and rows[0].retired_at is not None
     assert await storage_identity.latest_reports(session) == []
+
+
+# ---------------------------------------------------------------------------
+# identity markers and AWS evidence (no provider creation date)
+# ---------------------------------------------------------------------------
+
+MARKER = "9f1c2e3d4b5a6978"
+
+
+def _aws(marker=MARKER, owner="own-account", extra=None):
+    labels = {"managed_by": "bioaf", "storage_uid": "abc123"}
+    if marker is not None:
+        labels["bioaf_marker"] = marker
+    labels.update(extra or {})
+    return ContainerObservation(presence=ContainerPresence.PRESENT, owner=owner, created_at=None, labels=labels)
+
+
+async def _markers(session, origin, marker=MARKER):
+    import json
+
+    await _config(
+        session,
+        storage_bucket_markers=json.dumps({"generation": "abc123", "origin": origin, "markers": {"raw": marker}}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_created_with_its_deployment_marker_is_discovered_without_a_creation_date(session):
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    await _markers(session, "deploy")
+    with _patched(FakeAdapter({RAW: _aws()})):
+        report = await _raw_report(session)
+    assert (report.health, report.basis) == (StoreHealth.AVAILABLE, "discovered")
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_bucket_without_a_marker_or_history_stays_usable_but_not_confirmed(session):
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    with _patched(FakeAdapter({RAW: _aws(marker=None)})):
+        report = await _raw_report(session)
+    assert report.health is StoreHealth.NOT_CONFIRMED
+    assert report.usable is True
+
+
+@pytest.mark.asyncio
+async def test_a_marker_added_by_an_update_needs_an_administrators_confirmation(session):
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    await _markers(session, "update")
+    with _patched(FakeAdapter({RAW: _aws()})):
+        assert (await _raw_report(session)).health is StoreHealth.NOT_CONFIRMED
+        [report] = await storage_identity.enroll_stores(session, user_id, ["raw"], reason="Checked in the console")
+    await session.commit()
+    assert (report.health, report.basis) == (StoreHealth.AVAILABLE, "enrolled")
+    from app.models.storage_identity import StorageIdentity
+
+    row = (await session.execute(select(StorageIdentity))).scalar_one()
+    assert (row.marker, row.owner) == (MARKER, "own-account")
+
+
+@pytest.mark.asyncio
+async def test_confirming_a_bucket_with_no_identity_evidence_asks_for_the_marker_first(session):
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    with _patched(FakeAdapter({RAW: _aws(marker=None)})):
+        with pytest.raises(StateError, match="Check for Infrastructure Updates"):
+            await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_of_another_account_still_cannot_be_confirmed(session):
+    user_id = await _seed_user(session)
+    await _config(session, raw_bucket_name=RAW)
+    with _patched(FakeAdapter({RAW: _aws(owner="other-account")})):
+        with pytest.raises(StateError, match="another installation"):
+            await storage_identity.enroll_stores(session, user_id, ["raw"], reason="trust me")
+
+
+async def _established(session):
+    await _config(session, raw_bucket_name=RAW, storage_stack_uid="abc123")
+    await _markers(session, "deploy")
+    with _patched(FakeAdapter({RAW: _aws()})):
+        assert (await _raw_report(session)).health is StoreHealth.AVAILABLE
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_recreated_bucket_with_a_different_marker_is_a_known_mismatch(session):
+    await _established(session)
+    with _patched(FakeAdapter({RAW: _aws(marker="0000000000000000")})):
+        assert (await _raw_report(session)).health is StoreHealth.WRONG_OWNER
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_whose_recorded_marker_is_gone_cannot_be_checked(session):
+    await _established(session)
+    with _patched(FakeAdapter({RAW: _aws(marker=None)})):
+        assert (await _raw_report(session)).health is StoreHealth.CANNOT_CHECK
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_policy_edit_does_not_change_its_identity(session):
+    """AWS can report a new creation date after a policy edit; the marker and owner still match."""
+    await _established(session)
+    edited = _aws(extra={"policy_edited": "yes"})
+    edited.created_at = T0 + timedelta(days=90)
+    with _patched(FakeAdapter({RAW: edited})):
+        assert (await _raw_report(session)).health is StoreHealth.AVAILABLE

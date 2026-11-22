@@ -75,6 +75,17 @@ def multipart_part_size(size_bytes: int | None) -> int:
     return max(_MIN_PART, -(-needed // _MIB) * _MIB)
 
 
+def _bucket_status(exc) -> str:
+    """ "missing", "forbidden" or "other" for a bucket-level ClientError."""
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if code in ("404", "NoSuchBucket", "NotFound") or status == 404:
+        return "missing"
+    if code in ("403", "AccessDenied", "Forbidden") or status == 403:
+        return "forbidden"
+    return "other"
+
+
 def _error_code(exc) -> str:
     return str(exc.response.get("Error", {}).get("Code", ""))[:40]
 
@@ -597,7 +608,8 @@ class S3StorageProvider(StorageProvider):
             )
         try:
             creds = await self._get_credentials()
-            return await asyncio.to_thread(self._s3_inspect_container, bucket_name, creds)
+            account_id = await self._account_id()
+            return await asyncio.to_thread(self._s3_inspect_container, bucket_name, creds, account_id)
         except Exception as exc:
             logger.warning("Bucket inspection did not complete (error_type=%s)", type(exc).__name__)
             return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
@@ -860,6 +872,15 @@ class S3StorageProvider(StorageProvider):
             "total_cost_monthly_usd": total_monthly,
         }
 
+    async def _account_id(self) -> str | None:
+        """The installation's AWS account ID, as the installer recorded it."""
+        from app.database import async_session_factory
+        from app.platform.platform_config_service import PlatformConfigService
+
+        async with async_session_factory() as session:
+            value = await PlatformConfigService.get(session, "aws_account_id")
+        return value.strip() if value and value.strip() and value.strip() != "null" else None
+
     async def _read_storage_config(self) -> dict[str, str]:
         """Read storage_deployed + the per-store bucket-name keys (parity with GCS)."""
         from app.database import async_session_factory
@@ -1079,33 +1100,43 @@ class S3StorageProvider(StorageProvider):
             raise
         return resp["Body"]
 
-    def _s3_inspect_container(self, bucket_name: str, creds) -> ContainerObservation:
+    def _s3_inspect_container(self, bucket_name: str, creds, account_id: str | None = None) -> ContainerObservation:
+        """Presence and ownership through HeadBucket, which needs only the bucket permissions the
+        installer grants. With the installation's account ID, ``ExpectedBucketOwner`` confirms the
+        owner; AWS's bucket creation date is not reported because it can change (for example after
+        a bucket policy edit), so identity rests on the owner and bioAF's marker tag."""
         from botocore.exceptions import ClientError
 
         client = self._get_s3_client(creds)
+
+        def head(**kwargs):
+            client.head_bucket(Bucket=bucket_name, **kwargs)
+
+        owner: str | None = None
+        limits: list[str] = []
         try:
-            client.head_bucket(Bucket=bucket_name)
+            if account_id:
+                try:
+                    head(ExpectedBucketOwner=account_id)
+                    owner = "own-account"
+                except ClientError as exc:
+                    if _bucket_status(exc) != "forbidden":
+                        raise
+                    # Refused with the expected owner: another account's bucket, or no access at all.
+                    head()
+                    owner = "other-account"
+            else:
+                head()
+                limits.append("owner")
         except ClientError as exc:
-            code = str(exc.response.get("Error", {}).get("Code", ""))
-            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if code in ("404", "NoSuchBucket", "NotFound") or status == 404:
+            status = _bucket_status(exc)
+            if status == "missing":
                 return ContainerObservation(presence=ContainerPresence.MISSING)
-            if code in ("403", "AccessDenied", "Forbidden") or status == 403:
+            if status == "forbidden":
                 return ContainerObservation(presence=ContainerPresence.FORBIDDEN)
-            logger.warning("Bucket inspection did not complete (error_code=%s)", code[:40])
+            logger.warning("Bucket inspection did not complete (error_code=%s)", _error_code(exc))
             return ContainerObservation(presence=ContainerPresence.UNAVAILABLE)
 
-        limits: list[str] = []
-        owner: str | None = None
-        created_at = None
-        try:
-            # ListBuckets returns only buckets the caller's own account owns.
-            listed = client.list_buckets().get("Buckets", [])
-            match = next((b for b in listed if b.get("Name") == bucket_name), None)
-            owner = "own-account" if match else "other-account"
-            created_at = match.get("CreationDate") if match else None
-        except ClientError:
-            limits.append("owner")
         labels: dict[str, str] = {}
         try:
             tag_set = client.get_bucket_tagging(Bucket=bucket_name).get("TagSet", [])
@@ -1116,7 +1147,7 @@ class S3StorageProvider(StorageProvider):
         return ContainerObservation(
             presence=ContainerPresence.PRESENT,
             owner=owner,
-            created_at=created_at,
+            created_at=None,
             labels=labels,
             limits=tuple(limits),
         )

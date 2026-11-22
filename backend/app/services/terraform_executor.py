@@ -1047,6 +1047,11 @@ class TerraformExecutor:
             # SA hardening: pass the bioaf-app SA email through so the module
             # creates per-subscription roles/pubsub.subscriber bindings.
             tfvars["bioaf_app_sa_email"] = config.get("bioaf_app_sa_email") or ""
+            from app.services.storage_generation import markers_for_tfvars
+
+            markers = markers_for_tfvars(config, identifier_value(config.get("storage_stack_uid")))
+            if markers:
+                tfvars["bucket_markers"] = markers
         elif module_name == "billing_export":
             # The dataset read grant must land on the SA the backend actually
             # queries BQ as, not the project's default compute SA (the module's

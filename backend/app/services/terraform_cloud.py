@@ -105,6 +105,7 @@ class AwsTerraformCloud(TerraformCloud):
             "org_slug",
             "deploy_suffix",
             "storage_stack_uid",
+            "storage_bucket_markers",
             "compute_stack_uid",
             "terraform_initialized",
             "terraform_state_bucket",
@@ -138,6 +139,11 @@ class AwsTerraformCloud(TerraformCloud):
             tfvars["org_slug"] = org_slug
             if storage_suffix:
                 tfvars["stack_uid"] = storage_suffix
+            from app.services.storage_generation import markers_for_tfvars
+
+            markers = markers_for_tfvars(config, identifier_value(config.get("storage_stack_uid")))
+            if markers:
+                tfvars["bucket_markers"] = markers
         elif module_name == "compute":
             # EKS cluster + node groups + IRSA runner roles. The cluster name uses
             # the compute stack uid (its own suffix, like GKE), and the bioaf-app
@@ -217,6 +223,7 @@ class GcpTerraformCloud(TerraformCloud):
             "org_slug",
             "deploy_suffix",
             "storage_stack_uid",
+            "storage_bucket_markers",
             "compute_stack_uid",
             "terraform_initialized",
             "terraform_state_bucket",

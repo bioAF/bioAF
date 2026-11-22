@@ -31,3 +31,9 @@ variable "bioaf_app_sa_email" {
   type        = string
   default     = ""
 }
+
+variable "bucket_markers" {
+  description = "bioAF's identity marker per store (written as the bioaf_marker label). bioAF records each marker with the bucket's identity, so a bucket deleted and recreated under the same name is told apart. Empty: no marker is written."
+  type        = map(string)
+  default     = {}
+}

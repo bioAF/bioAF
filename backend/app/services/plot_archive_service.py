@@ -260,7 +260,8 @@ class PlotArchiveService:
             StoreHealth.NOT_FOUND: "missing",
             StoreHealth.NOT_MOUNTED: "missing",
             StoreHealth.NO_ACCESS: "no_access",
-            StoreHealth.NOT_CONFIRMED: "not_confirmed",
+            # Owner decision: a readable store that is only missing confirmation keeps supplying
+            # plots (an upgrade must not stop them); a known mismatch stops scanning.
             StoreHealth.WRONG_OWNER: "not_confirmed",
             StoreHealth.NOT_RESPONDING: "temporary",
         }.get(report.health)

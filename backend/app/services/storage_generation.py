@@ -14,10 +14,18 @@ Its lifecycle:
 
 A new generation separates deployments by name. It does not rely on any
 provider reserving a deleted bucket name.
+
+Each generation also carries one identity marker per bucket (``storage_bucket_markers``), written
+on the bucket as a label (GCS) or tag (S3) by Terraform and recorded with the bucket's identity,
+so a bucket deleted and recreated under the same name is told apart. Markers come from a new
+storage deployment (origin "deploy": bioAF created the buckets carrying them) or are added to
+existing buckets by Check for Infrastructure Updates (origin "update": an administrator still
+confirms those buckets).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 
@@ -32,6 +40,7 @@ from app.services.deployment_outputs import STORAGE_BUCKETS_TO_EMPTY, identifier
 logger = logging.getLogger("bioaf.storage_generation")
 
 STORAGE_GENERATION_KEY = "storage_stack_uid"
+MARKERS_KEY = "storage_bucket_markers"
 
 UNRESOLVED_PARTIAL_MESSAGE = (
     "An earlier storage deployment may have created buckets that bioAF cannot identify, "
@@ -99,6 +108,7 @@ async def ensure_storage_generation(session: AsyncSession) -> str:
     """
     existing = identifier_value(await PlatformConfigService.get(session, STORAGE_GENERATION_KEY))
     if existing:
+        await ensure_markers(session, origin="update")
         return existing
 
     earlier = await _last_storage_apply_since_destroy(session)
@@ -108,13 +118,60 @@ async def ensure_storage_generation(session: AsyncSession) -> str:
             logger.warning("Refusing storage deploy: run %s applied storage without a recorded generation", earlier.id)
             raise StorageGenerationUnresolved(UNRESOLVED_PARTIAL_MESSAGE)
         logger.info("Storage deploy resumes generation %s recorded by run %s", recorded, earlier.id)
-        return await _store_generation(session, recorded)
+        generation = await _store_generation(session, recorded)
+        await ensure_markers(session, origin="update")
+        return generation
 
     if await _recorded_bucket_names(session):
         logger.warning("Refusing storage deploy: bucket names are recorded without a storage generation")
         raise StorageGenerationUnresolved(UNRESOLVED_PARTIAL_MESSAGE)
 
-    return await _store_generation(session, secrets.token_hex(3))
+    generation = await _store_generation(session, secrets.token_hex(3))
+    # bioAF is about to create these buckets: the markers they carry identify them as its own.
+    await ensure_markers(session, origin="deploy")
+    return generation
+
+
+def _parse_markers(raw: str | None) -> dict:
+    if not raw or raw == "null":
+        return {}
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+async def ensure_markers(session: AsyncSession, *, origin: str) -> dict:
+    """The current generation's bucket markers, generated (with ``origin``) when it has none.
+
+    Existing markers of the same generation are kept, whatever their origin. The caller commits.
+    """
+    from app.services.storage_identity import STORES
+
+    generation = identifier_value(await PlatformConfigService.get(session, STORAGE_GENERATION_KEY))
+    if not generation:
+        return {}
+    current = _parse_markers(await PlatformConfigService.get(session, MARKERS_KEY))
+    if current.get("generation") == generation and set(STORES) <= set(current.get("markers") or {}):
+        return current
+    kept = (current.get("markers") or {}) if current.get("generation") == generation else {}
+    value = {
+        "generation": generation,
+        "origin": current.get("origin", origin) if kept else origin,
+        "markers": {store: kept.get(store) or secrets.token_hex(8) for store in STORES},
+    }
+    await PlatformConfigService.set(session, MARKERS_KEY, json.dumps(value, sort_keys=True))
+    logger.info("Recorded storage identity markers for generation %s (%s)", generation, value["origin"])
+    return value
+
+
+def markers_for_tfvars(config: dict, storage_suffix: str | None) -> dict | None:
+    """The bucket markers to pass to the storage module, when they belong to its generation."""
+    markers = _parse_markers(config.get(MARKERS_KEY))
+    if storage_suffix and markers.get("generation") == storage_suffix and markers.get("markers"):
+        return dict(markers["markers"])
+    return None
 
 
 async def retire_storage_generation(session: AsyncSession) -> None:
@@ -125,4 +182,5 @@ async def retire_storage_generation(session: AsyncSession) -> None:
     from app.services.storage_identity import retire_identities
 
     await PlatformConfigService.set(session, STORAGE_GENERATION_KEY, None)
+    await PlatformConfigService.set(session, MARKERS_KEY, None)
     await retire_identities(session)

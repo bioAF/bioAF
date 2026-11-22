@@ -113,11 +113,10 @@ async def test_temporary_failures_back_off_with_a_cap(session, results):
     "health, status",
     [
         (StoreHealth.NO_ACCESS, "no_access"),
-        (StoreHealth.NOT_CONFIRMED, "not_confirmed"),
         (StoreHealth.WRONG_OWNER, "not_confirmed"),
     ],
 )
-async def test_an_unverified_or_refused_store_is_never_listed(session, results, health, status):
+async def test_a_refused_or_known_mismatched_store_is_never_listed(session, results, health, status):
     await results()
     scans = _Scans()
     with _health(health), patch.object(PlotArchiveService, "scan_and_index", new=scans):
@@ -192,3 +191,14 @@ async def test_check_again_needs_infrastructure_actions(client, admin_token, com
         allowed = await client.post("/api/plots/scan/check", headers=_auth(admin_token))
     assert refused.status_code == 403
     assert allowed.status_code == 200 and allowed.json()["status"] == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("health", [StoreHealth.NOT_CONFIRMED, StoreHealth.CANNOT_CHECK])
+async def test_a_readable_store_only_missing_confirmation_keeps_supplying_plots(session, results, health):
+    """Owner decision: upgrading must not stop new plots; only destruction needs confirmation."""
+    await results()
+    scans = _Scans()
+    with _health(health), patch.object(PlotArchiveService, "scan_and_index", new=scans):
+        result = await PlotArchiveService.scheduled_scan(session)
+    assert (result.status, scans.calls) == ("ok", 1)

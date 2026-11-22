@@ -436,3 +436,67 @@ def test_unidentified_partial_refusal_is_shown_to_the_operator():
     assert _safe_stack_error_message(StorageGenerationUnresolved(UNRESOLVED_PARTIAL_MESSAGE)) == (
         UNRESOLVED_PARTIAL_MESSAGE
     )
+
+
+# ---------------------------------------------------------------------------
+# identity markers
+# ---------------------------------------------------------------------------
+
+
+async def _markers(session):
+    import json
+
+    raw = await _get_config(session, "storage_bucket_markers")
+    return json.loads(raw) if raw else None
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_storage_deploy_gives_every_bucket_a_marker_as_its_creator(session):
+    from app.services.storage_identity import STORES
+
+    user_id = await _seed_user(session)
+    await _ready_for_deploy(session)
+    seen: list[str | None] = []
+    await _deploy(session, user_id, _storage_only_run_module(seen))
+
+    markers = await _markers(session)
+    assert (markers["origin"], markers["generation"]) == ("deploy", seen[0])
+    assert set(markers["markers"]) == set(STORES)
+    assert len(set(markers["markers"].values())) == len(STORES)
+
+
+@pytest.mark.asyncio
+async def test_a_retried_storage_deploy_keeps_its_markers(session):
+    user_id = await _seed_user(session)
+    await _ready_for_deploy(session)
+    seen: list[str | None] = []
+    await _deploy(session, user_id, _storage_only_run_module(seen, storage_event="apply_error"))
+    await _record_run(session, user_id, action="apply", status="failed", tfvars={"stack_uid": seen[0]})
+    first = await _markers(session)
+    await _deploy(session, user_id, _storage_only_run_module(seen))
+    assert await _markers(session) == first
+
+
+@pytest.mark.asyncio
+async def test_markers_for_existing_buckets_come_from_an_update_and_are_kept(session):
+    from app.services.storage_generation import ensure_markers
+
+    await _deployed_storage(session)
+    await ensure_markers(session, origin="update")
+    await session.commit()
+    first = await _markers(session)
+    assert first["origin"] == "update"
+    await ensure_markers(session, origin="update")
+    assert await _markers(session) == first
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_destroy_forgets_the_markers(session):
+    from app.services.storage_generation import ensure_markers
+
+    user_id = await _seed_user(session)
+    await _deployed_storage(session)
+    await ensure_markers(session, origin="update")
+    await session.commit()
+    await _destroy(session, user_id, ["apply_complete"])
+    assert await _markers(session) is None

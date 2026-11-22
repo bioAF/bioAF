@@ -566,6 +566,10 @@ async def run_update_check(handle, user_id: int):
     async with async_session_factory() as s:  # type: ignore[misc]
         # The definitions this update reconciles, captured before anything runs (M17).
         captured = await definitions.capture(s)
+        # An approved update gives existing buckets bioAF's identity markers when they have none.
+        from app.services.storage_generation import ensure_markers
+
+        await ensure_markers(s, origin="update")
         result = await check_for_updates(s, user_id)
         await s.commit()
     await handle.step("plan", state="done")

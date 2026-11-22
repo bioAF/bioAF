@@ -26,6 +26,9 @@ class StorageIdentity(Base):
     storage_uid: Mapped[str | None] = mapped_column(String(32), nullable=True)
     owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # bioAF's identity marker on the bucket (label or tag ``bioaf_marker``): tells this bucket apart
+    # from one deleted and recreated under the same name, where the provider's creation date cannot.
+    marker: Mapped[str | None] = mapped_column(String(64), nullable=True)
     basis: Mapped[str] = mapped_column(String(16), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_by_user_id: Mapped[int | None] = mapped_column(

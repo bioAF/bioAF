@@ -16,6 +16,11 @@ provider "google" {
 
 locals {
   bucket_prefix = "bioaf"
+  # The bioaf_marker label for each store's bucket, only when bioAF supplied a marker.
+  marker_labels = {
+    for store in ["ingest", "raw", "working", "results", "references", "literature", "config_backups"] :
+    store => lookup(var.bucket_markers, store, "") == "" ? {} : { bioaf_marker = var.bucket_markers[store] }
+  }
 }
 
 resource "google_storage_bucket" "ingest" {
@@ -37,11 +42,11 @@ resource "google_storage_bucket" "ingest" {
     max_age_seconds = 3600
   }
 
-  labels = {
+  labels = merge(local.marker_labels["ingest"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "ingest"
-  }
+  })
 }
 
 resource "google_storage_bucket" "raw" {
@@ -64,11 +69,11 @@ resource "google_storage_bucket" "raw" {
     }
   }
 
-  labels = {
+  labels = merge(local.marker_labels["raw"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "raw-data"
-  }
+  })
 }
 
 resource "google_storage_bucket" "working" {
@@ -81,11 +86,11 @@ resource "google_storage_bucket" "working" {
   versioning { enabled = true }
   force_destroy = false
 
-  labels = {
+  labels = merge(local.marker_labels["working"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "working-data"
-  }
+  })
 }
 
 resource "google_storage_bucket" "results" {
@@ -98,11 +103,11 @@ resource "google_storage_bucket" "results" {
   versioning { enabled = true }
   force_destroy = false
 
-  labels = {
+  labels = merge(local.marker_labels["results"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "results"
-  }
+  })
 }
 
 # Reference data bucket: backing store for ReferenceDataset rows. Per
@@ -127,11 +132,11 @@ resource "google_storage_bucket" "references" {
     max_age_seconds = 3600
   }
 
-  labels = {
+  labels = merge(local.marker_labels["references"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "references"
-  }
+  })
 }
 
 # Literature bucket -- backing store for Paper PDFs, extracted text, page
@@ -158,11 +163,11 @@ resource "google_storage_bucket" "literature" {
     }
   }
 
-  labels = {
+  labels = merge(local.marker_labels["literature"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "literature"
-  }
+  })
 }
 
 # DEPRECATED: Backups now go to the persistent backups bucket in the
@@ -196,11 +201,11 @@ resource "google_storage_bucket" "config_backups" {
     }
   }
 
-  labels = {
+  labels = merge(local.marker_labels["config_backups"], {
     managed_by  = "bioaf"
     storage_uid = var.stack_uid
     purpose     = "config-backups"
-  }
+  })
 }
 
 # --- IAM: grant backend service account object access on all buckets ---

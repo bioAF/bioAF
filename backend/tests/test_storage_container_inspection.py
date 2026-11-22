@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -107,6 +107,7 @@ def s3(mode_adapter_factory, monkeypatch):
     monkeypatch.setattr(adapter, "_get_credentials", _none)
     client = MagicMock()
     monkeypatch.setattr(adapter, "_get_s3_client", lambda credentials=None: client)
+    monkeypatch.setattr(adapter, "_account_id", AsyncMock(return_value="123456789012"))
     return adapter, client
 
 
@@ -123,32 +124,54 @@ def _client_error(code: str, status: int):
 
 
 @pytest.mark.asyncio
-async def test_s3_owned_bucket_reports_creation_date_and_tags(s3):
+async def test_s3_ownership_is_checked_against_the_installation_account_without_listing_buckets(s3):
+    """HeadBucket with ExpectedBucketOwner needs only the bucket permissions the installer grants;
+    AWS's creation date can change (for example after a bucket policy edit), so it is not used."""
     adapter, client = s3
-    created = datetime(2026, 3, 2, tzinfo=timezone.utc)
     client.head_bucket.return_value = {}
-    client.list_buckets.return_value = {"Buckets": [{"Name": "bioaf-raw-acme-abc123", "CreationDate": created}]}
-    client.get_bucket_tagging.return_value = {"TagSet": [{"Key": "managed_by", "Value": "bioaf"}]}
+    client.get_bucket_tagging.return_value = {
+        "TagSet": [{"Key": "managed_by", "Value": "bioaf"}, {"Key": "bioaf_marker", "Value": "9f1c2e"}]
+    }
 
     seen = await adapter.inspect_container("s3://bioaf-raw-acme-abc123/")
 
     assert seen.presence is ContainerPresence.PRESENT
     assert seen.owner == "own-account"
-    assert seen.created_at == created
-    assert seen.labels == {"managed_by": "bioaf"}
+    assert seen.created_at is None
+    assert seen.labels == {"managed_by": "bioaf", "bioaf_marker": "9f1c2e"}
+    client.head_bucket.assert_called_with(Bucket="bioaf-raw-acme-abc123", ExpectedBucketOwner="123456789012")
+    client.list_buckets.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_s3_bucket_outside_the_account_listing_is_another_owner(s3):
+async def test_s3_bucket_of_another_account_is_a_known_mismatch(s3):
     adapter, client = s3
-    client.head_bucket.return_value = {}
-    client.list_buckets.return_value = {"Buckets": []}
+
+    def head(**kwargs):
+        if "ExpectedBucketOwner" in kwargs:
+            raise _client_error("403", 403)
+        return {}
+
+    client.head_bucket.side_effect = head
     client.get_bucket_tagging.return_value = {"TagSet": []}
 
     seen = await adapter.inspect_container("s3://bioaf-raw-acme-abc123/")
 
     assert seen.presence is ContainerPresence.PRESENT
     assert seen.owner == "other-account"
+
+
+@pytest.mark.asyncio
+async def test_s3_without_a_recorded_account_cannot_check_the_owner(s3, monkeypatch):
+    adapter, client = s3
+    monkeypatch.setattr(adapter, "_account_id", AsyncMock(return_value=None))
+    client.head_bucket.return_value = {}
+    client.get_bucket_tagging.return_value = {"TagSet": []}
+
+    seen = await adapter.inspect_container("s3://bioaf-raw-acme-abc123/")
+
+    assert (seen.presence, seen.owner) == (ContainerPresence.PRESENT, None)
+    assert "owner" in seen.limits
 
 
 @pytest.mark.parametrize(
@@ -169,20 +192,6 @@ async def test_s3_provider_answers_are_classified(s3, code, status, presence):
 
     assert seen.presence is presence
     assert "SECRET" not in repr(seen)
-
-
-@pytest.mark.asyncio
-async def test_s3_listing_denied_is_a_recorded_limit(s3):
-    adapter, client = s3
-    client.head_bucket.return_value = {}
-    client.list_buckets.side_effect = _client_error("AccessDenied", 403)
-    client.get_bucket_tagging.return_value = {"TagSet": []}
-
-    seen = await adapter.inspect_container("s3://bioaf-raw-acme-abc123/")
-
-    assert seen.presence is ContainerPresence.PRESENT
-    assert seen.owner is None
-    assert "owner" in seen.limits
 
 
 @pytest.mark.asyncio

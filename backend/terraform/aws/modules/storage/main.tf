@@ -47,11 +47,15 @@ resource "aws_s3_bucket" "store" {
   # first (the adapter's delete_bucket does this), never a silent wipe.
   force_destroy = false
 
-  tags = {
-    managed_by  = "bioaf"
-    purpose     = each.value.purpose
-    storage_uid = var.stack_uid
-  }
+  tags = merge(
+    {
+      managed_by  = "bioaf"
+      purpose     = each.value.purpose
+      storage_uid = var.stack_uid
+    },
+    # bioAF's identity marker for this bucket, only when bioAF supplied one.
+    lookup(var.bucket_markers, each.key, "") == "" ? {} : { bioaf_marker = var.bucket_markers[each.key] },
+  )
 }
 
 # Versioning on every bucket (= GCS versioning { enabled = true }).

@@ -21,6 +21,7 @@ only automatic repair and destruction require an established identity.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -41,6 +42,15 @@ from app.services.deployment_outputs import identifier_value
 logger = logging.getLogger("bioaf.storage_identity")
 
 # Stores in display order, each with the platform_config key naming its bucket.
+# bioAF's identity marker: a label (GCS) or tag (S3) on each bucket, recorded with its identity.
+MARKER_LABEL = "bioaf_marker"
+# platform_config: the markers bioAF generated for the current storage generation (see recorded_markers).
+MARKERS_KEY = "storage_bucket_markers"
+NEEDS_MARKER = (
+    "bioAF cannot yet tell {bucket} apart from a bucket created later under the same name. "
+    "Run Check for Infrastructure Updates to add bioAF's identity marker, then confirm the bucket."
+)
+
 STORES: tuple[str, ...] = ("ingest", "raw", "working", "results", "references", "literature", "config_backups")
 
 # How far a provider's creation time may sit outside a recorded apply's start/finish.
@@ -166,9 +176,29 @@ async def _created_by_recorded_apply(session: AsyncSession, generation: str, cre
     return False
 
 
-async def _discoverable(session: AsyncSession, bucket_name: str, seen: ContainerObservation) -> str | None:
+async def recorded_markers(session: AsyncSession) -> dict:
+    """The identity markers bioAF generated for this storage generation, and how.
+
+    ``origin`` is "deploy" when bioAF created the buckets carrying them, or "update" when it added
+    them to existing buckets (which an administrator must still confirm).
+    """
+    raw = await PlatformConfigService.get(session, MARKERS_KEY)
+    if not raw or raw == "null":
+        return {}
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _marker(seen: ContainerObservation) -> str | None:
+    return seen.labels.get(MARKER_LABEL) or None
+
+
+async def _discoverable(session: AsyncSession, store: str, bucket_name: str, seen: ContainerObservation) -> str | None:
     """The generation when provider evidence and recorded deployment agree, else None."""
-    if seen.created_at is None or seen.owner in (None, "other-account") or "labels" in seen.limits:
+    if seen.owner in (None, "other-account") or "labels" in seen.limits:
         return None
     if seen.labels.get("managed_by") != "bioaf":
         return None
@@ -182,7 +212,17 @@ async def _discoverable(session: AsyncSession, bucket_name: str, seen: Container
     installation_owner = await _installation_owner(session)
     if installation_owner is not None and installation_owner != seen.owner:
         return None
-    if not await _created_by_recorded_apply(session, generation, seen.created_at):
+    # The marker bioAF gave the buckets it created in this generation identifies this incarnation.
+    markers = await recorded_markers(session)
+    if (
+        markers.get("origin") == "deploy"
+        and markers.get("generation") == generation
+        and _marker(seen) is not None
+        and (markers.get("markers") or {}).get(store) == _marker(seen)
+    ):
+        return generation
+    # Otherwise the provider's creation time must fall within a recorded apply (GCS).
+    if seen.created_at is None or not await _created_by_recorded_apply(session, generation, seen.created_at):
         return None
     return generation
 
@@ -197,20 +237,33 @@ async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: C
 
     recorded = await _active_identity(session, bucket_name)
     if recorded is not None:
+        seen_marker = _marker(seen)
         owner_differs = None not in (recorded.owner, seen.owner) and recorded.owner != seen.owner
-        if owner_differs or not _same_instant(recorded.provider_created_at, seen.created_at):
+        marker_differs = None not in (recorded.marker, seen_marker) and recorded.marker != seen_marker
+        if owner_differs or marker_differs or not _same_instant(recorded.provider_created_at, seen.created_at):
             return StoreReport(store, bucket_name, StoreHealth.WRONG_OWNER, recorded.basis)
         # Evidence that cannot be read now is not matching evidence: the bucket keeps serving
         # ordinary reads and writes, but nothing destructive may act on it until it can be checked.
-        if None in (recorded.owner, seen.owner, recorded.provider_created_at, seen.created_at):
+        # Ownership is required; this incarnation is told apart by bioAF's marker or, where the
+        # provider keeps it fixed (GCS), the creation time.
+        if None in (recorded.owner, seen.owner):
             return StoreReport(store, bucket_name, StoreHealth.CANNOT_CHECK, recorded.basis)
+        if recorded.marker is not None:
+            if seen_marker is None:
+                return StoreReport(store, bucket_name, StoreHealth.CANNOT_CHECK, recorded.basis)
+        elif None in (recorded.provider_created_at, seen.created_at):
+            return StoreReport(store, bucket_name, StoreHealth.CANNOT_CHECK, recorded.basis)
+        elif seen_marker is not None:
+            # Established by its creation time before markers existed: keep its marker from now on.
+            recorded.marker = seen_marker
+            await session.flush()
         return StoreReport(store, bucket_name, StoreHealth.AVAILABLE, recorded.basis)
 
     installation_owner = await _installation_owner(session)
     if installation_owner is not None and seen.owner is not None and installation_owner != seen.owner:
         return StoreReport(store, bucket_name, StoreHealth.WRONG_OWNER)
 
-    generation = await _discoverable(session, bucket_name, seen)
+    generation = await _discoverable(session, store, bucket_name, seen)
     if generation is None:
         return StoreReport(store, bucket_name, StoreHealth.NOT_CONFIRMED)
     session.add(
@@ -220,6 +273,7 @@ async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: C
             storage_uid=generation,
             owner=seen.owner,
             provider_created_at=seen.created_at,
+            marker=_marker(seen),
             basis="discovered",
         )
     )
@@ -321,8 +375,11 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
             raise StateError(f"{bucket_name} belongs to another installation, so it cannot be confirmed.")
         if seen.presence is not ContainerPresence.PRESENT:
             raise StateError(f"{bucket_name} could not be observed, so it cannot be confirmed.")
-        if seen.owner is None or seen.created_at is None:
+        if seen.owner is None:
             raise StateError(f"bioAF could not read who owns {bucket_name}, so it cannot be confirmed.")
+        if _marker(seen) is None and seen.created_at is None:
+            # Ownership alone cannot tell this bucket from one deleted and recreated later.
+            raise StateError(NEEDS_MARKER.format(bucket=bucket_name))
         if report.health is StoreHealth.NOT_CONFIRMED:
             generation = identifier_value(await PlatformConfigService.get(session, "storage_stack_uid"))
             session.add(
@@ -332,6 +389,7 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
                     storage_uid=generation or _generation_from_name(bucket_name) or None,
                     owner=seen.owner,
                     provider_created_at=seen.created_at,
+                    marker=_marker(seen),
                     basis="enrolled",
                     reason=reason,
                     recorded_by_user_id=user_id,
@@ -349,6 +407,7 @@ async def enroll_stores(session: AsyncSession, user_id: int, stores: list[str], 
                     "bucket_name": bucket_name,
                     "owner": seen.owner,
                     "provider_created_at": seen.created_at.isoformat() if seen.created_at else None,
+                    "marker": _marker(seen),
                     "reason": reason,
                 },
             )
