@@ -78,11 +78,16 @@ responding, Not confirmed, Belongs to another installation, Not mounted, Cannot 
 read-only: bioAF never creates or recreates a bucket from a check. A missing bucket is created again only by
 **Check for Infrastructure Updates**.
 
-bioAF records a bucket as its own when the provider's evidence matches a recorded storage deployment. On an
-installation deployed before this release that evidence may be missing; uploads, downloads and pipelines
-keep working, but Destroy Storage and automatic repairs are unavailable until an administrator uses
-**Review and confirm buckets**, which records an audited baseline as of that day. A bucket bioAF knows
-belongs to another installation is never used, emptied or deleted, and cannot be confirmed.
+bioAF records a bucket as its own when the provider's evidence matches a recorded storage deployment: the
+owner (the Google Cloud project, or on AWS the installation's account, checked with the bucket permissions
+the installer grants) and either bioAF's `bioaf_marker` label or tag from the deployment or, on Google
+Cloud, the bucket's creation time. On an installation deployed before this release that evidence may be
+missing; uploads, downloads, pipelines and the Plot Archive keep working, but Destroy Storage and automatic
+repairs are unavailable until an administrator uses **Review and confirm buckets**, which records an
+audited baseline as of that day. On AWS, run **Check for Infrastructure Updates** first so the buckets carry
+bioAF's marker (ownership alone cannot tell a bucket from one recreated later). A bucket bioAF knows
+belongs to another installation, or whose marker differs from the one recorded, is never used, emptied or
+deleted, and cannot be confirmed.
 
 ### Uploads and Destroy Storage
 
@@ -127,8 +132,9 @@ Files are marked as deleted as each object is confirmed deleted.
 
 ### Plot Archive Health
 
-When the results storage is missing, refused or not confirmed, the Plot Archive says new plots are not
-being added and bioAF checks the storage every 30 minutes instead of every minute; a temporary failure is
+When the results storage is missing, refused or known to belong to another installation, the Plot Archive
+says new plots are not being added (a readable bucket that is only waiting for confirmation keeps supplying
+plots) and bioAF checks the storage every 30 minutes instead of every minute; a temporary failure is
 retried with increasing waits up to 30 minutes. Administrators can **Check again**. Existing plots are not
 affected.
 

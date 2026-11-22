@@ -65,8 +65,9 @@
 
 ### Plot Archive
 
-- When the results storage is missing or unreadable, the Plot Archive says new plots are not being added,
-  and bioAF checks the storage every 30 minutes instead of every minute.
+- When the results storage is missing, unreadable, or known to belong to another installation, the Plot
+  Archive says new plots are not being added, and bioAF checks the storage every 30 minutes instead of
+  every minute. A readable results bucket that is only waiting for confirmation keeps supplying new plots.
 
 ### After an update
 
@@ -77,11 +78,16 @@
 
 - The Google Cloud ingest bucket now exposes the `Range` header to browsers (for chunked uploads); it is
   applied by Check for Infrastructure Updates. Until then, uploads still work.
-- New infrastructure buckets carry a `storage_uid` label (GCP) or tag (AWS). Existing buckets get it only
-  when an administrator applies Check for Infrastructure Updates.
+- New infrastructure buckets carry a `storage_uid` label (GCP) or tag (AWS) and a `bioaf_marker` that bioAF
+  records to tell each bucket apart from one deleted and recreated under the same name. Existing buckets
+  get both only when an administrator applies Check for Infrastructure Updates.
 - On installations deployed before this release, the storage buckets may show **Not confirmed**. Uploads,
-  downloads and pipelines keep working; an administrator confirms the buckets under Infrastructure >
-  Components before Destroy Storage is available.
+  downloads, pipelines and the Plot Archive keep working; an administrator confirms the buckets under
+  Infrastructure > Components before Destroy Storage is available. On AWS, run Check for Infrastructure
+  Updates first so the buckets carry bioAF's marker, then confirm them.
+- No new cloud permissions are needed. On AWS, bioAF checks a bucket's owner against the account ID the
+  installer recorded, using the bucket permissions it already has, and no longer uses AWS's bucket creation
+  date (which can change after a bucket policy edit).
 - Uploads that were waiting in memory for completion when the update restarted the backend cannot be
   completed; upload those files again.
 - Upload links issued before this release count as running uploads until an hour after they expire; then
