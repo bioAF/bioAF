@@ -58,6 +58,9 @@
 - While storage confirms the last bytes of an upload, the uploader shows **Confirming upload** instead of
   an error.
 - Uploads with a declared checksum are verified against it even when bioAF finds them finished on its own.
+- An upload waiting to be filed is shown as done only once it is filed. If it is cancelled elsewhere (for
+  example from **Files**) the uploader shows it as cancelled, and if filing fails for good it shows an error
+  asking for the file to be uploaded again.
 - Each reference dataset upload is stored under its own path.
 - Lab document and reference dataset uploads, filing received uploads, and bioAF's own background writes
   (thumbnails, QC caches, export archives, environment build contexts, reference imports) count as storage
@@ -81,6 +84,9 @@
 - New infrastructure buckets carry a `storage_uid` label (GCP) or tag (AWS) and a `bioaf_marker` that bioAF
   records to tell each bucket apart from one deleted and recreated under the same name. Existing buckets
   get both only when an administrator applies Check for Infrastructure Updates.
+- Storage deploys, infrastructure updates and storage destroys are refused while a confirmed bucket has
+  been replaced by another bucket with the same name, or cannot be checked, so an update never copies the
+  confirmed bucket's marker onto a replacement.
 - On installations deployed before this release, the storage buckets may show **Not confirmed**. Uploads,
   downloads, pipelines and the Plot Archive keep working; an administrator confirms the buckets under
   Infrastructure > Components before Destroy Storage is available. On AWS, run Check for Infrastructure

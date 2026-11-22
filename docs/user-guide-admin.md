@@ -87,7 +87,9 @@ repairs are unavailable until an administrator uses **Review and confirm buckets
 audited baseline as of that day. On AWS, run **Check for Infrastructure Updates** first so the buckets carry
 bioAF's marker (ownership alone cannot tell a bucket from one recreated later). A bucket bioAF knows
 belongs to another installation, or whose marker differs from the one recorded, is never used, emptied or
-deleted, and cannot be confirmed.
+deleted, and cannot be confirmed. While a confirmed bucket has been replaced by another with the same name,
+or cannot be checked, storage deploys, **Check for Infrastructure Updates** and storage destroys are
+refused, so an update never gives the replacement the confirmed bucket's marker.
 
 ### Uploads and Destroy Storage
 

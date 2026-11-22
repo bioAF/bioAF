@@ -120,6 +120,7 @@ class TerraformExecutor:
         """
         runtime.require_admission("deployment")
         await TerraformExecutor._admit(session)
+        await TerraformExecutor._require_storage_identity(session, module_name)
         await TerraformExecutor._recover_stale_runs(session)
         await TerraformExecutor._check_no_active_run(session)
 
@@ -204,6 +205,7 @@ class TerraformExecutor:
             raise NotFoundError(f"Run {run_id} not found")
         if run.status not in ("awaiting_confirmation", "applying"):
             raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
+        await TerraformExecutor._require_storage_identity(session, run.module_name)
 
         await TerraformExecutor._join_operation(session, run)
         run.action = "apply"
@@ -661,6 +663,7 @@ class TerraformExecutor:
         """
         runtime.require_admission("deployment")
         await TerraformExecutor._admit(session)
+        await TerraformExecutor._require_storage_identity(session, module_name)
         await TerraformExecutor._recover_stale_runs(session)
 
         run = TerraformRun(
@@ -1430,6 +1433,14 @@ class TerraformExecutor:
             logger.info("Deleted lock file %s", uri)
         except Exception as exc:
             logger.warning("Error deleting lock file %s: %s", uri, exc)
+
+    @staticmethod
+    async def _require_storage_identity(session: AsyncSession, module_name: str | None) -> None:
+        """A storage plan, apply or destroy never acts on a bucket that replaced a confirmed one."""
+        if module_name == "storage":
+            from app.services.storage_identity import require_confirmed_buckets_unchanged
+
+            await require_confirmed_buckets_unchanged(session)
 
     @staticmethod
     async def _admit(session: AsyncSession) -> None:

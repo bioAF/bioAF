@@ -51,6 +51,11 @@ NEEDS_MARKER = (
     "Run Check for Infrastructure Updates to add bioAF's identity marker, then confirm the bucket."
 )
 
+REPLACED_BUCKET = (
+    "{bucket} is no longer the bucket bioAF confirmed, or cannot be checked right now, so storage "
+    "was not changed. Review storage under Infrastructure > Components."
+)
+
 STORES: tuple[str, ...] = ("ingest", "raw", "working", "results", "references", "literature", "config_backups")
 
 # How far a provider's creation time may sit outside a recorded apply's start/finish.
@@ -322,6 +327,33 @@ async def inspect_stores(session: AsyncSession, stores: list[str] | None = None)
         reports.append(await _record_check(session, report))
     await session.flush()
     return reports
+
+
+# A confirmed bucket in one of these states may be a different bucket under the same name.
+_UNVERIFIED = {
+    StoreHealth.WRONG_OWNER,
+    StoreHealth.CANNOT_CHECK,
+    StoreHealth.NO_ACCESS,
+    StoreHealth.NOT_RESPONDING,
+    StoreHealth.NOT_MOUNTED,
+}
+
+
+async def require_confirmed_buckets_unchanged(session: AsyncSession) -> None:
+    """Refuse a storage change while a confirmed bucket may have been replaced.
+
+    Terraform writes bioAF's marker as an ordinary label or tag, and the provider finds a bucket by
+    name, so reconciling a bucket recreated under a confirmed bucket's name would copy the confirmed
+    marker onto it and make it look confirmed. Every storage Terraform action calls this first. A
+    bucket not yet confirmed (an existing installation receiving its first markers) and a deleted
+    bucket (which bioAF then creates itself) do not block. Records the check; the caller commits.
+    """
+    for report in await inspect_stores(session):
+        if report.health is StoreHealth.WRONG_OWNER or (
+            report.health in _UNVERIFIED and await _active_identity(session, report.bucket_name) is not None
+        ):
+            logger.warning("Refused a storage change: store %s is %s", report.store, report.health.value)
+            raise StateError(REPLACED_BUCKET.format(bucket=report.bucket_name))
 
 
 async def configured_store_count(session: AsyncSession) -> int:

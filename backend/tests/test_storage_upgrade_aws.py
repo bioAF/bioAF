@@ -215,3 +215,145 @@ async def test_destroy_waits_for_confirmation_and_then_proceeds(session, aws):
     assert events[-1].event_type == "stack_complete"
     markers = await session.scalar(text("SELECT value FROM platform_config WHERE key = 'storage_bucket_markers'"))
     assert markers in (None, "null") or json.loads(markers) is None
+
+
+# ---------------------------------------------------------------------------
+# A replaced bucket never gets the confirmed bucket's marker back
+#
+# Terraform writes bioaf_marker as an ordinary tag and S3 identifies a bucket only by name, so
+# reconciling a replacement bucket would copy the confirmed bucket's marker onto it. Every storage
+# Terraform action first checks that each confirmed bucket is still the one bioAF confirmed.
+# ---------------------------------------------------------------------------
+
+
+async def _confirmed(session, cloud, user_id):
+    cloud.add(RAW, tags={"managed_by": "bioaf", "storage_uid": "abc123"})
+    await _add_markers_by_update(session, cloud)
+    await storage_identity.enroll_stores(session, user_id, ["raw"], reason="Original bucket confirmed")
+    await session.commit()
+    return json.loads(
+        await session.scalar(text("SELECT value FROM platform_config WHERE key = 'storage_bucket_markers'"))
+    )["markers"]["raw"]
+
+
+def _replace(cloud, replacement):
+    if replacement == "same_bucket":
+        return
+    tags = {"managed_by": "bioaf", "storage_uid": "abc123"}
+    if replacement == "different_marker":
+        tags["bioaf_marker"] = "different-bucket"
+    cloud.add(RAW, tags=tags)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", ["missing_marker", "different_marker", "same_bucket"])
+async def test_an_update_never_restores_the_marker_on_a_replacement_bucket(session, aws, replacement):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.models.component import TerraformRun
+    from app.services import infra_update_service as updates
+    from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+
+    cloud, user_id = aws
+    marker = await _confirmed(session, cloud, user_id)
+    _replace(cloud, replacement)
+    await session.execute(
+        text("INSERT INTO platform_config (key, value) VALUES ('terraform_initialized', 'true') ON CONFLICT DO NOTHING")
+    )
+    await session.commit()
+    target = 'aws_s3_bucket.store["raw"]'
+
+    async def plan(s, uid, *, module_name, targets=None, **kwargs):
+        run = TerraformRun(
+            triggered_by_user_id=uid,
+            module_name=module_name,
+            action="plan",
+            status="awaiting_confirmation",
+            plan_json={
+                "total": 1,
+                "add_count": 0,
+                "change_count": 1,
+                "destroy_count": 0,
+                "resources": [{"address": target, "type": "aws_s3_bucket", "action": "update"}],
+            },
+        )
+        s.add(run)
+        await s.flush()
+        return run
+
+    async def apply(s, run_id, uid, **kwargs):
+        # Terraform's in-place tags update writes the configured marker onto whatever bucket has the name.
+        cloud.buckets[RAW]["tags"]["bioaf_marker"] = marker
+        run = await s.get(TerraformRun, run_id)
+        run.status, run.completed_at = "completed", datetime.now(timezone.utc)
+        yield TerraformProgressEvent(event_type="apply_complete", message="Updated tags")
+
+    handle = SimpleNamespace(id=None, step=AsyncMock())
+    with (
+        patch.object(TerraformExecutor, "run_plan", side_effect=plan),
+        patch.object(TerraformExecutor, "run_apply", side_effect=apply),
+        patch.object(TerraformExecutor, "read_module_outputs", AsyncMock(return_value={})),
+    ):
+        if replacement == "same_bucket":
+            await updates.run_update_check(handle, user_id)
+        else:
+            with pytest.raises(StateError, match="no longer the bucket bioAF confirmed"):
+                await updates.run_update_check(handle, user_id)
+
+    session.expire_all()
+    report = await _raw(session)
+    assert report.trusted is (replacement == "same_bucket")
+    if replacement == "missing_marker":
+        assert "bioaf_marker" not in cloud.buckets[RAW]["tags"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["plan", "apply", "destroy"])
+async def test_direct_storage_terraform_refuses_a_replaced_bucket(session, aws, action):
+    from app.models.component import TerraformRun
+    from app.services.terraform_executor import TerraformExecutor
+
+    cloud, user_id = aws
+    await _confirmed(session, cloud, user_id)
+    _replace(cloud, "missing_marker")
+    run = TerraformRun(
+        triggered_by_user_id=user_id, module_name="storage", action="plan", status="awaiting_confirmation"
+    )
+    session.add(run)
+    await session.commit()
+
+    with (
+        patch.object(TerraformExecutor, "_resolve_cloud_and_config", AsyncMock(side_effect=AssertionError("ran"))),
+        patch.object(TerraformExecutor, "_recover_stale_runs", AsyncMock()),
+        pytest.raises(StateError, match="no longer the bucket bioAF confirmed"),
+    ):
+        if action == "plan":
+            await TerraformExecutor.run_plan(session, user_id, module_name="storage")
+        elif action == "apply":
+            [e async for e in TerraformExecutor.run_apply(session, run.id, user_id)]
+        else:
+            [e async for e in TerraformExecutor.run_destroy(session, user_id, module_name="storage")]
+    await session.rollback()
+    assert "bioaf_marker" not in cloud.buckets[RAW]["tags"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["legacy_unconfirmed", "confirmed_unchanged", "deleted"])
+async def test_storage_terraform_proceeds_when_no_confirmed_bucket_was_replaced(session, aws, state):
+    from app.services.terraform_executor import TerraformExecutor
+
+    cloud, user_id = aws
+    if state == "legacy_unconfirmed":
+        cloud.add(RAW, tags={"managed_by": "bioaf", "storage_uid": "abc123"})
+    else:
+        await _confirmed(session, cloud, user_id)
+        if state == "deleted":
+            del cloud.buckets[RAW]
+
+    with (
+        patch.object(TerraformExecutor, "_resolve_cloud_and_config", AsyncMock(side_effect=RuntimeError("reached"))),
+        patch.object(TerraformExecutor, "_recover_stale_runs", AsyncMock()),
+        pytest.raises(RuntimeError, match="reached"),
+    ):
+        await TerraformExecutor.run_plan(session, user_id, module_name="storage")

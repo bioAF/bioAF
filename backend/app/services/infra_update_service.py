@@ -566,9 +566,14 @@ async def run_update_check(handle, user_id: int):
     async with async_session_factory() as s:  # type: ignore[misc]
         # The definitions this update reconciles, captured before anything runs (M17).
         captured = await definitions.capture(s)
-        # An approved update gives existing buckets bioAF's identity markers when they have none.
+        # An approved update gives existing buckets bioAF's identity markers when they have none,
+        # never a confirmed bucket's marker to a bucket that replaced it.
         from app.services.storage_generation import ensure_markers
+        from app.services.storage_identity import require_confirmed_buckets_unchanged
 
+        if await PlatformConfigService.get(s, "storage_deployed") not in _UNSET_MARKERS:
+            await require_confirmed_buckets_unchanged(s)
+            await s.commit()
         await ensure_markers(s, origin="update")
         result = await check_for_updates(s, user_id)
         await s.commit()
