@@ -78,6 +78,7 @@ async def test_a_missing_store_is_not_listed_every_minute(session, results):
         second = await PlotArchiveService.scheduled_scan(session)
     assert scans.calls == 0
     assert first.status == "missing"
+    assert first.next_attempt_at is not None and first.last_attempt_at is not None
     assert first.next_attempt_at - first.last_attempt_at == timedelta(minutes=30)
     assert second.last_attempt_at == first.last_attempt_at  # not due: nothing was checked
 
@@ -94,6 +95,7 @@ async def test_a_failed_listing_never_advances_the_last_success(session, results
         failed = await PlotArchiveService.scheduled_scan(session, force=True)
     assert failed.status == "temporary"
     assert failed.last_success_at == ok.last_success_at
+    assert failed.next_attempt_at is not None and failed.last_attempt_at is not None
     assert failed.next_attempt_at - failed.last_attempt_at == timedelta(minutes=1)
 
 
@@ -104,6 +106,7 @@ async def test_temporary_failures_back_off_with_a_cap(session, results):
     with _health(StoreHealth.NOT_RESPONDING), patch.object(PlotArchiveService, "scan_and_index", new=_Scans()):
         for _ in range(8):
             health = await PlotArchiveService.scheduled_scan(session, force=True)
+            assert health.next_attempt_at is not None and health.last_attempt_at is not None
             delays.append((health.next_attempt_at - health.last_attempt_at).total_seconds() / 60)
     assert delays == [1, 2, 4, 8, 16, 30, 30, 30]
 

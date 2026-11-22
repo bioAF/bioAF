@@ -8,6 +8,8 @@ only for the files in buckets it actually emptied or found gone.
 
 from __future__ import annotations
 
+from typing import Any
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -69,7 +71,7 @@ async def _destroy_ok(*_a):
 async def _run(session, user_id, *, empty=None, terraform=_destroy_ok, drain=None):
     from app.services.stack_deployment import destroy_storage
 
-    calls = {"empty": [], "terraform": 0}
+    calls: dict[str, Any] = {"empty": [], "terraform": 0}
 
     async def default_empty(_s, bucket):
         calls["empty"].append(bucket)

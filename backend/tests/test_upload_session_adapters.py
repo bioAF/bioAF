@@ -203,6 +203,7 @@ async def test_s3_begin_starts_a_multipart_upload(size, part_size):
     adapter, patches = _s3(client)
     grant = await _with(patches, lambda: adapter.begin_upload_session(S3_URI, size_bytes=size))
     assert (grant.protocol, grant.handle, grant.url, grant.part_size) == ("s3_multipart", "UPLOAD-1", None, part_size)
+    assert client.created is not None
     assert client.created["Bucket"] == "bioaf-ingest-test"
     assert client.created["Key"] == "uploads/u1/a.fastq.gz"
 
@@ -223,6 +224,7 @@ async def test_s3_finish_completes_with_the_parts_in_order():
     adapter, patches = _s3(client)
     parts = [UploadedPart(number=2, etag='"b"'), UploadedPart(number=1, etag='"a"')]
     await _with(patches, lambda: adapter.finish_upload_session(S3_URI, "UPLOAD-1", parts))
+    assert client.completed is not None
     assert client.completed["MultipartUpload"] == {
         "Parts": [{"PartNumber": 1, "ETag": '"a"'}, {"PartNumber": 2, "ETag": '"b"'}]
     }

@@ -182,6 +182,7 @@ async def test_success_releases_exclusion_and_records_the_runner(session):
 
     op = await _op(session, op_id)
     assert (op.status, op.exclusive_slot, op.message) == ("succeeded", None, "Done")
+    assert op.runner is not None
     assert op.runner["container_id"] and op.runner["pid"]
     assert [s["state"] for s in op.steps] == ["done", "done"]
     assert ops.current_operation_id() is None

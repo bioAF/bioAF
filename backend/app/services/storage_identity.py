@@ -235,11 +235,12 @@ async def _discoverable(session: AsyncSession, store: str, bucket_name: str, see
 async def _recreated_by_bioaf(session: AsyncSession, recorded: StorageIdentity, seen: ContainerObservation) -> bool:
     """A newer bucket under a recorded name that bioAF itself created: the recorded marker, the
     recorded owner, and a creation time inside a recorded storage apply of this generation."""
-    if None in (recorded.marker, recorded.provider_created_at, seen.created_at, recorded.owner, seen.owner):
+    created, recorded_created = seen.created_at, recorded.provider_created_at
+    if created is None or recorded_created is None or None in (recorded.marker, recorded.owner, seen.owner):
         return False
-    if _marker(seen) != recorded.marker or seen.created_at <= recorded.provider_created_at:
+    if _marker(seen) != recorded.marker or created <= recorded_created:
         return False
-    return await _created_by_recorded_apply(session, recorded.storage_uid, seen.created_at)
+    return await _created_by_recorded_apply(session, recorded.storage_uid, created)
 
 
 async def _classify(session: AsyncSession, store: str, bucket_name: str, seen: ContainerObservation) -> StoreReport:

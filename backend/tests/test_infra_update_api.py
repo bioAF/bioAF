@@ -147,9 +147,9 @@ async def test_check_updates_destructive_not_auto_applied(session, admin_user, m
     assert applied == [[LIT["address"]]]
     assert op.status == "succeeded"
     assert op.message == (
-        "Infrastructure updated. "
-        "1 change was not applied because it would delete or replace an existing resource."
+        "Infrastructure updated. 1 change was not applied because it would delete or replace an existing resource."
     )
+    assert op.partial_effects is not None
     destructive = {r["address"]: r for r in op.partial_effects["destructive"]}
     assert destructive["module.storage.google_storage_bucket.raw"]["stateful"] is True
 

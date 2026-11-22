@@ -26,7 +26,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -868,7 +868,9 @@ async def owned(operation_id: int) -> AsyncIterator[OperationHandle]:
         _reset(token)
 
 
-async def operation_stream(operation_id: int, events: AsyncIterator, *, terminal: str = "stack") -> AsyncIterator:
+async def operation_stream(
+    operation_id: int, events: AsyncIterator, *, terminal: str = "stack"
+) -> AsyncGenerator[Any, None]:
     """Pass a stack generator's events through to an SSE response while the operation owns them.
 
     The stream's outcome becomes the operation's: a terminal event settles it, a client

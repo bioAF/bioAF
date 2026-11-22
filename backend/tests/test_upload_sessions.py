@@ -320,6 +320,7 @@ async def test_progress_keeps_a_session_alive(client, admin_token, storage, stor
 
     cp = await _checkpoint(session, upload_id)
     assert (cp.stage, cp.progress_bytes) == ("issued", 1024)
+    assert cp.progress_at is not None
     assert cp.progress_at > datetime.now(timezone.utc) - timedelta(minutes=1)
     assert store.cancel_calls == 0
 
@@ -467,6 +468,7 @@ async def test_a_presigned_url_counts_until_an_hour_after_it_expires(session, ad
     await _reconcile()
     assert (await _checkpoint(session, cp.id)).stage == "issued"
     [writer] = await storage_write_admission.outstanding_writers(session)
+    assert cp.grant_expires_at is not None
     assert writer.settles_after == cp.grant_expires_at + timedelta(hours=1)
     assert writer.needs_release is False
 
@@ -637,6 +639,7 @@ async def test_automatic_filing_waits_while_writes_are_paused(client, admin_toke
 
     cp = await _checkpoint(session, upload_id)
     assert (cp.stage, cp.attempts) == ("received", 0)
+    assert cp.next_attempt_at is not None
     assert cp.next_attempt_at > datetime.now(timezone.utc)
     assert (await session.execute(select(File))).scalars().all() == []
 
