@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import os
+import stat
 import threading
 
 import pytest
@@ -501,3 +502,34 @@ async def test_s3_deleting_the_current_version_can_expose_an_older_one(s3):
     current = await adapter.object_identity("s3://ingest/uploads/9/a.txt")
     assert await adapter.delete_if_unchanged(current) is True
     assert fake.objects[("ingest", "uploads/9/a.txt")].data == b"first attempt"
+
+
+@pytest.mark.parametrize("private", [".bioaf-object-staging", ".bioaf-object-locks"])
+def test_a_private_area_others_can_reach_is_refused(tmp_path, private):
+    """Review round 2, finding 1: a pre-created directory open to other users is never used."""
+    (tmp_path / private).mkdir()
+    os.chmod(tmp_path / private, 0o777)
+    fs = LocalObjectFilesystem(str(tmp_path), lambda u: tuple(u.split("://", 1)[1].split("/", 1)), _build)
+    fs.write_stream("gs://bk/uploads/1/a.txt", io.BytesIO(b"scientific bytes"))
+    with pytest.raises(ValidationError):
+        fs.copy_create_only("gs://bk/uploads/1/a.txt", "gs://bk/experiments/1/files/u/a.txt", None, OWNER)
+    assert list((tmp_path / private).iterdir()) == []
+    assert not fs.exists("gs://bk/experiments/1/files/u/a.txt")
+
+
+def test_a_private_area_owned_by_someone_else_is_refused(tmp_path, monkeypatch):
+    (tmp_path / ".bioaf-object-locks").mkdir(mode=0o700)
+    fs = LocalObjectFilesystem(str(tmp_path), lambda u: tuple(u.split("://", 1)[1].split("/", 1)), _build)
+    fs.write_stream("gs://bk/a.txt", io.BytesIO(b"x"))
+    real = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: real + 1)
+    with pytest.raises(ValidationError):
+        fs.copy_create_only("gs://bk/a.txt", "gs://bk/b.txt", None, None)
+
+
+def test_a_private_area_created_here_is_private(tmp_path):
+    fs = LocalObjectFilesystem(str(tmp_path), lambda u: tuple(u.split("://", 1)[1].split("/", 1)), _build)
+    fs.write_stream("gs://bk/a.txt", io.BytesIO(b"x"))
+    fs.copy_create_only("gs://bk/a.txt", "gs://bk/b.txt", None, None)
+    for private in (".bioaf-object-staging", ".bioaf-object-locks"):
+        assert stat.S_IMODE(os.stat(tmp_path / private).st_mode) == 0o700

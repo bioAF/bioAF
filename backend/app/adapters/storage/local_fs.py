@@ -391,25 +391,33 @@ class LocalObjectFilesystem:
 
     def _private_dir_fd(self, name: str) -> int:
         """A descriptor for ``<root>/<name>`` (created 0700 if missing), opened with O_NOFOLLOW from
-        the root's descriptor: a link or non-directory there is refused (ValidationError), so lock
-        records and staged bytes never leave the store. The caller closes it."""
+        the root's descriptor. Refused (ValidationError): a link or non-directory, or a directory not
+        owned by this service or open to group/other, so lock records and staged bytes neither leave
+        the store nor become reachable by another user. The caller closes it."""
         base = self._base()
         os.makedirs(base, exist_ok=True)
         root_fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         try:
             try:
-                return os.open(name, flags, dir_fd=root_fd)
+                fd = os.open(name, flags, dir_fd=root_fd)
             except FileNotFoundError:
                 try:
                     os.mkdir(name, 0o700, dir_fd=root_fd)
                 except FileExistsError:
                     pass
-                return os.open(name, flags, dir_fd=root_fd)
+                fd = os.open(name, flags, dir_fd=root_fd)
         except OSError as exc:  # a link (ELOOP) or not a directory (ENOTDIR)
             raise ValidationError(f"The store's private {name} area is not a plain directory") from exc
         finally:
             os.close(root_fd)
+        # Checked on the opened directory itself: it must be this service's and closed to everyone
+        # else, or staged scientific data and lock records could be read or swapped by another user.
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            os.close(fd)
+            raise ValidationError(f"The store's private {name} area is not private to this service")
+        return fd
 
     @contextmanager
     def _key_lock(self, uri: str) -> Iterator[None]:
