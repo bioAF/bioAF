@@ -829,9 +829,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # The action is a wrapper that runs ghcr.io/trufflesecurity/trufflehog:<version>, `latest` unless told otherwise,
+      # so pinning the wrapper alone leaves the scanner moving. `version` names the release and its image digest (the
+      # image `latest` resolved to when pinned); Dependabot does not track it, so a maintainer moves it by hand with the
+      # digest from ghcr.io.
       - name: Check for secrets in code
         uses: trufflesecurity/trufflehog@8cd2fdddd14a513cce30888e975d09233a61705c # v3.88.8
         with:
+          version: 3.100.1@sha256:9c7a8325d43a4af2960d3f21d61a08981d8a1bf0542e007efa2e47097e386452
           extra_args: --only-verified
 
   # Newly introduced high or critical vulnerabilities fail the pull request in every dependency scope. Accepted risk

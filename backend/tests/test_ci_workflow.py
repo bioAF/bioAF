@@ -1095,3 +1095,13 @@ def test_a_rejected_release_push_updates_neither_main_nor_the_tag(tmp_path):
     assert done.returncode != 0
     assert _git(remote, "rev-parse", "main").strip() == concurrent
     assert _git(remote, "tag", "--list") == ""
+
+
+def test_the_secret_scanner_image_is_pinned_by_digest(workflow):
+    # The trufflehog action is a wrapper that runs ghcr.io/trufflesecurity/trufflehog:<version>, `latest` by default.
+    # Pinning the wrapper does not pin the scanner; the version input names a release and its image digest.
+    step = next(
+        s for s in workflow["jobs"]["security-scan"]["steps"] if "trufflesecurity/trufflehog@" in s.get("uses", "")
+    )
+    assert re.fullmatch(r"\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", step["with"]["version"])
+    assert step["with"]["extra_args"] == "--only-verified"
