@@ -449,3 +449,37 @@ async def test_s3_local_mode_uses_the_filesystem_primitives(monkeypatch, tmp_pat
         await adapter.copy_create_only(src, dest)
     assert (await adapter.inspect_object(dest)).identity == published
     assert await adapter.delete_if_unchanged(published) is True
+
+
+# ---------------------------------------------------------------------------
+# confinement of the private lock and staging areas (review finding 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("private", [".bioaf-object-staging", ".bioaf-object-locks"])
+def test_a_private_area_replaced_by_a_link_is_refused_and_nothing_leaves_the_store(tmp_path, private):
+    root, outside = tmp_path / "store", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / private).symlink_to(outside)
+    fs = LocalObjectFilesystem(str(root), lambda u: tuple(u.split("://", 1)[1].split("/", 1)), _build)
+    fs.write_stream("gs://bk/uploads/1/a.txt", io.BytesIO(b"scientific bytes"))
+
+    with pytest.raises(ValidationError):
+        fs.copy_create_only("gs://bk/uploads/1/a.txt", "gs://bk/experiments/1/files/u/a.txt", None, OWNER)
+    if private == ".bioaf-object-locks":  # a guarded delete takes the lock, not the staging area
+        with pytest.raises(ValidationError):
+            fs.delete_if_unchanged("gs://bk/uploads/1/a.txt", fs.identity("gs://bk/uploads/1/a.txt")[1])
+
+    assert list(outside.iterdir()) == []
+    assert not fs.exists("gs://bk/experiments/1/files/u/a.txt")
+    assert fs.read_bytes("gs://bk/uploads/1/a.txt") == b"scientific bytes"
+
+
+def test_a_private_area_that_is_a_file_is_refused(tmp_path):
+    (tmp_path / ".bioaf-object-staging").write_text("not a directory")
+    fs = LocalObjectFilesystem(str(tmp_path), lambda u: tuple(u.split("://", 1)[1].split("/", 1)), _build)
+    fs.write_stream("gs://bk/a.txt", io.BytesIO(b"x"))
+    with pytest.raises(ValidationError):
+        fs.copy_create_only("gs://bk/a.txt", "gs://bk/b.txt", None, None)
+    assert not fs.exists("gs://bk/b.txt")

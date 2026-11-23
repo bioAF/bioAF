@@ -389,10 +389,27 @@ class LocalObjectFilesystem:
 
     # -- conditional operations (create-only copy, guarded delete) -----------------------------
 
-    def _private_dir(self, name: str) -> str:
-        path = os.path.join(self._base(), name)
-        os.makedirs(path, mode=0o700, exist_ok=True)
-        return path
+    def _private_dir_fd(self, name: str) -> int:
+        """A descriptor for ``<root>/<name>`` (created 0700 if missing), opened with O_NOFOLLOW from
+        the root's descriptor: a link or non-directory there is refused (ValidationError), so lock
+        records and staged bytes never leave the store. The caller closes it."""
+        base = self._base()
+        os.makedirs(base, exist_ok=True)
+        root_fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        try:
+            try:
+                return os.open(name, flags, dir_fd=root_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(name, 0o700, dir_fd=root_fd)
+                except FileExistsError:
+                    pass
+                return os.open(name, flags, dir_fd=root_fd)
+        except OSError as exc:  # a link (ELOOP) or not a directory (ENOTDIR)
+            raise ValidationError(f"The store's private {name} area is not a plain directory") from exc
+        finally:
+            os.close(root_fd)
 
     @contextmanager
     def _key_lock(self, uri: str) -> Iterator[None]:
@@ -402,9 +419,14 @@ class LocalObjectFilesystem:
         with _thread_locks_guard:
             thread_lock = _thread_locks.setdefault(f"{self._base()}:{digest}", threading.Lock())
         with thread_lock:
-            fd = os.open(
-                os.path.join(self._private_dir(LOCK_DIR), digest), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
-            )
+            dir_fd = self._private_dir_fd(LOCK_DIR)
+            try:
+                try:
+                    fd = os.open(digest, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
+                except OSError as exc:
+                    raise ValidationError("A storage lock record is not a plain file") from exc
+            finally:
+                os.close(dir_fd)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX)
                 yield
@@ -436,42 +458,53 @@ class LocalObjectFilesystem:
                 before = self._version(os.fstat(src.fileno()))
                 if source_version is not None and before != source_version:
                     raise ObjectChanged(source_uri)
-                staged = self._stage(src, dest)
+                staging_fd, staged = self._stage(src, dest)
                 try:
                     if self._version(os.fstat(src.fileno())) != before:
                         raise ObjectChanged(source_uri)
                     try:
-                        os.link(staged, dest)
+                        os.link(staged, dest, src_dir_fd=staging_fd, follow_symlinks=False)
                     except FileExistsError as e:
                         raise DestinationExists(dest_uri) from e
                 finally:
                     try:
-                        os.unlink(staged)
+                        os.unlink(staged, dir_fd=staging_fd)
                     except FileNotFoundError:
                         pass
+                    os.close(staging_fd)
             self._write_metadata(dest_uri, merged)
             st = os.stat(dest)
             return st.st_size, self._version(st)
 
-    def _stage(self, src: BinaryIO, dest: str) -> str:
-        """Write ``src`` to a private temporary file on the destination's filesystem; return its path."""
+    def _stage(self, src: BinaryIO, dest: str) -> tuple[int, str]:
+        """Write ``src`` to a new private temporary file on the destination's filesystem.
+
+        Returns ``(directory descriptor, name)``; the caller links it into place, unlinks it and
+        closes the descriptor. Created exclusively and without following links, in the store's
+        private staging directory, or (when that is another filesystem, which ``link`` cannot cross)
+        in the destination's own directory, which ``path`` has already confined."""
         name = f".bioaf-partial-{secrets.token_hex(8)}"
-        staging = os.path.join(self._private_dir(STAGING_DIR), name)
-        if os.stat(os.path.dirname(staging)).st_dev != os.stat(os.path.dirname(dest)).st_dev:
-            staging = os.path.join(os.path.dirname(dest), name)  # link cannot cross filesystems
-        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        dir_fd = self._private_dir_fd(STAGING_DIR)
         try:
-            with os.fdopen(fd, "wb") as out:
-                shutil.copyfileobj(src, out)
-                out.flush()
-                os.fsync(out.fileno())
-        except BaseException:
+            if os.fstat(dir_fd).st_dev != os.stat(os.path.dirname(dest)).st_dev:
+                os.close(dir_fd)
+                dir_fd = os.open(os.path.dirname(dest), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dir_fd)
             try:
-                os.unlink(staging)
-            except FileNotFoundError:
-                pass
+                with os.fdopen(fd, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                    out.flush()
+                    os.fsync(out.fileno())
+            except BaseException:
+                try:
+                    os.unlink(name, dir_fd=dir_fd)
+                except FileNotFoundError:
+                    pass
+                raise
+        except BaseException:
+            os.close(dir_fd)
             raise
-        return staging
+        return dir_fd, name
 
     def delete_if_unchanged(self, uri: str, version: str) -> bool:
         """Remove ``uri`` only while it is exactly ``version``; False if it is already gone."""
