@@ -1,4 +1,5 @@
 import logging
+import uuid as uuid_pkg
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import cast
@@ -80,8 +81,13 @@ class FileService:
         external_id: str | None = None,
         source_storage_uri: str | None = None,
         source_notebook_session_id: int | None = None,
+        file_uuid: uuid_pkg.UUID | None = None,
     ) -> File:
         """Create one File row on the caller's session (the caller commits).
+
+        ``file_uuid`` registers the File under an identity reserved earlier (an upload's checkpoint
+        reserves one so every filing attempt registers the same File); None lets the database
+        generate one.
 
         ``external_id`` is the caller's own identifier, or None. A pipeline output records where it
         was found as its durable source identity (``source_storage_uri``, by default the URI it is
@@ -111,6 +117,8 @@ class FileService:
             source_storage_uri=source_storage_uri,
             source_notebook_session_id=source_notebook_session_id,
         )
+        if file_uuid is not None:
+            file.uuid = file_uuid
         try:
             async with session.begin_nested():
                 session.add(file)

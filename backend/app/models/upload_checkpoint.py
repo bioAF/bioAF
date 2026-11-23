@@ -27,6 +27,7 @@ listing.
 not confirm.
 """
 
+import uuid as uuid_pkg
 from datetime import datetime
 
 from sqlalchemy import (
@@ -42,7 +43,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -60,6 +61,19 @@ class UploadCheckpoint(Base):
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     source_uri: Mapped[str] = mapped_column(Text, nullable=False)
     planned_destination: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The File UUID this data-file upload will be registered under, reserved before the first filing
+    # attempt so every retry (after a rolled-back savepoint or a restart) files the same identity at
+    # the same organized path. An independent UUID, not a reference: the File may not exist yet.
+    # NULL for non-file purposes and for checkpoints recorded before reservations existed (one is
+    # allocated under the upload lock before such a checkpoint's first new copy).
+    file_uuid: Mapped[uuid_pkg.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Observations committed before a filing copy: the received source's exact version and size
+    # (and a trusted whole-object MD5 when the provider has one), and the destination version once
+    # the copy is observed. Recovery after a crash compares against these, never against the path.
+    source_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_observed_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_native_md5: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    destination_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     received_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     expected_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     expected_md5: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -107,4 +121,5 @@ class UploadCheckpoint(Base):
         CheckConstraint("kind IN ('signed', 'proxied', 'session')", name="ck_upload_checkpoints_kind"),
         CheckConstraint("purpose IN ('file', 'lab_document', 'reference')", name="ck_upload_checkpoints_purpose"),
         Index("ix_upload_checkpoints_org_stage", "organization_id", "stage"),
+        Index("uq_upload_checkpoints_file_uuid", "file_uuid", unique=True),
     )

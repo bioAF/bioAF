@@ -244,6 +244,9 @@ class UploadService:
         from app.services.file_service import validate_external_id
         from app.services.storage_write_admission import require_store_usable
 
+        from app.services.file_organization import validate_object_filename
+
+        filename = validate_object_filename(filename)
         external_id = validate_external_id(external_id)
         await verify_association_targets(
             session, org_id, project_id=project_id, experiment_id=experiment_id, sample_ids=sample_ids or []
@@ -271,6 +274,7 @@ class UploadService:
             stage="issued",
             filename=filename,
             source_uri=gcs_uri,
+            file_uuid=uuid.uuid4(),
             expected_size=expected_size,
             expected_md5=expected_md5,
             project_id=project_id,
@@ -447,8 +451,10 @@ class UploadService:
         object stores (Phase 7). The checkpoint is recorded before the transfer; a filing failure
         keeps the received bytes tracked and raises UploadReceivedNotFiled.
         """
+        from app.services.file_organization import validate_object_filename
         from app.services.storage_write_admission import require_store_usable, tracked_transfer
 
+        filename = validate_object_filename(filename)
         # Before the storage write (admission already checked the pause): an unusable store or a
         # refused target leaves no object and no record.
         await verify_association_targets(
@@ -477,6 +483,7 @@ class UploadService:
             stage="transferring",
             filename=filename,
             source_uri=gcs_uri,
+            file_uuid=uuid.uuid4(),
             expected_size=size_bytes,
             project_id=project_id,
             experiment_id=experiment_id,
@@ -549,6 +556,11 @@ class UploadService:
         checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
         if checkpoint is None or checkpoint.stage not in ("received", "filed"):
             raise StateError("Only a received upload that has not been filed can be filed.")
+        if checkpoint.file_uuid is None and checkpoint.stage == "received":
+            # Recorded before reservations existed: reserve its identity durably, under the lock,
+            # before its first attempt, so every later attempt registers the same File.
+            await _update_checkpoint(upload_id, file_uuid=uuid.uuid4())
+            checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
         from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused, admitted
 
         try:
@@ -639,6 +651,7 @@ class UploadService:
             experiment_id=experiment_id,
             is_global=checkpoint.is_global,
             external_id=checkpoint.external_id,
+            file_uuid=checkpoint.file_uuid,
         )
 
         # Sequencing identity as typed columns. The tags above are kept for one

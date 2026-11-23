@@ -1,22 +1,57 @@
 """File Organization Service.
 
-Handles experiment-based file organization within GCS buckets.
-Files are organized under experiments/{id}/ prefixes or unlinked/.
+Handles experiment-based file organization within the raw store. An organized object's key carries
+the File's permanent UUID (approved D1), so two files with one display name never share an object:
+``experiments/{experiment_id}/files/{file_uuid}/{filename}`` or ``unlinked/files/{file_uuid}/{filename}``.
+The display filename is kept as the last segment and never used as identity.
 """
 
 from __future__ import annotations
 
 import logging
+import unicodedata
+import uuid as uuid_pkg
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import NotFoundError
+from app.exceptions import NotFoundError, ValidationError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.gcs_storage import GcsStorageService
 
 logger = logging.getLogger("bioaf.file_organization")
+
+# One key segment on every backend: S3 and GCS allow 1024 bytes per key, a filesystem 255 per name.
+_FILENAME_MAX_BYTES = 255
+
+
+def validate_object_filename(filename: str) -> str:
+    """Return ``filename`` unchanged if it is safe as the last segment of an object key.
+
+    Refused (ValidationError) rather than rewritten: an empty name, ``.``/``..``, a path separator,
+    a NUL or other control character, or more than 255 bytes of UTF-8. Anything else, including
+    spaces and glob characters, is the scientist's name for the file and is kept exactly.
+    """
+    if not isinstance(filename, str) or filename in ("", ".", ".."):
+        raise ValidationError("A file name is required and cannot be '.' or '..'.")
+    if "/" in filename or "\\" in filename:
+        raise ValidationError("A file name cannot contain '/' or '\\'.")
+    if any(unicodedata.category(c) == "Cc" for c in filename):
+        raise ValidationError("A file name cannot contain control characters.")
+    if len(filename.encode("utf-8")) > _FILENAME_MAX_BYTES:
+        raise ValidationError(f"A file name can be at most {_FILENAME_MAX_BYTES} bytes long.")
+    return filename
+
+
+def organized_key(file_uuid: uuid_pkg.UUID, experiment_id: int | None, filename: str) -> str:
+    """The canonical raw-store key for a File: under its experiment, or unlinked, by its UUID."""
+    if not isinstance(file_uuid, uuid_pkg.UUID):
+        raise TypeError("An organized key needs the File's UUID")
+    filename = validate_object_filename(filename)
+    if experiment_id is None:
+        return f"unlinked/files/{file_uuid}/{filename}"
+    return f"experiments/{int(experiment_id)}/files/{file_uuid}/{filename}"
 
 
 class FileOrganizationService:

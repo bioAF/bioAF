@@ -114,6 +114,15 @@ Destroy Storage could delete the file while it is still uploading. Nothing is de
 is recorded in the audit log. Lab document and reference dataset uploads are tracked the same way; each
 reference upload is stored under its own path, so a new upload never shares objects with an aborted one.
 
+Each file filed into an experiment is stored under its own permanent file ID, so two files with the same
+name never share stored bytes: `experiments/<experiment>/files/<file ID>/<file name>` in the raw bucket
+(the uploaded bucket when no raw bucket is configured), or `unlinked/files/<file ID>/<file name>` after
+**Unlink**. The file keeps its original name everywhere in bioAF. An upload without an experiment stays at
+its own upload path (`uploads/<upload>/<file name>` in the ingest bucket) until it is assigned. Files
+stored before this release keep their recorded paths until they are moved. A file name cannot contain `/`,
+`\`, control characters or more than 255 bytes, and cannot be `.` or `..`; such an upload is refused
+before anything is stored.
+
 If storage has not yet confirmed the last bytes when an upload finishes, the uploader shows **Confirming
 upload** and checks again automatically.
 
