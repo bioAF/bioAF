@@ -853,3 +853,53 @@ def test_the_release_push_offers_the_pat_only_to_the_push_and_fails_when_it_is_r
     assert all(d.endswith(":" + FAKE_PAT) for d in decoded)
     assert FAKE_PAT not in done.stdout + done.stderr
     assert FAKE_PAT not in _credential_traces(work) and "credential" not in _credential_traces(work)
+
+
+# ── planned skips are granted only explicitly (nov_sec 01D) ──
+
+NEVER_SKIP = "changes,security-scan,dependency-review,docs-lint"
+
+
+def _gate(required_checks, needs: str, skips: str | None, never: str | None = NEVER_SKIP) -> int:
+    argv = ["--needs", needs]
+    if skips is not None:
+        argv += ["--allowed-skips-json", skips]
+    if never is not None:
+        argv += ["--never-skip", never]
+    return required_checks.main(argv)
+
+
+def test_a_planned_skip_passes_only_with_explicit_permission(required_checks):
+    needs = _needs(changes="success", **{"docs-lint": "success", "backend-test": "skipped"})
+    assert _gate(required_checks, needs, '["backend-test"]') == 0
+    assert _gate(required_checks, needs, None) == 1
+    assert _gate(required_checks, needs, "") == 1
+    assert _gate(required_checks, needs, "[]") == 1
+    assert _gate(required_checks, needs, '["frontend-test"]') == 1
+
+
+@pytest.mark.parametrize("result", ["failure", "cancelled", "", "neutral"])
+def test_permission_to_skip_never_excuses_another_result(required_checks, result):
+    needs = _needs(changes="success", **{"backend-test": result})
+    assert _gate(required_checks, needs, '["backend-test"]') == 1
+
+
+def test_a_permitted_job_that_ran_must_still_succeed(required_checks):
+    assert _gate(required_checks, _needs(changes="success", b="success"), '["b"]') == 0
+    assert _gate(required_checks, _needs(changes="success", b="failure"), '["b"]') == 1
+
+
+@pytest.mark.parametrize(
+    "skips", ["not json", "{}", '"backend-test"', "[1]", '["backend-test", "backend-test"]', "null", '["unknown-job"]']
+)
+def test_malformed_permission_fails_the_gate(required_checks, capsys, skips):
+    needs = _needs(changes="success", **{"backend-test": "skipped"})
+    assert _gate(required_checks, needs, skips) == 1
+    assert "::error::" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("job", ["changes", "security-scan", "dependency-review", "docs-lint"])
+def test_an_always_required_job_cannot_be_permitted_to_skip(required_checks, capsys, job):
+    needs = _needs(**{"backend-test": "success", job: "skipped"})
+    assert _gate(required_checks, needs, json.dumps([job])) == 1
+    assert job in capsys.readouterr().out
