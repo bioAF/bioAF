@@ -161,3 +161,22 @@ async def test_an_nfs_cleanup_of_a_changed_artifact_is_refused(session, admin_us
 
 async def _noop():
     return "none"
+
+
+async def test_removing_a_managed_artifact_is_a_tracked_storage_worker(nfs, monkeypatch):
+    """Review finding 6: the deletion thread is registered until it returns, like every storage write."""
+    from app.adapters.storage import nfs_managed_copy, workers
+
+    artifact = await _artifact(nfs)
+    observed = await nfs.object_identity(artifact.uri)
+    seen = []
+    real = nfs_managed_copy.remove_managed_artifact
+
+    def recording(*args):
+        seen.append([w.label for w in workers._running.values()])
+        return real(*args)
+
+    monkeypatch.setattr(nfs_managed_copy, "remove_managed_artifact", recording)
+    assert await nfs.delete_if_unchanged(observed) is True
+    await nfs.remove_managed_artifact(artifact.uri)  # the procedure itself, as cleanup and the verifier call it
+    assert seen == [["storage delete"], ["storage delete"]]

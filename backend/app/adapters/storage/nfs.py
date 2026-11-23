@@ -425,7 +425,11 @@ class NfsStorageProvider(StorageProvider):
     async def remove_managed_artifact(self, uri: str) -> None:
         self._fs.path(uri)  # the same container/key confinement as every other operation, first
         store, key = self._parse_uri(uri)
-        await asyncio.to_thread(nfs_managed_copy.remove_managed_artifact, self._root, store, key, uri)
+        # Tracked until the thread returns: a cancelled caller must not release admission or a lock
+        # while the removal can still change storage.
+        await storage_workers.run(
+            "storage delete", nfs_managed_copy.remove_managed_artifact, self._root, store, key, uri
+        )
 
     def managed_preflight(self, store: str, producer_uids) -> None:
         nfs_managed_copy.preflight(self._root, store, producer_uids=producer_uids)
