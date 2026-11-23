@@ -319,3 +319,133 @@ async def test_gcs_conditional_writes_are_tracked_storage_workers(gcs, monkeypat
     copied = await adapter.copy_create_only("gs://ingest/uploads/6/a.txt", "gs://raw/x/a.txt", metadata=OWNER)
     await adapter.delete_if_unchanged(copied)
     assert labels == ["storage copy", "storage delete"]
+
+
+# ---------------------------------------------------------------------------
+# S3 (12B.2a)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(params=[True, False], ids=["versioned", "unversioned"])
+def s3(request, mode_adapter_factory, monkeypatch):
+    from app.adapters.storage.s3 import S3StorageProvider
+    from tests.support.fake_s3 import FakeS3
+
+    adapter = mode_adapter_factory(S3StorageProvider, org_slug="t", mode=ComputeMode.KUBERNETES)
+    adapter._region = "us-east-1"
+    fake = FakeS3(versioning=request.param)
+
+    async def creds():
+        return None
+
+    monkeypatch.setattr(adapter, "_get_credentials", creds)
+    monkeypatch.setattr(adapter, "_get_s3_client", lambda credentials=None: fake)
+    return adapter, fake
+
+
+async def test_s3_publishes_create_only_with_owner_metadata(s3):
+    adapter, fake = s3
+    fake.put("ingest", "uploads/1/a.txt", b"first-science", {"lab-tag": "x", "bioaf-file-uuid": "forged"}, "text/plain")
+    pinned = await adapter.object_identity("s3://ingest/uploads/1/a.txt")
+    published = await adapter.copy_create_only(
+        "s3://ingest/uploads/1/a.txt", "s3://raw/e/files/u/a.txt", source_identity=pinned, metadata=OWNER
+    )
+    stored = fake.objects[("raw", "e/files/u/a.txt")]
+    assert stored.data == b"first-science" and stored.content_type == "text/plain"
+    assert stored.metadata == {**OWNER, "lab-tag": "x"}
+    assert published.size_bytes == 13
+    [call] = [c for c in fake.calls if c[0] == "copy_object"]
+    assert call[1]["IfNoneMatch"] == "*" and call[1]["MetadataDirective"] == "REPLACE"
+    assert ("ingest", "uploads/1/a.txt") in fake.objects
+
+
+async def test_s3_refuses_an_existing_or_racing_destination(s3):
+    adapter, fake = s3
+    fake.put("ingest", "uploads/2/a.txt", b"mine")
+    fake.put("raw", "taken.txt", b"theirs")
+    with pytest.raises(DestinationExists):
+        await adapter.copy_create_only("s3://ingest/uploads/2/a.txt", "s3://raw/taken.txt", metadata=OWNER)
+    fake.before_publish = lambda: fake.put("raw", "racing.txt", b"theirs")
+    with pytest.raises(DestinationExists):
+        await adapter.copy_create_only("s3://ingest/uploads/2/a.txt", "s3://raw/racing.txt", metadata=OWNER)
+    assert fake.objects[("raw", "taken.txt")].data == fake.objects[("raw", "racing.txt")].data == b"theirs"
+
+
+async def test_s3_refuses_a_replaced_source(s3):
+    adapter, fake = s3
+    fake.put("ingest", "uploads/3/a.txt", b"observed")
+    pinned = await adapter.object_identity("s3://ingest/uploads/3/a.txt")
+    fake.put("ingest", "uploads/3/a.txt", b"replaced")
+    if fake.versioning:
+        # The pinned version still exists: it, not the replacement, is what gets copied.
+        published = await adapter.copy_create_only(
+            "s3://ingest/uploads/3/a.txt", "s3://raw/a.txt", source_identity=pinned, metadata=OWNER
+        )
+        assert fake.objects[("raw", "a.txt")].data == b"observed" and published.size_bytes == 8
+    else:
+        with pytest.raises(ObjectChanged):
+            await adapter.copy_create_only(
+                "s3://ingest/uploads/3/a.txt", "s3://raw/a.txt", source_identity=pinned, metadata=OWNER
+            )
+        assert ("raw", "a.txt") not in fake.objects
+
+
+async def test_s3_large_objects_are_copied_in_parts_with_a_conditional_completion(s3, monkeypatch):
+    from app.adapters.storage import s3 as module
+
+    adapter, fake = s3
+    monkeypatch.setattr(module, "_SINGLE_COPY_MAX", 10)
+    monkeypatch.setattr(module, "_COPY_PART", 4)
+    fake.put("ingest", "big", b"0123456789abcdef!", {"lab-tag": "x"})
+    published = await adapter.copy_create_only("s3://ingest/big", "s3://raw/big", metadata=OWNER)
+    assert fake.objects[("raw", "big")].data == b"0123456789abcdef!"
+    assert fake.objects[("raw", "big")].metadata == {**OWNER, "lab-tag": "x"}
+    assert published.native_md5 is None  # a multipart ETag is not an MD5
+    assert [c[1]["IfNoneMatch"] for c in fake.calls if c[0] == "complete_multipart_upload"] == ["*"]
+
+    fake.before_publish = lambda: fake.put("raw", "big2", b"theirs")
+    with pytest.raises(DestinationExists):
+        await adapter.copy_create_only("s3://ingest/big", "s3://raw/big2", metadata=OWNER)
+    assert fake.objects[("raw", "big2")].data == b"theirs"
+    assert len(fake.aborted) == 1 and fake.uploads == {}  # only its own unfinished upload was aborted
+
+
+async def test_s3_guarded_delete_removes_only_the_observed_version(s3):
+    adapter, fake = s3
+    fake.put("ingest", "uploads/4/a.txt", b"v1")
+    observed = await adapter.object_identity("s3://ingest/uploads/4/a.txt")
+    fake.put("ingest", "uploads/4/a.txt", b"v2")
+    with pytest.raises(ObjectChanged):
+        await adapter.delete_if_unchanged(observed)
+    assert fake.objects[("ingest", "uploads/4/a.txt")].data == b"v2"
+    current = await adapter.object_identity("s3://ingest/uploads/4/a.txt")
+    assert await adapter.delete_if_unchanged(current) is True
+    assert ("ingest", "uploads/4/a.txt") not in fake.objects
+    assert await adapter.delete_if_unchanged(current) is False
+    [last] = [c for c in fake.calls if c[0] == "delete_object"][-1:]
+    assert (last[1]["VersionId"] is not None) == fake.versioning
+    assert (last[1]["IfMatch"] is not None) == (not fake.versioning)
+
+
+async def test_s3_inspection_reads_identity_and_metadata_together(s3):
+    adapter, fake = s3
+    fake.put("raw", "x", b"abc", OWNER)
+    seen = await adapter.inspect_object("s3://raw/x")
+    assert seen.metadata == OWNER and seen.identity.size_bytes == 3
+
+
+async def test_s3_local_mode_uses_the_filesystem_primitives(monkeypatch, tmp_path):
+    from app.adapters.storage import s3 as module
+    from app.adapters.storage.s3 import S3StorageProvider
+
+    monkeypatch.setenv("BIOAF_COMPUTE_MODE", "local")
+    monkeypatch.setattr(module, "LOCAL_DATA_ROOT", str(tmp_path))
+    adapter = S3StorageProvider(org_slug="t")
+    src = adapter.build_uri("bk", "uploads/1/a.txt")
+    await adapter.upload_file(src, io.BytesIO(b"x"))
+    dest = adapter.build_uri("bk", "e/files/u/a.txt")
+    published = await adapter.copy_create_only(src, dest, source_identity=await adapter.object_identity(src))
+    with pytest.raises(DestinationExists):
+        await adapter.copy_create_only(src, dest)
+    assert (await adapter.inspect_object(dest)).identity == published
+    assert await adapter.delete_if_unchanged(published) is True

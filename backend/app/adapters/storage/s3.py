@@ -41,9 +41,12 @@ from app.adapters.models import (
     UploadSessionGrant,
     UploadSessionState,
     UploadSessionStatus,
+    DestinationExists,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
+    ObjectObservation,
+    owner_metadata,
     BucketAdminMetrics,
     BucketMetrics,
     ContainerObservation,
@@ -65,6 +68,9 @@ _MIB = 1024 * 1024
 _MIN_PART = 8 * _MIB  # S3's floor is 5 MiB; 8 MiB keeps requests few for small files
 _DEFAULT_PART = 64 * _MIB  # when the size is not declared
 _MAX_PARTS = 10_000
+# Largest object one CopyObject request may copy; anything bigger is copied part by part.
+_SINGLE_COPY_MAX = 5 * 1024 * _MIB
+_COPY_PART = 512 * _MIB
 
 
 def multipart_part_size(size_bytes: int | None) -> int:
@@ -559,6 +565,40 @@ class S3StorageProvider(StorageProvider):
         await storage_workers.run("storage copy", self._s3_copy, source_uri, dest_uri, creds)
         return dest_uri
 
+    async def copy_create_only(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> ObjectIdentity:
+        version = source_identity.version if source_identity is not None else None
+        if self.is_local:
+            size, published = await storage_workers.run(
+                "storage copy", self._local_fs().copy_create_only, source_uri, dest_uri, version, metadata
+            )
+            return ObjectIdentity(uri=dest_uri, size_bytes=size, version=published)
+        creds = await self._get_credentials()
+        return await storage_workers.run(
+            "storage copy", self._s3_copy_create_only, source_uri, dest_uri, version, metadata, creds
+        )
+
+    async def delete_if_unchanged(self, identity: ObjectIdentity) -> bool:
+        if self.is_local:
+            return await storage_workers.run(
+                "storage delete", self._local_fs().delete_if_unchanged, identity.uri, identity.version
+            )
+        creds = await self._get_credentials()
+        return await storage_workers.run("storage delete", self._s3_delete_if_unchanged, identity, creds)
+
+    async def inspect_object(self, uri: str) -> ObjectObservation:
+        if self.is_local:
+            size, version, md = await asyncio.to_thread(self._local_fs().inspect, uri)
+            return ObjectObservation(identity=ObjectIdentity(uri=uri, size_bytes=size, version=version), metadata=md)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_inspect_object, uri, creds)
+
     async def move(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
             await asyncio.to_thread(self._local_fs().move, source_uri, dest_uri)
@@ -1042,6 +1082,179 @@ class S3StorageProvider(StorageProvider):
         # limit. A multipart copy's ETag is not the object's MD5, so a large copied object has no native
         # MD5 and checksum verification streams it. The threshold is deliberately left alone.
         self._get_s3_client(creds).copy({"Bucket": src_bucket, "Key": src_key}, dst_bucket, dst_key)
+
+    @staticmethod
+    def _identity_from_head(uri: str, resp: dict) -> ObjectIdentity:
+        version_id = resp.get("VersionId")
+        version = f"versionid:{version_id}" if version_id and version_id != "null" else f"etag:{resp.get('ETag')}"
+        return ObjectIdentity(
+            uri=uri, size_bytes=resp.get("ContentLength") or 0, version=version, native_md5=_trusted_md5(resp)
+        )
+
+    @staticmethod
+    def _error_code(e) -> tuple[str, int | None]:
+        err = getattr(e, "response", {}) or {}
+        return str(err.get("Error", {}).get("Code", "")), err.get("ResponseMetadata", {}).get("HTTPStatusCode")
+
+    def _s3_pinned_head(self, client, uri: str, version: str | None) -> dict:
+        """HEAD of exactly the pinned source version (or the current one); ObjectChanged otherwise."""
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        kwargs: dict = {}
+        if version is not None:
+            kind, _, value = version.partition(":")
+            if kind == "versionid":
+                kwargs["VersionId"] = value
+            elif kind == "etag":
+                kwargs["IfMatch"] = value
+            else:
+                raise ObjectChanged(uri)
+        try:
+            resp = client.head_object(Bucket=bucket, Key=key, **kwargs)
+        except ClientError as e:
+            code, status = self._error_code(e)
+            if version is not None and (_is_not_found(e) or code in {"PreconditionFailed", "412"} or status == 412):
+                raise ObjectChanged(uri) from e
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        if version is not None and self._identity_from_head(uri, resp).version != version:
+            raise ObjectChanged(uri)
+        return resp
+
+    def _s3_copy_create_only(
+        self, source_uri: str, dest_uri: str, source_version: str | None, metadata, creds
+    ) -> ObjectIdentity:
+        """Copy only if the destination is absent (``IfNoneMatch="*"`` on CopyObject, or on
+        CompleteMultipartUpload above the single-copy limit), from exactly the observed source
+        version (``VersionId`` plus ``CopySourceIfMatch``), with the destination's metadata in the
+        same request. The managed ``client.copy`` is not used: s3transfer does not pass the
+        destination condition through. A refused or failed multipart copy aborts only its own upload.
+        """
+        from botocore.exceptions import ClientError
+
+        client = self._get_s3_client(creds)
+        head = self._s3_pinned_head(client, source_uri, source_version)
+        src_bucket, src_key = self._parse_uri(source_uri)
+        dst_bucket, dst_key = self._parse_uri(dest_uri)
+        copy_source = {"Bucket": src_bucket, "Key": src_key}
+        if head.get("VersionId") and head.get("VersionId") != "null":
+            copy_source["VersionId"] = head["VersionId"]
+        etag = head.get("ETag")
+        merged = validate_object_metadata(owner_metadata(head.get("Metadata"), metadata))
+        headers = {k: head[k] for k in ("ContentType", "ContentEncoding", "ContentDisposition") if head.get(k)}
+        size = head.get("ContentLength") or 0
+
+        def refused(e: ClientError) -> Exception:
+            code, status = self._error_code(e)
+            if code in {"PreconditionFailed", "412"} or status == 412:
+                try:
+                    client.head_object(Bucket=dst_bucket, Key=dst_key)
+                    return DestinationExists(dest_uri)
+                except ClientError:
+                    return ObjectChanged(source_uri)
+            if code in {"ConditionalRequestConflict", "409"} or status == 409:
+                # A concurrent conditional write to this key: the caller retries and re-inspects.
+                return RuntimeError("Concurrent write to the storage destination")
+            return e
+
+        if size <= _SINGLE_COPY_MAX:
+            try:
+                client.copy_object(
+                    Bucket=dst_bucket,
+                    Key=dst_key,
+                    CopySource=copy_source,
+                    CopySourceIfMatch=etag,
+                    IfNoneMatch="*",
+                    MetadataDirective="REPLACE",
+                    Metadata=merged,
+                    **headers,
+                )
+            except ClientError as e:
+                raise refused(e) from e
+        else:
+            part = max(_COPY_PART, -(-size // _MAX_PARTS))
+            upload_id = client.create_multipart_upload(Bucket=dst_bucket, Key=dst_key, Metadata=merged, **headers)[
+                "UploadId"
+            ]
+            try:
+                parts = []
+                for number, start in enumerate(range(0, size, part), start=1):
+                    end = min(start + part, size) - 1
+                    resp = client.upload_part_copy(
+                        Bucket=dst_bucket,
+                        Key=dst_key,
+                        UploadId=upload_id,
+                        PartNumber=number,
+                        CopySource=copy_source,
+                        CopySourceIfMatch=etag,
+                        CopySourceRange=f"bytes={start}-{end}",
+                    )
+                    parts.append({"PartNumber": number, "ETag": resp["CopyPartResult"]["ETag"]})
+                client.complete_multipart_upload(
+                    Bucket=dst_bucket,
+                    Key=dst_key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                    IfNoneMatch="*",
+                )
+            except BaseException as e:
+                try:
+                    client.abort_multipart_upload(Bucket=dst_bucket, Key=dst_key, UploadId=upload_id)
+                except Exception:
+                    logger.warning("Could not abort an unfinished copy (error_type=%s)", type(e).__name__)
+                if isinstance(e, ClientError):
+                    raise refused(e) from e
+                raise
+        published = self._identity_from_head(dest_uri, client.head_object(Bucket=dst_bucket, Key=dst_key))
+        if published.size_bytes != size:
+            raise RuntimeError("Storage copy verification failed: size differs")
+        return published
+
+    def _s3_delete_if_unchanged(self, identity: ObjectIdentity, creds) -> bool:
+        """Delete the observed version only: by ``VersionId`` once the current version is confirmed to
+        be it, or conditional on the ETag (``IfMatch``) without versioning."""
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(identity.uri)
+        client = self._get_s3_client(creds)
+        kind, _, value = identity.version.partition(":")
+        if kind not in ("versionid", "etag"):
+            raise ObjectChanged(identity.uri)
+        try:
+            current = self._identity_from_head(identity.uri, client.head_object(Bucket=bucket, Key=key))
+        except ClientError as e:
+            if _is_not_found(e):
+                return False
+            raise
+        if current.version != identity.version:
+            raise ObjectChanged(identity.uri)
+        kwargs = {"VersionId": value} if kind == "versionid" else {"IfMatch": value}
+        try:
+            client.delete_object(Bucket=bucket, Key=key, **kwargs)
+        except ClientError as e:
+            code, status = self._error_code(e)
+            if code in {"PreconditionFailed", "412"} or status == 412:
+                raise ObjectChanged(identity.uri) from e
+            if _is_not_found(e):
+                return False
+            raise
+        return True
+
+    def _s3_inspect_object(self, uri: str, creds) -> ObjectObservation:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            resp = self._get_s3_client(creds).head_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        return ObjectObservation(
+            identity=self._identity_from_head(uri, resp), metadata=dict(resp.get("Metadata") or {})
+        )
 
     def _s3_move(self, source_uri: str, dest_uri: str, creds) -> None:
         from botocore.exceptions import ClientError
