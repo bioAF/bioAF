@@ -92,10 +92,13 @@ async def test_a_refused_link_changes_nothing(client, session, world, body):
     assert await _file_row(session, world["file"]) == before
     assert await _links(session) == 0
     adapter.move.assert_not_called()
+    adapter.copy_create_only.assert_not_called()
+    adapter.object_identity.assert_not_called()
 
 
 async def test_a_link_to_own_targets_still_works(client, session, world):
     adapter = _storage_adapter()
+    adapter.put(world["uri"], b"reads")  # moving a file needs its stored bytes
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             f"/api/files/{world['file']}/link",

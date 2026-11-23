@@ -12,13 +12,11 @@ import logging
 import unicodedata
 import uuid as uuid_pkg
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, ValidationError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
-from app.services.gcs_storage import GcsStorageService
 
 logger = logging.getLogger("bioaf.file_organization")
 
@@ -66,17 +64,152 @@ class FileOrganizationService:
         return None
 
     @staticmethod
-    async def planned_location(session: AsyncSession, source_uri: str, experiment_id: int, filename: str) -> str:
-        """Where a file assigned to ``experiment_id`` is stored: the raw bucket's experiment prefix
-        (the source bucket when no raw bucket is configured)."""
+    async def planned_location(
+        session: AsyncSession,
+        source_uri: str,
+        *,
+        file_uuid: uuid_pkg.UUID,
+        experiment_id: int | None,
+        filename: str,
+    ) -> str:
+        """Where a File is organized: its UUID-keyed key (``organized_key``) in the raw bucket, or in
+        the source's bucket when no raw bucket is configured. The same File, experiment and name
+        always give the same location, so every retry reaches the destination it reserved."""
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
         raw_bucket = await FileOrganizationService._get_raw_bucket(session)
         source_bucket, _ = adapter.parse_uri(source_uri)
         dest_bucket = raw_bucket or source_bucket
-        new_prefix = GcsStorageService.build_experiment_prefix(experiment_id)
-        return adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
+        return adapter.build_uri(dest_bucket, organized_key(file_uuid, experiment_id, filename))
+
+    @staticmethod
+    def _owner_metadata(file_uuid: uuid_pkg.UUID, org_id: int) -> dict[str, str]:
+        return {"bioaf-file-uuid": str(file_uuid), "bioaf-organization-id": str(org_id)}
+
+    @staticmethod
+    async def _relocate(
+        session: AsyncSession,
+        *,
+        org_id: int,
+        file_id: int,
+        experiment_id: int | None,
+        user_id: int,
+        commit: bool,
+    ) -> None:
+        """Move one of the organization's live Files to its organized place for ``experiment_id``
+        (None: unlinked), and record the association, in the caller's transaction.
+
+        The File and the target are checked against the trusted ``org_id`` before any storage call;
+        a foreign or missing one is "not found" and changes nothing. The bytes are copied create-only
+        to the File's UUID-keyed destination with its server-owned tags; the old object is recorded
+        for removal after the commit (``storage_cleanup``), never deleted here. An object already at
+        the destination is reused only if it is provably this File's copy (an interrupted earlier move
+        to the same target). An object other live records also name is refused: moving it would break
+        them, and copying its current bytes would not recover theirs.
+        """
+        from app.adapters.models import DestinationExists, ObjectChanged, StorageObjectNotFound
+        from app.adapters.registry import get_storage_adapter
+        from app.exceptions import ConflictError, StateError
+        from app.models.experiment import Experiment
+        from app.models.file import File
+        from app.services import storage_cleanup
+        from app.services.entity_references import verify_association_targets
+        from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused, admitted
+        from sqlalchemy import func, or_, select
+
+        file = await storage_cleanup.lock_file_for_storage_change(session, file_id, org_id)
+        if file is None:
+            raise NotFoundError("File not found")
+        if experiment_id is not None:
+            await verify_association_targets(session, org_id, experiment_id=experiment_id)
+        old_uri = file.storage_uri or file.gcs_uri
+        old_experiment_id = file.experiment_id
+        destination_uri = await FileOrganizationService.planned_location(
+            session, old_uri, file_uuid=file.uuid, experiment_id=experiment_id, filename=file.filename
+        )
+        previous = destination = None
+        if destination_uri != old_uri:
+            shared = await session.scalar(
+                select(func.count(File.id)).where(
+                    File.id != file.id,
+                    or_(File.storage_uri == old_uri, File.gcs_uri == old_uri),
+                    File.deleted_at.is_(None),
+                    File.storage_deleted.is_(False),
+                )
+            )
+            if shared:
+                logger.warning("File %s shares its stored object with other records; not moved", file.id)
+                raise ConflictError(
+                    "This file's stored copy is shared with other files, so it cannot be moved. "
+                    "An administrator needs to check it."
+                )
+            adapter = get_storage_adapter()
+            owner = FileOrganizationService._owner_metadata(file.uuid, org_id)
+            async with admitted(session, error=StorageWritesPaused, message=STORAGE_PAUSED):
+                try:
+                    previous = await adapter.object_identity(old_uri)
+                except StorageObjectNotFound:
+                    previous = None
+                for _attempt in range(2):
+                    try:
+                        observed = await adapter.inspect_object(destination_uri)
+                    except StorageObjectNotFound:
+                        observed = None
+                    if observed is None:
+                        if previous is None:
+                            raise StateError("This file's stored copy could not be found, so it was not moved.")
+                        try:
+                            destination = await adapter.copy_create_only(
+                                old_uri, destination_uri, source_identity=previous, metadata=owner
+                            )
+                        except DestinationExists:
+                            continue
+                        except ObjectChanged:
+                            raise ConflictError("This file's stored copy changed while it was being moved. Try again.")
+                        break
+                    tags = observed.metadata or {}
+                    same_size = previous is None or observed.identity.size_bytes == previous.size_bytes
+                    if all(tags.get(k) == v for k, v in owner.items()) and same_size:
+                        destination = observed.identity
+                        break
+                    raise ConflictError("Something else is already stored where this file would go. Nothing was moved.")
+                if destination is None:
+                    raise ConflictError("Something else is already stored where this file would go. Nothing was moved.")
+            await storage_cleanup.record_relocation(session, file, destination=destination, previous=previous)
+
+        exp_project_id = None
+        if experiment_id is not None:
+            exp_project_id = await session.scalar(
+                select(Experiment.project_id).where(
+                    Experiment.id == experiment_id, Experiment.organization_id == org_id
+                )
+            )
+        file.experiment_id = experiment_id
+        if exp_project_id is not None:
+            file.project_id = exp_project_id
+        await session.flush()
+
+        new_uri = file.storage_uri
+        if experiment_id is None:
+            action, details = "unlinked_from_experiment", {"old_experiment_id": old_experiment_id}
+        elif old_experiment_id is not None and old_experiment_id != experiment_id:
+            action = "reassigned_to_experiment"
+            details = {"old_experiment_id": old_experiment_id, "new_experiment_id": experiment_id}
+        else:
+            action, details = "assigned_to_experiment", {"experiment_id": experiment_id}
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="file",
+            entity_id=file.id,
+            action=action,
+            details={**details, "old_uri": old_uri, "new_uri": new_uri},
+        )
+        if commit:
+            await session.commit()
+            if previous is not None:
+                await storage_cleanup.cleanup_after_commit(file.id, org_id)
 
     @staticmethod
     async def assign_file_to_experiment(
@@ -85,80 +218,15 @@ class FileOrganizationService:
         experiment_id: int,
         user_id: int,
         *,
+        org_id: int,
         commit: bool = True,
     ) -> None:
-        """Assign (or reassign) a file to an experiment.
-
-        If the file is already assigned to another experiment, this acts
-        as a reassignment, moving the file between experiment prefixes.
-        ``commit=False`` leaves the transaction to the caller (upload filing records the File
-        and its move together, so neither is committed without the other).
-        """
-        row = (
-            await session.execute(
-                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
-            )
-        ).fetchone()
-
-        if not row:
-            raise NotFoundError(f"File {file_id} not found")
-
-        old_uri, current_exp_id, filename = row[0], row[1], row[2]
-
-        if current_exp_id is not None and current_exp_id != experiment_id:
-            # Already assigned to a different experiment - treat as reassign
-            await FileOrganizationService.reassign_file_to_experiment(session, file_id, experiment_id, user_id)
-            return
-
-        from app.adapters.registry import get_storage_adapter
-
-        adapter = get_storage_adapter()
-        new_uri = await FileOrganizationService.planned_location(session, old_uri, experiment_id, filename)
-
-        # Move file in GCS if URIs differ
-        if old_uri != new_uri:
-            new_uri = await adapter.move(old_uri, new_uri)
-
-        # Look up the experiment's project so we can denormalize project_id onto the file
-        exp_row = (
-            await session.execute(
-                text("SELECT project_id FROM experiments WHERE id = :eid").bindparams(eid=experiment_id)
-            )
-        ).fetchone()
-        exp_project_id = exp_row[0] if exp_row else None
-
-        # Update DB
-        await session.execute(
-            text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
-                + (", project_id = :proj_id" if exp_project_id is not None else "")
-                + " WHERE id = :fid"
-            ).bindparams(
-                **(
-                    {
-                        "exp_id": experiment_id,
-                        "uri": new_uri,
-                        "fid": file_id,
-                        **({"proj_id": exp_project_id} if exp_project_id is not None else {}),
-                    }
-                )
-            )
+        """Assign (or reassign) one of ``org_id``'s files to an experiment, moving its bytes to the
+        experiment's UUID-keyed place. ``commit=False`` leaves the transaction to the caller; the old
+        object is then removed by the cleanup pass after the caller commits."""
+        await FileOrganizationService._relocate(
+            session, org_id=org_id, file_id=file_id, experiment_id=experiment_id, user_id=user_id, commit=commit
         )
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="file",
-            entity_id=file_id,
-            action="assigned_to_experiment",
-            details={
-                "experiment_id": experiment_id,
-                "old_uri": old_uri,
-                "new_uri": new_uri,
-            },
-        )
-        if commit:
-            await session.commit()
 
     @staticmethod
     async def reassign_file_to_experiment(
@@ -166,123 +234,25 @@ class FileOrganizationService:
         file_id: int,
         new_experiment_id: int,
         user_id: int,
+        *,
+        org_id: int,
+        commit: bool = True,
     ) -> None:
-        """Move a file from one experiment to another."""
-        row = (
-            await session.execute(
-                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
-            )
-        ).fetchone()
-
-        if not row:
-            raise NotFoundError(f"File {file_id} not found")
-
-        old_uri, old_exp_id, filename = row[0], row[1], row[2]
-
-        # Use raw bucket as destination; fall back to source bucket
-        from app.adapters.registry import get_storage_adapter
-
-        adapter = get_storage_adapter()
-        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = adapter.parse_uri(old_uri)
-        dest_bucket = raw_bucket or source_bucket
-        new_prefix = GcsStorageService.build_experiment_prefix(new_experiment_id)
-        new_uri = adapter.build_uri(dest_bucket, f"{new_prefix}{filename}")
-
-        # Move in GCS
-        if old_uri != new_uri:
-            new_uri = await adapter.move(old_uri, new_uri)
-
-        # Look up the new experiment's project_id to keep file.project_id in sync
-        new_exp_row = (
-            await session.execute(
-                text("SELECT project_id FROM experiments WHERE id = :eid").bindparams(eid=new_experiment_id)
-            )
-        ).fetchone()
-        new_exp_project_id = new_exp_row[0] if new_exp_row else None
-
-        # Update DB
-        await session.execute(
-            text(
-                "UPDATE files SET experiment_id = :exp_id, gcs_uri = :uri, storage_uri = :uri"
-                + (", project_id = :proj_id" if new_exp_project_id is not None else "")
-                + " WHERE id = :fid"
-            ).bindparams(
-                **(
-                    {
-                        "exp_id": new_experiment_id,
-                        "uri": new_uri,
-                        "fid": file_id,
-                        **({"proj_id": new_exp_project_id} if new_exp_project_id is not None else {}),
-                    }
-                )
-            )
+        """Move one of ``org_id``'s files from one experiment to another."""
+        await FileOrganizationService._relocate(
+            session, org_id=org_id, file_id=file_id, experiment_id=new_experiment_id, user_id=user_id, commit=commit
         )
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="file",
-            entity_id=file_id,
-            action="reassigned_to_experiment",
-            details={
-                "old_experiment_id": old_exp_id,
-                "new_experiment_id": new_experiment_id,
-                "old_uri": old_uri,
-                "new_uri": new_uri,
-            },
-        )
-        await session.commit()
 
     @staticmethod
     async def unlink_file_from_experiment(
         session: AsyncSession,
         file_id: int,
         user_id: int,
+        *,
+        org_id: int,
+        commit: bool = True,
     ) -> None:
-        """Unlink a file from its experiment, moving to unlinked prefix."""
-        row = (
-            await session.execute(
-                text("SELECT storage_uri, experiment_id, filename FROM files WHERE id = :fid").bindparams(fid=file_id)
-            )
-        ).fetchone()
-
-        if not row:
-            raise NotFoundError(f"File {file_id} not found")
-
-        old_uri, old_exp_id, filename = row[0], row[1], row[2]
-
-        # Use raw bucket as destination; fall back to source bucket
-        from app.adapters.registry import get_storage_adapter
-
-        adapter = get_storage_adapter()
-        raw_bucket = await FileOrganizationService._get_raw_bucket(session)
-        source_bucket, _ = adapter.parse_uri(old_uri)
-        dest_bucket = raw_bucket or source_bucket
-        unlinked_prefix = GcsStorageService.build_unlinked_prefix()
-        new_uri = adapter.build_uri(dest_bucket, f"{unlinked_prefix}{filename}")
-
-        # Move in GCS
-        if old_uri != new_uri:
-            new_uri = await adapter.move(old_uri, new_uri)
-
-        # Update DB
-        await session.execute(
-            text(
-                "UPDATE files SET experiment_id = NULL, gcs_uri = :uri, storage_uri = :uri WHERE id = :fid"
-            ).bindparams(uri=new_uri, fid=file_id)
+        """Unlink one of ``org_id``'s files from its experiment, moving it to ``unlinked/files/{uuid}/``."""
+        await FileOrganizationService._relocate(
+            session, org_id=org_id, file_id=file_id, experiment_id=None, user_id=user_id, commit=commit
         )
-
-        await log_action(
-            session,
-            user_id=user_id,
-            entity_type="file",
-            entity_id=file_id,
-            action="unlinked_from_experiment",
-            details={
-                "old_experiment_id": old_exp_id,
-                "old_uri": old_uri,
-                "new_uri": new_uri,
-            },
-        )
-        await session.commit()

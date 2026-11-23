@@ -74,6 +74,10 @@ class UploadCheckpoint(Base):
     source_observed_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_native_md5: Mapped[str | None] = mapped_column(String(64), nullable=True)
     destination_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The stage a cancellation started from. ``received``/``transferring``: the bytes were already
+    # stored, so settling is removing bioAF's own copies (the ingest source and any organized copy),
+    # with no provider to wait for. NULL for a cancellation of an upload still being sent.
+    cancel_from_stage: Mapped[str | None] = mapped_column(String(24), nullable=True)
     received_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     expected_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     expected_md5: Mapped[str | None] = mapped_column(String(64), nullable=True)

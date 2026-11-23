@@ -3,19 +3,13 @@ import pytest_asyncio
 
 
 def _echo_move_adapter():
-    """Storage-adapter mock whose move() echoes the destination URI.
+    """An in-memory object store (tests/support/object_store.py) in which every seeded File's bytes
+    exist. Linking moves a file by a create-only copy to its UUID-keyed place; the old object is
+    removed after the link commits."""
+    from tests.support.object_store import recording_store
 
-    Phase 3 routes file moves through the BAL storage adapter (file linking /
-    reconcile), so these API tests patch the adapter boundary rather than the
-    retired GcsStorageService.move_file.
-    """
-    from unittest.mock import AsyncMock, MagicMock
-    from urllib.parse import urlparse
-
-    adapter = AsyncMock()
-    adapter.move.side_effect = lambda src, dst: dst
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
-    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
+    adapter = recording_store()
+    adapter.assume_present = lambda uri: True
     return adapter
 
 
@@ -292,6 +286,7 @@ async def test_link_already_linked_file_does_not_move_gcs(client, admin_token, s
 
     assert resp.status_code == 200
     adapter.move.assert_not_called()
+    adapter.copy_create_only.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -404,8 +399,7 @@ async def test_link_fastq_transitions_experiment_to_fastq_uploaded(client, admin
 @pytest.mark.asyncio
 async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, session, admin_user):
     """Files stuck in ingest bucket with an experiment_id should be moved to raw."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from urllib.parse import urlparse
+    from unittest.mock import patch
 
     from app.models.experiment import Experiment
     from app.models.file import File
@@ -459,16 +453,7 @@ async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, se
     await session.flush()
     await session.commit()
 
-    move_calls = []
-
-    async def fake_move(source, dest):
-        move_calls.append((source, dest))
-        return dest
-
-    adapter = AsyncMock()
-    adapter.move.side_effect = fake_move
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
-    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
+    adapter = _echo_move_adapter()
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         resp = await client.post(
             "/api/files/reconcile",
@@ -488,8 +473,8 @@ async def test_reconcile_moves_stuck_ingest_files_to_raw(client, admin_token, se
         assert "bioaf-raw-test" in row[0], f"Expected raw bucket, got {row[0]}"
         assert f"experiments/{exp.id}/" in row[0]
 
-    # Verify OK file was not moved
-    assert len(move_calls) == 2
+    # Verify OK file was not moved: only the two stuck files were copied
+    assert adapter.copy_create_only.await_count == 2
 
     # Verify experiment status advanced
     row = (

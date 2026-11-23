@@ -106,16 +106,32 @@ class UploadNotFinished(DomainError):
     code = "upload_not_finished"
 
 
+class _FilingConflict(Exception):
+    """Filing found storage it must not claim or overwrite: a destination it cannot prove is this
+    upload's, a received source that changed, or a legacy plan whose bytes cannot be located safely.
+    The bytes stay tracked (received, not filed) for an administrator; nothing is adopted or deleted."""
+
+    def __init__(self, category: str) -> None:
+        self.category = category
+        super().__init__(category)
+
+
 async def _record_filing_failure(upload_id: str, exc: BaseException) -> int:
-    """Count a failed filing attempt and schedule the next automatic one; return the attempt count."""
+    """Count a failed filing attempt and schedule the next automatic one; return the attempt count.
+
+    A conflict is not retried automatically (retrying cannot resolve it); it waits for Retry now or
+    Cancel upload with its own category."""
     async with _session_factory()() as s:
         checkpoint = await s.get(UploadCheckpoint, upload_id, with_for_update=True)
         if checkpoint is None:
             return 0
+        conflict = isinstance(exc, _FilingConflict)
         checkpoint.attempts = (checkpoint.attempts or 0) + 1
+        if conflict:
+            checkpoint.attempts = max(checkpoint.attempts, MAX_AUTOMATIC_ATTEMPTS + 1)
         due = checkpoint.attempts <= MAX_AUTOMATIC_ATTEMPTS
         checkpoint.next_attempt_at = datetime.now(timezone.utc) + RETRY_DELAYS[checkpoint.attempts - 1] if due else None
-        checkpoint.last_error_category = "filing_failed"
+        checkpoint.last_error_category = exc.category if conflict else "filing_failed"
         attempts = checkpoint.attempts
         reference = checkpoint.reference
         await s.commit()
@@ -564,10 +580,15 @@ class UploadService:
         from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused, admitted
 
         try:
-            # Filing moves bytes between stores: an admitted writer, refused while writes are paused.
+            # Filing copies bytes between stores: an admitted writer, refused while writes are paused.
             async with admitted(session, error=StorageWritesPaused, message=STORAGE_PAUSED):
+                staged = None
+                if checkpoint.stage == "received" and checkpoint.experiment_id:
+                    # Before the savepoint: the copy's observations and receipt are committed on
+                    # their own while this session's checkpoint stays clean (see _organized_copy).
+                    staged = await UploadService._organized_copy(session, checkpoint)
                 async with session.begin_nested():
-                    return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type)
+                    return await UploadService._file_checkpoint(session, checkpoint, file_type=file_type, staged=staged)
         except DomainError:
             raise
         except Exception as exc:
@@ -583,15 +604,138 @@ class UploadService:
             ) from None
 
     @staticmethod
-    async def _file_checkpoint(
-        session: AsyncSession, checkpoint: UploadCheckpoint, *, file_type: str | None = None
-    ) -> File:
-        """Register the received bytes as a File, link and move them, and start readiness.
+    def _owner_metadata(checkpoint: UploadCheckpoint) -> dict[str, str]:
+        """The server-owned tags an organized copy of this upload carries (never client values)."""
+        return {
+            "bioaf-file-uuid": str(checkpoint.file_uuid),
+            "bioaf-organization-id": str(checkpoint.organization_id),
+            "bioaf-upload-id": checkpoint.id,
+        }
 
-        Idempotent across retries: a filed checkpoint returns its File, and bytes a previous attempt
-        already moved are found at their planned destination, never copied twice.
+    @staticmethod
+    def _is_owned_copy(observation, checkpoint: UploadCheckpoint) -> bool:
+        """The recovery predicate: an object at the reserved destination is this upload's copy only if
+        its server-owned tags, its size, any recorded destination version and any comparable trusted
+        checksums all agree. A path, a name or a size alone never establishes ownership."""
+        tags = observation.metadata or {}
+        identity = observation.identity
+        if any(tags.get(k) != v for k, v in UploadService._owner_metadata(checkpoint).items()):
+            return False
+        if checkpoint.source_observed_size is not None and identity.size_bytes != checkpoint.source_observed_size:
+            return False
+        if checkpoint.destination_version is not None and identity.version != checkpoint.destination_version:
+            return False
+        if checkpoint.source_native_md5 and identity.native_md5 and identity.native_md5 != checkpoint.source_native_md5:
+            return False
+        return True
+
+    @staticmethod
+    def _is_legacy_plan(checkpoint: UploadCheckpoint) -> bool:
+        planned = checkpoint.planned_destination
+        return planned is not None and f"/files/{checkpoint.file_uuid}/" not in planned
+
+    @staticmethod
+    async def _organized_copy(session: AsyncSession, checkpoint: UploadCheckpoint):
+        """Copy received bytes to their reserved organized destination, create-only, and return
+        ``(pinned source or None, destination identity)``. The caller holds the upload lock.
+
+        Every observation (the exact destination, the source's version and size, the destination's
+        version) is committed in the checkpoint's own transaction before the step that relies on it,
+        and the caller's checkpoint is refreshed from that committed state rather than assigned, so
+        no flush in the caller's transaction holds the row another progress write needs. Nothing is
+        deleted here: the source is removed only after the File that replaces it is committed.
         """
+        from app.adapters.models import DestinationExists, ObjectChanged, ObjectIdentity, StorageObjectNotFound
         from app.adapters.registry import get_storage_adapter
+        from app.services.file_organization import FileOrganizationService
+
+        adapter = get_storage_adapter()
+        planned = checkpoint.planned_destination
+        if UploadService._is_legacy_plan(checkpoint):
+            # Planned by an earlier release at a name-only path that another upload may share. With the
+            # source still here, file it under its own identity instead; without it, the bytes at that
+            # path cannot be attributed to this upload, so the old evidence is kept and not adopted.
+            if not await adapter.exists(checkpoint.source_uri):
+                raise _FilingConflict("legacy_destination")
+            planned = None
+        if planned is None:
+            planned = await FileOrganizationService.planned_location(
+                session,
+                checkpoint.source_uri,
+                file_uuid=checkpoint.file_uuid,
+                experiment_id=checkpoint.experiment_id,
+                filename=checkpoint.filename,
+            )
+        try:
+            source: ObjectIdentity | None = await adapter.object_identity(checkpoint.source_uri)
+        except StorageObjectNotFound:
+            source = None
+        updates: dict = {}
+        if planned != checkpoint.planned_destination:
+            updates["planned_destination"] = planned
+        if source is not None:
+            if checkpoint.source_version is None:
+                updates.update(
+                    source_version=source.version,
+                    source_observed_size=source.size_bytes,
+                    source_native_md5=source.native_md5,
+                )
+            elif checkpoint.source_version != source.version:
+                raise _FilingConflict("source_changed")
+        if updates:
+            await _update_checkpoint(checkpoint.id, **updates)
+            await session.refresh(checkpoint)
+        pinned = (
+            ObjectIdentity(
+                uri=checkpoint.source_uri,
+                size_bytes=checkpoint.source_observed_size or 0,
+                version=checkpoint.source_version,
+                native_md5=checkpoint.source_native_md5,
+            )
+            if source is not None and checkpoint.source_version
+            else None
+        )
+        for _attempt in range(2):
+            try:
+                observed = await adapter.inspect_object(planned)
+            except StorageObjectNotFound:
+                observed = None
+            if observed is None:
+                if pinned is None:
+                    await _update_checkpoint(checkpoint.id, stage="failed", last_error_category="bytes_missing")
+                    raise StateError("The received copy of this upload is no longer stored.")
+                try:
+                    destination = await adapter.copy_create_only(
+                        checkpoint.source_uri,
+                        planned,
+                        source_identity=pinned,
+                        metadata=UploadService._owner_metadata(checkpoint),
+                    )
+                except DestinationExists:
+                    continue  # created meanwhile: decide from what is actually there
+                except ObjectChanged:
+                    raise _FilingConflict("source_changed") from None
+            elif UploadService._is_owned_copy(observed, checkpoint):
+                destination = observed.identity  # an earlier attempt's copy (a lost response, a crash)
+            else:
+                raise _FilingConflict("destination_conflict")
+            if checkpoint.destination_version != destination.version:
+                await _update_checkpoint(checkpoint.id, destination_version=destination.version)
+                await session.refresh(checkpoint)
+            return pinned, destination
+        raise _FilingConflict("destination_conflict")
+
+    @staticmethod
+    async def _file_checkpoint(
+        session: AsyncSession, checkpoint: UploadCheckpoint, *, file_type: str | None = None, staged=None
+    ) -> File:
+        """Register the received bytes as a File, link them, and start readiness.
+
+        ``staged`` is ``(source, destination)`` from ``_organized_copy`` for an upload into an
+        experiment: the File is registered at the destination with the source recorded for removal
+        once this transaction commits. Without an experiment the File stays at its unique intake URI.
+        Idempotent across retries: a filed checkpoint returns its File.
+        """
         from app.services.file_verification_service import Expectation, FileVerificationService, agreed_upload_md5
 
         org_id = checkpoint.organization_id
@@ -608,24 +752,14 @@ class UploadService:
             sample_ids=list(checkpoint.sample_ids or []),
         )
 
-        adapter = get_storage_adapter()
         storage_uri = checkpoint.source_uri
         experiment_id = checkpoint.experiment_id
+        source = destination = None
         if experiment_id:
-            from app.services.file_organization import FileOrganizationService
-
-            planned = await FileOrganizationService.planned_location(
-                session, checkpoint.source_uri, experiment_id, checkpoint.filename
-            )
-            if checkpoint.planned_destination != planned:
-                await _update_checkpoint(checkpoint.id, planned_destination=planned)
-                checkpoint.planned_destination = planned
-            if planned != checkpoint.source_uri and not await adapter.exists(checkpoint.source_uri):
-                # An earlier attempt moved the bytes and then failed: adopt them where they are.
-                if not await adapter.exists(planned):
-                    await _update_checkpoint(checkpoint.id, stage="failed", last_error_category="bytes_missing")
-                    raise StateError("The received copy of this upload is no longer stored.")
-                storage_uri = planned
+            if staged is None:
+                raise StateError("An upload into an experiment is filed only after its organized copy.")
+            source, destination = staged
+            storage_uri = destination.uri
 
         filename = checkpoint.filename
         file_type = file_type or UploadService._detect_file_type(filename)
@@ -679,12 +813,29 @@ class UploadService:
         for sample_id in checkpoint.sample_ids or []:
             await FileService.link_file_to_sample(session, file.id, sample_id)
 
-        # Move file from ingest to raw bucket under experiment prefix
         if experiment_id:
-            from app.services.file_organization import FileOrganizationService
+            from app.models.experiment import Experiment
+            from app.services.audit_service import log_action
+            from app.services.storage_cleanup import cleanup_slot
 
-            await FileOrganizationService.assign_file_to_experiment(
-                session, file.id, experiment_id, user_id, commit=False
+            # The experiment's project is denormalized onto the file, as assignment always did.
+            exp_project_id = await session.scalar(
+                select(Experiment.project_id).where(
+                    Experiment.id == experiment_id, Experiment.organization_id == org_id
+                )
+            )
+            if exp_project_id is not None:
+                file.project_id = exp_project_id
+            # The ingest copy is removed only after this transaction commits (storage_cleanup).
+            if source is not None and source.uri != storage_uri:
+                file.pending_storage_cleanup = cleanup_slot(source)
+            await log_action(
+                session,
+                user_id=user_id,
+                entity_type="file",
+                entity_id=file.id,
+                action="assigned_to_experiment",
+                details={"experiment_id": experiment_id, "old_uri": checkpoint.source_uri, "new_uri": storage_uri},
             )
 
         # Announce the registration with its final context and links, then start readiness: an
@@ -749,14 +900,16 @@ class UploadService:
     async def cancel_upload(
         session: AsyncSession, org_id: int, upload_id: str, user_id: int, *, reason: str = "cancelled"
     ) -> str:
-        """Cancel an unfiled upload; returns its stage afterwards.
+        """Cancel an unfiled upload; returns its stage afterwards (``cancelling``).
 
-        Received bytes (bioAF's own upload object) are deleted and the upload settles at once. An
-        upload still being sent is recorded as cancelling: filing is refused from now on, but it
-        keeps counting as a possible writer until the provider confirms nothing more can arrive
-        (``upload_settlement.settle``, run right after the caller commits and in the background).
+        Always recorded as cancelling first, committed by the caller before anything is deleted, so
+        a crash can never leave a received upload eligible for filing with its bytes half removed.
+        Filing is refused from then on. ``upload_settlement.settle`` (run right after the caller
+        commits, and in the background) finishes it: received bytes are removed from both places
+        they may be (the ingest copy and any organized copy an interrupted filing published), only
+        where they are provably this upload's; an upload still being sent keeps counting as a
+        possible writer until the provider confirms nothing more can arrive.
         """
-        from app.adapters.registry import get_storage_adapter
         from app.services.audit_service import log_action
 
         await lock_upload(session, upload_id)
@@ -770,24 +923,18 @@ class UploadService:
         if checkpoint.stage == "cancelling":
             return "cancelling"
         now = datetime.now(timezone.utc)
-        if checkpoint.stage == "issued":
-            checkpoint.stage = "cancelling"
-            # "interrupted": the browser stopped it after a failure, not the uploader's choice.
-            checkpoint.last_error_category = reason
-            checkpoint.cancel_requested_at = now
-            checkpoint.cancel_requested_by_user_id = user_id
-            checkpoint.next_reconcile_at = now
-            checkpoint.reconcile_attempts = 0
-        else:
-            expected_prefix = f"uploads/{upload_id}/"
-            adapter = get_storage_adapter()
-            _bucket, key = adapter.parse_uri(checkpoint.source_uri)
-            if key.startswith(expected_prefix):
-                await adapter.delete(checkpoint.source_uri)
-            checkpoint.stage = "cancelled"
-            checkpoint.cancel_requested_at = now
-            checkpoint.cancel_requested_by_user_id = user_id
-            checkpoint.next_attempt_at = None
+        if checkpoint.stage != "issued":
+            # The bytes are stored (or being stored by this server): settling removes bioAF's own
+            # copies, with no provider to wait for.
+            checkpoint.cancel_from_stage = checkpoint.stage
+        checkpoint.stage = "cancelling"
+        # "interrupted": the browser stopped it after a failure, not the uploader's choice.
+        checkpoint.last_error_category = reason
+        checkpoint.cancel_requested_at = now
+        checkpoint.cancel_requested_by_user_id = user_id
+        checkpoint.next_reconcile_at = now
+        checkpoint.reconcile_attempts = 0
+        checkpoint.next_attempt_at = None
         await log_action(
             session,
             user_id=user_id,
@@ -822,9 +969,16 @@ class UploadService:
         for upload_id, org_id in due:
             async with session_factory() as session:
                 try:
-                    await UploadService._file_or_defer(session, upload_id)
+                    file = await UploadService._file_or_defer(session, upload_id)
+                    file_id = file.id
                     await session.commit()
                     filed += 1
+                    from app.services.storage_cleanup import cleanup_after_commit
+
+                    try:
+                        await cleanup_after_commit(file_id, org_id, session_factory)
+                    except Exception as exc:  # the periodic cleanup pass retries
+                        logger.warning("Ingest copy cleanup deferred (error_type=%s)", type(exc).__name__)
                 except UploadReceivedNotFiled:
                     await session.rollback()
                 except StorageWritesPaused:

@@ -1,32 +1,19 @@
 import io
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import urlparse
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
 
 
 def _storage_adapter():
-    """Adapter mock for the upload + file-organization flows (Phase 3).
+    """An in-memory object store for the upload and file-organization flows
+    (tests/support/object_store.py): uploads land in it, a provider session finishes with the
+    object stored, and filing copies create-only to the File's UUID-keyed place."""
+    from tests.support.object_store import recording_store
 
-    The upload endpoints mint signed URLs / stream uploads via the BAL storage
-    adapter, and file-linking moves objects through it; both go through this one
-    adapter. move() echoes the destination URI.
-    """
-    from tests.support.uploads import with_upload_session
-
-    adapter = with_upload_session(AsyncMock(), "https://storage.googleapis.com/fake-signed-url")
-    adapter.move.side_effect = lambda src, dst: dst
-    # resolve_uri is the backend-neutral URI factory (Phase 7); echo a realistic
-    # store-scoped URI so callers that build write URIs through it get a string.
-    adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
-    # parse_uri is sync (a pure string transform), so it must be a MagicMock,
-    # not the AsyncMock default which returns an un-unpackable coroutine.
-    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
-    return adapter
+    return recording_store("https://storage.googleapis.com/fake-signed-url")
 
 
 @pytest_asyncio.fixture
@@ -440,12 +427,13 @@ async def test_signed_upload_moves_file_to_raw_bucket(client, admin_token, confi
 
     assert complete_resp.status_code == 200
 
-    # File should have been moved from ingest to raw bucket via the adapter
-    adapter.move.assert_awaited_once()
-    src, dest = adapter.move.call_args.args
+    # File should have been copied from ingest to the raw bucket (create-only), then the ingest copy removed
+    adapter.copy_create_only.assert_awaited_once()
+    src, dest = adapter.copy_create_only.call_args.args
     assert "uploads/" in src
-    assert f"experiments/{exp.id}/" in dest
+    assert f"experiments/{exp.id}/files/" in dest
     assert "bioaf-raw-test-abc123" in dest
+    assert src not in adapter.objects and dest in adapter.objects
 
     # DB record should have the new URI
     file_row = (await session.execute(select(File).where(File.filename == "moved.fastq.gz"))).scalar_one_or_none()

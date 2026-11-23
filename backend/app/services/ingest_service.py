@@ -6,6 +6,7 @@ entities, and catalogs files in the database.
 """
 
 import logging
+import uuid as uuid_pkg
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -187,10 +188,15 @@ async def copy_to_raw_bucket(
     destination_prefix: str,
     filename: str,
     credentials=None,
+    *,
+    source_identity=None,
+    owner_metadata: dict[str, str] | None = None,
 ) -> str:
-    """Copy a file from the ingest bucket to the raw bucket.
+    """Copy a file from the ingest bucket to the raw bucket, create-only. Returns the destination URI.
 
-    Returns the destination GCS URI.
+    The source is kept: it is removed only after the File that names the copy is committed (the
+    caller records it for ``storage_cleanup``). ``destination_prefix`` is the File's UUID-keyed
+    organized prefix, so an occupied destination is refused, never replaced.
     """
     from app.adapters.registry import get_storage_adapter
 
@@ -198,8 +204,58 @@ async def copy_to_raw_bucket(
     source_uri = adapter.build_uri(source_bucket, source_path)
     destination_uri = adapter.build_uri(raw_bucket, f"{destination_prefix}{filename}")
 
-    await adapter.move(source_uri, destination_uri)
+    await adapter.copy_create_only(
+        source_uri, destination_uri, source_identity=source_identity, metadata=owner_metadata
+    )
     return destination_uri
+
+
+async def organize_ingested_file(
+    db: AsyncSession,
+    file_record: File,
+    *,
+    source_bucket: str,
+    source_path: str,
+    raw_bucket: str,
+    filename: str,
+    experiment_id: int | None,
+    cleanup_policy: str,
+    credentials=None,
+) -> str:
+    """Copy an ingested file to its UUID-keyed raw place and point its (flushed) File at it.
+
+    The File's own UUID is the identity (approved D1), so two ingested files with one name never
+    share an object. The ingest object stays until this registration commits; then, under
+    ``delete_after_copy``, storage_cleanup removes it. Retain policies keep it.
+    """
+    from app.adapters.registry import get_storage_adapter
+    from app.services.file_organization import organized_key
+    from app.services.storage_cleanup import cleanup_slot
+
+    key = organized_key(file_record.uuid, experiment_id, filename)
+    adapter = get_storage_adapter()
+    try:
+        source_identity = await adapter.object_identity(adapter.build_uri(source_bucket, source_path))
+    except Exception:
+        source_identity = None
+    new_uri = await copy_to_raw_bucket(
+        source_bucket,
+        source_path,
+        raw_bucket,
+        key[: -len(filename)],
+        filename,
+        credentials=credentials,
+        source_identity=source_identity,
+        owner_metadata={
+            "bioaf-file-uuid": str(file_record.uuid),
+            "bioaf-organization-id": str(file_record.organization_id),
+        },
+    )
+    file_record.storage_uri = new_uri
+    if cleanup_policy == "delete_after_copy" and source_identity is not None:
+        file_record.pending_storage_cleanup = cleanup_slot(source_identity)
+    await db.flush()
+    return new_uri
 
 
 async def cleanup_ingest_file(
@@ -363,6 +419,8 @@ async def process_ingest_event(
         version=file_version,
         file_date=file_date,
         uploader_user_id=user_id,
+        # Assigned here, not by the database default, so the organized path below can use it.
+        uuid=uuid_pkg.uuid4(),
     )
     db.add(file_record)
     await db.flush()
@@ -418,31 +476,17 @@ async def process_ingest_event(
         config = await _read_ingest_config(db)
         raw_bucket = config.get("raw_bucket_name", "")
         if raw_bucket and raw_bucket != "null":
-            if resolved_experiment_id:
-                from app.services.gcs_storage import GcsStorageService
-
-                prefix = GcsStorageService.build_experiment_prefix(resolved_experiment_id)
-            else:
-                from app.services.gcs_storage import GcsStorageService
-
-                prefix = GcsStorageService.build_unlinked_prefix()
-
-            new_uri = await copy_to_raw_bucket(
-                source_bucket,
-                source_path,
-                raw_bucket,
-                prefix,
-                filename,
+            await organize_ingested_file(
+                db,
+                file_record,
+                source_bucket=source_bucket,
+                source_path=source_path,
+                raw_bucket=raw_bucket,
+                filename=filename,
+                experiment_id=resolved_experiment_id,
+                cleanup_policy=config.get("ingest_cleanup_policy", "delete_after_copy"),
                 credentials=credentials,
             )
-            file_record.storage_uri = new_uri
-            await db.flush()
-
-            # move_file already deletes the source after copy+verify.
-            # Only call cleanup for retain policies (which skip deletion).
-            cleanup_policy = config.get("ingest_cleanup_policy", "delete_after_copy")
-            if cleanup_policy != "delete_after_copy":
-                await cleanup_ingest_file(source_bucket, source_path, policy=cleanup_policy, credentials=credentials)
 
     # Step 6: Create file_parse_result
     parse_result_record = FileParseResult(
