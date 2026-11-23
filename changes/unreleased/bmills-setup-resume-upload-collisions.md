@@ -16,10 +16,15 @@
   refused before anything is uploaded.
 - **Cancel upload** for an upload that was already received now shows it as stopping until its stored
   copies are removed, then cancelled; it never removes a copy that belongs to another file. An upload
-  cancelled while its bytes are still arriving is no longer saved as a file when the transfer finishes. On
-  S3 buckets with versioning, a cancellation finishes only once no version of the upload is readable.
+  cancelled while its bytes are still arriving is no longer saved as a file when the transfer finishes,
+  and any bytes that arrived are removed even if the transfer then fails. On
+  S3 buckets with versioning, a cancellation finishes only once no version of the upload is readable,
+  however many versions it takes.
 - On NFS, the copy a verified file's protected copy replaces is removed (a pipeline's own output is kept),
-  so moving a verified file leaves exactly one copy.
+  so moving a verified file leaves exactly one copy. If an earlier cleanup for that file has not finished,
+  verification waits and tries again rather than leaving a copy untracked.
+- On filesystem stores (NFS, and local development storage), bioAF's private staging and lock folders must
+  be owned by bioAF and closed to other users; copying into a store whose folders are not is refused.
 - Moving a file whose checksum was verified checks it again at its new location instead of carrying the
   old result over. A file whose old copy is still waiting to be removed is fully removed when deleted.
 - Assigning or unlinking a file through `/api/v1/files/{id}/assign` and `/api/v1/files/{id}/unlink` is now
