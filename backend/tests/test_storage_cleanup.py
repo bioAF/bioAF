@@ -101,8 +101,10 @@ async def test_cleanup_after_commit_deletes_only_the_old_source(session, admin_u
     file_id, old, new = relocated
     reread = await _file(session, file_id)
     assert reread.storage_uri == new.uri
-    assert reread.pending_storage_cleanup["uri"] == old.uri
-    assert reread.pending_storage_cleanup["version"] == old.version
+    slot = reread.pending_storage_cleanup
+    assert slot is not None
+    assert slot["uri"] == old.uri
+    assert slot["version"] == old.version
 
     assert await storage_cleanup.cleanup_after_commit(file_id, admin_user.organization_id) == "deleted"
 
@@ -144,6 +146,7 @@ async def test_a_storage_failure_is_retried_on_a_bounded_schedule(session, admin
     with patch.object(store, "delete_if_unchanged", unavailable):
         assert await storage_cleanup.cleanup_after_commit(file_id, admin_user.organization_id) == "retry"
     slot = (await _file(session, file_id)).pending_storage_cleanup
+    assert slot is not None
     assert slot["attempts"] == 1 and slot["next_attempt_at"] is not None
     assert "SECRET" not in str(slot)
 
@@ -168,6 +171,7 @@ async def test_automatic_retries_stop_after_the_last_attempt_but_the_record_stay
         for _ in range(storage_cleanup.MAX_ATTEMPTS):
             assert await storage_cleanup.cleanup_after_commit(file_id, admin_user.organization_id) == "retry"
     slot = (await _file(session, file_id)).pending_storage_cleanup
+    assert slot is not None
     assert slot["attempts"] == storage_cleanup.MAX_ATTEMPTS and slot["next_attempt_at"] is None
     assert await store.exists(old.uri)
 
@@ -196,7 +200,8 @@ async def test_another_relocation_first_settles_the_pending_one(session, admin_u
     await storage_cleanup.record_relocation(session, locked, destination=newer, previous=new)
     await session.commit()
     assert not await store.exists(old.uri)  # settled before the second relocation was recorded
-    assert (await _file(session, file_id)).pending_storage_cleanup["uri"] == new.uri
+    pending = (await _file(session, file_id)).pending_storage_cleanup
+    assert pending is not None and pending["uri"] == new.uri
 
 
 @pytest.mark.asyncio

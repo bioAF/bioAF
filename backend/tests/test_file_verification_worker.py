@@ -861,7 +861,7 @@ async def test_verification_waits_while_an_earlier_cleanup_cannot_finish(session
     record = await _record(file_id)
     assert f.storage_uri == uri and record.status == "queued" and record.error_code == "storage_cleanup_pending"
     assert record.observed_uri is None  # nothing recorded about the discarded artifact
-    assert f.pending_storage_cleanup["uri"] == earlier
+    assert f.pending_storage_cleanup is not None and f.pending_storage_cleanup["uri"] == earlier
     assert [o.storage_uri for o in await adapter.list_objects("file://raw/verified-files/")] == []
 
     await _make_due(file_id)
