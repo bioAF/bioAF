@@ -63,6 +63,8 @@ jobs:
       BIOAF_TEST_BCRYPT_ROUNDS: ${{ inputs.test_bcrypt_rounds }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # Dispatch values reach the shell only as quoted environment variables, never as script text. The worker
       # count is free text, so it is checked here, before anything is installed: `auto` or a whole number from 1 to

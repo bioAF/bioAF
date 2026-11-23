@@ -654,3 +654,202 @@ def test_dependabot_proposes_weekly_action_pin_updates():
     assert actions["schedule"]["interval"] == "weekly"
     assert 1 <= actions["open-pull-requests-limit"] <= 5
     assert "automerge" not in json.dumps(actions).lower()
+
+
+# ── checkout credentials do not outlive the checkout (nov_sec 01C) ──
+
+RELEASE = REPO / ".github" / "workflows" / "release.yml"
+PUSH_STEP = "Commit, tag, and push"
+
+
+def _checkouts() -> list[tuple[str, str, dict]]:
+    return [
+        (path.name, name, step)
+        for path in ALL_WORKFLOWS
+        for name, job in yaml.safe_load(path.read_text())["jobs"].items()
+        for step in job.get("steps", [])
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+
+
+def test_every_checkout_drops_its_credential():
+    # No job pushes with, or later fetches through, the checkout's token; the release push authenticates on its own.
+    checkouts = _checkouts()
+    assert len(checkouts) == 20
+    kept = [(f, j) for f, j, s in checkouts if (s.get("with") or {}).get("persist-credentials") is not False]
+    assert kept == []
+    tokens = [(f, j) for f, j, s in checkouts if "token" in (s.get("with") or {})]
+    assert tokens == []
+
+
+def test_checkouts_keep_their_history_ref_and_sparse_settings():
+    by_job = {(f, j): s.get("with") or {} for f, j, s in _checkouts()}
+    assert by_job[("ci.yml", "backend-test")]["fetch-depth"] == 0
+    assert by_job[("ci.yml", "coverage-comment")]["fetch-depth"] == 0
+    assert by_job[("changelog-check.yml", "check")]["fetch-depth"] == 0
+    assert by_job[("release.yml", "release")]["fetch-depth"] == 0
+    assert by_job[("release.yml", "publish-images")]["ref"] == "${{ needs.release.outputs.tag }}"
+    review = by_job[("ci.yml", "dependency-review")]
+    assert review["path"] == "base" and review["sparse-checkout-cone-mode"] is False
+
+
+def _release() -> dict:
+    return yaml.safe_load(RELEASE.read_text())
+
+
+def test_the_release_pat_reaches_only_the_push_step():
+    assert RELEASE.read_text().count("secrets.RELEASE_PAT") == 1
+    steps = _release()["jobs"]["release"]["steps"]
+    holders = [s.get("name") or s.get("uses") for s in steps if "secrets.RELEASE_PAT" in json.dumps(s)]
+    assert holders == [PUSH_STEP]
+    push = next(s for s in steps if s.get("name") == PUSH_STEP)
+    assert push["env"]["RELEASE_PAT"] == "${{ secrets.RELEASE_PAT }}"
+
+
+def test_the_release_keeps_its_permissions_and_signing():
+    jobs = _release()["jobs"]
+    assert jobs["release"]["permissions"] == {"contents": "write"}
+    assert jobs["publish-images"]["permissions"] == {"contents": "read", "packages": "write"}
+    gpg = next(s for s in jobs["release"]["steps"] if s.get("uses", "").startswith("crazy-max/ghaction-import-gpg@"))
+    assert gpg["with"]["git_commit_gpgsign"] is True and gpg["with"]["git_tag_gpgsign"] is True
+    run = next(s for s in jobs["release"]["steps"] if s.get("name") == PUSH_STEP)["run"]
+    assert "git commit -S" in run and "git tag -s" in run
+
+
+FAKE_GPG = """#!/bin/sh
+# Stands in for gpg when git signs: consume the payload, report a created signature, print an armored block.
+cat > /dev/null
+echo '[GNUPG:] SIG_CREATED D 1 8 00 0 0 0' >&2
+printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-----\\n'
+"""
+FAKE_PAT = "github_pat_FAKE0000000000000000000000000000000000"
+
+
+def _git(cwd: Path, *args: str, env: dict | None = None) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout
+
+
+def _release_checkout(tmp_path: Path, remote: str) -> tuple[Path, dict]:
+    """A clone shaped like the release job's workspace after the version bump, with its credential dropped."""
+    bin_dir, work, home = tmp_path / "bin", tmp_path / "work", tmp_path / "home"
+    for d in (bin_dir, work, home):
+        d.mkdir(parents=True)
+    (bin_dir / "gpg").write_text(FAKE_GPG)
+    (bin_dir / "gpg").chmod(0o755)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/usr/bin/false",
+        "GIT_AUTHOR_NAME": "Release Test",
+        "GIT_AUTHOR_EMAIL": "release@example.invalid",
+        "GIT_COMMITTER_NAME": "Release Test",
+        "GIT_COMMITTER_EMAIL": "release@example.invalid",
+    }
+    _git(work, "init", "-q", "-b", "main", env=env)
+    _git(work, "config", "user.signingkey", "TESTKEY", env=env)
+    for rel in ("backend/pyproject.toml", "backend/uv.lock", "frontend/package.json", "RELEASE_NOTES.md"):
+        (work / rel).parent.mkdir(parents=True, exist_ok=True)
+        (work / rel).write_text("v0\n")
+    (work / "changes" / "unreleased").mkdir(parents=True)
+    (work / "changes" / "unreleased" / "entry.md").write_text("- a change\n")
+    _git(work, "add", "-A", env=env)
+    _git(work, "commit", "-q", "-m", "base", env=env)
+    _git(work, "remote", "add", "origin", remote, env=env)
+    for rel in ("backend/pyproject.toml", "backend/uv.lock", "frontend/package.json", "RELEASE_NOTES.md"):
+        (work / rel).write_text("v1\n")
+    (work / "changes" / "unreleased" / "entry.md").unlink()
+    return work, env
+
+
+def _run_push_step(work: Path, env: dict, pat: str) -> subprocess.CompletedProcess:
+    step = next(s for s in _release()["jobs"]["release"]["steps"] if s.get("name") == PUSH_STEP)
+    assert "${{" not in step["run"]
+    step_env = {**env, "TAG": "v2099.1.0", "RELEASE_PAT": pat}
+    return subprocess.run(
+        [*EXPLICIT_BASH, "-c", step["run"]], cwd=work, env=step_env, capture_output=True, text=True, timeout=60
+    )
+
+
+def _credential_traces(work: Path) -> str:
+    config = (work / ".git" / "config").read_text()
+    return config + "".join(p.read_text() for p in (work / ".git").glob("credentials*"))
+
+
+def test_the_release_push_lands_the_signed_commit_and_tag_without_storing_the_pat(tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    work, env = _release_checkout(tmp_path, str(remote))
+    done = _run_push_step(work, env, FAKE_PAT)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert FAKE_PAT not in done.stdout + done.stderr
+    assert FAKE_PAT not in _credential_traces(work) and "credential" not in _credential_traces(work)
+    assert "chore: release v2099.1.0 [skip ci]" in _git(remote, "log", "-1", "--format=%s", "main")
+    assert "gpgsig" in _git(remote, "cat-file", "-p", "main")
+    tag = _git(remote, "cat-file", "-p", "v2099.1.0")
+    assert "Release v2099.1.0" in tag and "BEGIN PGP SIGNATURE" in tag
+
+
+def test_a_missing_release_pat_fails_the_push_visibly(tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    work, env = _release_checkout(tmp_path, str(remote))
+    done = _run_push_step(work, env, "")
+    assert done.returncode != 0
+    assert "::error::" in done.stdout + done.stderr and "RELEASE_PAT" in done.stdout + done.stderr
+    assert _git(remote, "tag", "--list") == ""
+    assert subprocess.run(["git", "rev-parse", "--verify", "-q", "main"], cwd=remote).returncode != 0
+
+
+class _RecordingRemote:
+    """An HTTP git remote that demands Basic credentials, records what it is offered, and refuses everything."""
+
+    def __init__(self):
+        import http.server
+        import threading
+
+        offered: list[str] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                auth = self.headers.get("Authorization")
+                if auth:
+                    offered.append(auth)
+                    self.send_response(403)
+                else:
+                    self.send_response(401)
+                    self.send_header("WWW-Authenticate", 'Basic realm="test"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_POST = do_GET  # noqa: N815
+
+            def log_message(self, *args):
+                pass
+
+        self.offered = offered
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/bioAF/bioAF.git"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def test_the_release_push_offers_the_pat_only_to_the_push_and_fails_when_it_is_refused(tmp_path):
+    import base64
+
+    remote = _RecordingRemote()
+    try:
+        work, env = _release_checkout(tmp_path, remote.url)
+        done = _run_push_step(work, env, FAKE_PAT)
+    finally:
+        remote.close()
+    assert done.returncode != 0
+    assert remote.offered, "the push never offered a credential"
+    decoded = {base64.b64decode(a.split(" ", 1)[1]).decode() for a in remote.offered}
+    assert all(d.endswith(":" + FAKE_PAT) for d in decoded)
+    assert FAKE_PAT not in done.stdout + done.stderr
+    assert FAKE_PAT not in _credential_traces(work) and "credential" not in _credential_traces(work)
