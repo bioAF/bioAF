@@ -505,3 +505,85 @@ def test_the_benchmark_keeps_its_dispatch_choices_and_artifact_name():
         "benchmark-${{ inputs.scope }}-r${{ inputs.test_bcrypt_rounds }}-${{ inputs.durability }}"
         "-n${{ inputs.workers }}-${{ github.run_id }}"
     )
+
+
+# ── no workflow expression is shell source (nov_sec 01A) ──
+
+ALL_WORKFLOWS = sorted((REPO / ".github" / "workflows").glob("*.yml"))
+
+
+@pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda p: p.name)
+def test_no_run_script_interpolates_a_workflow_expression(path):
+    # GitHub substitutes ${{ }} into the script text before the shell parses it, so any value becomes code.
+    # Values enter a step through env and are read as quoted variables.
+    workflow = yaml.safe_load(path.read_text())
+    offenders = [
+        (name, step.get("name") or step.get("uses"))
+        for name, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+        if "${{" in step.get("run", "")
+    ]
+    assert offenders == []
+
+
+# ── the no-changelog label (nov_sec 01A) ──
+
+CHANGELOG = REPO / ".github" / "workflows" / "changelog-check.yml"
+LABEL_EXPRESSION = "${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}"
+
+
+def _github_contains(labels: list[str], item: str) -> str:
+    """GitHub's contains() over an array: an element equal to the item, compared ignoring case."""
+    return "true" if any(label.lower() == item.lower() for label in labels) else "false"
+
+
+def _run_label_step(tmp_path: Path, labels: list[str]) -> tuple[subprocess.CompletedProcess, str]:
+    workflow = yaml.safe_load(CHANGELOG.read_text())
+    step = next(s for s in workflow["jobs"]["check"]["steps"] if s.get("id") == "label")
+    assert step["env"] == {"HAS_NO_CHANGELOG_LABEL": LABEL_EXPRESSION}
+    output = tmp_path / "github_output"
+    output.write_text("")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "GITHUB_OUTPUT": str(output),
+        "HAS_NO_CHANGELOG_LABEL": _github_contains(labels, "no-changelog"),
+    }
+    shell = EXPLICIT_BASH if _effective_shell(workflow, workflow["jobs"]["check"], step) == "bash" else IMPLICIT_BASH
+    done = subprocess.run([*shell, "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    return done, output.read_text()
+
+
+@pytest.mark.parametrize(
+    ("labels", "skip"),
+    [
+        ([], "false"),
+        (["no-changelog"], "true"),
+        (["bug", "no-changelog"], "true"),
+        (["no-changelog-please"], "false"),
+        (["changelog"], "false"),
+        (["not no-changelog"], "false"),
+    ],
+)
+def test_the_changelog_check_skips_only_for_the_exact_label(tmp_path, labels, skip):
+    done, output = _run_label_step(tmp_path, labels)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert output == f"skip={skip}\n"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["$(touch {marker})", "`touch {marker}`", "x' ; touch {marker} ; echo '", 'x" ; touch {marker} ; echo "'],
+)
+def test_a_label_name_is_never_executed(tmp_path, label):
+    marker = tmp_path / "executed"
+    done, output = _run_label_step(tmp_path, [label.format(marker=marker)])
+    assert not marker.exists()
+    assert output == "skip=false\n"
+
+
+def test_the_changelog_check_keeps_its_policy():
+    workflow = yaml.safe_load(CHANGELOG.read_text())
+    steps = workflow["jobs"]["check"]["steps"]
+    gated = [s for s in steps if s.get("id") != "label"]
+    assert gated and all(s.get("if") == "steps.label.outputs.skip != 'true'" for s in gated)
+    assert "changes/unreleased/" in gated[-1]["run"]

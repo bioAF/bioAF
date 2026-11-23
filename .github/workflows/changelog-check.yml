@@ -14,10 +14,13 @@ jobs:
     name: Verify changelog entry
     runs-on: ubuntu-latest
     steps:
+      # Label names are data: GitHub evaluates the membership test, and the script reads only its true/false result.
       - name: Skip if no-changelog label is present
         id: label
+        env:
+          HAS_NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
         run: |
-          if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | grep -q '"no-changelog"'; then
+          if [ "$HAS_NO_CHANGELOG_LABEL" = "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "PR carries no-changelog label, skipping entry check"
           else
