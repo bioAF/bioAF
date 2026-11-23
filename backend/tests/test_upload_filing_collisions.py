@@ -411,3 +411,38 @@ async def test_a_cancelled_upload_is_never_filed(client, admin_token, raw_storag
     await session.commit()
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         assert await UploadService.retry_due(database.async_session_factory) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_upload_cancelled_while_its_bytes_arrive_is_never_filed(client, admin_token, raw_storage, session):
+    """Review finding 2: the finishing transfer must not turn a cancellation back into a filing."""
+    exp = await _experiment(session)
+    adapter = _adapter()
+    arrived, release = asyncio.Event(), asyncio.Event()
+    store_upload = adapter.upload_file.side_effect
+
+    async def slow_upload(uri, source, **kw):
+        arrived.set()
+        await release.wait()
+        await store_upload(uri, source, **kw)
+
+    adapter.upload_file.side_effect = slow_upload
+
+    async def cancel_then_release():
+        await arrived.wait()
+        [cp] = await _checkpoints(session)
+        assert cp.stage == "transferring"
+        with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+            resp = await client.post(f"/api/files/uploads/{cp.id}/cancel", headers=_auth(admin_token))
+        release.set()
+        return resp
+
+    upload, cancel = await asyncio.gather(
+        _upload(client, admin_token, adapter, exp.id, "a.txt", b"science"), cancel_then_release()
+    )
+    assert cancel.status_code == 204
+    assert upload.status_code == 409, upload.text
+    assert (await session.execute(select(File))).scalars().all() == []
+    [cp] = await _checkpoints(session)
+    assert cp.stage == "cancelled"
+    assert cp.source_uri not in adapter.objects  # the bytes that landed after the cancel are removed

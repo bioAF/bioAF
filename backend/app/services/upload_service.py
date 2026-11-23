@@ -81,6 +81,42 @@ async def _update_checkpoint(upload_id: str, **fields) -> None:
         await s.commit()
 
 
+async def _advance_checkpoint(upload_id: str, from_stage: str, **fields) -> bool:
+    """Move an upload on only if it is still in ``from_stage``, in its own committed transaction.
+
+    A transfer that finishes after its upload was cancelled must not overwrite the cancellation."""
+    from sqlalchemy import update
+
+    async with _session_factory()() as s:
+        result = await s.execute(
+            update(UploadCheckpoint)
+            .where(UploadCheckpoint.id == upload_id, UploadCheckpoint.stage == from_stage)
+            .values(**fields)
+        )
+        await s.commit()
+    return bool(result.rowcount)
+
+
+class UploadCancelled(DomainError):
+    """The upload was cancelled while its bytes were arriving; it is not filed."""
+
+    status_code = 409
+    code = "upload_cancelled"
+
+
+async def _settle_cancelled_transfer(upload_id: str) -> None:
+    """Bytes landed after the cancellation was recorded: have settlement remove them now."""
+    from app.services.upload_settlement import settle
+
+    now = datetime.now(timezone.utc)
+    await _advance_checkpoint(upload_id, "cancelled", stage="cancelling", next_reconcile_at=now)
+    await _advance_checkpoint(upload_id, "cancelling", next_reconcile_at=now)
+    try:
+        await settle(_session_factory(), upload_id)
+    except Exception as exc:  # the background settlement keeps trying
+        logger.warning("Cancelled upload cleanup deferred (error_type=%s)", type(exc).__name__)
+
+
 async def _load_checkpoint(session: AsyncSession, org_id: int, upload_id: str) -> UploadCheckpoint | None:
     checkpoint = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
     if checkpoint is None or checkpoint.organization_id != org_id:
@@ -511,12 +547,21 @@ class UploadService:
             try:
                 await adapter.upload_file(gcs_uri, file_obj)
             except DomainError:
-                await _update_checkpoint(upload_id, stage="failed", last_error_category="transfer_refused")
+                await _advance_checkpoint(
+                    upload_id, "transferring", stage="failed", last_error_category="transfer_refused"
+                )
                 raise
             except Exception as exc:
-                await _update_checkpoint(upload_id, stage="failed", last_error_category="transfer_failed")
+                await _advance_checkpoint(
+                    upload_id, "transferring", stage="failed", last_error_category="transfer_failed"
+                )
                 raise upload_failure("transfer", exc) from None
-            await _update_checkpoint(upload_id, stage="received", received_size=size_bytes)
+            received = await _advance_checkpoint(upload_id, "transferring", stage="received", received_size=size_bytes)
+        if not received:
+            # Cancelled while the bytes were arriving: the cancellation stands, and what arrived after
+            # it was settled is removed by the same owned-copy cleanup.
+            await _settle_cancelled_transfer(upload_id)
+            raise UploadCancelled("This upload was cancelled, so it was not saved.")
 
         return await UploadService._file_or_wait(session, upload_id, file_type=file_type)
 
