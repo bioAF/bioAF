@@ -420,8 +420,14 @@ async def test_s3_guarded_delete_removes_only_the_observed_version(s3):
     assert fake.objects[("ingest", "uploads/4/a.txt")].data == b"v2"
     current = await adapter.object_identity("s3://ingest/uploads/4/a.txt")
     assert await adapter.delete_if_unchanged(current) is True
-    assert ("ingest", "uploads/4/a.txt") not in fake.objects
-    assert await adapter.delete_if_unchanged(current) is False
+    if fake.versioning:
+        # Only the observed version went; the older one is current again and is not touched.
+        assert fake.objects[("ingest", "uploads/4/a.txt")].data == b"v1"
+        with pytest.raises(ObjectChanged):
+            await adapter.delete_if_unchanged(current)
+    else:
+        assert ("ingest", "uploads/4/a.txt") not in fake.objects
+        assert await adapter.delete_if_unchanged(current) is False
     [last] = [c for c in fake.calls if c[0] == "delete_object"][-1:]
     assert (last[1]["VersionId"] is not None) == fake.versioning
     assert (last[1]["IfMatch"] is not None) == (not fake.versioning)
@@ -483,3 +489,15 @@ def test_a_private_area_that_is_a_file_is_refused(tmp_path):
     with pytest.raises(ValidationError):
         fs.copy_create_only("gs://bk/a.txt", "gs://bk/b.txt", None, None)
     assert not fs.exists("gs://bk/b.txt")
+
+
+async def test_s3_deleting_the_current_version_can_expose_an_older_one(s3):
+    """The provider behavior review finding 5 depends on, modelled by the fake."""
+    adapter, fake = s3
+    if not fake.versioning:
+        pytest.skip("only versioned buckets keep older versions")
+    fake.put("ingest", "uploads/9/a.txt", b"first attempt")
+    fake.put("ingest", "uploads/9/a.txt", b"second attempt")
+    current = await adapter.object_identity("s3://ingest/uploads/9/a.txt")
+    assert await adapter.delete_if_unchanged(current) is True
+    assert fake.objects[("ingest", "uploads/9/a.txt")].data == b"first attempt"

@@ -39,6 +39,8 @@ class FakeS3:
     aborted: list[str] = field(default_factory=list)
     calls: list[tuple[str, dict]] = field(default_factory=list)
     before_publish: object = None
+    # Make the next N deletes fail with a 500.
+    fail_deletes: int = 0
 
     def put(self, bucket, key, data: bytes, metadata=None, content_type=None, multipart=False) -> S3Object:
         etag = f'"{hashlib.md5(data).hexdigest()}{"-2" if multipart else ""}"'
@@ -130,15 +132,33 @@ class FakeS3:
         self.uploads.pop(UploadId, None)
 
     def delete_object(self, Bucket, Key, VersionId=None, IfMatch=None):
+        """S3's versioned semantics: permanently deleting the current version makes the newest
+        noncurrent version current again (readable at the key); deleting a noncurrent version
+        removes only it; a delete without a version in a versioned bucket hides the object behind
+        a delete marker."""
         self.calls.append(("delete_object", {"Key": Key, "VersionId": VersionId, "IfMatch": IfMatch}))
+        if self.fail_deletes:
+            self.fail_deletes -= 1
+            raise _error("InternalError", 500, "DeleteObject")
         obj = self.objects.get((Bucket, Key))
         if VersionId is not None:
             if obj is not None and obj.version_id == VersionId:
                 del self.objects[(Bucket, Key)]
+                older = [i for i, (b, k, _o) in enumerate(self.noncurrent) if (b, k) == (Bucket, Key)]
+                if older:
+                    self.objects[(Bucket, Key)] = self.noncurrent.pop(older[-1])[2]
+            else:
+                self.noncurrent = [
+                    (b, k, o)
+                    for b, k, o in self.noncurrent
+                    if not ((b, k) == (Bucket, Key) and o.version_id == VersionId)
+                ]
             return {}
         if obj is None:
             return {}
         if IfMatch is not None and IfMatch != obj.etag:
             raise _error("PreconditionFailed", 412, "DeleteObject")
+        if self.versioning:
+            self.noncurrent.append((Bucket, Key, obj))
         del self.objects[(Bucket, Key)]
         return {}

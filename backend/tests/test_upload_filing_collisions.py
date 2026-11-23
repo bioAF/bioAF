@@ -446,3 +446,82 @@ async def test_an_upload_cancelled_while_its_bytes_arrive_is_never_filed(client,
     [cp] = await _checkpoints(session)
     assert cp.stage == "cancelled"
     assert cp.source_uri not in adapter.objects  # the bytes that landed after the cancel are removed
+
+
+@pytest_asyncio.fixture
+async def s3_store(mode_adapter_factory, monkeypatch):
+    from app.adapters.storage.s3 import S3StorageProvider
+    from app.settings_contract import ComputeMode
+    from tests.support.fake_s3 import FakeS3
+
+    adapter = mode_adapter_factory(S3StorageProvider, org_slug="t", mode=ComputeMode.KUBERNETES)
+    adapter._region = "us-east-1"
+    fake = FakeS3(versioning=True)
+
+    async def creds():
+        return None
+
+    monkeypatch.setattr(adapter, "_get_credentials", creds)
+    monkeypatch.setattr(adapter, "_get_s3_client", lambda credentials=None: fake)
+    with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+        yield adapter, fake
+
+
+async def _cancelling_s3_upload(session, exp):
+    upload_id = str(uuid.uuid4())
+    session.add(
+        UploadCheckpoint(
+            id=upload_id,
+            organization_id=exp.organization_id,
+            kind="proxied",
+            stage="cancelling",
+            cancel_from_stage="received",
+            last_error_category="cancelled",
+            filename="a.txt",
+            source_uri=f"s3://ingest/uploads/{upload_id}/a.txt",
+            experiment_id=exp.id,
+            reference="UPL-5EA5ED",
+            file_uuid=uuid.uuid4(),
+        )
+    )
+    await session.commit()
+    return upload_id
+
+
+@pytest.mark.asyncio
+async def test_s3_cancellation_removes_older_versions_before_it_settles(session, raw_storage, s3_store):
+    """Review finding 5: removing the current version must not leave an older one readable."""
+    from app import database
+    from app.services.upload_settlement import settle
+
+    adapter, fake = s3_store
+    exp = await _experiment(session)
+    upload_id = await _cancelling_s3_upload(session, exp)
+    key = ("ingest", f"uploads/{upload_id}/a.txt")
+    fake.put(*key, b"first attempt")
+    fake.put(*key, b"second attempt")
+
+    assert await settle(database.async_session_factory, upload_id) == "cancelled"
+    assert key not in fake.objects
+
+
+@pytest.mark.asyncio
+async def test_s3_cancellation_stays_pending_while_an_older_version_is_readable(session, raw_storage, s3_store):
+    from app import database
+    from app.services.upload_settlement import settle
+
+    adapter, fake = s3_store
+    exp = await _experiment(session)
+    upload_id = await _cancelling_s3_upload(session, exp)
+    key = ("ingest", f"uploads/{upload_id}/a.txt")
+    fake.put(*key, b"first attempt")
+    fake.put(*key, b"second attempt")
+    original = fake.delete_object
+
+    def first_only(**kw):
+        fake.delete_object = lambda **k: (_ for _ in ()).throw(RuntimeError("503"))
+        return original(**kw)
+
+    fake.delete_object = first_only
+    assert await settle(database.async_session_factory, upload_id) == "cancelling"
+    assert fake.objects[key].data == b"first attempt"

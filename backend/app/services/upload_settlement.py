@@ -234,6 +234,8 @@ async def _settle_presigned(cp: UploadCheckpoint, session: AsyncSession | None =
 
 # Backoff for removing a cancelled upload's own copies when storage does not answer. An ordinary
 # delete failure is retried; it is never treated as an unconfirmed transfer.
+# How many older versions one settlement pass removes from a cancelled upload's own path.
+_MAX_EXPOSED_VERSIONS = 20
 CLEANUP_BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1))
 
 
@@ -328,6 +330,17 @@ async def _remove_owned_copies(cp: UploadCheckpoint, session: AsyncSession) -> N
             await adapter.delete_if_unchanged(expected)
         except ObjectChanged:
             logger.warning("Upload %s: its stored copy changed since it was received; kept", cp.reference)
+            return
+        # Removing the current version of a versioned store can make an older version readable again.
+        # Everything at this upload's unique path is this upload's: remove each version exposed, and
+        # settle only once nothing is readable there (otherwise stay cancelling and try again).
+        for _ in range(_MAX_EXPOSED_VERSIONS):
+            try:
+                exposed = await adapter.object_identity(cp.source_uri)
+            except StorageObjectNotFound:
+                return
+            await adapter.delete_if_unchanged(exposed)
+        raise RuntimeError("Older versions of a cancelled upload are still readable")
 
 
 def _ended_category(cp: UploadCheckpoint) -> str:
