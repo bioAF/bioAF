@@ -41,6 +41,8 @@ import {
 
 interface SetupWizardProps {
   onComplete: () => void;
+  /** ``resume``: an authorized administrator reviewing an unfinished installation's saved setup. */
+  mode?: "initial" | "resume";
 }
 
 interface StackComponentsResponse {
@@ -62,7 +64,7 @@ interface StackComponentsResponse {
  * the first admin's session. The step views only render; showing a step again never repeats a
  * request. Each step's submit runs once however fast it is pressed.
  */
-export function SetupWizard({ onComplete }: SetupWizardProps) {
+export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) {
   const confirm = useConfirm();
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
