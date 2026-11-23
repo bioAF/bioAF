@@ -675,7 +675,8 @@ def _checkouts() -> list[tuple[str, str, dict]]:
 def test_every_checkout_drops_its_credential():
     # No job pushes with, or later fetches through, the checkout's token; the release push authenticates on its own.
     checkouts = _checkouts()
-    assert len(checkouts) == 20
+    # 20 before selective CI, plus the classifier's and the workflow-lint job's.
+    assert len(checkouts) == 22
     kept = [(f, j) for f, j, s in checkouts if (s.get("with") or {}).get("persist-credentials") is not False]
     assert kept == []
     tokens = [(f, j) for f, j, s in checkouts if "token" in (s.get("with") or {})]
@@ -903,3 +904,173 @@ def test_an_always_required_job_cannot_be_permitted_to_skip(required_checks, cap
     needs = _needs(**{"backend-test": "success", job: "skipped"})
     assert _gate(required_checks, needs, json.dumps([job])) == 1
     assert job in capsys.readouterr().out
+
+
+# ── ci.yml selects its jobs by change type (nov_sec 01D) ──
+
+CLASSIFIER_JOB = "changes"
+LINT_JOB = "workflow-lint"
+APPLICATION_JOBS = {
+    "terraform-validate",
+    "backend-lint",
+    "backend-test",
+    "frontend-lint",
+    "frontend-test",
+    "python-sdk",
+    "r-sdk",
+    "shell-tests",
+    "update-agent-systemd",
+}
+EVERY_PR_JOBS = {"security-scan", "dependency-review", "docs-lint"}
+FOCUSED_TESTS = [
+    "backend/tests/test_ci_workflow.py",
+    "backend/tests/test_ci_coverage_workflow.py",
+    "backend/tests/test_dependency_installers.py",
+    "backend/tests/test_ci_change_classifier.py",
+    "backend/tests/test_workflow_linters.py",
+]
+
+
+def test_ci_runs_on_every_pull_request_and_label_change(workflow):
+    trigger = workflow[True]["pull_request"]
+    assert trigger["branches"] == ["main"]
+    assert trigger["types"] == ["opened", "synchronize", "reopened", "labeled", "unlabeled"]
+    assert "paths" not in trigger and "paths-ignore" not in trigger
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert "pull_request_target" not in workflow[True]
+
+
+def test_the_classifier_reads_the_whole_pull_request(workflow):
+    job = workflow["jobs"][CLASSIFIER_JOB]
+    assert "if" not in job and "needs" not in job
+    checkout = job["steps"][0]
+    assert checkout["uses"].startswith("actions/checkout@") and checkout["with"]["fetch-depth"] == 0
+    [step] = [s for s in job["steps"] if "scripts/ci/classify_changes.py" in s.get("run", "")]
+    assert step["env"]["BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
+    assert step["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert '--event "$GITHUB_EVENT_PATH"' in step["run"] and '--output "$GITHUB_OUTPUT"' in step["run"]
+    assert job["outputs"] == {
+        "mode": f"${{{{ steps.{step['id']}.outputs.mode }}}}",
+        "allowed_skips": f"${{{{ steps.{step['id']}.outputs.allowed_skips }}}}",
+    }
+
+
+@pytest.mark.parametrize("job", sorted(APPLICATION_JOBS))
+def test_application_jobs_run_only_for_full_validation(workflow, job):
+    spec = workflow["jobs"][job]
+    assert CLASSIFIER_JOB in spec["needs"]
+    assert spec["if"] == "needs.changes.outputs.mode == 'full'"
+
+
+@pytest.mark.parametrize("job", sorted(EVERY_PR_JOBS))
+def test_scanning_review_and_docs_lint_run_on_every_pull_request(workflow, job):
+    assert "if" not in workflow["jobs"][job]
+
+
+def test_the_jobs_are_exactly_the_classified_set(workflow):
+    assert set(workflow["jobs"]) == APPLICATION_JOBS | EVERY_PR_JOBS | {CLASSIFIER_JOB, LINT_JOB, GATE_JOB}
+
+
+def test_the_workflow_lint_job_is_read_only_and_runs_for_ci_and_full_modes(workflow):
+    job = workflow["jobs"][LINT_JOB]
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert job["permissions"] == {"contents": "read"}
+    assert CLASSIFIER_JOB in job["needs"]
+    assert job["if"] == "needs.changes.outputs.mode == 'ci-config' || needs.changes.outputs.mode == 'full'"
+    runs = "\n".join(s.get("run", "") for s in job["steps"])
+    assert "scripts/ci/install_workflow_linters.py --manifest scripts/ci/workflow_linter_versions.json" in runs
+    assert re.search(r"^actionlint\b", runs, re.M)
+    assert re.search(r"^zizmor\b", runs, re.M)
+    python = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/setup-python@"))
+    assert python["with"]["python-version"] == "3.12"
+
+
+def test_the_focused_regressions_run_without_the_backend_environment(workflow):
+    [step] = [s for s in workflow["jobs"][LINT_JOB]["steps"] if "--noconftest" in s.get("run", "")]
+    run = step["run"]
+    assert "-m pip install --require-hashes -r scripts/ci/workflow-tests.lock" in run
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1" in run
+    assert "-c /dev/null --rootdir=. -p no:cacheprovider" in run
+    for path in FOCUSED_TESTS:
+        assert path in run
+        assert (REPO / path).is_file()
+    assert "backend/tests " not in run and not run.rstrip().endswith("backend/tests")
+    assert "uv sync" not in run
+
+
+def test_the_focused_lock_holds_only_hashed_test_tooling():
+    text = (REPO / "scripts" / "ci" / "workflow-tests.lock").read_text()
+    pins = dict(re.findall(r"^([a-z0-9_.-]+)==(\S+)", text, re.M))
+    assert set(pins) == {"pytest", "pyyaml", "iniconfig", "packaging", "pluggy", "pygments"}
+    blocks = re.split(r"^(?=[a-z])", text, flags=re.M)[1:]
+    assert all("--hash=sha256:" in b for b in blocks)
+
+
+def test_the_gate_needs_the_classifier_and_the_lint_job(workflow):
+    needs = set(workflow["jobs"][GATE_JOB]["needs"])
+    assert {CLASSIFIER_JOB, LINT_JOB} <= needs
+
+
+def test_the_gate_takes_skips_only_from_a_successful_classification(workflow):
+    step = next(s for s in workflow["jobs"][GATE_JOB]["steps"] if "required_checks.py" in s.get("run", ""))
+    assert step["env"]["ALLOWED_SKIPS"] == (
+        "${{ needs.changes.result == 'success' && needs.changes.outputs.allowed_skips || '' }}"
+    )
+    assert '--allowed-skips-json "$ALLOWED_SKIPS"' in step["run"]
+    never = re.search(r"--never-skip (\S+)", step["run"]).group(1)
+    assert set(never.split(",")) == EVERY_PR_JOBS | {CLASSIFIER_JOB}
+
+
+def _enforce_coverage(tmp_path: Path, classified: str, mode: str, gate_status: str | None) -> int:
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    step = next(s for s in workflow["jobs"][GATE_JOB]["steps"] if s.get("name") == "Enforce coverage gates")
+    assert step["env"] == {"CLASSIFIED": "${{ needs.changes.result }}", "MODE": "${{ needs.changes.outputs.mode }}"}
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    if gate_status is not None:
+        (tmp_path / "gate-status").write_text(gate_status + "\n")
+    env = {"PATH": "/usr/bin:/bin", "CLASSIFIED": classified, "MODE": mode}
+    return subprocess.run([*EXPLICIT_BASH, "-c", step["run"]], cwd=tmp_path, env=env, capture_output=True).returncode
+
+
+@pytest.mark.parametrize(
+    ("classified", "mode", "gate_status", "code"),
+    [
+        ("success", "full", "0", 0),
+        ("success", "full", "1", 1),
+        ("success", "full", None, 1),
+        ("success", "docs", None, 0),
+        ("success", "ci-config", None, 0),
+        ("failure", "docs", None, 1),
+        ("cancelled", "ci-config", None, 1),
+        ("success", "", None, 1),
+        ("success", "weird", None, 1),
+        ("success", "docs ", None, 1),
+        ("", "", None, 1),
+    ],
+)
+def test_coverage_gates_apply_unless_a_cheaper_mode_was_classified(tmp_path, classified, mode, gate_status, code):
+    assert _enforce_coverage(tmp_path / "run", classified, mode, gate_status) == code
+
+
+def test_cheaper_modes_skip_the_coverage_artifacts_and_report(workflow):
+    steps = workflow["jobs"][GATE_JOB]["steps"]
+    full_only = "needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'"
+    downloads = [s for s in steps if s.get("uses", "").startswith("actions/download-artifact@")]
+    assert len(downloads) == 2 and all(s["if"] == full_only for s in downloads)
+    build = next(s for s in steps if s.get("name") == "Build report")
+    assert build["if"] == full_only
+    report = next(s for s in steps if "classify_changes.py report" in s.get("run", ""))
+    assert report["if"] == "needs.changes.result == 'success' && needs.changes.outputs.mode != 'full'"
+
+
+def test_the_build_workflow_keeps_its_own_path_filters():
+    build = yaml.safe_load((REPO / ".github" / "workflows" / "build.yml").read_text())
+    assert build[True]["pull_request"]["paths"] == [
+        "backend/**",
+        "frontend/**",
+        "docker/Dockerfile*",
+        "docker/docker-compose*",
+        "scripts/ci/check_image_contents.py",
+        "scripts/ci/frontend_image_smoke.sh",
+        "docker/nginx.conf",
+    ]

@@ -1,8 +1,12 @@
 name: CI
 
+# Every pull request runs this workflow; the changes job selects which jobs inside it run. Label events are subscribed
+# so adding or removing `ci:full` starts a new classified run. Any label change restarts CI (the concurrency group
+# cancels the run in progress), which is the accepted cost of a label-only override.
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,12 +28,95 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────
+  # Change classification
+  # ──────────────────────────────────────────────
+  # One explicit path classifier (scripts/ci/classify_changes.py) reads every path the pull request changes since its
+  # merge base and selects a mode: docs (allowlisted documentation only), ci-config (Dependabot or markdownlint
+  # configuration, optionally with docs) or full (anything else, including every workflow file). The `ci:full` label
+  # forces full. A failed classification selects nothing, so the application jobs skip and the merge gate fails.
+  changes:
+    name: Classify Changes
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      allowed_skips: ${{ steps.classify.outputs.allowed_skips }}
+    steps:
+      # Full history: the pull request is compared with its merge base, across all of its commits.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify the pull request
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/ci/classify_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --event "$GITHUB_EVENT_PATH" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────
+  # Workflow lint and focused workflow regressions (ci-config and full modes)
+  # ──────────────────────────────────────────────
+  # actionlint (with ShellCheck) and zizmor come from fixed release archives verified against committed SHA-256
+  # values (scripts/ci/workflow_linter_versions.json). The workflow regressions run from a hash-locked pytest/PyYAML
+  # environment with no backend packages: --noconftest skips backend/tests/conftest.py, which imports the application.
+  workflow-lint:
+    name: Workflow Lint & Regressions
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mode == 'ci-config' || needs.changes.outputs.mode == 'full'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the workflow linters
+        run: |
+          python3 scripts/ci/install_workflow_linters.py --manifest scripts/ci/workflow_linter_versions.json \
+            --dest "$RUNNER_TEMP/workflow-linters" --path-file "$GITHUB_PATH"
+
+      # actionlint runs ShellCheck over every run: script when shellcheck is on PATH.
+      - name: actionlint
+        run: |
+          actionlint -version
+          actionlint
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zizmor --version
+          zizmor --persona regular .github/workflows
+
+      - name: Focused workflow regressions
+        run: |
+          python -m venv "$RUNNER_TEMP/workflow-tests"
+          "$RUNNER_TEMP/workflow-tests/bin/python" -m pip install --require-hashes -r scripts/ci/workflow-tests.lock
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+            "$RUNNER_TEMP/workflow-tests/bin/python" -m pytest \
+            --noconftest -c /dev/null --rootdir=. -p no:cacheprovider \
+            backend/tests/test_ci_workflow.py \
+            backend/tests/test_ci_coverage_workflow.py \
+            backend/tests/test_dependency_installers.py \
+            backend/tests/test_ci_change_classifier.py \
+            backend/tests/test_workflow_linters.py -q
+
+  # ──────────────────────────────────────────────
   # Terraform validation
   # ──────────────────────────────────────────────
   terraform-validate:
     name: Terraform Validate
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
-    if: true
     defaults:
       run:
         # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
@@ -93,6 +180,8 @@ jobs:
   # ──────────────────────────────────────────────
   backend-lint:
     name: Backend Lint & Type Check
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -144,6 +233,8 @@ jobs:
 
   backend-test:
     name: Backend Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     # Pinned: the schema-upgrade and historical-upgrade tests need the PostgreSQL 16 client
     # (pg_dump, pg_restore under /usr/lib/postgresql/16/bin), which the ubuntu-24.04 image ships and
     # the ubuntu-26.04 image that ubuntu-latest moved to in November 2026 does not.
@@ -267,6 +358,8 @@ jobs:
   # ──────────────────────────────────────────────
   frontend-lint:
     name: Frontend Lint & Type Check
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -299,6 +392,8 @@ jobs:
 
   frontend-test:
     name: Frontend Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -345,6 +440,8 @@ jobs:
   # outside the checkout, so a packaging defect fails here rather than for a user.
   python-sdk:
     name: Python SDK
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -414,6 +511,8 @@ jobs:
   # R CMD check run without it.
   r-sdk:
     name: R SDK
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     env:
       R_EVIDENCE: ${{ github.workspace }}/r-evidence
@@ -507,6 +606,8 @@ jobs:
   # lets the encryption bootstrap test run. The only skip accepted is the network guard's.
   shell-tests:
     name: Shell Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -565,6 +666,8 @@ jobs:
   # The script installs and removes its own unit and refuses a host that already has one.
   update-agent-systemd:
     name: Update Agent (systemd)
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -596,6 +699,8 @@ jobs:
     name: Coverage Report
     runs-on: ubuntu-latest
     needs:
+      - changes
+      - workflow-lint
       - terraform-validate
       - backend-lint
       - backend-test
@@ -618,19 +723,24 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
           name: backend-test-evidence
           path: coverage-in/backend
 
+      # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
           name: frontend-coverage
           path: coverage-in/frontend
 
       - name: Build report
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -653,6 +763,16 @@ jobs:
           echo "$status" > gate-status
           cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A cheaper mode reports why tests and coverage did not run, and the results of the jobs that did.
+      - name: Report the selected mode
+        if: needs.changes.result == 'success' && needs.changes.outputs.mode != 'full'
+        env:
+          MODE: ${{ needs.changes.outputs.mode }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 scripts/ci/classify_changes.py report --mode "$MODE" --needs "$NEEDS_JSON" --output coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post or update the pull request comment
         if: github.event.pull_request.head.repo.full_name == github.repository
         env:
@@ -668,21 +788,35 @@ jobs:
             gh pr comment "$PR" --body-file coverage-report.md
           fi
 
+      # Always runs. Only a successfully classified docs or ci-config pull request skips the thresholds; full mode, a
+      # failed classification or an unknown mode needs the report's passing status.
       - name: Enforce coverage gates
         if: always()
+        env:
+          CLASSIFIED: ${{ needs.changes.result }}
+          MODE: ${{ needs.changes.outputs.mode }}
         run: |
+          if [ "$CLASSIFIED" = "success" ] && { [ "$MODE" = "docs" ] || [ "$MODE" = "ci-config" ]; }; then
+            echo "Coverage gates not applied: this $MODE pull request did not require tests or coverage."
+            exit 0
+          fi
           status=$(cat gate-status 2>/dev/null || echo missing)
           if [ "$status" != "0" ]; then
             echo "::error::Coverage gates failed (report status: $status). See the Gates table in the job summary."
             exit 1
           fi
 
-      # Only success passes: a failed, cancelled or skipped dependency fails the merge gate.
+      # Only success passes: a failed, cancelled or skipped dependency fails the merge gate. The one exception is a job
+      # the classifier planned to skip for this mode, and only when the classification itself succeeded. The
+      # classifier, secret scan, dependency review and markdown lint can never be skipped.
       - name: Enforce required checks
         if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/ci/required_checks.py --needs "$NEEDS_JSON" --summary "$GITHUB_STEP_SUMMARY"
+          ALLOWED_SKIPS: ${{ needs.changes.result == 'success' && needs.changes.outputs.allowed_skips || '' }}
+        run: |
+          python3 scripts/ci/required_checks.py --needs "$NEEDS_JSON" --allowed-skips-json "$ALLOWED_SKIPS" \
+            --never-skip changes,security-scan,dependency-review,docs-lint --summary "$GITHUB_STEP_SUMMARY"
 
   # ──────────────────────────────────────────────
   # Security & docs
