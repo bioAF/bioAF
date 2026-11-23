@@ -117,6 +117,13 @@ class File(Base):
     # has not been established under that contract, not that an older file is unusable. Historical: it
     # is not reset on deletion.
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The superseded object this File's bytes were copied from, to be removed once the new reference
+    # is committed: ``{"uri", "version", "size_bytes", "attempts", "next_attempt_at"}``, the old
+    # object's pinned identity plus a bounded retry schedule. NULL when nothing is pending. Written in
+    # the same transaction as the new ``storage_uri`` and cleared only by its owned cleanup
+    # (app/services/storage_cleanup.py), so a rollback keeps the original and a crash after commit
+    # leaves the cleanup to the next pass. At most one per File.
+    pending_storage_cleanup: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("idx_files_experiment_id", "experiment_id"),
@@ -134,6 +141,11 @@ class File(Base):
             "source_storage_uri",
             unique=True,
             postgresql_where=text("source_storage_uri IS NOT NULL"),
+        ),
+        Index(
+            "ix_files_pending_storage_cleanup",
+            "id",
+            postgresql_where=text("pending_storage_cleanup IS NOT NULL"),
         ),
     )
 

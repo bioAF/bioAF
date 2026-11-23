@@ -648,6 +648,25 @@ class FileService:
         file = await FileService.get_file(session, file_id, org_id)
         if not file:
             return False
+        if file.deleted_at is None:
+            # The same lock a move takes, so a delete never erases a source while a move publishes
+            # its replacement (and the verifier's lock order, verification first).
+            from app.services import storage_cleanup
+
+            locked = await storage_cleanup.lock_file_for_storage_change(session, file_id, org_id)
+            if locked is not None:
+                file = locked
+                # A superseded object still waiting for removal is this file's bytes too: free it
+                # first, or nothing, so a delete never reports reclaimed space while a copy remains.
+                outcome = await storage_cleanup.clean_pending(session, file)
+                if outcome == "paused":
+                    from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused
+
+                    raise StorageWritesPaused(STORAGE_PAUSED)
+                if outcome == "retry":
+                    raise StorageUnavailableError(
+                        "The file's storage could not be reached, so nothing was deleted. Try again."
+                    )
 
         # Bytes first, record second. If storage fails the exception propagates
         # before anything is committed, so the file stays whole and listed

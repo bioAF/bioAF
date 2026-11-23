@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,9 @@ from app.adapters.storage.digest import normalize_md5  # noqa: F401 - re-exporte
 from app.exceptions import ValidationError
 from app.models.file import File
 from app.models.file_verification import FileVerification
+
+if TYPE_CHECKING:
+    from app.adapters.models import ObjectIdentity
 
 WAITING_EXPECTATION = "waiting_expectation"
 NOT_REQUIRED = "not_required"
@@ -257,6 +260,52 @@ class FileVerificationService:
         record.verified_at = _now()
         await session.flush()
         return await FileService.mark_ready(session, file.id, file.organization_id, expected_size=expected_size)
+
+    @staticmethod
+    async def relocate(session: AsyncSession, file: File, destination: "ObjectIdentity") -> FileVerification | None:
+        """The file's bytes now live at ``destination`` (a copy); make the record describe that object.
+
+        Runs in the relocating transaction, which must already hold the record's lock (the verifier's
+        order: verification, then File). Evidence for the old object never carries over: a new
+        expectation revision invalidates any in-flight claim, and observations are cleared. A
+        required expectation is re-established at the destination: compared at once against a
+        trustworthy native digest when the provider has one, otherwise queued for the worker. A
+        mismatch or failure stays as it is (a copy proves nothing about it); the File's historical
+        ``ready_at`` and registration events are untouched.
+        """
+        record = await current_record(session, file.id, lock=True)
+        if record is None or record.status in (CHECKSUM_MISMATCH, FAILED, NOT_REQUIRED, WAITING_EXPECTATION):
+            if record is not None and record.status in (NOT_REQUIRED, WAITING_EXPECTATION):
+                record.lease_token = None
+                record.lease_expires_at = None
+            return record
+        expected = record.expected_checksum
+        artifact_uuid, artifact_uri = record.artifact_uuid, record.artifact_uri
+        record.expectation_revision = (record.expectation_revision or 1) + 1
+        _reset_work(record)
+        record.artifact_uuid, record.artifact_uri = artifact_uuid, artifact_uri
+        if expected is not None and destination.native_md5:
+            record.observed_checksum = destination.native_md5
+            record.observed_method = "provider"
+            record.observed_bytes = destination.size_bytes
+            record.observed_uri = destination.uri
+            record.observed_object_version = destination.version
+            record.next_attempt_at = None
+            if destination.native_md5 == expected:
+                record.status = VERIFIED
+                record.verified_at = _now()
+            else:
+                record.status = CHECKSUM_MISMATCH
+                record.error_code = "checksum_mismatch"
+                record.retryable = False
+                await session.flush()
+                await notify_failure(session, file, "checksum_mismatch")
+                return record
+        else:
+            record.status = QUEUED
+            record.next_attempt_at = _now()
+        await session.flush()
+        return record
 
     @staticmethod
     async def retry(session: AsyncSession, file_id: int, org_id: int) -> FileVerification | None:
