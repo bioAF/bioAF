@@ -75,7 +75,10 @@ async def select_batch(
                 "INSERT INTO component_states (component_key, enabled, status, config_json) "
                 "VALUES (:k, true, 'queued_for_infra', '{}') "
                 "ON CONFLICT (component_key) DO UPDATE SET "
-                "enabled = true, status = 'queued_for_infra'"
+                "enabled = true, status = 'queued_for_infra' "
+                # An enabled component (queued, provisioning, running or failed) is already owned by
+                # the orchestrator or its own retry: a repeated or stale selection never requeues it.
+                "WHERE component_states.enabled = false"
             ).bindparams(k=k)
         )
 

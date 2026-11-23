@@ -30,6 +30,27 @@ from app.services import infrastructure_operations as ops
 
 router = APIRouter(tags=["infrastructure_operations"])
 
+# The actions an operation can record (services/infrastructure_operations.ACTION_LABELS).
+OperationAction = Literal[
+    "compute_deploy",
+    "compute_teardown",
+    "storage_deploy",
+    "storage_update",
+    "storage_destroy",
+    "infrastructure_update",
+    "cluster_config",
+    "image_build",
+    "notebook_image_build",
+    "cellxgene_image_build",
+    "foundation_bootstrap",
+    "billing_export_enable",
+    "billing_export_teardown",
+    "terraform_plan",
+    "terraform_apply",
+    "config_sync",
+    "component_change",
+]
+
 ADMIN_PERMISSIONS = [("infrastructure", "deploy"), ("infrastructure", "configure")]
 
 OperationStatus = Literal[
@@ -141,13 +162,16 @@ async def active_operation_endpoint(
 @router.get("/api/v1/infrastructure/operations", response_model=OperationListResponse)
 async def list_operations_endpoint(
     limit: int = 20,
+    action: OperationAction | None = None,
     current_user: dict = require_any_permission(ADMIN_PERMISSIONS),
     session: AsyncSession = Depends(get_session),
 ) -> OperationListResponse:
+    """Recent operations, newest first; ``action`` narrows them (in the query, before the limit)."""
     limit = max(1, min(limit, 100))
-    rows = (
-        await session.execute(select(InfrastructureOperation).order_by(InfrastructureOperation.id.desc()).limit(limit))
-    ).scalars()
+    query = select(InfrastructureOperation)
+    if action is not None:
+        query = query.where(InfrastructureOperation.action == action)
+    rows = (await session.execute(query.order_by(InfrastructureOperation.id.desc()).limit(limit))).scalars()
     return OperationListResponse(operations=[await _view(session, op) for op in rows])
 
 

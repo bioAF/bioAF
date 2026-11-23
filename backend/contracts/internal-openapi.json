@@ -12745,6 +12745,20 @@
         "title": "OperationView",
         "type": "object"
       },
+      "OrgSettingsResponse": {
+        "description": "The saved organization name, for an administrator reviewing an unfinished setup.",
+        "properties": {
+          "org_name": {
+            "title": "Org Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_name"
+        ],
+        "title": "OrgSettingsResponse",
+        "type": "object"
+      },
       "OrphanedResourceListResponse": {
         "properties": {
           "items": {
@@ -30794,6 +30808,28 @@
         ]
       }
     },
+    "/api/bootstrap/org-settings": {
+      "get": {
+        "description": "The caller's saved organization name, so a returning administrator can review it. Kept out\nof the public status, which anyone can read.",
+        "operationId": "get_org_settings_api_bootstrap_org_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Org Settings",
+        "tags": [
+          "bootstrap"
+        ]
+      }
+    },
     "/api/bootstrap/smtp-settings": {
       "get": {
         "operationId": "get_smtp_settings_api_bootstrap_smtp_settings_get",
@@ -48714,6 +48750,7 @@
     },
     "/api/v1/infrastructure/operations": {
       "get": {
+        "description": "Recent operations, newest first; ``action`` narrows them (in the query, before the limit).",
         "operationId": "list_operations_endpoint_api_v1_infrastructure_operations_get",
         "parameters": [
           {
@@ -48724,6 +48761,41 @@
               "default": 20,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "compute_deploy",
+                    "compute_teardown",
+                    "storage_deploy",
+                    "storage_update",
+                    "storage_destroy",
+                    "infrastructure_update",
+                    "cluster_config",
+                    "image_build",
+                    "notebook_image_build",
+                    "cellxgene_image_build",
+                    "foundation_bootstrap",
+                    "billing_export_enable",
+                    "billing_export_teardown",
+                    "terraform_plan",
+                    "terraform_apply",
+                    "config_sync",
+                    "component_change"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
             }
           }
         ],
