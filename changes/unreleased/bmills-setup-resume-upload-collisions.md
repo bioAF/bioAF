@@ -15,7 +15,11 @@
 - A file name containing `/`, `\`, control characters or more than 255 bytes, or named `.` or `..`, is
   refused before anything is uploaded.
 - **Cancel upload** for an upload that was already received now shows it as stopping until its stored
-  copies are removed, then cancelled; it never removes a copy that belongs to another file.
+  copies are removed, then cancelled; it never removes a copy that belongs to another file. An upload
+  cancelled while its bytes are still arriving is no longer saved as a file when the transfer finishes. On
+  S3 buckets with versioning, a cancellation finishes only once no version of the upload is readable.
+- On NFS, the copy a verified file's protected copy replaces is removed (a pipeline's own output is kept),
+  so moving a verified file leaves exactly one copy.
 - Moving a file whose checksum was verified checks it again at its new location instead of carrying the
   old result over. A file whose old copy is still waiting to be removed is fully removed when deleted.
 - Assigning or unlinking a file through `/api/v1/files/{id}/assign` and `/api/v1/files/{id}/unlink` is now
@@ -36,8 +40,11 @@
 - An infrastructure deployment that was already started is shown instead of being created again: either
   **Deployment already in progress** with **Continue to components**, or **The last deployment didn't
   finish** with **View details** and **Retry deployment**. Retry is available only with deploy permission,
-  when no other infrastructure action is running, and after any required recovery is recorded.
+  when no other infrastructure action is running, and after any required recovery is recorded; it asks
+  **Continue infrastructure setup?** first. If bioAF cannot read whether a deployment already exists, it
+  does not offer to create one.
 - Components that are already enabled stay selected during setup review and are not queued again.
+  Components added after a failed completion are still queued when you try again.
   Selecting a component that is already enabled, from any screen, no longer restarts it.
 - If setup cannot be marked complete, setup says "Setup couldn't be marked complete. Your settings are
   saved." with **Try again**, instead of moving on as if it had worked.
