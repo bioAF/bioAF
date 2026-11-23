@@ -64,6 +64,26 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Dispatch values reach the shell only as quoted environment variables, never as script text. The worker
+      # count is free text, so it is checked here, before anything is installed: `auto` or a whole number from 1 to
+      # MAX_WORKERS (the public ubuntu-latest runner has 4 CPUs). The syntax and length are checked before the number
+      # is compared, and a rejected value is never repeated in the log.
+      - name: Validate inputs
+        id: validate
+        env:
+          WORKERS: ${{ inputs.workers }}
+          MAX_WORKERS: "4"
+        run: |
+          if [ "$WORKERS" = "auto" ]; then
+            echo "workers=auto"
+            exit 0
+          fi
+          if [[ ! "$WORKERS" =~ ^[1-9][0-9]?$ ]] || [ "$WORKERS" -gt "$MAX_WORKERS" ]; then
+            echo "::error::Unsupported workers value. Use auto or a whole number from 1 to $MAX_WORKERS."
+            exit 1
+          fi
+          echo "workers=$WORKERS"
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -89,6 +109,9 @@ jobs:
         run: python -m tests.support.disposable_pg tune-ci-service
 
       - name: Run tests
+        env:
+          SCOPE: ${{ inputs.scope }}
+          WORKERS: ${{ inputs.workers }}
         run: |
           mkdir -p test-artifacts
           uv pip freeze > test-artifacts/pip-freeze.txt
@@ -98,7 +121,7 @@ jobs:
             echo "uv=$(uv --version)"
             echo "lock_sha256=$(sha256sum uv.lock | cut -d' ' -f1)"
           } > test-artifacts/environment.txt
-          if [ "${{ inputs.scope }}" = "subset" ]; then
+          if [ "$SCOPE" = "subset" ]; then
             targets=$(grep -v '^#' tests/benchmark_subset.txt | tr '\n' ' ')
           else
             targets=tests
@@ -108,26 +131,38 @@ jobs:
           # No -x: a comparison needs every outcome, not the first failure.
           # $targets is a word list on purpose.
           # shellcheck disable=SC2086
-          pytest -n "${{ inputs.workers }}" --tb=short --cov=app --cov-report=term-missing -q $targets \
+          pytest -n "$WORKERS" --tb=short --cov=app --cov-report=term-missing -q $targets \
             --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
             2>&1 | tee test-artifacts/pytest-output.txt || status=$?
           echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
           exit $status
 
+      # Runs after a rejected input too: it reports the rejection instead of the value, and tolerates missing evidence.
       - name: Summarize
         if: always()
+        env:
+          SCOPE: ${{ inputs.scope }}
+          ROUNDS: ${{ inputs.test_bcrypt_rounds }}
+          DURABILITY: ${{ inputs.durability }}
+          WORKERS: ${{ inputs.workers }}
+          VALIDATION: ${{ steps.validate.outcome }}
         run: |
+          if [ "$VALIDATION" != "success" ]; then
+            echo "Inputs were rejected (workers must be auto or 1 to 4); no tests ran." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           cp "$RUNNER_TEMP/timings.env" test-artifacts/timings.env || true
           {
             echo '```'
-            echo "scope=${{ inputs.scope }} rounds=${{ inputs.test_bcrypt_rounds }} durability=${{ inputs.durability }} workers=${{ inputs.workers }} cpus=$(nproc)"
+            echo "scope=$SCOPE rounds=$ROUNDS durability=$DURABILITY workers=$WORKERS cpus=$(nproc)"
             cat test-artifacts/timings.env || true
             python -m tests.plugins.phase_report test-artifacts/phases.jsonl || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The artifact name carries the inputs, so it is built only from accepted values.
       - name: Upload evidence
-        if: always()
+        if: always() && steps.validate.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ inputs.scope }}-r${{ inputs.test_bcrypt_rounds }}-${{ inputs.durability }}-n${{ inputs.workers }}-${{ github.run_id }}

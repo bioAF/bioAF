@@ -314,3 +314,194 @@ def test_the_scheduled_audit_is_never_a_pull_request_check():
     run = "\n".join(s.get("run", "") for s in audit["jobs"]["npm-audit"]["steps"])
     assert "scripts/ci/dependency_report.py audit" in run and "--package-lock-only" in run
     assert "|| true" not in run
+
+
+# ── benchmark dispatch inputs stay data (nov_sec 01A) ──
+#
+# The worker count is free text typed into a manual dispatch. It reaches the shell only through step environment
+# variables, a dedicated step accepts `auto` or 1-4 before any tool is installed, and the always-running summary
+# never treats it as code. These tests run the workflow's own scripts with the environment each step declares.
+
+BENCHMARK_INPUTS = {"test_bcrypt_rounds": "4", "durability": "default", "scope": "full", "workers": "auto"}
+PAYLOADS = [
+    "$(touch {marker})",
+    "`touch {marker}`",
+    "1'; touch {marker}; echo '",
+    '1"; touch {marker}; echo "',
+    "1 $(touch {marker})",
+]
+
+
+def _benchmark() -> dict:
+    return yaml.safe_load(BENCHMARK.read_text())
+
+
+def _benchmark_step(name: str) -> tuple[int, dict]:
+    steps = _benchmark()["jobs"]["benchmark"]["steps"]
+    return next((i, s) for i, s in enumerate(steps) if s.get("name") == name)
+
+
+def _resolve(value: str, inputs: dict[str, str], outcomes: dict[str, str]) -> str:
+    """Evaluate the only expressions a step's env may use here: dispatch inputs and earlier step outcomes."""
+
+    def sub(match: re.Match) -> str:
+        expr = match.group(1).strip()
+        if m := re.fullmatch(r"inputs\.(\w+)", expr):
+            return inputs[m.group(1)]
+        if m := re.fullmatch(r"steps\.([\w-]+)\.outcome", expr):
+            return outcomes[m.group(1)]
+        raise AssertionError(f"unexpected expression in a step env: {expr}")
+
+    return re.sub(r"\$\{\{(.*?)\}\}", sub, str(value))
+
+
+def _run_benchmark_step(
+    name: str,
+    tmp_path: Path,
+    inputs: dict[str, str] | None = None,
+    outcomes: dict[str, str] | None = None,
+    pytest_exit: int = 0,
+    artifacts: bool = True,
+) -> tuple[subprocess.CompletedProcess, Path]:
+    """Run one benchmark step exactly as written, with the env it declares and the job's explicit bash."""
+    _, step = _benchmark_step(name)
+    script = step["run"]
+    assert "${{" not in script, f"{name} puts a workflow expression in shell source"
+    inputs = {**BENCHMARK_INPUTS, **(inputs or {})}
+    outcomes = {"validate": "success", **(outcomes or {})}
+    bin_dir, work, runner = tmp_path / "bin", tmp_path / "work", tmp_path / "runner"
+    for d in (bin_dir, work / "tests", runner):
+        d.mkdir(parents=True, exist_ok=True)
+    if artifacts:
+        (work / "test-artifacts").mkdir(exist_ok=True)
+    argv = tmp_path / "pytest-argv"
+    (bin_dir / "pytest").write_text(
+        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "{argv}"\necho "1 passed"\nexit {pytest_exit}\n'
+    )
+    (bin_dir / "nproc").write_text("#!/bin/sh\necho 4\n")
+    for tool in ("uv", "python"):
+        (bin_dir / tool).write_text("#!/bin/sh\necho stub\n")
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    (work / "uv.lock").write_text("")
+    (work / "tests" / "benchmark_subset.txt").write_text("# header\ntests/test_a.py\ntests/test_b.py\n")
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "RUNNER_TEMP": str(runner),
+        "HOME": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+    }
+    env.update({k: _resolve(v, inputs, outcomes) for k, v in step.get("env", {}).items()})
+    done = subprocess.run([*EXPLICIT_BASH, "-c", script], cwd=work, env=env, capture_output=True, text=True, timeout=60)
+    return done, work
+
+
+def _pytest_argv(tmp_path: Path) -> list[str]:
+    return (tmp_path / "pytest-argv").read_text().splitlines()
+
+
+@pytest.mark.parametrize("workers", ["auto", "1", "2", "4"])
+def test_the_benchmark_accepts_auto_and_one_to_four_workers(tmp_path, workers):
+    done, _ = _run_benchmark_step("Validate inputs", tmp_path, {"workers": workers})
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize(
+    "workers",
+    ["", "0", "5", "9", "10", "-1", "+1", " 1", "1 ", "01", "1.0", "0x2", "1e1", "AUTO", "auto ", "four", "9" * 40],
+)
+def test_the_benchmark_rejects_unsupported_worker_values_without_echoing_them(tmp_path, workers):
+    done, _ = _run_benchmark_step("Validate inputs", tmp_path, {"workers": workers})
+    assert done.returncode != 0
+    # One fixed diagnostic, whatever was typed: the rejected value is never repeated.
+    assert (done.stdout + done.stderr).strip() == (
+        "::error::Unsupported workers value. Use auto or a whole number from 1 to 4."
+    )
+
+
+@pytest.mark.parametrize("payload", PAYLOADS)
+@pytest.mark.parametrize("step", ["Validate inputs", "Run tests", "Summarize"])
+def test_a_worker_payload_never_executes_in_any_benchmark_step(tmp_path, payload, step):
+    marker = tmp_path / "executed"
+    workers = payload.format(marker=marker)
+    outcome = "failure" if step == "Summarize" else "success"
+    done, _ = _run_benchmark_step(step, tmp_path, {"workers": workers}, {"validate": outcome}, artifacts=False)
+    assert not marker.exists(), (step, done.stdout + done.stderr)
+    if step == "Validate inputs":
+        assert done.returncode != 0
+
+
+@pytest.mark.parametrize("workers", ["auto", "1", "4"])
+def test_accepted_workers_reach_pytest_as_one_exact_argument(tmp_path, workers):
+    done, _ = _run_benchmark_step("Run tests", tmp_path, {"workers": workers})
+    assert done.returncode == 0, done.stdout + done.stderr
+    argv = _pytest_argv(tmp_path)
+    assert argv[argv.index("-n") + 1] == workers
+    assert argv.count("-n") == 1
+
+
+@pytest.mark.parametrize(
+    ("scope", "targets"), [("subset", ["tests/test_a.py", "tests/test_b.py"]), ("full", ["tests"])]
+)
+def test_the_benchmark_scope_still_selects_its_tests(tmp_path, scope, targets):
+    done, _ = _run_benchmark_step("Run tests", tmp_path, {"scope": scope})
+    assert done.returncode == 0, done.stdout + done.stderr
+    argv = _pytest_argv(tmp_path)
+    for target in targets:
+        assert target in argv
+    if scope == "subset":
+        assert "tests" not in argv and "# header" not in argv
+
+
+@pytest.mark.parametrize("pytest_exit", [0, 1])
+def test_the_benchmark_test_step_keeps_the_pytest_result_through_tee(tmp_path, pytest_exit):
+    done, work = _run_benchmark_step("Run tests", tmp_path, {"workers": "2"}, pytest_exit=pytest_exit)
+    assert done.returncode == pytest_exit
+    assert "1 passed" in (work / "test-artifacts" / "pytest-output.txt").read_text()
+
+
+def test_the_benchmark_validates_before_installing_anything():
+    steps = _benchmark()["jobs"]["benchmark"]["steps"]
+    index, validate = _benchmark_step("Validate inputs")
+    assert validate.get("id") == "validate"
+    assert "if" not in validate and not validate.get("continue-on-error")
+    assert steps[0]["uses"].startswith("actions/checkout@") and index == 1
+    later = steps[index + 1 :]
+    installers = [s for s in later if s.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))]
+    assert len(installers) == 2
+    for step in later:
+        # A rejected value stops every later step except the evidence steps, which say what was skipped.
+        if "always()" in str(step.get("if", "")):
+            assert step.get("name") in {"Summarize", "Upload evidence"}, step
+    upload = _benchmark_step("Upload evidence")[1]
+    assert "steps.validate.outcome == 'success'" in upload["if"]
+
+
+def test_the_benchmark_summary_survives_a_rejected_value_without_repeating_it(tmp_path):
+    marker = tmp_path / "executed"
+    workers = f"$(touch {marker})"
+    done, _ = _run_benchmark_step("Summarize", tmp_path, {"workers": workers}, {"validate": "failure"}, artifacts=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    summary = (tmp_path / "summary.md").read_text()
+    assert "touch" not in summary and "rejected" in summary
+    assert not marker.exists()
+
+
+def test_the_benchmark_summary_reports_an_accepted_run(tmp_path):
+    done, _ = _run_benchmark_step("Summarize", tmp_path, {"workers": "4", "scope": "subset"})
+    assert done.returncode == 0, done.stdout + done.stderr
+    summary = (tmp_path / "summary.md").read_text()
+    assert "scope=subset" in summary and "workers=4" in summary and "cpus=4" in summary
+
+
+def test_the_benchmark_keeps_its_dispatch_choices_and_artifact_name():
+    inputs = _benchmark()[True]["workflow_dispatch"]["inputs"]
+    assert inputs["workers"]["default"] == "auto"
+    assert inputs["scope"]["options"] == ["subset", "full"]
+    assert inputs["durability"]["options"] == ["default", "tuned"]
+    assert inputs["test_bcrypt_rounds"]["options"] == ["4", "12"]
+    upload = _benchmark_step("Upload evidence")[1]
+    assert upload["with"]["name"] == (
+        "benchmark-${{ inputs.scope }}-r${{ inputs.test_bcrypt_rounds }}-${{ inputs.durability }}"
+        "-n${{ inputs.workers }}-${{ github.run_id }}"
+    )
