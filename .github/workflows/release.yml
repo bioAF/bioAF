@@ -88,7 +88,9 @@ jobs:
           {
             echo "## ${TAG}"
             echo
-            for f in $(ls changes/unreleased/*.md 2>/dev/null | grep -v 'README\.md$' | sort); do
+            # The glob expands in sorted order; README.md is the directory's instructions, not an entry.
+            for f in changes/unreleased/*.md; do
+              [ -f "$f" ] && [ "$(basename "$f")" != "README.md" ] || continue
               cat "$f"
               echo
             done
