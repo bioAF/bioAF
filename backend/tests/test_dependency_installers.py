@@ -66,8 +66,11 @@ def test_workflows_use_the_image_uv_version(workflow, job):
 
 @pytest.mark.parametrize(("workflow", "job"), BACKEND_INSTALLERS + [("release.yml", "release")])
 def test_setup_uv_is_referenced_by_a_full_release_tag(workflow, job):
-    # astral-sh/setup-uv publishes no moving major tag: `@v10` fails at job setup ("unable to find version").
-    assert re.fullmatch(r"astral-sh/setup-uv@v\d+\.\d+\.\d+", _setup_uv(workflow, job)["uses"])
+    # Pinned to a reviewed commit, with the full release tag it carries as a comment. astral-sh/setup-uv publishes
+    # no moving major tag: `@v10` fails at job setup ("unable to find version"), so the comment names vX.Y.Z.
+    assert re.fullmatch(r"astral-sh/setup-uv@[0-9a-f]{40}", _setup_uv(workflow, job)["uses"])
+    lines = [line for line in (WORKFLOWS / workflow).read_text().splitlines() if "astral-sh/setup-uv@" in line]
+    assert lines and all(re.search(r"@[0-9a-f]{40} # v\d+\.\d+\.\d+$", line) for line in lines)
 
 
 # ── CI and benchmarks ──

@@ -587,3 +587,70 @@ def test_the_changelog_check_keeps_its_policy():
     gated = [s for s in steps if s.get("id") != "label"]
     assert gated and all(s.get("if") == "steps.label.outputs.skip != 'true'" for s in gated)
     assert "changes/unreleased/" in gated[-1]["run"]
+
+
+# ── external actions run reviewed code (nov_sec 01B) ──
+
+USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<ref>\S+)(?P<rest>.*)$")
+PINNED = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}")
+VERSION_COMMENT = re.compile(r"\s+# v\d+\.\d+\.\d+$")
+
+
+def _uses_lines(path: Path) -> list[tuple[int, str, str]]:
+    found = []
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if m := USES_LINE.match(line):
+            found.append((number, m.group("ref").strip("'\""), m.group("rest")))
+    return found
+
+
+def test_the_pin_check_reads_every_action_reference():
+    # The raw-line scan and the parsed workflow must agree, or a reference could hide from the pin check.
+    for path in ALL_WORKFLOWS:
+        parsed = [
+            s["uses"]
+            for job in yaml.safe_load(path.read_text())["jobs"].values()
+            for s in job.get("steps", [])
+            if "uses" in s
+        ]
+        assert sorted(parsed) == sorted(ref for _, ref, _ in _uses_lines(path)), path.name
+
+
+@pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda p: p.name)
+def test_every_external_action_is_pinned_to_a_reviewed_commit(path):
+    # A tag can be moved to new code; a full commit SHA cannot. The comment names the release that was reviewed,
+    # and Dependabot (github-actions) proposes updates to both together.
+    unpinned = [
+        (number, ref + rest)
+        for number, ref, rest in _uses_lines(path)
+        if not ref.startswith(("./", "docker://")) and not (PINNED.fullmatch(ref) and VERSION_COMMENT.fullmatch(rest))
+    ]
+    assert unpinned == []
+
+
+@pytest.mark.parametrize(
+    ("ref", "rest", "ok"),
+    [
+        ("actions/checkout@" + "a" * 40, " # v5.1.0", True),
+        ("r-lib/actions/setup-r@" + "b" * 40, " # v2.14.0", True),
+        ("actions/checkout@v5", "", False),
+        ("actions/checkout@v5.1.0", "", False),
+        ("actions/checkout@" + "a" * 40, "", False),
+        ("actions/checkout@" + "a" * 40, " # v5", False),
+        ("actions/checkout@" + "A" * 40, " # v5.1.0", False),
+        ("actions/checkout@" + "a" * 39, " # v5.1.0", False),
+    ],
+)
+def test_the_pin_rule_accepts_only_a_full_sha_with_its_release(ref, rest, ok):
+    assert bool(PINNED.fullmatch(ref) and VERSION_COMMENT.fullmatch(rest)) is ok
+
+
+def test_dependabot_proposes_weekly_action_pin_updates():
+    config = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text())
+    ecosystems = {u["package-ecosystem"]: u for u in config["updates"]}
+    assert {"uv", "npm", "github-actions"} <= set(ecosystems)
+    actions = ecosystems["github-actions"]
+    assert actions["directory"] == "/"
+    assert actions["schedule"]["interval"] == "weekly"
+    assert 1 <= actions["open-pull-requests-limit"] <= 5
+    assert "automerge" not in json.dumps(actions).lower()

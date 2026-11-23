@@ -62,7 +62,7 @@ jobs:
       BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test
       BIOAF_TEST_BCRYPT_ROUNDS: ${{ inputs.test_bcrypt_rounds }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Dispatch values reach the shell only as quoted environment variables, never as script text. The worker
       # count is free text, so it is checked here, before anything is installed: `auto` or a whole number from 1 to
@@ -84,12 +84,12 @@ jobs:
           fi
           echo "workers=$WORKERS"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.5"
           enable-cache: true
@@ -163,7 +163,7 @@ jobs:
       # The artifact name carries the inputs, so it is built only from accepted values.
       - name: Upload evidence
         if: always() && steps.validate.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: benchmark-${{ inputs.scope }}-r${{ inputs.test_bcrypt_rounds }}-${{ inputs.durability }}-n${{ inputs.workers }}-${{ github.run_id }}
           path: backend/test-artifacts/
