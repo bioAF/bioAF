@@ -123,7 +123,8 @@ class File(Base):
     # the same transaction as the new ``storage_uri`` and cleared only by its owned cleanup
     # (app/services/storage_cleanup.py), so a rollback keeps the original and a crash after commit
     # leaves the cleanup to the next pass. At most one per File.
-    pending_storage_cleanup: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # none_as_null: clearing it stores SQL NULL, not JSON null (the cleanup pass selects IS NOT NULL).
+    pending_storage_cleanup: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     __table_args__ = (
         Index("idx_files_experiment_id", "experiment_id"),

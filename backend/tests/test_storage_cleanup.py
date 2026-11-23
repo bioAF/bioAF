@@ -384,3 +384,54 @@ async def test_migration_146_adds_a_nullable_slot(session, admin_user):
     await conn.run_sync(run, "upgrade")
     assert (await session.execute(text("SELECT pending_storage_cleanup FROM files"))).scalar_one() is None
     await session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# selection (review finding 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_settled_cleanup_is_sql_null(session, admin_user, store, relocated):
+    from sqlalchemy import text
+
+    file_id, _old, _new = relocated
+    assert await storage_cleanup.cleanup_after_commit(file_id, admin_user.organization_id) == "deleted"
+    is_null = (
+        await session.execute(text("SELECT pending_storage_cleanup IS NULL FROM files WHERE id = :i"), {"i": file_id})
+    ).scalar_one()
+    assert is_null is True
+
+
+@pytest.mark.asyncio
+async def test_settled_and_waiting_records_never_starve_due_work(session, admin_user, store):
+    from sqlalchemy import text
+
+    org = admin_user.organization_id
+    # Many earlier rows: settled (JSON null written by older code), out of attempts, or not due yet.
+    later = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    for n in range(12):
+        session.add(File(organization_id=org, storage_uri=f"gs://bk/x/{n}", filename="x", file_type="other"))
+    await session.flush()
+    await session.execute(text("UPDATE files SET pending_storage_cleanup = 'null'::jsonb WHERE id % 3 = 0"))
+    await session.execute(
+        text(
+            "UPDATE files SET pending_storage_cleanup = jsonb_build_object('uri','gs://bk/gone','version','v',"
+            "'size_bytes',1,'attempts',5,'next_attempt_at',NULL) WHERE id % 3 = 1"
+        )
+    )
+    await session.execute(
+        text(
+            "UPDATE files SET pending_storage_cleanup = jsonb_build_object('uri','gs://bk/gone','version','v',"
+            "'size_bytes',1,'attempts',1,'next_attempt_at',:later) WHERE id % 3 = 2"
+        ).bindparams(later=later)
+    )
+    await session.commit()
+    due_old = await _put(store, "gs://bk/uploads/due/a.txt")
+    due = File(organization_id=org, storage_uri="gs://bk/experiments/1/files/d/a.txt", filename="a", file_type="other")
+    due.pending_storage_cleanup = storage_cleanup.cleanup_slot(due_old)
+    session.add(due)
+    await session.commit()
+
+    assert await storage_cleanup.reconcile_due(_factory(), limit=2) == 1
+    assert not await store.exists(due_old.uri)

@@ -201,29 +201,31 @@ async def cleanup_after_commit(file_id: int, org_id: int, session_factory=None) 
 
 
 async def reconcile_due(session_factory=None, *, limit: int = 20) -> int:
-    """Run pending cleanups whose turn has come (the periodic/startup pass). Returns how many settled."""
+    """Run pending cleanups whose turn has come (the periodic/startup pass). Returns how many settled.
+
+    Eligibility is decided in the query, before the limit: a settled record (SQL or JSON null), one
+    out of automatic attempts, or one not yet due never takes a place from work that is due."""
+    from sqlalchemy import BigInteger, DateTime, cast, func, literal
+
     factory = session_factory or _factory()
     now = _now()
+    slot = File.pending_storage_cleanup
+    attempts = func.coalesce(cast(slot["attempts"].astext, BigInteger), literal(0))
+    due_at = cast(slot["next_attempt_at"].astext, DateTime(timezone=True))
     async with factory() as session:
-        rows = (
+        due = (
             await session.execute(
-                select(File.id, File.organization_id, File.pending_storage_cleanup)
-                .where(File.pending_storage_cleanup.is_not(None))
+                select(File.id, File.organization_id)
+                .where(
+                    slot.is_not(None),
+                    func.jsonb_typeof(slot) == "object",
+                    attempts < MAX_ATTEMPTS,
+                    or_(attempts == 0, and_(due_at.is_not(None), due_at <= now)),
+                )
                 .order_by(File.id)
-                .limit(limit * 5)
+                .limit(limit)
             )
         ).all()
-    due = []
-    for file_id, org_id, slot in rows:
-        attempts = int((slot or {}).get("attempts") or 0)
-        when = (slot or {}).get("next_attempt_at")
-        if attempts >= MAX_ATTEMPTS:
-            continue  # out of automatic attempts; still recorded for an administrator
-        if attempts and (when is None or datetime.fromisoformat(when) > now):
-            continue
-        due.append((file_id, org_id))
-        if len(due) >= limit:
-            break
     settled = 0
     for file_id, org_id in due:
         try:
