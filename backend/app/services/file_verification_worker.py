@@ -392,6 +392,24 @@ async def complete(claim: Claim, result: Result) -> str:
 
         digest = result.digest
         assert digest is not None
+        if (
+            digest.hex == record.expected_checksum
+            and result.final_uri != claim.uri
+            and file.source_type != "pipeline_output"
+            and result.superseded is not None
+            and file.pending_storage_cleanup
+        ):
+            # Installing this copy makes the current one superseded, and the File has one cleanup
+            # slot. Drain it first; while it is still held, installing would lose the obligation to
+            # remove the replaced copy. Then nothing changes: the attempt is retried (bounded) and
+            # the caller discards its artifact.
+            from app.services import storage_cleanup
+
+            await storage_cleanup.clean_pending(session, file)
+            if file.pending_storage_cleanup:
+                await _fail(session, record, file, "storage_cleanup_pending", True, discovery=False)
+                await session.commit()
+                return "stale"
         _release(record)
         record.observed_checksum = digest.hex
         record.observed_method = digest.method
@@ -425,13 +443,8 @@ async def complete(claim: Claim, result: Result) -> str:
             if file.source_type != "pipeline_output" and result.superseded is not None:
                 from app.services import storage_cleanup
 
-                if file.pending_storage_cleanup:
-                    await storage_cleanup.clean_pending(session, file)
-                if not file.pending_storage_cleanup:
-                    file.pending_storage_cleanup = storage_cleanup.cleanup_slot(result.superseded)
-                    superseded = file.id, file.organization_id
-                else:
-                    logger.warning("File %s: an earlier cleanup is pending; the replaced copy is kept", file.id)
+                file.pending_storage_cleanup = storage_cleanup.cleanup_slot(result.superseded)
+                superseded = file.id, file.organization_id
         await session.flush()
         await FileService.mark_ready(session, file.id, file.organization_id)
         await session.commit()

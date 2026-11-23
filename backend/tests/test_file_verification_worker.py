@@ -834,3 +834,40 @@ async def test_moving_a_verified_nfs_file_leaves_exactly_one_copy(session, admin
     assert record.status == "verified" and f.storage_uri.startswith("file://raw/verified-files/")
     stored = [o.storage_uri for o in await adapter.list_objects("file://raw/")]
     assert stored == [f.storage_uri]
+
+
+async def test_verification_waits_while_an_earlier_cleanup_cannot_finish(session, admin_user, nfs, monkeypatch):
+    """Review round 2, finding 4: installing the artifact must never drop the obligation to remove
+    the copy it replaces. While the File's cleanup slot is held, the attempt is retried and its
+    artifact discarded; once the slot drains, verification installs and records the replaced copy."""
+    from app.services import storage_cleanup
+
+    adapter, root = nfs
+    uri = "file://raw/experiments/1/files/u/a.fastq.gz"
+    file_id = await _expect(session, admin_user, adapter, uri=uri)
+    earlier = "file://raw/uploads/9/a.fastq.gz"
+    await adapter.write_bytes(earlier, b"earlier copy")
+    f = await session.get(File, file_id)
+    f.pending_storage_cleanup = storage_cleanup.cleanup_slot(await adapter.object_identity(earlier))
+    await session.commit()
+
+    async def unavailable(identity):
+        raise RuntimeError("storage did not answer")
+
+    with monkeypatch.context() as m:
+        m.setattr(adapter, "delete_if_unchanged", unavailable)
+        await worker.run_once()
+    f = await _file_row(file_id)
+    record = await _record(file_id)
+    assert f.storage_uri == uri and record.status == "queued" and record.error_code == "storage_cleanup_pending"
+    assert record.observed_uri is None  # nothing recorded about the discarded artifact
+    assert f.pending_storage_cleanup["uri"] == earlier
+    assert [o.storage_uri for o in await adapter.list_objects("file://raw/verified-files/")] == []
+
+    await _make_due(file_id)
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+    f = await _file_row(file_id)
+    assert (await _record(file_id)).status == "verified" and f.storage_uri.startswith("file://raw/verified-files/")
+    assert not await adapter.exists(earlier) and not await adapter.exists(uri)
+    assert f.pending_storage_cleanup is None
