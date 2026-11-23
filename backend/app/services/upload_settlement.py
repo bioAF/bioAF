@@ -291,7 +291,7 @@ async def _referenced_elsewhere(session: AsyncSession, cp: UploadCheckpoint, uri
 
 
 async def _remove_owned_copies(cp: UploadCheckpoint, session: AsyncSession) -> None:
-    from app.adapters.models import ObjectChanged, ObjectIdentity, StorageObjectNotFound
+    from app.adapters.models import ObjectChanged, StorageObjectNotFound
     from app.adapters.registry import get_storage_adapter
     from app.services.storage_write_admission import StorageWritesPaused, admitted
     from app.services.upload_service import UploadService
@@ -313,34 +313,25 @@ async def _remove_owned_copies(cp: UploadCheckpoint, session: AsyncSession) -> N
                     await adapter.delete_if_unchanged(observed.identity)
                 except ObjectChanged:
                     logger.warning("Upload %s: its organized copy changed; kept", cp.reference)
-        # The ingest copy, at its own unique path only.
+        # The ingest copy, at its own unique path only. Every version at ``uploads/{id}/`` is this
+        # upload's (no other writer is ever given that path), and removing the current version of a
+        # versioned store can make an older one readable again. So each pass removes whatever is
+        # readable there now, one observed version at a time (each delete guarded by its own
+        # observation, never by what an earlier pass saw), and the upload settles only once nothing
+        # is readable; otherwise it stays cancelling and the next pass continues from what is there.
         _bucket, key = adapter.parse_uri(cp.source_uri)
         if not key.startswith(f"uploads/{cp.id}/") or await _referenced_elsewhere(session, cp, cp.source_uri):
             return
-        try:
-            current = await adapter.object_identity(cp.source_uri)
-        except StorageObjectNotFound:
-            return
-        expected = (
-            ObjectIdentity(uri=cp.source_uri, size_bytes=cp.source_observed_size or 0, version=cp.source_version)
-            if cp.source_version
-            else current
-        )
-        try:
-            await adapter.delete_if_unchanged(expected)
-        except ObjectChanged:
-            logger.warning("Upload %s: its stored copy changed since it was received; kept", cp.reference)
-            return
-        # Removing the current version of a versioned store can make an older version readable again.
-        # Everything at this upload's unique path is this upload's: remove each version exposed, and
-        # settle only once nothing is readable there (otherwise stay cancelling and try again).
         for _ in range(_MAX_EXPOSED_VERSIONS):
             try:
-                exposed = await adapter.object_identity(cp.source_uri)
+                current = await adapter.object_identity(cp.source_uri)
             except StorageObjectNotFound:
                 return
-            await adapter.delete_if_unchanged(exposed)
-        raise RuntimeError("Older versions of a cancelled upload are still readable")
+            try:
+                await adapter.delete_if_unchanged(current)
+            except ObjectChanged:
+                continue  # replaced between the read and the delete: observe again
+        raise RuntimeError("Versions of a cancelled upload are still readable")
 
 
 def _ended_category(cp: UploadCheckpoint) -> str:

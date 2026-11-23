@@ -559,3 +559,32 @@ async def test_a_cancelled_transfer_that_fails_after_writing_leaves_no_bytes(cli
     [cp] = await _checkpoints(session)
     assert cp.stage == "cancelled"
     assert cp.source_uri not in adapter.objects
+
+
+@pytest.mark.asyncio
+async def test_s3_cancellation_finishes_across_passes_when_many_versions_exist(session, raw_storage, s3_store):
+    """Review round 2, finding 3: a later pass continues from what is there now, never from the
+    version the first pass already removed."""
+    from app import database
+    from app.services.upload_settlement import settle
+
+    adapter, fake = s3_store
+    exp = await _experiment(session)
+    upload_id = await _cancelling_s3_upload(session, exp)
+    key = ("ingest", f"uploads/{upload_id}/a.txt")
+    for n in range(26):
+        fake.put(*key, f"attempt {n}".encode())
+    first_seen = await adapter.object_identity(f"s3://ingest/uploads/{upload_id}/a.txt")
+    await session.execute(
+        text("UPDATE upload_checkpoints SET source_version = :v WHERE id = :i").bindparams(
+            v=first_seen.version, i=upload_id
+        )
+    )
+    await session.commit()
+
+    assert await settle(database.async_session_factory, upload_id) == "cancelling"
+    assert key in fake.objects  # more versions than one pass removes
+    await session.execute(text("UPDATE upload_checkpoints SET next_reconcile_at = now()"))
+    await session.commit()
+    assert await settle(database.async_session_factory, upload_id) == "cancelled"
+    assert key not in fake.objects
