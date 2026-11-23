@@ -15,6 +15,28 @@ import { DEFAULT_AWS_REGION } from "@/lib/aws-regions";
  * value it had when the read started.
  */
 
+/**
+ * The saved validation outcome, as persisted: a JSON array of checks. Anything else (empty, legacy,
+ * malformed) means the outcome is unknown, not a crash and not a pass.
+ */
+function savedChecks(raw: string | null | undefined): ProbeCheck[] | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (c): c is ProbeCheck => !!c && typeof c === "object" && "name" in c && "passed" in c,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** A stable comparison key for a set of field values. */
+function valuesKey(values: Record<string, string>): string {
+  return JSON.stringify(Object.keys(values).sort().map((k) => [k, values[k] ?? ""]));
+}
+
 interface ProbeCheck {
   name: string;
   passed: boolean;
@@ -43,6 +65,8 @@ export interface GcpValidation {
 }
 
 interface GcpSettings {
+  gcp_credentials_configured?: boolean;
+  gcp_validation_status?: string | null;
   gcp_project_id: string | null;
   gcp_region: string | null;
   gcp_zone: string | null;
@@ -66,11 +90,27 @@ export function useGcpCredentials(prefillKey: string | null) {
   const [gcpBootstrapSaEmail, setGcpBootstrapSaEmail] = useState("");
   const [gcpPrefilled, setGcpPrefilled] = useState(false);
   const [gcpSaving, setGcpSaving] = useState(false);
-  const [gcpConfigured, setGcpConfigured] = useState(false);
   const [gcpValidation, setGcpValidation] = useState<GcpValidation | null>(null);
+  // The values the server has saved (null until read), and the values a passed validation is for.
+  // Validation belongs to exact values: editing any of them, or typing a replacement key, clears it.
+  const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [validatedKey, setValidatedKey] = useState<string | null>(null);
 
-  const typed = useRef({ gcpProjectId, gcpOrgSlug });
-  typed.current = { gcpProjectId, gcpOrgSlug };
+  const typed = useRef({ gcpProjectId, gcpOrgSlug, gcpServiceAccountEmail });
+  typed.current = { gcpProjectId, gcpOrgSlug, gcpServiceAccountEmail } as typeof typed.current;
+
+  const committedValues = {
+    gcpProjectId,
+    gcpRegion,
+    gcpZone,
+    gcpOrgSlug,
+    gcpCredentialSource,
+    gcpServiceAccountEmail,
+  };
+  const currentKey = valuesKey(committedValues);
+  const keyTyped = gcpCredentialSource === "service_account_key" && gcpServiceAccountKey !== "";
+  const gcpConfigured = !keyTyped && validatedKey === currentKey;
+  const unchangedSinceSaved = !keyTyped && savedKey === currentKey;
 
   // install-gcp.sh's prefill path writes project/region/zone/credential-source/bootstrap-email to
   // platform_config, and the metadata-server fallback writes the bootstrap email on first backend
@@ -92,32 +132,64 @@ export function useGcpCredentials(prefillKey: string | null) {
         setGcpBootstrapSaEmail(cfg.gcp_bootstrap_sa_email);
         prefilled = true;
       }
+      if (cfg.gcp_service_account_email && !typed.current.gcpServiceAccountEmail) {
+        setGcpServiceAccountEmail(cfg.gcp_service_account_email);
+      }
       if (prefilled) setGcpPrefilled(true);
+      // What is saved, and whether those saved values passed validation. Installer prefill alone is
+      // never a pass.
+      const saved = valuesKey({
+        gcpProjectId: cfg.gcp_project_id ?? "",
+        gcpRegion: cfg.gcp_region ?? "us-central1",
+        gcpZone: cfg.gcp_zone ?? "us-central1-a",
+        gcpOrgSlug: cfg.org_slug ?? "",
+        gcpCredentialSource:
+          cfg.gcp_credential_source === "service_account_key" ? "service_account_key" : "vm_default",
+        gcpServiceAccountEmail: cfg.gcp_service_account_email ?? "",
+      });
+      setSavedKey(saved);
+      const checks = savedChecks(cfg.gcp_validation_status);
+      if (cfg.gcp_credentials_configured) setValidatedKey(saved);
+      if (checks && !cfg.gcp_credentials_configured) {
+        setGcpValidation({ passed: false, checks, permission_details: [], app_probe: null, bootstrap_probe: null });
+      }
     },
   });
 
-  /** Saves and validates. Resolves true when validation passed; a failure is thrown. */
+  /**
+   * Resolves true when the current values are validated; a failure is thrown. Values that already
+   * passed make no request; unchanged saved values are only validated (a save would reset the
+   * saved outcome); changed values or a typed replacement key are saved, then validated.
+   */
   async function saveAndValidate(): Promise<boolean> {
+    if (gcpConfigured) return true;
     setGcpValidation(null);
     setGcpSaving(true);
     try {
-      await api.put("/api/v1/settings/gcp", {
-        gcp_project_id: gcpProjectId || undefined,
-        gcp_region: gcpRegion,
-        gcp_zone: gcpZone,
-        org_slug: gcpOrgSlug || undefined,
-        gcp_credential_source: gcpCredentialSource,
-        service_account_key:
-          gcpCredentialSource === "service_account_key" && gcpServiceAccountKey ? gcpServiceAccountKey : undefined,
-        gcp_service_account_email: gcpServiceAccountEmail || undefined,
-      });
+      if (!unchangedSinceSaved) await saveGcp();
       const result = await api.post<GcpValidation | null>("/api/v1/settings/gcp/validate");
       setGcpValidation(result);
-      if (result?.passed) setGcpConfigured(true);
+      if (result?.passed) setValidatedKey(currentKey);
       return !!result?.passed;
     } finally {
       setGcpSaving(false);
     }
+  }
+
+  async function saveGcp(): Promise<void> {
+    await api.put("/api/v1/settings/gcp", {
+      gcp_project_id: gcpProjectId || undefined,
+      gcp_region: gcpRegion,
+      gcp_zone: gcpZone,
+      org_slug: gcpOrgSlug || undefined,
+      gcp_credential_source: gcpCredentialSource,
+      service_account_key:
+        gcpCredentialSource === "service_account_key" && gcpServiceAccountKey ? gcpServiceAccountKey : undefined,
+      gcp_service_account_email: gcpServiceAccountEmail || undefined,
+    });
+    // Saved: these are now the server's values, and the key is no longer pending.
+    setSavedKey(currentKey);
+    setGcpServiceAccountKey("");
   }
 
   return {
@@ -141,7 +213,7 @@ export function useGcpCredentials(prefillKey: string | null) {
     gcpConfigured,
     gcpValidation,
     /** What the step commits, for the unchanged-resubmit comparison. */
-    committedValues: { gcpProjectId, gcpRegion, gcpZone, gcpOrgSlug, gcpCredentialSource },
+    committedValues,
     saveAndValidate,
   };
 }
@@ -153,6 +225,8 @@ export interface AwsValidation {
 }
 
 interface AwsSettings {
+  aws_credentials_configured?: boolean;
+  aws_validation_status?: string | null;
   aws_account_id: string | null;
   aws_region: string | null;
   aws_app_role_arn: string | null;
@@ -175,8 +249,13 @@ export function useAwsCredentials(prefillKey: string | null) {
   const [awsCredentialSource, setAwsCredentialSource] = useState("instance_profile");
   const [awsPrefilled, setAwsPrefilled] = useState(false);
   const [awsSaving, setAwsSaving] = useState(false);
-  const [awsConfigured, setAwsConfigured] = useState(false);
   const [awsValidation, setAwsValidation] = useState<AwsValidation | null>(null);
+  const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [validatedKey, setValidatedKey] = useState<string | null>(null);
+  const committedValues = { awsAccountId, awsRegion, awsAppRoleArn, awsBootstrapRoleArn, awsOrgSlug };
+  const currentKey = valuesKey(committedValues);
+  const awsConfigured = validatedKey === currentKey;
+  const unchangedSinceSaved = savedKey === currentKey;
 
   const typed = useRef({ awsAccountId, awsAppRoleArn, awsBootstrapRoleArn, awsOrgSlug });
   typed.current = { awsAccountId, awsAppRoleArn, awsBootstrapRoleArn, awsOrgSlug };
@@ -199,23 +278,45 @@ export function useAwsCredentials(prefillKey: string | null) {
       if (cfg.org_slug && !typed.current.awsOrgSlug) setAwsOrgSlug(cfg.org_slug);
       if (cfg.aws_credential_source) setAwsCredentialSource(cfg.aws_credential_source);
       if (prefilled) setAwsPrefilled(true);
+      const saved = valuesKey({
+        awsAccountId: cfg.aws_account_id ?? "",
+        awsRegion: cfg.aws_region ?? DEFAULT_AWS_REGION,
+        awsAppRoleArn: cfg.aws_app_role_arn ?? "",
+        awsBootstrapRoleArn: cfg.aws_bootstrap_role_arn ?? "",
+        awsOrgSlug: cfg.org_slug ?? "",
+      });
+      setSavedKey(saved);
+      if (cfg.aws_credentials_configured) setValidatedKey(saved);
+      const checks = savedChecks(cfg.aws_validation_status);
+      if (checks && !cfg.aws_credentials_configured) {
+        setAwsValidation({
+          passed: false,
+          checks: checks.map((c) => ({ ...c, status: c.passed ? "passed" : "failed" })),
+          account_id: cfg.aws_account_id,
+        });
+      }
     },
   });
 
+  /** As for GCP: no request for validated values, validate-only for unchanged saved values. */
   async function saveAndValidate(): Promise<boolean> {
+    if (awsConfigured) return true;
     setAwsValidation(null);
     setAwsSaving(true);
     try {
-      await api.put("/api/v1/settings/aws", {
-        aws_account_id: awsAccountId || undefined,
-        aws_region: awsRegion,
-        aws_app_role_arn: awsAppRoleArn || undefined,
-        aws_bootstrap_role_arn: awsBootstrapRoleArn || undefined,
-        org_slug: awsOrgSlug || undefined,
-      });
+      if (!unchangedSinceSaved) {
+        await api.put("/api/v1/settings/aws", {
+          aws_account_id: awsAccountId || undefined,
+          aws_region: awsRegion,
+          aws_app_role_arn: awsAppRoleArn || undefined,
+          aws_bootstrap_role_arn: awsBootstrapRoleArn || undefined,
+          org_slug: awsOrgSlug || undefined,
+        });
+        setSavedKey(currentKey);
+      }
       const result = await api.post<AwsValidation | null>("/api/v1/settings/aws/validate");
       setAwsValidation(result);
-      if (result?.passed) setAwsConfigured(true);
+      if (result?.passed) setValidatedKey(currentKey);
       return !!result?.passed;
     } finally {
       setAwsSaving(false);
@@ -236,7 +337,7 @@ export function useAwsCredentials(prefillKey: string | null) {
     awsSaving,
     awsConfigured,
     awsValidation,
-    committedValues: { awsAccountId, awsRegion, awsOrgSlug },
+    committedValues,
     saveAndValidate,
   };
 }

@@ -321,6 +321,31 @@ class ObjectChanged(Exception):
         super().__init__(f"Storage object changed: {uri}")
 
 
+class ConditionalStorageUnsupported(NotImplementedError):
+    """This backend cannot yet copy create-only or delete by identity; nothing was copied or deleted."""
+
+
+class DestinationExists(Exception):
+    """A create-only copy found its destination already occupied; nothing was written there."""
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+        super().__init__(f"Storage destination already exists: {uri}")
+
+
+# Metadata keys only bioAF writes, on create-only publication: a source's (or a client's) values for
+# them are never carried to a destination, so they can serve as evidence of which File, organization
+# and upload an object was published for.
+RESERVED_OWNER_METADATA = ("bioaf-file-uuid", "bioaf-organization-id", "bioaf-upload-id")
+
+
+def owner_metadata(source: dict[str, str] | None, authoritative: dict[str, str] | None) -> dict[str, str]:
+    """A destination's metadata: the source's unrelated keys, then the server's authoritative keys."""
+    merged = {k: v for k, v in (source or {}).items() if k not in RESERVED_OWNER_METADATA}
+    merged.update(authoritative or {})
+    return merged
+
+
 # Bounded read size for whole-object digests (one active digest per process by default).
 DIGEST_CHUNK_BYTES = 8 * 1024 * 1024
 
@@ -338,6 +363,13 @@ class ObjectIdentity(BaseModel):
     size_bytes: int
     version: str
     native_md5: str | None = None
+
+
+class ObjectObservation(BaseModel):
+    """One object version's identity together with the custom metadata of that same version."""
+
+    identity: ObjectIdentity
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class ObjectDigest(BaseModel):

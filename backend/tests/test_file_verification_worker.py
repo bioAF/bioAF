@@ -755,3 +755,119 @@ async def test_resolution_is_recorded_for_every_outcome(session, admin_user, fak
     assert (
         await FileVerificationService.record_expectation(session, md5, source="upload_assertion", md5=GOOD)
     ).expectation_resolved is True
+
+
+# --- the copy a protected artifact replaces (project 12, owner review) -------------------------
+
+
+async def test_installing_an_artifact_for_an_uploaded_file_removes_the_copy_it_replaces(session, admin_user, nfs):
+    """Without this every move of a verified NFS file (copy, then re-verification into a new artifact)
+    would leave one more unreferenced copy behind."""
+    from app.services import storage_cleanup
+
+    adapter, _ = nfs
+    uri = "file://raw/experiments/1/files/u/a.fastq.gz"
+    file_id = await _expect(session, admin_user, adapter, uri=uri)
+
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+
+    f = await _file_row(file_id)
+    assert f.storage_uri.startswith("file://raw/verified-files/")
+    assert not await adapter.exists(uri)
+    assert f.pending_storage_cleanup is None
+
+
+async def test_a_pipeline_outputs_producer_copy_is_still_retained(session, admin_user, nfs):
+    from app.services import storage_cleanup
+
+    adapter, _ = nfs
+    source = "file://raw/runs/2/fastq/a.fastq.gz"
+    file_id = await _pipeline_output(session, admin_user, adapter, source, GOOD)
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+    assert (await _file_row(file_id)).pending_storage_cleanup is None
+    assert await adapter.exists(source)
+
+
+async def test_a_source_that_changed_during_the_copy_is_not_removed(session, admin_user, nfs, monkeypatch):
+    from app.services import storage_cleanup
+
+    adapter, _ = nfs
+    uri = "file://raw/uploads/3/a.fastq.gz"
+    file_id = await _expect(session, admin_user, adapter, uri=uri)
+    real = adapter.prepare_managed_copy
+
+    async def then_rewrite(*args, **kwargs):
+        copy = await real(*args, **kwargs)
+        await adapter.write_bytes(uri, DATA + b"appended by a producer")
+        return copy
+
+    monkeypatch.setattr(adapter, "prepare_managed_copy", then_rewrite)
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+    assert (await _file_row(file_id)).storage_uri.startswith("file://raw/verified-files/")
+    assert await adapter.read_bytes(uri) == DATA + b"appended by a producer"
+
+
+async def test_moving_a_verified_nfs_file_leaves_exactly_one_copy(session, admin_user, nfs):
+    from app.models.experiment import Experiment
+    from app.services import storage_cleanup
+    from app.services.file_organization import FileOrganizationService
+
+    adapter, root = nfs
+    file_id = await _expect(session, admin_user, adapter, uri="file://raw/uploads/4/a.fastq.gz")
+    await worker.run_once()
+    exp = Experiment(name="E", organization_id=admin_user.organization_id, owner_user_id=admin_user.id)
+    session.add(exp)
+    await session.commit()
+
+    await FileOrganizationService.assign_file_to_experiment(
+        session, file_id, exp.id, admin_user.id, org_id=admin_user.organization_id
+    )
+    await _make_due(file_id)
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+
+    f = await _file_row(file_id)
+    record = await _record(file_id)
+    assert record.status == "verified" and f.storage_uri.startswith("file://raw/verified-files/")
+    stored = [o.storage_uri for o in await adapter.list_objects("file://raw/")]
+    assert stored == [f.storage_uri]
+
+
+async def test_verification_waits_while_an_earlier_cleanup_cannot_finish(session, admin_user, nfs, monkeypatch):
+    """Review round 2, finding 4: installing the artifact must never drop the obligation to remove
+    the copy it replaces. While the File's cleanup slot is held, the attempt is retried and its
+    artifact discarded; once the slot drains, verification installs and records the replaced copy."""
+    from app.services import storage_cleanup
+
+    adapter, root = nfs
+    uri = "file://raw/experiments/1/files/u/a.fastq.gz"
+    file_id = await _expect(session, admin_user, adapter, uri=uri)
+    earlier = "file://raw/uploads/9/a.fastq.gz"
+    await adapter.write_bytes(earlier, b"earlier copy")
+    f = await session.get(File, file_id)
+    f.pending_storage_cleanup = storage_cleanup.cleanup_slot(await adapter.object_identity(earlier))
+    await session.commit()
+
+    async def unavailable(identity):
+        raise RuntimeError("storage did not answer")
+
+    with monkeypatch.context() as m:
+        m.setattr(adapter, "delete_if_unchanged", unavailable)
+        await worker.run_once()
+    f = await _file_row(file_id)
+    record = await _record(file_id)
+    assert f.storage_uri == uri and record.status == "queued" and record.error_code == "storage_cleanup_pending"
+    assert record.observed_uri is None  # nothing recorded about the discarded artifact
+    assert f.pending_storage_cleanup is not None and f.pending_storage_cleanup["uri"] == earlier
+    assert [o.storage_uri for o in await adapter.list_objects("file://raw/verified-files/")] == []
+
+    await _make_due(file_id)
+    await worker.run_once()
+    await storage_cleanup.reconcile_due(database_module.async_session_factory)
+    f = await _file_row(file_id)
+    assert (await _record(file_id)).status == "verified" and f.storage_uri.startswith("file://raw/verified-files/")
+    assert not await adapter.exists(earlier) and not await adapter.exists(uri)
+    assert f.pending_storage_cleanup is None

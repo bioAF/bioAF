@@ -93,7 +93,9 @@ async def reconcile_due(session_factory, *, limit: int = 20) -> int:
                     select(UploadCheckpoint.id)
                     .where(
                         UploadCheckpoint.stage.in_(SETTLING_STAGES),
-                        UploadCheckpoint.kind.in_(("session", "signed")),
+                        # Every cancelling upload, proxied ones included: removing received copies
+                        # needs no provider session.
+                        or_(UploadCheckpoint.kind.in_(("session", "signed")), UploadCheckpoint.stage == "cancelling"),
                         or_(UploadCheckpoint.next_reconcile_at.is_(None), UploadCheckpoint.next_reconcile_at <= now),
                     )
                     .order_by(UploadCheckpoint.next_reconcile_at.nulls_first())
@@ -120,7 +122,9 @@ async def settle(session_factory, upload_id: str) -> str | None:
         cp = await session.get(UploadCheckpoint, upload_id, populate_existing=True)
         if cp is None or cp.stage not in SETTLING_STAGES:
             return cp.stage if cp else None
-        if cp.kind == "signed":
+        if cp.stage == "cancelling" and cp.cancel_from_stage is not None:
+            await _settle_received_cancellation(cp, session)
+        elif cp.kind == "signed":
             await _settle_presigned(cp, session)
         elif cp.kind == "session":
             await _settle_session(cp, session)
@@ -226,6 +230,108 @@ async def _settle_presigned(cp: UploadCheckpoint, session: AsyncSession | None =
     # looking (an object that appears later is still handled) and let an administrator decide.
     cp.last_error_category = "outcome_unknown"
     cp.next_reconcile_at = now + timedelta(hours=1)
+
+
+# Backoff for removing a cancelled upload's own copies when storage does not answer. An ordinary
+# delete failure is retried; it is never treated as an unconfirmed transfer.
+# How many older versions one settlement pass removes from a cancelled upload's own path.
+_MAX_EXPOSED_VERSIONS = 20
+CLEANUP_BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1))
+
+
+async def _settle_received_cancellation(cp: UploadCheckpoint, session: AsyncSession) -> None:
+    """Remove the copies a cancelled upload owns, then settle it as cancelled.
+
+    Both recorded places are checked: the ingest source (only the exact ``uploads/{id}/`` object,
+    at the version observed now or when filing observed it) and the organized destination an
+    interrupted filing may have published (only with this upload's server-owned tags and size). An
+    object another File or upload names is never deleted, nor is anything at a legacy name-only
+    path. Until every owned copy is accounted for the upload stays cancelling and is retried.
+    """
+    from app.services.storage_write_admission import StorageWritesPaused
+
+    try:
+        await _remove_owned_copies(cp, session)
+    except StorageWritesPaused:
+        cp.next_reconcile_at = _now() + timedelta(minutes=5)
+        return
+    except Exception as exc:
+        attempts = (cp.reconcile_attempts or 0) + 1
+        cp.reconcile_attempts = attempts
+        cp.next_reconcile_at = _now() + CLEANUP_BACKOFF[min(attempts, len(CLEANUP_BACKOFF)) - 1]
+        logger.warning(
+            "Upload %s: its stored copy could not be removed yet (error_type=%s)", cp.reference, type(exc).__name__
+        )
+        return
+    cp.reconcile_attempts = 0
+    _settled(cp, "cancelled", _ended_category(cp))
+
+
+async def _referenced_elsewhere(session: AsyncSession, cp: UploadCheckpoint, uri: str) -> bool:
+    from sqlalchemy import func
+
+    from app.models.file import File
+
+    files = await session.scalar(
+        select(func.count(File.id)).where(
+            or_(File.storage_uri == uri, File.gcs_uri == uri, File.pending_storage_cleanup["uri"].astext == uri),
+            File.deleted_at.is_(None),
+        )
+    )
+    if files:
+        return True
+    other = await session.scalar(
+        select(func.count(UploadCheckpoint.id)).where(
+            UploadCheckpoint.id != cp.id,
+            UploadCheckpoint.stage.not_in(("cancelled", "failed")),
+            or_(UploadCheckpoint.source_uri == uri, UploadCheckpoint.planned_destination == uri),
+        )
+    )
+    return bool(other)
+
+
+async def _remove_owned_copies(cp: UploadCheckpoint, session: AsyncSession) -> None:
+    from app.adapters.models import ObjectChanged, StorageObjectNotFound
+    from app.adapters.registry import get_storage_adapter
+    from app.services.storage_write_admission import StorageWritesPaused, admitted
+    from app.services.upload_service import UploadService
+
+    adapter = get_storage_adapter()
+    async with admitted(session, error=StorageWritesPaused):
+        # The organized copy an interrupted filing may have published.
+        if cp.planned_destination and not UploadService._is_legacy_plan(cp) and cp.file_uuid is not None:
+            try:
+                observed = await adapter.inspect_object(cp.planned_destination)
+            except StorageObjectNotFound:
+                observed = None
+            if (
+                observed is not None
+                and UploadService._is_owned_copy(observed, cp)
+                and not await _referenced_elsewhere(session, cp, cp.planned_destination)
+            ):
+                try:
+                    await adapter.delete_if_unchanged(observed.identity)
+                except ObjectChanged:
+                    logger.warning("Upload %s: its organized copy changed; kept", cp.reference)
+        # The ingest copy, at its own unique path only. Every version at ``uploads/{id}/`` is this
+        # upload's (no other writer is ever given that path), and removing the current version of a
+        # versioned store can make an older one readable again. So each pass removes whatever is
+        # readable there now, one observed version at a time (each delete guarded by its own
+        # observation, never by what an earlier pass saw), and the upload settles only once nothing
+        # is readable; otherwise it stays cancelling and the next pass continues from what is there.
+        _bucket, key = adapter.parse_uri(cp.source_uri)
+        if not key.startswith(f"uploads/{cp.id}/") or await _referenced_elsewhere(session, cp, cp.source_uri):
+            return
+        for _ in range(_MAX_EXPOSED_VERSIONS):
+            try:
+                current = await adapter.object_identity(cp.source_uri)
+            except StorageObjectNotFound:
+                return
+            try:
+                await adapter.delete_if_unchanged(current)
+            except ObjectChanged:
+                continue  # replaced between the read and the delete: observe again
+        raise RuntimeError("Versions of a cancelled upload are still readable")
 
 
 def _ended_category(cp: UploadCheckpoint) -> str:

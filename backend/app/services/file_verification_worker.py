@@ -39,7 +39,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select, update
 
 from app import runtime
-from app.adapters.models import ObjectChanged, ObjectDigest, StorageObjectNotFound
+from app.adapters.models import ObjectIdentity, ObjectChanged, ObjectDigest, StorageObjectNotFound
 from app.exceptions import ValidationError
 from app.models.file import File
 from app.models.file_verification import FileVerification
@@ -85,6 +85,9 @@ class Result:
     final_uri: str | None = None
     artifact_uuid: uuid.UUID | None = None
     discovered: tuple[bool, str | None] | None = None  # (resolved, md5)
+    # The exact source version a protected copy was made from, when it was unchanged throughout the
+    # copy: once the copy is installed, that object is superseded.
+    superseded: ObjectIdentity | None = None
     error: str | None = None
     transient: bool = True
 
@@ -274,11 +277,20 @@ async def _verify(claim: Claim, adapter) -> Result:
             on_progress=_heartbeat(claim, "preparing", source.size_bytes),
         )
         identity = await adapter.object_identity(copy.uri)
+        try:
+            after = await adapter.object_identity(claim.uri)
+        except Exception:
+            after = None
         await _guarded(claim, status=fvs.VERIFYING, stage="verifying", bytes_processed=0)
         digest = await adapter.stream_md5(
             identity, chunk_size=chunk, on_progress=_heartbeat(claim, "verifying", identity.size_bytes)
         )
-        return Result(digest=digest, final_uri=copy.uri, artifact_uuid=artifact_uuid)
+        return Result(
+            digest=digest,
+            final_uri=copy.uri,
+            artifact_uuid=artifact_uuid,
+            superseded=source if after is not None and after.version == source.version else None,
+        )
     identity = await adapter.object_identity(claim.uri)
     if identity.native_md5:
         digest = ObjectDigest(
@@ -380,6 +392,24 @@ async def complete(claim: Claim, result: Result) -> str:
 
         digest = result.digest
         assert digest is not None
+        if (
+            digest.hex == record.expected_checksum
+            and result.final_uri != claim.uri
+            and file.source_type != "pipeline_output"
+            and result.superseded is not None
+            and file.pending_storage_cleanup
+        ):
+            # Installing this copy makes the current one superseded, and the File has one cleanup
+            # slot. Drain it first; while it is still held, installing would lose the obligation to
+            # remove the replaced copy. Then nothing changes: the attempt is retried (bounded) and
+            # the caller discards its artifact.
+            from app.services import storage_cleanup
+
+            await storage_cleanup.clean_pending(session, file)
+            if file.pending_storage_cleanup:
+                await _fail(session, record, file, "storage_cleanup_pending", True, discovery=False)
+                await session.commit()
+                return "stale"
         _release(record)
         record.observed_checksum = digest.hex
         record.observed_method = digest.method
@@ -402,13 +432,29 @@ async def complete(claim: Claim, result: Result) -> str:
         record.verified_at = _now()
         record.error_code = None
         record.retryable = None
+        superseded = None
         if result.final_uri != claim.uri:
             if file.source_type == "pipeline_output" and file.source_storage_uri is None:
                 file.source_storage_uri = claim.uri
             file.storage_uri = result.final_uri
+            # A pipeline's output stays its producer's (it is the file's durable source identity). Any
+            # other file's previous copy is now unreferenced: remove exactly the version that was
+            # copied, after this commits, through the File's one cleanup slot.
+            if file.source_type != "pipeline_output" and result.superseded is not None:
+                from app.services import storage_cleanup
+
+                file.pending_storage_cleanup = storage_cleanup.cleanup_slot(result.superseded)
+                superseded = file.id, file.organization_id
         await session.flush()
         await FileService.mark_ready(session, file.id, file.organization_id)
         await session.commit()
+        if superseded is not None:
+            from app.services import storage_cleanup
+
+            try:
+                await storage_cleanup.cleanup_after_commit(*superseded)
+            except Exception as exc:  # the periodic cleanup pass retries
+                logger.warning("Replaced copy cleanup deferred (error_type=%s)", type(exc).__name__)
         return "applied"
 
 

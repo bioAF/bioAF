@@ -1,4 +1,5 @@
 import logging
+import uuid as uuid_pkg
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import cast
@@ -80,8 +81,13 @@ class FileService:
         external_id: str | None = None,
         source_storage_uri: str | None = None,
         source_notebook_session_id: int | None = None,
+        file_uuid: uuid_pkg.UUID | None = None,
     ) -> File:
         """Create one File row on the caller's session (the caller commits).
+
+        ``file_uuid`` registers the File under an identity reserved earlier (an upload's checkpoint
+        reserves one so every filing attempt registers the same File); None lets the database
+        generate one.
 
         ``external_id`` is the caller's own identifier, or None. A pipeline output records where it
         was found as its durable source identity (``source_storage_uri``, by default the URI it is
@@ -111,6 +117,8 @@ class FileService:
             source_storage_uri=source_storage_uri,
             source_notebook_session_id=source_notebook_session_id,
         )
+        if file_uuid is not None:
+            file.uuid = file_uuid
         try:
             async with session.begin_nested():
                 session.add(file)
@@ -640,6 +648,25 @@ class FileService:
         file = await FileService.get_file(session, file_id, org_id)
         if not file:
             return False
+        if file.deleted_at is None:
+            # The same lock a move takes, so a delete never erases a source while a move publishes
+            # its replacement (and the verifier's lock order, verification first).
+            from app.services import storage_cleanup
+
+            locked = await storage_cleanup.lock_file_for_storage_change(session, file_id, org_id)
+            if locked is not None:
+                file = locked
+                # A superseded object still waiting for removal is this file's bytes too: free it
+                # first, or nothing, so a delete never reports reclaimed space while a copy remains.
+                outcome = await storage_cleanup.clean_pending(session, file)
+                if outcome == "paused":
+                    from app.services.storage_write_admission import STORAGE_PAUSED, StorageWritesPaused
+
+                    raise StorageWritesPaused(STORAGE_PAUSED)
+                if outcome == "retry":
+                    raise StorageUnavailableError(
+                        "The file's storage could not be reached, so nothing was deleted. Try again."
+                    )
 
         # Bytes first, record second. If storage fails the exception propagates
         # before anything is committed, so the file stays whole and listed

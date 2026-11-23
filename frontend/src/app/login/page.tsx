@@ -6,7 +6,17 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { api } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { startSession } from "@/lib/session";
+import { setupDestination } from "@/lib/setupRoute";
 import type { LoginResponse, BootstrapStatus } from "@/lib/types";
+
+/** The status, or null when it cannot be read (the sign-in form is then still offered). */
+async function readStatus(): Promise<BootstrapStatus | null> {
+  try {
+    return await api.get<BootstrapStatus>("/api/bootstrap/status");
+  } catch {
+    return null; // Backend may not be available
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,18 +25,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     async function checkSetup() {
+      const status = await readStatus();
       if (isAuthenticated()) {
-        router.push("/");
+        // Already signed in: to an unfinished setup if there is one, otherwise the app.
+        router.push(status && !status.setup_complete ? "/setup" : "/");
         return;
       }
-      try {
-        const status = await api.get<BootstrapStatus>("/api/bootstrap/status");
-        if (!status.setup_complete) {
-          router.push("/setup");
-          return;
-        }
-      } catch {
-        // Backend may not be available
+      // Only an installation with no administrator starts in the first-run wizard; one whose
+      // administrator exists signs in here even while setup is unfinished.
+      if (status && setupDestination(status, false, null) === "setup-initial") {
+        router.push("/setup");
+        return;
       }
       setLoading(false);
     }
@@ -41,7 +50,8 @@ export default function LoginPage() {
         password,
       });
       startSession(response.access_token);
-      router.push("/");
+      const status = await readStatus();
+      router.push(status && !status.setup_complete ? "/setup" : "/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
     }

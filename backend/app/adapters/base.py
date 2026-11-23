@@ -10,6 +10,7 @@ from typing import BinaryIO
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.adapters.job_specs import JobSpec
 from app.adapters.models import (
+    ConditionalStorageUnsupported,
     ContainerObservation,
     ContainerPresence,
     NotebookWorkload,
@@ -29,6 +30,7 @@ from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
     ObjectDigest,
     ObjectIdentity,
+    ObjectObservation,
     ObjectMetadata,
     SessionInfo,
     SessionStatus,
@@ -487,8 +489,55 @@ class StorageProvider(ABC):
         """List objects under a URI prefix as StoredObject records."""
         raise NotImplementedError
 
-    async def copy(self, source_uri: str, dest_uri: str) -> str:
-        """Copy an object to a new URI. Returns the destination URI."""
+    async def copy(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        create_only: bool = False,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        """Copy an object to a new URI. Returns the destination URI.
+
+        By default an existing destination is replaced (callers rely on that). ``create_only``
+        applies the ``copy_create_only`` contract instead.
+        """
+        raise NotImplementedError
+
+    async def copy_create_only(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> ObjectIdentity:
+        """Publish a copy only if nothing exists at ``dest_uri``; return the published identity.
+
+        Atomic against concurrent writers: an occupied destination (before or during the copy) raises
+        DestinationExists and is left untouched. ``source_identity`` pins the exact source version;
+        a different version raises ObjectChanged and publishes nothing. The destination's metadata is
+        written in the same publication: the source's custom metadata without bioAF's reserved owner
+        keys, overlaid with ``metadata`` (``owner_metadata``). The source is never removed, and an
+        interrupted copy never leaves a partial object at the destination.
+        """
+        raise ConditionalStorageUnsupported("create-only copy")
+
+    async def delete_if_unchanged(self, identity: ObjectIdentity) -> bool:
+        """Delete exactly the object version ``identity`` names. True if deleted, False if absent.
+
+        A different current version (replaced, rewritten, or an identity of another kind) raises
+        ObjectChanged and deletes nothing. Unlike ``delete(generation=...)``, the expected identity is
+        never ignored or coerced.
+        """
+        raise ConditionalStorageUnsupported("guarded delete")
+
+    async def inspect_object(self, uri: str) -> ObjectObservation:
+        """The object's identity and the custom metadata of that same version, read together.
+
+        Raises StorageObjectNotFound if the object is absent.
+        """
         raise NotImplementedError
 
     async def move(self, source_uri: str, dest_uri: str) -> str:

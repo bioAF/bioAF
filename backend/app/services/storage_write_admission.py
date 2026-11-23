@@ -157,10 +157,26 @@ async def require_store_usable(session: AsyncSession, store: str) -> None:
     bucket = (await storage_identity._configured_buckets(session)).get(store)
     if not bucket:
         return
-    try:
-        report = await storage_identity.inspect_bucket(session, store, bucket)
-    except Exception as exc:
-        logger.warning("Could not check the %s store before an upload (error_type=%s)", store, type(exc).__name__)
+    from sqlalchemy.exc import IntegrityError
+
+    # In a savepoint: whatever the check writes or fails on stays inside it, so the upload's own
+    # transaction is never left aborted. Overlapping first uploads each discover the bucket's
+    # identity; the losers' insert conflicts, and one re-read then finds the winner's record.
+    report = None
+    for attempt in range(2):
+        try:
+            async with session.begin_nested():
+                report = await storage_identity.inspect_bucket(session, store, bucket)
+            break
+        except IntegrityError as exc:
+            if attempt == 0:
+                continue
+            logger.warning("Could not check the %s store before an upload (error_type=%s)", store, type(exc).__name__)
+            return
+        except Exception as exc:
+            logger.warning("Could not check the %s store before an upload (error_type=%s)", store, type(exc).__name__)
+            return
+    if report is None:
         return
     if report.health in unusable:
         logger.warning("Upload refused: the %s store is %s", store, report.health.value)

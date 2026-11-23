@@ -17,6 +17,7 @@ from app.schemas.bootstrap import (
     ConfigureSmtpRequest,
     CreateAdminRequest,
     GenerateSetupCodeResponse,
+    OrgSettingsResponse,
     SmtpSettingsResponse,
     TestSmtpRequest,
     TestSmtpResponse,
@@ -36,8 +37,15 @@ router = APIRouter(prefix="/api/bootstrap", tags=["bootstrap"])
 
 
 async def _get_org(session: AsyncSession) -> Organization | None:
+    """The installation's organization, for unauthenticated discovery and first-run bootstrap only.
+    Authenticated reads and writes use ``_caller_org``."""
     result = await session.execute(select(Organization).limit(1))
     return result.scalar_one_or_none()
+
+
+async def _caller_org(session: AsyncSession, current_user: dict) -> Organization | None:
+    """The authenticated caller's own organization (from their trusted principal), never another's."""
+    return await session.get(Organization, int(current_user["org_id"]))
 
 
 async def _has_admin(session: AsyncSession) -> bool:
@@ -289,7 +297,7 @@ async def configure_org(
     session: AsyncSession = Depends(get_session),
 ):
 
-    org = await _get_org(session)
+    org = await _caller_org(session, current_user)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
@@ -311,13 +319,26 @@ async def configure_org(
     return {"message": "Organization configured"}
 
 
+@router.get("/org-settings", response_model=OrgSettingsResponse)
+async def get_org_settings(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """The caller's saved organization name, so a returning administrator can review it. Kept out
+    of the public status, which anyone can read."""
+    org = await _caller_org(session, current_user)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return OrgSettingsResponse(org_name=org.name)
+
+
 @router.get("/smtp-settings", response_model=SmtpSettingsResponse)
 async def get_smtp_settings(
     current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
 
-    org = await _get_org(session)
+    org = await _caller_org(session, current_user)
     if not org:
         return SmtpSettingsResponse(
             host="",
@@ -354,7 +375,7 @@ async def configure_smtp(
     session: AsyncSession = Depends(get_session),
 ):
 
-    org = await _get_org(session)
+    org = await _caller_org(session, current_user)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
@@ -506,7 +527,7 @@ async def complete_setup(
     session: AsyncSession = Depends(get_session),
 ):
 
-    org = await _get_org(session)
+    org = await _caller_org(session, current_user)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 

@@ -417,8 +417,11 @@ async def assign_file(
 ) -> dict:
     """Assign or reassign a file to an experiment."""
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"])
     try:
-        await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
+        await FileOrganizationService.assign_file_to_experiment(
+            session, file_id, body.experiment_id, user_id, org_id=org_id
+        )
     except ValueError as exc:
         logger.warning("File assign failed for file %d: %s", file_id, exc)
         if "not found" in str(exc).lower():
@@ -435,8 +438,9 @@ async def unlink_file(
 ) -> dict:
     """Unlink a file from its experiment."""
     user_id = int(current_user["sub"])
+    org_id = int(current_user["org_id"])
     try:
-        await FileOrganizationService.unlink_file_from_experiment(session, file_id, user_id)
+        await FileOrganizationService.unlink_file_from_experiment(session, file_id, user_id, org_id=org_id)
     except ValueError as exc:
         logger.warning("File unlink failed for file %d: %s", file_id, exc)
         if "not found" in str(exc).lower():

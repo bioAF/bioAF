@@ -89,6 +89,9 @@ NOT_RESET: dict[tuple[str, str], str] = {
     ("app.adapters.registry", "_initialized"): "reset by the _init_adapter_registry fixture",
     ("app.adapters.registry", "_active_compute_stack"): "reset by the _init_adapter_registry fixture",
     ("app.services.post_commit_events", "_in_flight"): "drained by settle_owner; tasks remove themselves",
+    ("app.adapters.storage.local_fs", "_thread_locks"): (
+        "per-key mutexes for filesystem create-only copies; hold no test data and are always released"
+    ),
     ("app.adapters.storage.workers", "_operation_lookup"): "installed once at import by infrastructure_operations",
     ("app.adapters.storage.workers", "_claim_lookup"): "installed once at import by storage_write_admission",
     ("app.adapters.storage.workers", "_on_settled"): "installed once at import by infrastructure_operations",

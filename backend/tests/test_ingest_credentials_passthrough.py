@@ -102,25 +102,33 @@ async def test_file_ingest_receives_credentials(session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_copy_to_raw_moves_via_storage_adapter(session: AsyncSession):
-    """copy_to_raw_bucket moves the object via the BAL storage adapter (Phase 3),
-    which owns credential resolution internally."""
+    """copy_to_raw_bucket copies the object create-only via the BAL storage adapter (Phase 3), which
+    owns credential resolution internally, to the File's UUID-keyed prefix with its owner tags. The
+    source is kept until the registration commits (12B.1e)."""
     from app.services.ingest_service import copy_to_raw_bucket
 
     adapter = AsyncMock()
     adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
+    owner = {"bioaf-file-uuid": "u-1", "bioaf-organization-id": "1"}
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         dest = await copy_to_raw_bucket(
             source_bucket="ingest-bucket",
             source_path="file.fastq.gz",
             raw_bucket="raw-bucket",
-            destination_prefix="experiments/1/",
+            destination_prefix="experiments/1/files/u-1/",
             filename="file.fastq.gz",
+            owner_metadata=owner,
         )
 
-    assert dest == "gs://raw-bucket/experiments/1/file.fastq.gz"
-    adapter.move.assert_awaited_once_with(
-        "gs://ingest-bucket/file.fastq.gz", "gs://raw-bucket/experiments/1/file.fastq.gz"
+    assert dest == "gs://raw-bucket/experiments/1/files/u-1/file.fastq.gz"
+    adapter.copy_create_only.assert_awaited_once_with(
+        "gs://ingest-bucket/file.fastq.gz",
+        "gs://raw-bucket/experiments/1/files/u-1/file.fastq.gz",
+        source_identity=None,
+        metadata=owner,
     )
+    adapter.move.assert_not_called()
+    adapter.delete.assert_not_called()
 
 
 @pytest.mark.asyncio

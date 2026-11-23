@@ -196,6 +196,46 @@ Kubernetes and Work Node VMs are separate cloud resources. See the [architecture
 ./bioaf reset-db            # Drop and recreate database (destructive, with confirmation)
 ```
 
+### Check for shared file storage references
+
+Before this release, two files uploaded into one experiment with the same name were stored at the same
+path, so the second upload replaced the first's bytes while both records stayed. New uploads are stored
+under each file's own ID. To find records that already share one stored object, run this read-only query
+in `./bioaf dbshell`. It changes nothing, and bioAF never runs it on its own.
+
+```sql
+WITH refs AS (
+    SELECT id, organization_id, deleted_at, storage_deleted,
+           COALESCE(NULLIF(storage_uri, ''), NULLIF(gcs_uri, '')) AS uri
+    FROM files
+)
+SELECT uri,
+       COUNT(*) AS total_references,
+       COUNT(*) FILTER (
+           WHERE deleted_at IS NULL AND storage_deleted IS FALSE
+       ) AS live_references,
+       ARRAY_AGG(id ORDER BY id) AS file_ids,
+       ARRAY_AGG(DISTINCT organization_id) AS organization_ids
+FROM refs
+WHERE uri IS NOT NULL
+GROUP BY uri
+HAVING COUNT(*) > 1
+ORDER BY total_references DESC, uri;
+```
+
+Reading the result:
+
+- Each row is one stored URI that more than one file record names. `live_references` counts records that
+  are not deleted and whose bytes are not marked deleted; the other references are historical.
+- A row shows only that records share a reference. It does not show which bytes each record originally
+  held, or whether an older object version can recover them. Some shared references are intentional.
+- The query matches exact URIs only. Different spellings of one object, or references to object versions,
+  need separate inspection, as do uploads still waiting to be filed (`upload_checkpoints` rows in stage
+  `received` or `cancelling`).
+- The result spans every organization on the installation; share it only with installation operators.
+- Investigating or repairing what it finds (restoring versions, rewriting URIs, deleting duplicates) is
+  separate work. bioAF does not change these records or objects.
+
 ## Debugging
 
 ```bash

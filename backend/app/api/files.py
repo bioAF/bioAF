@@ -159,6 +159,18 @@ async def upload_part_links(
     return UploadPartsResponse(urls=urls)
 
 
+async def _remove_superseded_copy(file_id: int, org_id: int) -> None:
+    """After a filing commits, remove the ingest copy it replaced (the periodic pass retries)."""
+    from app.services.storage_cleanup import cleanup_after_commit
+
+    try:
+        await cleanup_after_commit(file_id, org_id)
+    except Exception as exc:
+        import logging
+
+        logging.getLogger("bioaf.files").warning("Ingest copy cleanup deferred (error_type=%s)", type(exc).__name__)
+
+
 @router.post("/upload/complete", response_model=FileResponse, responses=_RECEIVED_NOT_FILED)
 async def complete_upload(
     body: FileUploadComplete,
@@ -178,6 +190,7 @@ async def complete_upload(
     except Exception as exc:
         raise upload_failure("completion", exc) from None
     await session.commit()
+    await _remove_superseded_copy(file.id, org_id)
     file = await FileService.get_file(session, file.id, org_id)
     return (await _file_responses(session, [file], provenance=False))[0]
 
@@ -215,6 +228,7 @@ async def simple_upload(
     except Exception as exc:
         raise upload_failure("registration", exc) from None
     await session.commit()
+    await _remove_superseded_copy(result.id, org_id)
     result = await FileService.get_file(session, result.id, org_id)
     return (await _file_responses(session, [result], provenance=False))[0]
 
@@ -389,6 +403,7 @@ async def retry_pending_upload(
     except Exception as exc:
         raise upload_failure("retry", exc) from None
     await session.commit()
+    await _remove_superseded_copy(file.id, org_id)
     file = await FileService.get_file(session, file.id, org_id)
     return (await _file_responses(session, [file], provenance=False))[0]
 
@@ -481,7 +496,9 @@ async def reconcile_stuck_files(
 
     for file_id, experiment_id, file_type in stuck:
         try:
-            await FileOrganizationService.assign_file_to_experiment(session, file_id, experiment_id, user_id)
+            await FileOrganizationService.assign_file_to_experiment(
+                session, file_id, experiment_id, user_id, org_id=org_id
+            )
             reconciled += 1
             if file_type == "fastq":
                 experiments_with_fastq.add(experiment_id)
@@ -792,7 +809,9 @@ async def link_file(
         if file.experiment_id != body.experiment_id:
             from app.services.file_organization import FileOrganizationService
 
-            await FileOrganizationService.assign_file_to_experiment(session, file_id, body.experiment_id, user_id)
+            await FileOrganizationService.assign_file_to_experiment(
+                session, file_id, body.experiment_id, user_id, org_id=org_id, commit=False
+            )
 
         # Auto-transition experiment status for FASTQ files
         if file.file_type == "fastq":
@@ -811,4 +830,5 @@ async def link_file(
             details={"sample_id": body.sample_id, "filename": file.filename},
         )
     await session.commit()
+    await _remove_superseded_copy(file_id, org_id)
     return {"status": "linked"}

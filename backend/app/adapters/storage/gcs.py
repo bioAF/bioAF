@@ -27,9 +27,12 @@ from app.adapters.models import (
     UploadSessionGrant,
     UploadSessionState,
     UploadSessionStatus,
+    DestinationExists,
     ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
+    ObjectObservation,
+    owner_metadata,
     BucketAdminMetrics,
     BucketMetrics,
     ContainerObservation,
@@ -518,13 +521,58 @@ class GcsStorageProvider(StorageProvider):
             self._gcs_list_objects, uri_prefix, recursive, include_versions, max_results, creds
         )
 
-    async def copy(self, source_uri: str, dest_uri: str) -> str:
+    async def copy(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        create_only: bool = False,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        if create_only:
+            await self.copy_create_only(source_uri, dest_uri, source_identity=source_identity, metadata=metadata)
+            return dest_uri
         if self.is_local:
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
         creds = await self._get_credentials()
         await storage_workers.run("storage copy", self._gcs_copy, source_uri, dest_uri, creds)
         return dest_uri
+
+    async def copy_create_only(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> ObjectIdentity:
+        version = source_identity.version if source_identity is not None else None
+        if self.is_local:
+            size, published = await storage_workers.run(
+                "storage copy", self._local_fs().copy_create_only, source_uri, dest_uri, version, metadata
+            )
+            return ObjectIdentity(uri=dest_uri, size_bytes=size, version=published)
+        creds = await self._get_credentials()
+        return await storage_workers.run(
+            "storage copy", self._gcs_copy_create_only, source_uri, dest_uri, version, metadata, creds
+        )
+
+    async def delete_if_unchanged(self, identity: ObjectIdentity) -> bool:
+        if self.is_local:
+            return await storage_workers.run(
+                "storage delete", self._local_fs().delete_if_unchanged, identity.uri, identity.version
+            )
+        creds = await self._get_credentials()
+        return await storage_workers.run("storage delete", self._gcs_delete_if_unchanged, identity, creds)
+
+    async def inspect_object(self, uri: str) -> ObjectObservation:
+        if self.is_local:
+            size, version, md = await asyncio.to_thread(self._local_fs().inspect, uri)
+            return ObjectObservation(identity=ObjectIdentity(uri=uri, size_bytes=size, version=version), metadata=md)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_inspect_object, uri, creds)
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         if self.is_local:
@@ -806,6 +854,103 @@ class GcsStorageProvider(StorageProvider):
         dst_bucket = client.bucket(dst_bucket_name)
         src_blob = src_bucket.blob(src_key)
         dst_bucket.copy_blob(src_blob, dst_bucket, dst_key)
+
+    # A rewrite of a large object across locations or storage classes answers in several steps.
+    _REWRITE_MAX_STEPS = 10_000
+
+    @staticmethod
+    def _generation_of(version: str | None, uri: str) -> int | None:
+        if version is None:
+            return None
+        kind, _, value = version.partition(":")
+        if kind != "generation" or not value.isdigit():
+            raise ObjectChanged(uri)  # an identity of another backend never matches a GCS object
+        return int(value)
+
+    def _gcs_copy_create_only(
+        self, source_uri: str, dest_uri: str, source_version: str | None, metadata, creds
+    ) -> ObjectIdentity:
+        """``Blob.rewrite`` with ``ifGenerationMatch=0`` and the source generation pinned, so the
+        service refuses an occupied destination and a replaced source atomically. The destination's
+        metadata and content headers are sent with the rewrite itself, never patched on after."""
+        from google.api_core.exceptions import NotFound, PreconditionFailed
+
+        src_bucket, src_key = self._parse_uri(source_uri)
+        dst_bucket, dst_key = self._parse_uri(dest_uri)
+        client = self._get_gcs_client(creds)
+        source = client.bucket(src_bucket).blob(src_key)
+        try:
+            source.reload()
+        except NotFound as e:
+            if source_version is not None:
+                raise ObjectChanged(source_uri) from e
+            raise StorageObjectNotFound(source_uri) from e
+        generation = self._generation_of(source_version, source_uri) or source.generation
+        if source_version is not None and source.generation != generation:
+            raise ObjectChanged(source_uri)
+        dest = client.bucket(dst_bucket).blob(dst_key)
+        dest.metadata = validate_object_metadata(owner_metadata(source.metadata, metadata))
+        dest.content_type = source.content_type
+        for attr in ("content_encoding", "content_disposition", "content_language", "cache_control"):
+            value = getattr(source, attr, None)
+            if isinstance(value, str):
+                setattr(dest, attr, value)
+        token = None
+        try:
+            for _ in range(self._REWRITE_MAX_STEPS):
+                token, _done, _total = dest.rewrite(
+                    source, token=token, if_generation_match=0, if_source_generation_match=generation
+                )
+                if token is None:
+                    break
+            else:
+                raise RuntimeError("Storage copy did not finish")
+        except PreconditionFailed as e:
+            if client.bucket(dst_bucket).blob(dst_key).exists():
+                raise DestinationExists(dest_uri) from e
+            raise ObjectChanged(source_uri) from e
+        except NotFound as e:
+            raise ObjectChanged(source_uri) from e
+        size = dest.size if dest.size is not None else source.size
+        if source.size is not None and size != source.size:
+            raise RuntimeError("Storage copy verification failed: size differs")
+        return ObjectIdentity(uri=dest_uri, size_bytes=size or 0, version=f"generation:{dest.generation}")
+
+    def _gcs_delete_if_unchanged(self, identity: ObjectIdentity, creds) -> bool:
+        from google.api_core.exceptions import NotFound, PreconditionFailed
+
+        generation = self._generation_of(identity.version, identity.uri)
+        bucket, key = self._parse_uri(identity.uri)
+        try:
+            self._get_gcs_client(creds).bucket(bucket).blob(key).delete(if_generation_match=generation)
+        except NotFound:
+            return False
+        except PreconditionFailed as e:
+            raise ObjectChanged(identity.uri) from e
+        return True
+
+    def _gcs_inspect_object(self, uri: str, creds) -> ObjectObservation:
+        """One metadata read: the generation, size, MD5 and custom metadata all describe one version."""
+        from google.api_core.exceptions import NotFound
+
+        from app.adapters.storage.digest import normalize_md5
+
+        bucket, key = self._parse_uri(uri)
+        blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        try:
+            blob.reload()
+        except NotFound as e:
+            raise StorageObjectNotFound(uri) from e
+        native = None
+        if blob.md5_hash:
+            try:
+                native = normalize_md5(blob.md5_hash, allow_base64=True)
+            except Exception:
+                native = None
+        identity = ObjectIdentity(
+            uri=uri, size_bytes=blob.size or 0, version=f"generation:{blob.generation}", native_md5=native
+        )
+        return ObjectObservation(identity=identity, metadata=dict(blob.metadata or {}))
 
     def _gcs_move(self, source_uri: str, dest_uri: str, creds) -> None:
         # Fail-safe: copy, verify, then delete source (parity with the prior

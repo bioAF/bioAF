@@ -1191,6 +1191,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/bootstrap/org-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Org Settings
+         * @description The caller's saved organization name, so a returning administrator can review it. Kept out
+         *     of the public status, which anyone can read.
+         */
+        get: operations["get_org_settings_api_bootstrap_org_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/bootstrap/smtp-settings": {
         parameters: {
             query?: never;
@@ -7104,7 +7125,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Operations Endpoint */
+        /**
+         * List Operations Endpoint
+         * @description Recent operations, newest first; ``action`` narrows them (in the query, before the limit).
+         */
         get: operations["list_operations_endpoint_api_v1_infrastructure_operations_get"];
         put?: never;
         post?: never;
@@ -13142,6 +13166,14 @@ export interface components {
             status: "accepted" | "running" | "stopping" | "succeeded" | "failed" | "cancelled" | "interrupted" | "recovery_required";
             /** Steps */
             steps?: components["schemas"]["OperationStep"][];
+        };
+        /**
+         * OrgSettingsResponse
+         * @description The saved organization name, for an administrator reviewing an unfinished setup.
+         */
+        OrgSettingsResponse: {
+            /** Org Name */
+            org_name: string;
         };
         /** OrphanedResourceListResponse */
         OrphanedResourceListResponse: {
@@ -19911,6 +19943,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerateSetupCodeResponse"];
+                };
+            };
+        };
+    };
+    get_org_settings_api_bootstrap_org_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgSettingsResponse"];
                 };
             };
         };
@@ -32059,6 +32111,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change") | null;
             };
             header?: never;
             path?: never;

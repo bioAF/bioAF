@@ -140,12 +140,18 @@ export function ComponentsStep({
   onSelectionChange,
   submitting,
   onContinue,
+  defaultSelected = DEFAULT_SELECTED_COMPONENTS,
+  locked = [],
 }: {
   loading: boolean;
   components: PickerComponent[];
   onSelectionChange: (keys: string[]) => void;
   submitting: boolean;
   onContinue: () => void;
+  /** The selection the picker starts from (the saved one when setup is resumed). */
+  defaultSelected?: string[];
+  /** Already enabled: shown selected and not removable here. */
+  locked?: string[];
 }) {
   return (
     <div className="space-y-4">
@@ -159,7 +165,8 @@ export function ComponentsStep({
       ) : (
         <ComponentPicker
           components={components}
-          defaultSelected={DEFAULT_SELECTED_COMPONENTS}
+          defaultSelected={defaultSelected}
+          locked={locked}
           onChange={onSelectionChange}
         />
       )}

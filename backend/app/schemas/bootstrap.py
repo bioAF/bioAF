@@ -48,6 +48,12 @@ class ConfigureSmtpRequest(BaseModel):
     encryption: str = "starttls"
 
 
+class OrgSettingsResponse(BaseModel):
+    """The saved organization name, for an administrator reviewing an unfinished setup."""
+
+    org_name: str
+
+
 class SmtpSettingsResponse(BaseModel):
     host: str
     port: int

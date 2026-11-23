@@ -11,7 +11,6 @@ import io
 import re
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -25,25 +24,19 @@ from app.services.upload_service import UploadService
 REF = re.compile(r"Reference UPL-[0-9A-F]{6}\.")
 
 
-def _adapter(move_failures: int = 0):
-    from tests.support.uploads import with_upload_session
+def _adapter(copy_failures: int = 0):
+    """An in-memory object store (tests/support/object_store.py) with a provider upload session.
 
-    adapter = with_upload_session(AsyncMock())
-    calls = {"move": 0}
+    Filing copies received bytes create-only to their organized destination and removes the ingest
+    copy only after the File commits. ``copy_failures`` makes that many organized copies fail first
+    (the bytes then stay tracked as received, not filed). Every operation is an AsyncMock wrapping
+    the store, so tests can assert on calls or override one with ``side_effect``.
+    """
+    from tests.support.object_store import recording_store
 
-    async def move(src, dst):
-        calls["move"] += 1
-        if calls["move"] <= move_failures:
-            raise RuntimeError("503 POST https://storage.googleapis.com/rewrite SECRET")
-        return dst
-
-    adapter.move.side_effect = move
-    adapter.exists.return_value = True
-    adapter.resolve_uri.side_effect = lambda store, key: f"gs://bioaf-{store.value}-test/{key}"
-    adapter.build_uri = MagicMock(side_effect=lambda bucket, key: f"gs://{bucket}/{key.lstrip('/')}")
-    adapter.parse_uri = MagicMock(side_effect=lambda uri: (urlparse(uri).netloc, urlparse(uri).path.lstrip("/")))
-    adapter.calls = calls
-    return adapter
+    store = recording_store()
+    store.fail("copy_create_only", copy_failures)
+    return store
 
 
 @pytest_asyncio.fixture
@@ -115,7 +108,7 @@ async def test_a_direct_upload_is_recorded_before_its_session_exists(client, adm
 @pytest.mark.asyncio
 async def test_a_failed_filing_keeps_the_bytes_and_reports_received_not_filed(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=1)
+    adapter = _adapter(copy_failures=1)
 
     resp = await _simple(client, admin_token, exp.id, adapter)
 
@@ -140,7 +133,7 @@ async def test_the_due_retry_files_it_once(client, admin_token, storage, session
     from app import database
 
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=1)
+    adapter = _adapter(copy_failures=1)
     await _simple(client, admin_token, exp.id, adapter)
     await session.execute(text("UPDATE upload_checkpoints SET next_attempt_at = now() - interval '1 second'"))
     await session.commit()
@@ -165,7 +158,7 @@ async def test_the_due_retry_files_it_once(client, admin_token, storage, session
 @pytest.mark.asyncio
 async def test_retries_run_out_then_the_upload_needs_attention(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=99)
+    adapter = _adapter(copy_failures=99)
     await _simple(client, admin_token, exp.id, adapter)
     upload_id = (await _checkpoints(session))[0].id
 
@@ -188,7 +181,7 @@ async def test_retries_run_out_then_the_upload_needs_attention(client, admin_tok
 @pytest.mark.asyncio
 async def test_retry_now_files_it_and_a_repeat_returns_the_same_file(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=1)
+    adapter = _adapter(copy_failures=1)
     await _simple(client, admin_token, exp.id, adapter)
     upload_id = (await _checkpoints(session))[0].id
 
@@ -280,23 +273,39 @@ async def test_bytes_an_earlier_attempt_already_moved_are_adopted_not_copied_aga
         gcs_uri=source,
         experiment_id=exp.id,
     )
-    await session.execute(text("UPDATE upload_checkpoints SET stage='received'"))
+    reserved = uuid.uuid4()
+    destination = f"gs://bioaf-raw-test/experiments/{exp.id}/files/{reserved}/a.fastq.gz"
+    await session.execute(
+        text(
+            "UPDATE upload_checkpoints SET stage='received', file_uuid=:u, planned_destination=:d, "
+            "source_observed_size=4"
+        ).bindparams(u=reserved, d=destination)
+    )
     await session.commit()
     adapter = _adapter()
-    adapter.exists.side_effect = lambda uri: uri != source  # moved: gone from ingest, present in raw
+    # An earlier attempt copied the bytes (with this upload's server-owned tags) and lost the answer.
+    adapter.put(
+        destination,
+        b"data",
+        {
+            "bioaf-file-uuid": str(reserved),
+            "bioaf-organization-id": str(admin_user.organization_id),
+            "bioaf-upload-id": upload_id,
+        },
+    )
 
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
         file = await UploadService.retry_upload(session, admin_user.organization_id, upload_id)
         await session.commit()
 
-    assert file.storage_uri.startswith("gs://bioaf-raw-test/")
-    assert adapter.calls["move"] == 0
+    assert file.storage_uri == destination
+    adapter.copy_create_only.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_cancel_removes_the_stored_copy_and_adds_nothing(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=99)
+    adapter = _adapter(copy_failures=99)
     await _simple(client, admin_token, exp.id, adapter)
     [cp] = await _checkpoints(session)
 
@@ -304,7 +313,10 @@ async def test_cancel_removes_the_stored_copy_and_adds_nothing(client, admin_tok
         resp = await client.post(f"/api/files/uploads/{cp.id}/cancel", headers=_auth(admin_token))
 
     assert resp.status_code == 204
-    adapter.delete.assert_awaited_once_with(cp.source_uri)
+    # Removed by a guarded delete of the exact stored version, never by a plain delete.
+    adapter.delete.assert_not_called()
+    assert [call.args[0].uri for call in adapter.delete_if_unchanged.await_args_list] == [cp.source_uri]
+    assert cp.source_uri not in adapter.objects
     [cp] = await _checkpoints(session)
     assert cp.stage == "cancelled"
     assert (await session.execute(select(File))).scalars().all() == []
@@ -317,7 +329,7 @@ async def test_the_attention_list_shows_bench_only_their_own(
     client, admin_token, bench_token, comp_bio_token, storage, session
 ):
     exp = await _experiment(session)
-    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    await _simple(client, admin_token, exp.id, _adapter(copy_failures=99))
 
     bench = (await client.get("/api/files/uploads/pending", headers=_auth(bench_token))).json()["uploads"]
     comp_bio = (await client.get("/api/files/uploads/pending", headers=_auth(comp_bio_token))).json()["uploads"]
@@ -330,7 +342,7 @@ async def test_someone_elses_upload_cannot_be_retried_or_cancelled_by_bench(
     client, admin_token, bench_token, storage, session
 ):
     exp = await _experiment(session)
-    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    await _simple(client, admin_token, exp.id, _adapter(copy_failures=99))
     [cp] = await _checkpoints(session)
     assert (await client.post(f"/api/files/uploads/{cp.id}/retry", headers=_auth(bench_token))).status_code == 404
     assert (await client.post(f"/api/files/uploads/{cp.id}/cancel", headers=_auth(bench_token))).status_code == 404
@@ -584,7 +596,7 @@ def test_the_received_not_filed_receipt_is_part_of_the_api_contract():
 @pytest.mark.asyncio
 async def test_an_uploads_outcome_tells_filed_from_cancelled(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=99)
+    adapter = _adapter(copy_failures=99)
     await _simple(client, admin_token, exp.id, adapter)
     [cp] = await _checkpoints(session)
 
@@ -600,7 +612,7 @@ async def test_an_uploads_outcome_tells_filed_from_cancelled(client, admin_token
 @pytest.mark.asyncio
 async def test_a_filed_uploads_outcome_names_its_file(client, admin_token, storage, session):
     exp = await _experiment(session)
-    adapter = _adapter(move_failures=1)
+    adapter = _adapter(copy_failures=1)
     await _simple(client, admin_token, exp.id, adapter)
     [cp] = await _checkpoints(session)
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
@@ -613,7 +625,7 @@ async def test_a_filed_uploads_outcome_names_its_file(client, admin_token, stora
 @pytest.mark.asyncio
 async def test_a_failed_uploads_outcome_is_failed(client, admin_token, storage, session):
     exp = await _experiment(session)
-    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    await _simple(client, admin_token, exp.id, _adapter(copy_failures=99))
     [cp] = await _checkpoints(session)
     await session.execute(text("UPDATE upload_checkpoints SET stage='failed' WHERE id=:i").bindparams(i=cp.id))
     await session.commit()
@@ -624,6 +636,6 @@ async def test_a_failed_uploads_outcome_is_failed(client, admin_token, storage, 
 @pytest.mark.asyncio
 async def test_someone_elses_upload_outcome_is_not_found_for_bench(client, admin_token, bench_token, storage, session):
     exp = await _experiment(session)
-    await _simple(client, admin_token, exp.id, _adapter(move_failures=99))
+    await _simple(client, admin_token, exp.id, _adapter(copy_failures=99))
     [cp] = await _checkpoints(session)
     assert (await client.get(f"/api/files/uploads/{cp.id}", headers=_auth(bench_token))).status_code == 404

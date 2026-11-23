@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
+import { api } from "@/lib/api";
+import type { BootstrapStatus } from "@/lib/types";
 import { useBackendReady } from "@/hooks/useBackendReady";
 import { usePermissions, clearPermissionsCache } from "@/hooks/usePermissions";
 import { useComponents, invalidateComponentCache } from "@/hooks/useComponents";
@@ -45,6 +47,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // per-page pattern it replaces.
   useEffect(() => {
     if (!isAuthenticated()) router.replace("/login");
+  }, [router]);
+
+  // Direct navigation into the app while setup is unfinished goes to /setup, which decides what
+  // this session may do there (review saved setup, or a plain notice). An unreadable status does
+  // not lock the app; /setup is where an unreadable status is reported.
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+    let active = true;
+    api
+      .get<BootstrapStatus>("/api/bootstrap/status")
+      .then((status) => {
+        if (active && status?.setup_complete === false) router.replace("/setup");
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [router]);
 
   // A boot dependency that failed is not the same as one still loading, and the
