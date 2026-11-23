@@ -71,3 +71,35 @@ test("the created admin starts a new session", async () => {
   await waitFor(() => expect(getToken()).toBe("admin.jwt"));
   expect(sessionGeneration()).not.toBe(before);
 });
+
+test("a validation error from admin creation is shown as a message, never crashes the wizard", async () => {
+  // A 422 carries a list of field errors; rendering that object took the whole page down.
+  const user = userEvent.setup();
+  fakeServer([
+    ["/verify-setup-code", { json: { setup_token: "setup.tok" } }],
+    [
+      "/create-admin",
+      {
+        status: 422,
+        json: { detail: [{ type: "value_error", loc: ["body", "email"], msg: "bad email", input: "x", ctx: {} }] },
+      },
+    ],
+  ]);
+  render(<SetupWizard onComplete={() => {}} />);
+
+  await toCreateAdmin(user);
+
+  expect(await screen.findByText("Failed to create admin")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Create Admin Account" })).toBeInTheDocument();
+});
+
+test("a validation error from the setup code check is shown as a message", async () => {
+  const user = userEvent.setup();
+  fakeServer([
+    ["/verify-setup-code", { status: 422, json: { detail: [{ type: "string_too_short", loc: ["body", "code"], msg: "short" }] } }],
+  ]);
+  render(<SetupWizard onComplete={() => {}} />);
+  await user.type(screen.getByPlaceholderText("Enter 6-character code"), "ABC123");
+  await user.click(screen.getByRole("button", { name: /verify/i }));
+  expect(await screen.findByText("Invalid or expired setup code")).toBeInTheDocument();
+});

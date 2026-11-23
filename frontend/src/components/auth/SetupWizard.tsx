@@ -51,6 +51,16 @@ import {
   StackStep,
 } from "@/components/auth/setup/InfrastructureSteps";
 
+/**
+ * The server's message when it is one plain sentence; otherwise (a validation error's list of
+ * field errors, or nothing) the step's own message, with the detail in the logs.
+ */
+function plainDetail(detail: unknown, fallback: string, context: string): string {
+  if (typeof detail === "string" && detail) return detail;
+  if (detail !== undefined) logError(context, detail);
+  return fallback;
+}
+
 interface SetupWizardProps {
   onComplete: () => void;
   /** ``resume``: an authorized administrator reviewing an unfinished installation's saved setup. */
@@ -297,7 +307,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({ detail: "Verification failed" }));
-        setError(data.detail || "Invalid or expired setup code");
+        setError(plainDetail(data.detail, "Invalid or expired setup code", "verifying the setup code"));
         return;
       }
       const data = await resp.json();
@@ -347,7 +357,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({ detail: "Failed to create admin" }));
-        setError(data.detail || "Failed to create admin");
+        setError(plainDetail(data.detail, "Failed to create admin", "creating the admin account"));
         return;
       }
       const data = await resp.json();
