@@ -547,14 +547,20 @@ class UploadService:
             try:
                 await adapter.upload_file(gcs_uri, file_obj)
             except DomainError:
-                await _advance_checkpoint(
+                if not await _advance_checkpoint(
                     upload_id, "transferring", stage="failed", last_error_category="transfer_refused"
-                )
+                ):
+                    await _settle_cancelled_transfer(upload_id)
+                    raise UploadCancelled("This upload was cancelled, so it was not saved.") from None
                 raise
             except Exception as exc:
-                await _advance_checkpoint(
+                if not await _advance_checkpoint(
                     upload_id, "transferring", stage="failed", last_error_category="transfer_failed"
-                )
+                ):
+                    # Cancelled meanwhile: bytes may have landed before the failure, so the
+                    # cancellation's owned-copy cleanup runs now rather than never.
+                    await _settle_cancelled_transfer(upload_id)
+                    raise UploadCancelled("This upload was cancelled, so it was not saved.") from None
                 raise upload_failure("transfer", exc) from None
             received = await _advance_checkpoint(upload_id, "transferring", stage="received", received_size=size_bytes)
         if not received:

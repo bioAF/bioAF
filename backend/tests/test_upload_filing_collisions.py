@@ -525,3 +525,37 @@ async def test_s3_cancellation_stays_pending_while_an_older_version_is_readable(
     fake.delete_object = first_only
     assert await settle(database.async_session_factory, upload_id) == "cancelling"
     assert fake.objects[key].data == b"first attempt"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_transfer_that_fails_after_writing_leaves_no_bytes(client, admin_token, raw_storage, session):
+    """Review round 2, finding 2: the failure path must settle the cancellation too."""
+    exp = await _experiment(session)
+    adapter = _adapter()
+    arrived, release = asyncio.Event(), asyncio.Event()
+    store_upload = adapter.upload_file.side_effect
+
+    async def write_then_fail(uri, source, **kw):
+        arrived.set()
+        await release.wait()
+        await store_upload(uri, source, **kw)
+        raise RuntimeError("connection reset after the last byte")
+
+    adapter.upload_file.side_effect = write_then_fail
+
+    async def cancel_then_release():
+        await arrived.wait()
+        [cp] = await _checkpoints(session)
+        with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
+            resp = await client.post(f"/api/files/uploads/{cp.id}/cancel", headers=_auth(admin_token))
+        release.set()
+        return resp
+
+    upload, cancel = await asyncio.gather(
+        _upload(client, admin_token, adapter, exp.id, "a.txt", b"science"), cancel_then_release()
+    )
+    assert cancel.status_code == 204
+    assert upload.status_code == 409, upload.text
+    [cp] = await _checkpoints(session)
+    assert cp.stage == "cancelled"
+    assert cp.source_uri not in adapter.objects
