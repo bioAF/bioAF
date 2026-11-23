@@ -178,14 +178,15 @@ jobs:
           # by the import step, but the explicit flags keep the intent clear.
           git commit -S -m "chore: release ${TAG} [skip ci]"
           git tag -s "$TAG" -m "Release ${TAG}"
-          # Push the commit and the tag atomically. If the push is rejected
-          # (concurrent merge raced us), the workflow fails and the next push
-          # to main will re-run this job with a fresh N.
+          # Push the commit and the tag atomically (--atomic): if either ref is
+          # rejected (a concurrent merge raced us), neither is updated, the
+          # workflow fails, and the next push to main re-runs this job with a
+          # fresh N.
           # The first -c clears any inherited helper; the second answers git's credential request from RELEASE_PAT.
           # shellcheck disable=SC2016 # $RELEASE_PAT is expanded by the helper when git calls it, not here.
           git -c credential.helper= \
             -c 'credential.helper=!f() { if [ "$1" = get ]; then printf "username=x-access-token\npassword=%s\n" "$RELEASE_PAT"; fi; }; f' \
-            push origin HEAD:main "$TAG"
+            push --atomic origin HEAD:main "$TAG"
 
       - name: Create GitHub Release
         if: steps.check_entries.outputs.has_entries == 'true'

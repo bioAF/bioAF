@@ -1074,3 +1074,24 @@ def test_the_build_workflow_keeps_its_own_path_filters():
         "scripts/ci/frontend_image_smoke.sh",
         "docker/nginx.conf",
     ]
+
+
+def test_a_rejected_release_push_updates_neither_main_nor_the_tag(tmp_path):
+    # A merge lands on main while the release job runs: the push of HEAD:main is not a fast-forward. The commit and
+    # the tag must be refused together, or the tag would name a release commit that never reached main.
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    work, env = _release_checkout(tmp_path, str(remote))
+    _git(work, "push", "-q", "origin", "HEAD:main", env=env)
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", str(remote), str(other), env=env)
+    (other / "concurrent.txt").write_text("merged meanwhile\n")
+    _git(other, "add", "concurrent.txt", env=env)
+    _git(other, "commit", "-q", "-m", "concurrent merge", env=env)
+    _git(other, "push", "-q", "origin", "HEAD:main", env=env)
+    concurrent = _git(remote, "rev-parse", "main").strip()
+
+    done = _run_push_step(work, env, FAKE_PAT)
+    assert done.returncode != 0
+    assert _git(remote, "rev-parse", "main").strip() == concurrent
+    assert _git(remote, "tag", "--list") == ""
