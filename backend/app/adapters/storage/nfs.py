@@ -23,6 +23,7 @@ from app.adapters.base import StorageProvider
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 from app.exceptions import ValidationError
 from app.adapters.storage import nfs_managed_copy
+from app.adapters.storage import workers as storage_workers
 from app.adapters.storage.digest import ordered_md5
 from app.adapters.storage.local_fs import LocalObjectFilesystem
 from app.adapters.storage.uri import split_storage_uri
@@ -32,8 +33,10 @@ from app.adapters.models import (
     DIGEST_CHUNK_BYTES,
     ContainerObservation,
     ContainerPresence,
+    ObjectChanged,
     ObjectDigest,
     ObjectIdentity,
+    ObjectObservation,
     BucketMetrics,
     ObjectMetadata,
     validate_object_metadata,
@@ -299,9 +302,52 @@ class NfsStorageProvider(StorageProvider):
     ) -> list[StoredObject]:
         return await asyncio.to_thread(self._fs.list, uri_prefix, recursive=recursive, max_results=max_results)
 
-    async def copy(self, source_uri: str, dest_uri: str) -> str:
+    async def copy(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        create_only: bool = False,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        if create_only:
+            await self.copy_create_only(source_uri, dest_uri, source_identity=source_identity, metadata=metadata)
+            return dest_uri
         await asyncio.to_thread(self._fs.copy, source_uri, dest_uri)
         return dest_uri
+
+    async def copy_create_only(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> ObjectIdentity:
+        if self._is_managed(dest_uri):
+            raise ValidationError("A protected managed copy is published only by its own procedure")
+        version = source_identity.version if source_identity is not None else None
+        size, published = await storage_workers.run(
+            "storage copy", self._fs.copy_create_only, source_uri, dest_uri, version, metadata
+        )
+        return ObjectIdentity(uri=dest_uri, size_bytes=size, version=published)
+
+    async def delete_if_unchanged(self, identity: ObjectIdentity) -> bool:
+        if self._is_managed(identity.uri):
+            # Published read-only and removed only by the managed-artifact procedure, which owns it.
+            current = await self.object_identity(identity.uri) if await self.exists(identity.uri) else None
+            if current is None:
+                return False
+            if current.version != identity.version:
+                raise ObjectChanged(identity.uri)
+            await self.remove_managed_artifact(identity.uri)
+            return True
+        return await storage_workers.run("storage delete", self._fs.delete_if_unchanged, identity.uri, identity.version)
+
+    async def inspect_object(self, uri: str) -> ObjectObservation:
+        size, version, metadata = await asyncio.to_thread(self._fs.inspect, uri)
+        return ObjectObservation(identity=ObjectIdentity(uri=uri, size_bytes=size, version=version), metadata=metadata)
 
     async def move(self, source_uri: str, dest_uri: str) -> str:
         # Copy-verify-delete: leave the source intact if the copy fails.

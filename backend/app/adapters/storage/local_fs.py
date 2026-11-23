@@ -19,6 +19,13 @@ delivery 4 matrix):
 - Listings match keys literally, sort by key, honour ``recursive=False`` (nothing past the next
   ``/``) and return nothing for ``max_results <= 0``. ``uploaded_at`` is the destination's mtime.
 - Streams use ``shutil.copyfileobj``'s bounded buffer and are never closed here.
+- Create-only copies (``copy_create_only``) and identity-guarded deletes (``delete_if_unchanged``) run
+  under a per-key exclusion (an in-process lock plus ``flock`` on a record in ``<root>/.bioaf-object-locks``)
+  that every such app writer shares. A copy is staged in ``<root>/.bioaf-object-staging`` and published
+  with ``link``, which never replaces an existing name, so a partial copy is never visible at the
+  destination. Writers that do not take the exclusion (plain writes, privileged out-of-band changes) are
+  outside that guarantee; the destination's metadata is written right after the bytes are published, so a
+  crash between the two leaves an object without metadata (unconfirmed), never one with someone else's.
 - Custom object metadata lives outside every container, at ``<root>/.bioaf-object-metadata/<container>/<key>``
   (directory 0700, records 0600, replaced atomically), so no listing sees it and no URI can address it. It
   follows its object: a write drops the old record before the bytes change and writes the new one after, so an
@@ -28,19 +35,38 @@ delivery 4 matrix):
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import secrets
 import shutil
 import stat
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import BinaryIO
 
-from app.adapters.models import StorageObjectNotFound, StoredObject, validate_object_metadata
+from app.adapters.models import (
+    DestinationExists,
+    ObjectChanged,
+    StorageObjectNotFound,
+    StoredObject,
+    owner_metadata,
+    validate_object_metadata,
+)
 from app.exceptions import ValidationError
 
 METADATA_DIR = ".bioaf-object-metadata"
+LOCK_DIR = ".bioaf-object-locks"
+STAGING_DIR = ".bioaf-object-staging"
+_PRIVATE_DIRS = (METADATA_DIR, LOCK_DIR, STAGING_DIR)
+
+# In-process half of the per-key exclusion: flock on NFS may be emulated with POSIX record locks,
+# which do not exclude two threads of one process.
+_thread_locks: dict[str, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
 
 
 class LocalObjectFilesystem:
@@ -59,7 +85,7 @@ class LocalObjectFilesystem:
         return real == base or real.startswith(base + os.sep)
 
     def _container_root(self, container: str, uri: str) -> str:
-        if not container or container in (".", "..", METADATA_DIR) or any(c in container for c in ("/", "\\", "\0")):
+        if not container or container in (".", "..", *_PRIVATE_DIRS) or any(c in container for c in ("/", "\\", "\0")):
             raise ValidationError(f"Storage URI names an unsafe container: {uri!r}")
         return os.path.join(self._base(), container)
 
@@ -360,6 +386,123 @@ class LocalObjectFilesystem:
         if not os.path.isfile(dest):
             raise RuntimeError(f"Move verification failed: {dest_uri!r} not written")
         self.delete(source_uri)
+
+    # -- conditional operations (create-only copy, guarded delete) -----------------------------
+
+    def _private_dir(self, name: str) -> str:
+        path = os.path.join(self._base(), name)
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        return path
+
+    @contextmanager
+    def _key_lock(self, uri: str) -> Iterator[None]:
+        """Exclude every other create-only copy or guarded delete of ``uri``, in or out of process."""
+        container, key = self._parse_uri(uri)
+        digest = hashlib.sha256(f"{container}/{key}".encode()).hexdigest()
+        with _thread_locks_guard:
+            thread_lock = _thread_locks.setdefault(f"{self._base()}:{digest}", threading.Lock())
+        with thread_lock:
+            fd = os.open(
+                os.path.join(self._private_dir(LOCK_DIR), digest), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+            )
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+
+    def copy_create_only(
+        self, source_uri: str, dest_uri: str, source_version: str | None, metadata: dict[str, str] | None
+    ) -> tuple[int, str]:
+        """Publish ``source_uri`` at ``dest_uri`` only if nothing is there; return the new (size, version).
+
+        ``source_version`` pins the source (ObjectChanged otherwise, before or during the copy). The
+        destination's metadata is the source's without bioAF's reserved owner keys, overlaid with
+        ``metadata``. Raises DestinationExists, leaving an existing destination untouched.
+        """
+        src_path = self._file(source_uri)
+        dest = self._writable(dest_uri)
+        self._check_metadata(dest_uri)
+        merged = validate_object_metadata(owner_metadata(self.read_metadata(source_uri), metadata))
+        with self._key_lock(dest_uri):
+            if os.path.lexists(dest):
+                raise DestinationExists(dest_uri)
+            try:
+                src = open(src_path, "rb")
+            except FileNotFoundError as e:
+                raise (ObjectChanged(source_uri) if source_version else StorageObjectNotFound(source_uri)) from e
+            with src:
+                before = self._version(os.fstat(src.fileno()))
+                if source_version is not None and before != source_version:
+                    raise ObjectChanged(source_uri)
+                staged = self._stage(src, dest)
+                try:
+                    if self._version(os.fstat(src.fileno())) != before:
+                        raise ObjectChanged(source_uri)
+                    try:
+                        os.link(staged, dest)
+                    except FileExistsError as e:
+                        raise DestinationExists(dest_uri) from e
+                finally:
+                    try:
+                        os.unlink(staged)
+                    except FileNotFoundError:
+                        pass
+            self._write_metadata(dest_uri, merged)
+            st = os.stat(dest)
+            return st.st_size, self._version(st)
+
+    def _stage(self, src: BinaryIO, dest: str) -> str:
+        """Write ``src`` to a private temporary file on the destination's filesystem; return its path."""
+        name = f".bioaf-partial-{secrets.token_hex(8)}"
+        staging = os.path.join(self._private_dir(STAGING_DIR), name)
+        if os.stat(os.path.dirname(staging)).st_dev != os.stat(os.path.dirname(dest)).st_dev:
+            staging = os.path.join(os.path.dirname(dest), name)  # link cannot cross filesystems
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                shutil.copyfileobj(src, out)
+                out.flush()
+                os.fsync(out.fileno())
+        except BaseException:
+            try:
+                os.unlink(staging)
+            except FileNotFoundError:
+                pass
+            raise
+        return staging
+
+    def delete_if_unchanged(self, uri: str, version: str) -> bool:
+        """Remove ``uri`` only while it is exactly ``version``; False if it is already gone."""
+        self._check_metadata(uri)
+        lexical = self._lexical(uri)
+        path = self.path(uri)
+        with self._key_lock(uri):
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                return False
+            if not stat.S_ISREG(st.st_mode):
+                return False
+            if self._version(st) != version:
+                raise ObjectChanged(uri)
+            try:
+                os.unlink(lexical)
+            except FileNotFoundError:
+                return False
+            self._clear_metadata(uri)
+            return True
+
+    def inspect(self, uri: str) -> tuple[int, str, dict[str, str]]:
+        """(size, version, metadata) of one version, read under the key's exclusion."""
+        with self._key_lock(uri):
+            for _ in range(3):
+                size, version = self.identity(uri)
+                metadata = self.read_metadata(uri)
+                if self.identity(uri)[1] == version:
+                    return size, version, metadata
+        raise ObjectChanged(uri)
 
     # -- listing ----------------------------------------------------------------------------
 

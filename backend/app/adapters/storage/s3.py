@@ -540,7 +540,18 @@ class S3StorageProvider(StorageProvider):
             self._s3_list_objects, uri_prefix, recursive, include_versions, max_results, creds
         )
 
-    async def copy(self, source_uri: str, dest_uri: str) -> str:
+    async def copy(
+        self,
+        source_uri: str,
+        dest_uri: str,
+        *,
+        create_only: bool = False,
+        source_identity: ObjectIdentity | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        if create_only:
+            await self.copy_create_only(source_uri, dest_uri, source_identity=source_identity, metadata=metadata)
+            return dest_uri
         if self.is_local:
             await asyncio.to_thread(self._local_fs().copy, source_uri, dest_uri)
             return dest_uri
