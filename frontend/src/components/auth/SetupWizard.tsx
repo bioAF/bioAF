@@ -246,7 +246,12 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   // --- Completion: advances only once the server confirms it ---
 
   const [completionFailed, setCompletionFailed] = useState(false);
-  const componentsQueued = useRef(false);
+  // Components this session has already queued (the endpoint only adds, so they cannot be taken
+  // back here); a later choice is still sent, before completion is tried again.
+  const [queuedComponents, setQueuedComponents] = useState<string[]>([]);
+  const batchSent = useRef(false);
+  // Without the deployment history, whether infrastructure already exists is unknown.
+  const deploymentUnknown = resume && saved.data !== undefined && !saved.data.historyKnown;
 
   const completeSetup = async (): Promise<boolean> => {
     setCompletionFailed(false);
@@ -505,6 +510,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   };
 
   const handleSelectStack = async () => {
+    if (deploymentUnknown) return; // never start infrastructure without knowing what exists
     // The most expensive and least reversible action in the product, and it was
     // an ordinary primary button. Re-typing a six-character setup code, two steps
     // earlier, got a full confirmation dialog.
@@ -557,14 +563,10 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   const retryKey = useRef<string | null>(null);
   const handleRetryDeployment = async () => {
     const ok = await confirm({
-      title: "Retry deployment?",
-      message: (
-        <p>
-          This provisions real infrastructure in your cloud account and
-          <span className="font-medium"> starts incurring charges</span>. It usually takes 10 to 15 minutes.
-        </p>
-      ),
-      confirmLabel: "Retry deployment",
+      title: "Continue infrastructure setup?",
+      message:
+        "bioAF will retry using your saved configuration and existing infrastructure state. This may create additional cloud resources and incur charges.",
+      confirmLabel: "Continue setup",
     });
     if (!ok) return;
     setError("");
@@ -591,13 +593,14 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
     setError("");
     setComponentsSubmitting(true);
     try {
-      if (!componentsQueued.current) {
-        // The endpoint only adds: send what is new, never what is already enabled.
-        const additions = selectedComponents.filter((k) => !enabledComponents.includes(k));
-        if (additions.length > 0 || enabledComponents.length === 0) {
-          await api.post("/api/components/select-batch", { keys: additions });
-        }
-        componentsQueued.current = true;
+      // The endpoint only adds: send what is new, never what is already enabled or queued.
+      const additions = selectedComponents.filter(
+        (k) => !enabledComponents.includes(k) && !queuedComponents.includes(k),
+      );
+      if (additions.length > 0 || (enabledComponents.length === 0 && !batchSent.current)) {
+        await api.post("/api/components/select-batch", { keys: additions });
+        batchSent.current = true;
+        setQueuedComponents((q) => [...q, ...additions]);
       }
       if (await completeSetup()) setStep(8);
     } catch (e) {
@@ -839,7 +842,14 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
         />
       )}
 
-      {step === 5 && !(deployment && deployment.status !== "succeeded") && (
+      {step === 5 && deploymentUnknown && !deployment && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">Your saved setup couldn&apos;t be loaded.</p>
+          <Button onClick={() => saved.refresh()}>Try again</Button>
+        </div>
+      )}
+
+      {step === 5 && !deploymentUnknown && !(deployment && deployment.status !== "succeeded") && (
         <InfrastructureDecisionStep
           cloudLabel={cloudLabel}
           configured={isAws ? aws.awsConfigured : gcp.gcpConfigured}
@@ -865,7 +875,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
         <ComponentsStep
           loading={catalog.loading || (resume && !saved.data)}
           defaultSelected={enabledComponents.length > 0 ? enabledComponents : undefined}
-          locked={enabledComponents}
+          locked={[...enabledComponents, ...queuedComponents]}
           components={pickerComponents}
           onSelectionChange={handlePickerChange}
           submitting={componentsSubmitting}

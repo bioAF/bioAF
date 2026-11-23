@@ -264,7 +264,14 @@ test("a failed deployment offers details and an explicit retry, never a silent r
   expect(writes(requests)).toEqual([]);
 
   await user.click(retry);
-  await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Retry deployment" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("Continue infrastructure setup?")).toBeInTheDocument();
+  expect(
+    within(dialog).getByText(
+      "bioAF will retry using your saved configuration and existing infrastructure state. This may create additional cloud resources and incur charges.",
+    ),
+  ).toBeInTheDocument();
+  await user.click(within(dialog).getByRole("button", { name: "Continue setup" }));
   await waitFor(() => expect(writes(requests)).toEqual(["POST /api/v1/infrastructure/stack/deploy-background"]));
   const deploy = requests.find((r) => r.url.includes("deploy-background"))!;
   expect(deploy.headers["Idempotency-Key"]).toBeTruthy();
@@ -318,4 +325,42 @@ test("an unreadable saved setup is a retryable error, never an empty form", asyn
   expect(await screen.findByText("Your saved setup couldn't be loaded.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Review saved setup" })).not.toBeInTheDocument();
+});
+
+
+test("an unreadable deployment history blocks creating infrastructure", async () => {
+  // Review finding 4: not knowing whether a deployment exists is never a reason to start one.
+  const user = userEvent.setup();
+  const { requests } = server([
+    ["/api/v1/infrastructure/operations?action", { status: 500, json: { detail: "history down" } }],
+  ]);
+  render(<SetupWizard mode="resume" onComplete={() => {}} />);
+  await toInfrastructure(user);
+  expect(screen.getByText("Your saved setup couldn't be loaded.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Set up infrastructure" })).not.toBeInTheDocument();
+  expect(writes(requests)).toEqual([]);
+});
+
+test("a component chosen after a failed completion is still queued, and queued ones stay locked", async () => {
+  // Review finding 7.
+  const user = userEvent.setup();
+  let completeFails = true;
+  const operation = { ...OP, status: "running" };
+  const { requests } = server(
+    [["/api/bootstrap/complete", () => (completeFails ? { status: 500, json: { detail: "db" } } : { json: {} })]],
+    { operation, busy: true },
+  );
+  render(<SetupWizard mode="resume" onComplete={() => {}} />);
+  await toComponents(user);
+  await user.click(await screen.findByRole("checkbox", { name: "rstudio" }));
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByText("Setup couldn't be marked complete. Your settings are saved.");
+
+  expect(screen.getByRole("checkbox", { name: "rstudio" })).toBeDisabled(); // queued: cannot be taken back
+  await user.click(screen.getByRole("checkbox", { name: "jupyterhub" }));
+  completeFails = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await screen.findByRole("heading", { name: "Deploying" });
+  const batches = requests.filter((r) => r.url.includes("select-batch")).map((r) => JSON.parse(String(r.body)).keys);
+  expect(batches).toEqual([["rstudio"], ["jupyterhub"]]);
 });
