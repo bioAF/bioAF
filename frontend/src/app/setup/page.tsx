@@ -11,6 +11,7 @@ import { SETUP_PERMISSION, setupDestination, type SetupDestination } from "@/lib
 import type { BootstrapStatus } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 interface MeResponse {
   permissions: { resource: string; action: string }[];
@@ -75,7 +76,7 @@ export default function SetupPage() {
   let body: React.ReactNode;
   if (view.kind === "failed") {
     body = (
-      <div className="bg-white shadow rounded-lg p-8 space-y-4">
+      <Card className="p-8 space-y-4">
         <p className="text-sm text-gray-700">Your saved setup couldn&apos;t be loaded.</p>
         <div className="flex items-center gap-4">
           <Button onClick={() => void decide()}>Try again</Button>
@@ -83,17 +84,17 @@ export default function SetupPage() {
             Sign out
           </button>
         </div>
-      </div>
+      </Card>
     );
   } else if (view.destination === "setup-unauthorized") {
     body = (
-      <div className="bg-white shadow rounded-lg p-8 space-y-4">
+      <Card className="p-8 space-y-4">
         <h2 className="text-xl font-semibold">Setup isn&apos;t finished yet</h2>
         <p className="text-sm text-gray-700">
           An administrator needs to finish setting up bioAF before you can use it.
         </p>
         <Button onClick={signOut}>Sign out</Button>
-      </div>
+      </Card>
     );
   } else {
     body = (

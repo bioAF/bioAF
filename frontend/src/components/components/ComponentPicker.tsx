@@ -16,6 +16,8 @@ interface ComponentPickerProps {
   components: PickerComponent[];
   defaultSelected: string[];
   onChange: (selected: string[]) => void;
+  /** Keys shown selected that cannot be unselected here (already enabled components). */
+  locked?: string[];
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -44,10 +46,12 @@ export function ComponentPicker({
   components,
   defaultSelected,
   onChange,
+  locked = [],
 }: ComponentPickerProps) {
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(defaultSelected)
+    () => new Set([...defaultSelected, ...locked])
   );
+  const lockedKeys = useMemo(() => new Set(locked), [locked]);
 
   const byKey = useMemo(() => {
     const map = new Map<string, PickerComponent>();
@@ -85,6 +89,7 @@ export function ComponentPicker({
   }, [selected, onChange]);
 
   const toggle = (key: string) => {
+    if (lockedKeys.has(key)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (prev.has(key)) {
@@ -101,7 +106,7 @@ export function ComponentPicker({
           if (next.has(c.key) && !isUserFacing(c) && !stillNeeded.has(c.key)) {
             // user-selected the dep directly; leave it
           }
-          if (!isUserFacing(c) && next.has(c.key) && !stillNeeded.has(c.key)) {
+          if (!isUserFacing(c) && next.has(c.key) && !stillNeeded.has(c.key) && !lockedKeys.has(c.key)) {
             next.delete(c.key);
           }
         }
@@ -155,6 +160,7 @@ export function ComponentPicker({
                     <input
                       type="checkbox"
                       checked={selected.has(c.key)}
+                      disabled={lockedKeys.has(c.key)}
                       onChange={() => toggle(c.key)}
                       className="mt-0.5 h-4 w-4"
                       aria-label={c.name}

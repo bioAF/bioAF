@@ -1,7 +1,7 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useResource } from "@/hooks/useResource";
 import { useSubmitGuard } from "@/hooks/useSubmitGuard";
@@ -14,7 +14,19 @@ import {
   type InstallMetricsChoice,
   type InstallMetricsSettings,
 } from "@/lib/installMetrics";
-import { startSession } from "@/lib/session";
+import { endSession, startSession } from "@/lib/session";
+import { navigateToLogin } from "@/lib/navigation";
+import { OperationStatusModal } from "@/components/infrastructure/OperationStatusModal";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import {
+  ExistingDeploymentStep,
+  ResumeSummary,
+  deploymentStateLabel,
+  isActiveOperation,
+  type SetupOperation,
+} from "@/components/auth/setup/ResumeSteps";
 import type { PickerComponent } from "@/components/components/ComponentPicker";
 import { apiUrl } from "@/lib/apiUrl";
 import { STEPS, DEFAULT_SELECTED_COMPONENTS } from "@/components/auth/setup/setupConstants";
@@ -45,6 +57,27 @@ interface SetupWizardProps {
   mode?: "initial" | "resume";
 }
 
+interface SavedSmtp {
+  host: string;
+  port: number;
+  username: string;
+  from_address: string;
+  encryption: string;
+  configured: boolean;
+}
+
+/** What an unfinished installation already has, read once when an administrator resumes setup. */
+interface SavedSetup {
+  orgName: string;
+  smtp: SavedSmtp;
+  enabledComponents: string[];
+  activeOperation: SetupOperation | null;
+  busy: boolean;
+  /** The latest compute deployment, or null when there is none (or history could not be read). */
+  deployment: SetupOperation | null;
+  historyKnown: boolean;
+}
+
 interface StackComponentsResponse {
   compute_stack: string | null;
   components: {
@@ -66,7 +99,12 @@ interface StackComponentsResponse {
  */
 export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) {
   const confirm = useConfirm();
-  const [step, setStep] = useState(0);
+  const resume = mode === "resume";
+  // Resuming starts at the summary card, over the organization step: the setup code and admin
+  // account already exist and are never shown again.
+  const [step, setStep] = useState(resume ? 2 : 0);
+  const [reviewing, setReviewing] = useState(resume);
+  const firstReviewStep = resume ? 2 : 0;
   const [error, setError] = useState("");
   const stepGuard = useSubmitGuard();
   const submit = (work: () => Promise<void>) => () => void stepGuard.run(work);
@@ -126,6 +164,8 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
     smtpPassword: "",
     smtpFrom: "",
   });
+  // Kept as saved: the step has no encryption control, and a save must not reset it to the default.
+  const [smtpEncryption, setSmtpEncryption] = useState("starttls");
 
   // Step 6: Compute stack
   const [computeStack, setComputeStack] = useState("kubernetes");
@@ -134,6 +174,98 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   // Step 7: Select Components
   const [selectedComponents, setSelectedComponents] = useState<string[]>(DEFAULT_SELECTED_COMPONENTS);
   const [componentsSubmitting, setComponentsSubmitting] = useState(false);
+
+  // --- Resuming: saved settings, read once ---
+
+  const saved = useResource<SavedSetup>(resume ? "setup:saved" : null, async (signal) => {
+    const [org, smtpSaved, components, active] = await Promise.all([
+      api.get<{ org_name: string }>("/api/bootstrap/org-settings", { signal }),
+      api.get<SavedSmtp>("/api/bootstrap/smtp-settings", { signal }),
+      api.get<{ components: { key: string; enabled?: boolean }[] }>("/api/components", { signal }),
+      api.get<{ busy: boolean; operation?: SetupOperation | null }>("/api/v1/infrastructure/operations/active", {
+        signal,
+      }),
+    ]);
+    // History is optional: when it cannot be read, nothing claims there was no deployment, and
+    // deployment actions stay unavailable.
+    let deployment: SetupOperation | null = null;
+    let historyKnown = true;
+    try {
+      const history = await api.get<{ operations: SetupOperation[] }>(
+        "/api/v1/infrastructure/operations?action=compute_deploy&limit=1",
+        { signal },
+      );
+      deployment = history.operations[0] ?? null;
+    } catch (e) {
+      logError("reading the deployment history", e);
+      historyKnown = false;
+    }
+    const activeOperation = active.operation ?? null;
+    if (activeOperation?.action === "compute_deploy" && (!deployment || deployment.id <= activeOperation.id)) {
+      deployment = activeOperation;
+    }
+    return {
+      orgName: org.org_name,
+      smtp: smtpSaved,
+      enabledComponents: components.components.filter((c) => c.enabled).map((c) => c.key),
+      activeOperation,
+      busy: active.busy,
+      deployment,
+      historyKnown,
+    };
+  });
+
+  // Fill the form from the saved settings once, and record them as this session's committed values,
+  // so continuing with them unchanged writes nothing.
+  const hydrated = useRef(false);
+  useEffect(() => {
+    const data = saved.data;
+    if (!data || hydrated.current) return;
+    hydrated.current = true;
+    setOrgName(data.orgName);
+    setCommits((c) => commitStep(c, 2, { orgName: data.orgName }));
+    if (data.smtp.configured) {
+      const fields: SmtpFields = {
+        smtpHost: data.smtp.host,
+        smtpPort: String(data.smtp.port),
+        smtpUsername: data.smtp.username,
+        smtpPassword: "", // blank keeps the stored secret; the masked value is never sent back
+        smtpFrom: data.smtp.from_address,
+      };
+      setSmtp(fields);
+      setSmtpEncryption(data.smtp.encryption || "starttls");
+      setCommits((c) => commitStep(c, 4, { ...fields }));
+    }
+    if (data.enabledComponents.length > 0) setSelectedComponents(data.enabledComponents);
+  }, [saved.data]);
+
+  const [viewingOperation, setViewingOperation] = useState<number | null>(null);
+  const deployment = saved.data?.deployment ?? null;
+  const enabledComponents = saved.data?.enabledComponents ?? [];
+
+  // --- Completion: advances only once the server confirms it ---
+
+  const [completionFailed, setCompletionFailed] = useState(false);
+  const componentsQueued = useRef(false);
+
+  const completeSetup = async (): Promise<boolean> => {
+    setCompletionFailed(false);
+    try {
+      await api.post("/api/bootstrap/complete");
+      return true;
+    } catch (e) {
+      logError("marking setup complete", e);
+      // The answer may have been lost after the server completed it.
+      try {
+        const current = await api.get<{ setup_complete?: boolean }>("/api/bootstrap/status");
+        if (current.setup_complete) return true;
+      } catch (readError) {
+        logError("rereading the setup status", readError);
+      }
+      setCompletionFailed(true);
+      return false;
+    }
+  };
 
   // --- Handlers ---
 
@@ -359,6 +491,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
         username: smtp.smtpUsername,
         password: smtp.smtpPassword,
         from_address: smtp.smtpFrom,
+        encryption: smtpEncryption,
       });
       markStepCompleted(4, current);
       setStep(5);
@@ -368,12 +501,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   };
 
   const handleDoInfraLater = async () => {
-    try {
-      await api.post("/api/bootstrap/complete");
-    } catch {
-      // Non-critical
-    }
-    setStep(8);
+    if (await completeSetup()) setStep(8);
   };
 
   const handleSelectStack = async () => {
@@ -425,19 +553,53 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
     }
   };
 
+  // One key per explicit retry, kept while its answer is unknown so a resend cannot start another.
+  const retryKey = useRef<string | null>(null);
+  const handleRetryDeployment = async () => {
+    const ok = await confirm({
+      title: "Retry deployment?",
+      message: (
+        <p>
+          This provisions real infrastructure in your cloud account and
+          <span className="font-medium"> starts incurring charges</span>. It usually takes 10 to 15 minutes.
+        </p>
+      ),
+      confirmLabel: "Retry deployment",
+    });
+    if (!ok) return;
+    setError("");
+    retryKey.current ??= crypto.randomUUID();
+    try {
+      await api.post(
+        "/api/v1/infrastructure/stack/deploy-background",
+        { stack_type: computeStack },
+        { idempotencyKey: retryKey.current },
+      );
+      retryKey.current = null;
+      saved.refresh();
+      setStep(7);
+    } catch (e) {
+      logError("retrying the cloud stack deployment", e);
+      saved.refresh(); // decide from what the server now records before offering another attempt
+      setError(
+        "Infrastructure could not be started, so nothing has been created. The technical detail is in the application logs.",
+      );
+    }
+  };
+
   const handleSelectComponents = async () => {
     setError("");
     setComponentsSubmitting(true);
     try {
-      await api.post("/api/components/select-batch", {
-        keys: selectedComponents,
-      });
-      try {
-        await api.post("/api/bootstrap/complete");
-      } catch {
-        // Non-critical; the deploy step renders regardless.
+      if (!componentsQueued.current) {
+        // The endpoint only adds: send what is new, never what is already enabled.
+        const additions = selectedComponents.filter((k) => !enabledComponents.includes(k));
+        if (additions.length > 0 || enabledComponents.length === 0) {
+          await api.post("/api/components/select-batch", { keys: additions });
+        }
+        componentsQueued.current = true;
       }
-      setStep(8);
+      if (await completeSetup()) setStep(8);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to queue components");
     } finally {
@@ -478,7 +640,7 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
   // only while this step owns it. Each read starts 8 s after the previous one
   // settles; a failed read is said, and the next tick retries.
   const deployPoll = useResource(
-    step === 8 ? `deploy-status:${selectedComponents.join(",")}` : null,
+    step === 8 || (step === 5 && deployment) ? `deploy-status:${step}:${selectedComponents.join(",")}` : null,
     useCallback(
       (signal: AbortSignal) =>
         api.get<{
@@ -495,6 +657,36 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
       .filter((c) => selected.has(c.key))
       .map((c) => ({ key: c.key, name: c.name, status: c.status }));
   }, [deployPoll.data, selectedComponents]);
+
+  if (resume && saved.error) {
+    return (
+      <Card className="p-8 space-y-4">
+        <p className="text-sm text-gray-700">Your saved setup couldn&apos;t be loaded.</p>
+        <div className="flex items-center gap-4">
+          <Button onClick={() => saved.refresh()}>Try again</Button>
+          <button
+            type="button"
+            onClick={() => {
+              endSession();
+              navigateToLogin();
+            }}
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            Sign out
+          </button>
+        </div>
+      </Card>
+    );
+  }
+
+  const operationModal = viewingOperation !== null && (
+    <OperationStatusModal
+      operationId={viewingOperation}
+      openedFromBanner={false}
+      onClose={() => setViewingOperation(null)}
+      onSettled={() => saved.refresh()}
+    />
+  );
 
   return (
     <div className="bg-white shadow rounded-lg p-8">
@@ -520,6 +712,20 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
         ))}
       </div>
 
+      {reviewing ? (
+        saved.data ? (
+          <ResumeSummary
+            deploymentState={deployment ? deploymentStateLabel(deployment.status) : null}
+            onViewDeployment={() => deployment && setViewingOperation(deployment.id)}
+            onReview={() => setReviewing(false)}
+          />
+        ) : (
+          <div className="flex justify-center py-8">
+            <LoadingSpinner size="lg" />
+          </div>
+        )
+      ) : (
+      <>
       <h2 className="text-xl font-semibold mb-4">{displaySteps[step]}</h2>
 
       {/* Back / Forward: allowed only on steps 1-6 (everything before TF deploy
@@ -529,14 +735,18 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
           they can go back to verify a value and return without re-submitting. */}
       {step >= 1 && step <= 6 && (
         <div className="mb-4 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setStep(step - 1)}
-            aria-label="Back"
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            <span aria-hidden="true">&larr; </span>Back
-          </button>
+          {step > firstReviewStep ? (
+            <button
+              type="button"
+              onClick={() => setStep(step - 1)}
+              aria-label="Back"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              <span aria-hidden="true">&larr; </span>Back
+            </button>
+          ) : (
+            <span />
+          )}
           {commits.completed.has(step) && (
             <button
               type="button"
@@ -553,6 +763,20 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">
           {error}
+        </div>
+      )}
+
+      {completionFailed && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm flex items-center justify-between gap-4">
+          <span>Setup couldn&apos;t be marked complete. Your settings are saved.</span>
+          <Button
+            onClick={submit(async () => {
+              if (step === 7) await handleSelectComponents();
+              else await handleDoInfraLater();
+            })}
+          >
+            Try again
+          </Button>
         </div>
       )}
 
@@ -599,11 +823,28 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
         />
       )}
 
-      {step === 5 && (
+      {step === 5 && deployment && deployment.status !== "succeeded" && (
+        <ExistingDeploymentStep
+          operation={deployment}
+          deployStatus={deployStatus}
+          retryUnblocked={
+            !saved.data?.busy &&
+            saved.data?.historyKnown === true &&
+            !isActiveOperation(deployment.status) &&
+            deployment.status !== "recovery_required"
+          }
+          onViewDetails={() => setViewingOperation(deployment.id)}
+          onContinue={() => setStep(7)}
+          onRetry={submit(handleRetryDeployment)}
+        />
+      )}
+
+      {step === 5 && !(deployment && deployment.status !== "succeeded") && (
         <InfrastructureDecisionStep
           cloudLabel={cloudLabel}
           configured={isAws ? aws.awsConfigured : gcp.gcpConfigured}
-          onSetUp={() => setStep(6)}
+          // Compute already deployed: never create the stack again, go to the saved components.
+          onSetUp={() => setStep(deployment?.status === "succeeded" ? 7 : 6)}
           onLater={submit(handleDoInfraLater)}
         />
       )}
@@ -622,7 +863,9 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
 
       {step === 7 && (
         <ComponentsStep
-          loading={catalog.loading}
+          loading={catalog.loading || (resume && !saved.data)}
+          defaultSelected={enabledComponents.length > 0 ? enabledComponents : undefined}
+          locked={enabledComponents}
           components={pickerComponents}
           onSelectionChange={handlePickerChange}
           submitting={componentsSubmitting}
@@ -639,6 +882,9 @@ export function SetupWizard({ onComplete, mode = "initial" }: SetupWizardProps) 
       )}
 
       {step === 9 && <GettingStartedStep onComplete={onComplete} />}
+      </>
+      )}
+      {operationModal}
     </div>
   );
 }
