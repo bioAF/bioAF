@@ -1,14 +1,23 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PaperPdfViewer } from "./PaperPdfViewer";
+import { PDF_DEADLINES } from "@/lib/pdfSession";
 
 jest.mock("@/lib/literature", () => ({
   fetchPaperPdfBlob: jest.fn(),
 }));
 
 const getDocumentMock = jest.fn();
+// Every worker the viewer creates, so a test can see whether it was terminated.
+const mockWorkers: Array<{ destroy: jest.Mock }> = [];
 jest.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
+  PDFWorker: class {
+    destroy = jest.fn();
+    constructor() {
+      mockWorkers.push(this);
+    }
+  },
   // A real loading task always has destroy(); tests that check it supply their own.
   getDocument: (...args: unknown[]) => ({ destroy: jest.fn(), ...getDocumentMock(...args) }),
 }));
@@ -201,5 +210,69 @@ describe("page drawing", () => {
     await screen.findByText(/page 2 \/ 2/i);
     expect(stale.cancel).toHaveBeenCalled();
     expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+  });
+});
+
+// A hostile file can keep pdf.js's worker busy forever, and pdf.js's own
+// destroy() waits for that worker to answer. The viewer must give up within a
+// fixed time, say so, and terminate the worker itself.
+describe("stuck PDFs", () => {
+  beforeEach(() => {
+    mockWorkers.length = 0;
+    jest.useFakeTimers();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({} as unknown as CanvasRenderingContext2D);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  const stuck = () => new Promise<never>(() => {});
+
+  test("a PDF that never finishes opening is abandoned and its worker terminated", async () => {
+    getDocumentMock.mockReturnValue({ promise: stuck(), destroy: jest.fn(stuck) });
+    render(<PaperPdfViewer paperId={3} />);
+    await act(() => jest.advanceTimersByTimeAsync(0)); // fetch the bytes, start opening
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.loadMs - 1));
+    expect(screen.getByText(/loading pdf/i)).toBeInTheDocument();
+
+    await act(() => jest.advanceTimersByTimeAsync(1));
+    expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
+    expect(mockWorkers).toHaveLength(1);
+    expect(mockWorkers[0].destroy).toHaveBeenCalled();
+  });
+
+  test("a page that never finishes drawing is abandoned and the worker terminated", async () => {
+    const pdf = {
+      numPages: 2,
+      getPage: jest.fn(async () => ({
+        getViewport: () => ({ width: 600, height: 800 }),
+        render: () => ({ promise: stuck(), cancel: jest.fn() }),
+      })),
+    };
+    getDocumentMock.mockReturnValue({ promise: Promise.resolve(pdf), destroy: jest.fn(stuck) });
+    render(<PaperPdfViewer paperId={3} />);
+    await act(() => jest.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/page 1 \/ 2/i)).toBeInTheDocument();
+
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs));
+    expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
+    expect(mockWorkers[0].destroy).toHaveBeenCalled();
+  });
+
+  test("closing a viewer whose worker never answers still terminates the worker", async () => {
+    getDocumentMock.mockReturnValue({ promise: Promise.resolve(makePdf(2)), destroy: jest.fn(stuck) });
+    const { unmount } = render(<PaperPdfViewer paperId={3} />);
+    await act(() => jest.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/page 1 \/ 2/i)).toBeInTheDocument();
+    unmount();
+    expect(mockWorkers[0].destroy).not.toHaveBeenCalled();
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
+    expect(mockWorkers[0].destroy).toHaveBeenCalled();
   });
 });
