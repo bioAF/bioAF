@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
-import { loadFailureMessage, logError } from "@/lib/errorReporting";
+import { loadFailureMessage } from "@/lib/errorReporting";
 import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
+import type { PdfEngine } from "@/lib/pdfSession";
+import { usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
 // our own origin (no CDN), so a strict CSP won't block it.
@@ -13,6 +15,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
+
+// Each document gets its own worker so a stuck one can be terminated
+// (src/lib/pdfSession.ts).
+const ENGINE: PdfEngine<PDFDocumentProxy> = {
+  createWorker: () => new pdfjsLib.PDFWorker(),
+  open: (data, worker) =>
+    pdfjsLib.getDocument({ data, worker: worker as pdfjsLib.PDFWorker, ...HARDENED_PDF_OPTIONS }),
+};
 
 interface Props {
   documentId: number;
@@ -40,29 +50,21 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
   const kind = kindFor(mimeType, fileName);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pdfRef = useRef<PDFDocumentProxy | null>(null);
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
-  const [numPages, setNumPages] = useState(0);
-  const [page, setPage] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [pageFailed, setPageFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(true);
 
-  // pdf.js parses on a worker that lives until its loading task is destroyed,
-  // so closing the viewer, moving to another document or version, or failing
-  // to parse all destroy it.
+  // Fetch the bytes (and a download URL) once per document version.
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
-    let loadingTask: PDFDocumentLoadingTask | null = null;
-    setLoading(true);
-    setError(null);
-    setNumPages(0);
-    setPage(1);
+    setFetching(true);
+    setFetchError(null);
     setTextContent(null);
-    pdfRef.current = null;
+    setPdfData(null);
 
     fetchLabDocumentBlob(documentId, version)
       .then(async (blob) => {
@@ -72,67 +74,37 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         if (kind === "pdf") {
           const data = await blob.arrayBuffer();
           if (cancelled) return;
-          loadingTask = pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS });
-          const pdf = await loadingTask.promise;
-          if (cancelled) return;
-          pdfRef.current = pdf;
-          setNumPages(pdf.numPages);
-          setPage(1);
+          setPdfData(data);
         } else if (kind === "text") {
           const text = await blob.text();
           if (cancelled) return;
           setTextContent(text);
         }
-        setLoading(false);
+        setFetching(false);
       })
       .catch((e) => {
-        void loadingTask?.destroy();
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Could not load the document.");
-          setLoading(false);
+          setFetchError(e instanceof Error ? e.message : "Could not load the document.");
+          setFetching(false);
         }
       });
 
     return () => {
       cancelled = true;
-      void loadingTask?.destroy();
-      pdfRef.current = null;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [documentId, version, kind]);
 
-  // Render the current PDF page whenever it (or the loaded document) changes.
-  // A page turn cancels a drawing still in progress, so a slow page can never
-  // paint over the one the reader moved to.
-  useEffect(() => {
-    if (kind !== "pdf") return;
-    const pdf = pdfRef.current;
-    if (!pdf || numPages === 0) return;
-    let cancelled = false;
-    let renderTask: RenderTask | null = null;
-    setPageFailed(false);
-    (async () => {
-      const pdfPage = await pdf.getPage(page);
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      renderTask = pdfPage.render({ canvas, canvasContext: ctx, viewport });
-      await renderTask.promise;
-    })().catch((e) => {
-      if (cancelled) return;
-      logError(`rendering page ${page} of a lab document PDF`, e);
-      setPageFailed(true);
-    });
-    return () => {
-      cancelled = true;
-      renderTask?.cancel();
-    };
-  }, [page, numPages, kind]);
+  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy>(
+    ENGINE,
+    pdfData,
+    canvasRef,
+    RENDER_SCALE,
+    "a lab document PDF",
+  );
+  const { numPages, page, setPage, pageFailed } = pdf;
+  const error = fetchError ?? pdf.error;
+  const loading = !error && (fetching || pdf.opening);
 
   if (loading) {
     return <div className="text-sm text-gray-500 p-4">Loading document...</div>;
