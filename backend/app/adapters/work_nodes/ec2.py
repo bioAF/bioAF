@@ -761,6 +761,35 @@ class Ec2VmInstance(VmInstance):
             logger.exception("Failed to list EC2 work nodes")
             return []
 
+    async def inventory_instances(self) -> list:
+        """Every existing (not terminated) bioAF Work Node instance in the Region, including stopped
+        ones whose volumes remain. Raises InventoryUnavailable."""
+        from app.services.work_node_readiness import InventoryUnavailable, ManagedInstance
+
+        if self.is_local:
+            return []
+        try:
+            await self.load_config()
+            ec2 = self._client("ec2")
+            paginator = ec2.get_paginator("describe_instances")
+            filters = [
+                {"Name": "tag:bioaf-managed", "Values": ["true"]},
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["pending", "running", "shutting-down", "stopping", "stopped"],
+                },
+            ]
+            pages = await asyncio.to_thread(lambda: list(paginator.paginate(Filters=filters)))
+        except Exception as exc:
+            raise InventoryUnavailable(type(exc).__name__) from exc
+        found = []
+        for page in pages:
+            for reservation in page.get("Reservations", []):
+                for inst in reservation.get("Instances", []):
+                    tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                    found.append(ManagedInstance(name=inst["InstanceId"], session_id=tags.get("bioaf-session")))
+        return found
+
     # -- Local mode implementations --
 
     def _local_launch_vm(self, vm_spec: dict) -> VmInfo:

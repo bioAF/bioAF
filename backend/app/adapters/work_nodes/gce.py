@@ -981,6 +981,34 @@ class GceVmInstance(VmInstance):
             logger.exception("Failed to list GCE VMs")
             return []
 
+    async def inventory_instances(self) -> list:
+        """Every existing bioAF Work Node VM in the project, across all zones (launches fail over
+        between zones). A stopped VM still exists with its disks. Raises InventoryUnavailable."""
+        from app.services.work_node_readiness import InventoryUnavailable, ManagedInstance
+
+        if self.is_local:
+            return []
+        try:
+            from google.cloud import compute_v1
+
+            await self.load_gcp_config()
+            project = (self._gcp_config or {}).get("gcp_project_id", "")
+            if not project:
+                raise InventoryUnavailable("no GCP project configured")
+            client = compute_v1.InstancesClient(credentials=self._get_gcp_credentials())
+            request = compute_v1.AggregatedListInstancesRequest(project=project, filter='labels.bioaf-managed="true"')
+            pages = await asyncio.to_thread(lambda: list(client.aggregated_list(request=request)))
+        except InventoryUnavailable:
+            raise
+        except Exception as exc:
+            raise InventoryUnavailable(type(exc).__name__) from exc
+        found = []
+        for _zone, scoped in pages:
+            for instance in getattr(scoped, "instances", None) or []:
+                labels = dict(instance.labels or {})
+                found.append(ManagedInstance(name=instance.name, session_id=labels.get("bioaf-session")))
+        return found
+
     # -- Local mode implementations --
 
     def _local_launch_vm(self, vm_spec: dict) -> dict:

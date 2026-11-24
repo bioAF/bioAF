@@ -907,6 +907,17 @@ class WorkNodeProvider(ABC):
     async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
         """List active work node VMs."""
 
+    async def inventory_instances(self) -> list:
+        """Every existing bioAF Work Node instance in this installation, as ManagedInstance records.
+
+        Used by the first-update gate (``app.services.work_node_readiness``). Unlike ``list_vms`` it
+        raises ``InventoryUnavailable`` instead of returning an empty list when the provider cannot
+        answer. The default raises: a backend that cannot inventory its nodes cannot prove safety.
+        """
+        from app.services.work_node_readiness import InventoryUnavailable
+
+        raise InventoryUnavailable(f"{type(self).__name__} cannot list its Work Node instances")
+
     async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
         """Return the first zone in ``zones`` with capacity for ``machine_type``.
 
