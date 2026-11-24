@@ -9,7 +9,8 @@ jest.mock("@/lib/literature", () => ({
 const getDocumentMock = jest.fn();
 jest.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
-  getDocument: (...args: unknown[]) => getDocumentMock(...args),
+  // A real loading task always has destroy(); tests that check it supply their own.
+  getDocument: (...args: unknown[]) => ({ destroy: jest.fn(), ...getDocumentMock(...args) }),
 }));
 
 import { fetchPaperPdfBlob } from "@/lib/literature";
@@ -20,7 +21,7 @@ function makePdf(numPages: number) {
     numPages,
     getPage: jest.fn(async () => ({
       getViewport: () => ({ width: 600, height: 800 }),
-      render: () => ({ promise: Promise.resolve() }),
+      render: () => ({ promise: Promise.resolve(), cancel: jest.fn() }),
     })),
   };
 }
@@ -89,4 +90,116 @@ test("shows an error message when the PDF cannot be loaded", async () => {
   await waitFor(() =>
     expect(screen.getByText(/no pdf attached/i)).toBeInTheDocument(),
   );
+});
+
+// pdf.js parses on a worker that stays alive until its loading task is
+// destroyed. A viewer that is closed, or moved to another paper, must stop it;
+// otherwise a hostile or huge PDF keeps a worker busy after the reader left.
+describe("pdf.js lifecycle", () => {
+  function loadingTask(promise: Promise<unknown>) {
+    return { promise, destroy: jest.fn() };
+  }
+
+  test("closing the viewer while the PDF is still loading stops pdf.js", async () => {
+    const task = loadingTask(new Promise(() => {}));
+    getDocumentMock.mockReturnValue(task);
+    const { unmount } = render(<PaperPdfViewer paperId={3} />);
+    await waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
+    unmount();
+    expect(task.destroy).toHaveBeenCalled();
+  });
+
+  test("closing the viewer after the PDF loaded stops pdf.js", async () => {
+    const task = loadingTask(Promise.resolve(makePdf(2)));
+    getDocumentMock.mockReturnValue(task);
+    const { unmount } = render(<PaperPdfViewer paperId={3} />);
+    await screen.findByText(/page 1 \/ 2/i);
+    unmount();
+    expect(task.destroy).toHaveBeenCalled();
+  });
+
+  test("opening another paper stops the previous one, and its late result is never shown", async () => {
+    let finishFirst: (pdf: unknown) => void = () => {};
+    const first = loadingTask(new Promise((resolve) => (finishFirst = resolve)));
+    const second = loadingTask(Promise.resolve(makePdf(7)));
+    getDocumentMock.mockReturnValueOnce(first).mockReturnValueOnce(second);
+
+    const { rerender } = render(<PaperPdfViewer paperId={3} />);
+    await waitFor(() => expect(getDocumentMock).toHaveBeenCalledTimes(1));
+    rerender(<PaperPdfViewer paperId={4} />);
+    await screen.findByText(/page 1 \/ 7/i);
+    expect(first.destroy).toHaveBeenCalled();
+
+    finishFirst(makePdf(2));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText(/page 1 \/ 7/i)).toBeInTheDocument();
+    expect(second.destroy).not.toHaveBeenCalled();
+  });
+
+  test("a file pdf.js cannot read shows the error and stops pdf.js", async () => {
+    const task = loadingTask(Promise.reject(new Error("Invalid PDF structure.")));
+    getDocumentMock.mockReturnValue(task);
+    render(<PaperPdfViewer paperId={3} />);
+    await screen.findByText(/invalid pdf structure/i);
+    expect(task.destroy).toHaveBeenCalled();
+  });
+});
+
+describe("page drawing", () => {
+  function pdfWithPages(renders: Array<() => { promise: Promise<void>; cancel: jest.Mock }>) {
+    let call = 0;
+    return {
+      numPages: renders.length,
+      getPage: jest.fn(async () => ({
+        getViewport: () => ({ width: 600, height: 800 }),
+        render: () => renders[Math.min(call++, renders.length - 1)](),
+      })),
+    };
+  }
+
+  // jsdom has no 2D canvas; the drawing itself belongs to the mocked pdf.js.
+  beforeEach(() => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({} as unknown as CanvasRenderingContext2D);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test("a page that fails to draw says so and leaves the other pages reachable", async () => {
+    const pdf = pdfWithPages([
+      () => ({ promise: Promise.reject(new Error("bad page stream")), cancel: jest.fn() }),
+      () => ({ promise: Promise.resolve(), cancel: jest.fn() }),
+    ]);
+    getDocumentMock.mockReturnValue({ promise: Promise.resolve(pdf) });
+    render(<PaperPdfViewer paperId={3} />);
+
+    expect(await screen.findByText(/page 1 could not be loaded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/bad page stream/i)).not.toBeInTheDocument();
+    const next = screen.getByRole("button", { name: /next/i });
+    expect(next).toBeEnabled();
+
+    await userEvent.click(next);
+    await screen.findByText(/page 2 \/ 2/i);
+    await waitFor(() =>
+      expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  test("turning the page while one is still drawing cancels the stale drawing", async () => {
+    const stale = { promise: new Promise<void>(() => {}), cancel: jest.fn() };
+    const pdf = pdfWithPages([
+      () => stale,
+      () => ({ promise: Promise.resolve(), cancel: jest.fn() }),
+    ]);
+    getDocumentMock.mockReturnValue({ promise: Promise.resolve(pdf) });
+    render(<PaperPdfViewer paperId={3} />);
+    await screen.findByText(/page 1 \/ 2/i);
+    await waitFor(() => expect(pdf.getPage).toHaveBeenCalledWith(1));
+
+    await userEvent.click(screen.getByRole("button", { name: /next/i }));
+    await screen.findByText(/page 2 \/ 2/i);
+    expect(stale.cancel).toHaveBeenCalled();
+    expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+  });
 });

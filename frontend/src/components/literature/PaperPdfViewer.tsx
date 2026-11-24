@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
+import { loadFailureMessage, logError } from "@/lib/errorReporting";
 import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
@@ -38,12 +39,16 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [pageFailed, setPageFailed] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load the document (and a download URL) once per paper.
+  // Load the document (and a download URL) once per paper. pdf.js parses on a
+  // worker that lives until its loading task is destroyed, so closing the
+  // viewer, moving to another paper, or failing to parse all destroy it.
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
+    let loadingTask: PDFDocumentLoadingTask | null = null;
     setLoading(true);
     setError(null);
     setNumPages(0);
@@ -57,7 +62,8 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
         setDownloadUrl(createdUrl);
         const data = await blob.arrayBuffer();
         if (cancelled) return;
-        const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
+        loadingTask = pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS });
+        const pdf = await loadingTask.promise;
         if (cancelled) return;
         pdfRef.current = pdf;
         setNumPages(pdf.numPages);
@@ -65,6 +71,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
         setLoading(false);
       })
       .catch((e) => {
+        void loadingTask?.destroy();
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Could not load the PDF.");
           setLoading(false);
@@ -73,15 +80,21 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
 
     return () => {
       cancelled = true;
+      void loadingTask?.destroy();
+      pdfRef.current = null;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [paperId]);
 
-  // Render the current page whenever it (or the loaded document) changes.
+  // Render the current page whenever it (or the loaded document) changes. A
+  // page turn cancels a drawing still in progress, so a slow page can never
+  // paint over the one the reader moved to.
   useEffect(() => {
     const pdf = pdfRef.current;
     if (!pdf || numPages === 0) return;
     let cancelled = false;
+    let renderTask: RenderTask | null = null;
+    setPageFailed(false);
     (async () => {
       const pdfPage = await pdf.getPage(page);
       if (cancelled) return;
@@ -92,10 +105,16 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
       canvas.height = viewport.height;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
-    })();
+      renderTask = pdfPage.render({ canvas, canvasContext: ctx, viewport });
+      await renderTask.promise;
+    })().catch((e) => {
+      if (cancelled) return;
+      logError(`rendering page ${page} of a paper PDF`, e);
+      setPageFailed(true);
+    });
     return () => {
       cancelled = true;
+      renderTask?.cancel();
     };
   }, [page, numPages]);
 
@@ -151,7 +170,12 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
             page's intrinsic ratio scale it down to fit both bounds, so a portrait
             page shows in full on a laptop or external display without an inner
             scrollbar. Sized for desktop; small screens are not a target. */}
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+        {pageFailed && (
+          <p role="alert" className="text-sm text-red-700 p-4">
+            {loadFailureMessage(`Page ${page}`)}
+          </p>
+        )}
+        <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />
       </div>
     </div>
   );
