@@ -507,6 +507,67 @@ def test_the_benchmark_keeps_its_dispatch_choices_and_artifact_name():
     )
 
 
+# ── the full-scope benchmark measures what CI runs (nov_sec 02.5B1) ──
+# A worker-count decision is only evidence for CI if the benchmark's full scope runs CI's suite the CI way: the same
+# runner image, database service, checkout history, pytest options and evidence. Only -n and the target differ.
+
+
+def _ci_backend_job() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]["backend-test"]
+
+
+def _pytest_options(run: str) -> list[str]:
+    """The options of the one pytest command in a step, without the worker count or positional targets."""
+    joined = re.sub(r"\\\n\s*", " ", run)
+    [line] = [ln for ln in joined.splitlines() if re.match(r"\s*pytest ", ln)]
+    words = line.split("2>&1")[0].split()[1:]
+    options, skip = [], False
+    for word in words:
+        if skip:
+            skip = False
+        elif word == "-n":
+            skip = True
+        elif word.startswith("-"):
+            options.append(word)
+    return sorted(options)
+
+
+def test_the_benchmark_runs_on_the_backend_ci_runner_and_database():
+    benchmark, ci = _benchmark()["jobs"]["benchmark"], _ci_backend_job()
+    assert benchmark["runs-on"] == ci["runs-on"]
+    assert benchmark["services"] == ci["services"]
+    assert benchmark["env"]["BIOAF_TEST_DATABASE_URL"] == ci["env"]["BIOAF_TEST_DATABASE_URL"]
+
+
+def test_the_benchmark_checks_out_the_history_the_upgrade_tests_read():
+    # The historical upgrade matrix builds each released schema from local Git tags; a shallow clone tests less.
+    [checkout] = [s for s in _benchmark()["jobs"]["benchmark"]["steps"] if s.get("uses", "").startswith("actions/checkout@")]
+    [ci_checkout] = [s for s in _ci_backend_job()["steps"] if s.get("uses", "").startswith("actions/checkout@")]
+    assert checkout == ci_checkout
+
+
+def test_the_benchmark_passes_pytest_the_ci_options():
+    ci_run = next(s for s in _ci_backend_job()["steps"] if s.get("name") == "Run tests")["run"]
+    assert _pytest_options(_benchmark_step("Run tests")[1]["run"]) == _pytest_options(ci_run)
+
+
+def test_the_benchmark_writes_ci_coverage_and_exit_status_evidence(tmp_path):
+    done, work = _run_benchmark_step("Run tests", tmp_path, pytest_exit=1)
+    assert done.returncode == 1
+    assert (work / "test-artifacts" / "exit-status").read_text().strip() == "1"
+    assert "--cov-report=json:test-artifacts/coverage.json" in _pytest_argv(tmp_path)
+
+
+def test_the_benchmark_records_the_runner_it_measured(tmp_path):
+    done, work = _run_benchmark_step("Run tests", tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    recorded = dict(
+        line.split("=", 1) for line in (work / "test-artifacts" / "environment.txt").read_text().splitlines()
+    )
+    assert {"commit", "runner_image", "cpus", "memory_bytes", "workers", "scope", "python", "uv"} <= set(recorded)
+    assert recorded["workers"] == BENCHMARK_INPUTS["workers"] and recorded["scope"] == "full"
+
+
 # ── no workflow expression is shell source (nov_sec 01A) ──
 
 ALL_WORKFLOWS = sorted((REPO / ".github" / "workflows").glob("*.yml"))

@@ -38,7 +38,9 @@ env:
 jobs:
   benchmark:
     name: Benchmark (${{ inputs.scope }}, rounds ${{ inputs.test_bcrypt_rounds }}, ${{ inputs.durability }}, -n ${{ inputs.workers }})
-    runs-on: ubuntu-latest
+    # The backend CI job's runner (ci.yml backend-test): a worker-count result measured on another image is not
+    # evidence for CI. ubuntu-24.04 ships the PostgreSQL 16 client the schema-upgrade tests need.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -62,13 +64,15 @@ jobs:
       BIOAF_TEST_DATABASE_URL: postgresql+asyncpg://bioaf_test:test@localhost:5432/bioaf_test
       BIOAF_TEST_BCRYPT_ROUNDS: ${{ inputs.test_bcrypt_rounds }}
     steps:
+      # Full history and tags, as in CI: the historical upgrade matrix reads every release's migrations from Git.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       # Dispatch values reach the shell only as quoted environment variables, never as script text. The worker
       # count is free text, so it is checked here, before anything is installed: `auto` or a whole number from 1 to
-      # MAX_WORKERS (the public ubuntu-latest runner has 4 CPUs). The syntax and length are checked before the number
+      # MAX_WORKERS (the public ubuntu-24.04 runner has 4 CPUs). The syntax and length are checked before the number
       # is compared, and a rejected value is never repeated in the log.
       - name: Validate inputs
         id: validate
@@ -118,6 +122,12 @@ jobs:
           mkdir -p test-artifacts
           uv pip freeze > test-artifacts/pip-freeze.txt
           {
+            echo "commit=${GITHUB_SHA:-}"
+            echo "runner_image=${ImageOS:-unknown} ${ImageVersion:-unknown}"
+            echo "scope=$SCOPE"
+            echo "workers=$WORKERS"
+            echo "cpus=$(nproc)"
+            echo "memory_bytes=$(free -b 2>/dev/null | awk '/^Mem:/ {print $2}')"
             echo "python=$(python --version 2>&1)"
             echo "platform=$(python -c 'import sysconfig; print(sysconfig.get_platform())')"
             echo "uv=$(uv --version)"
@@ -133,10 +143,13 @@ jobs:
           # No -x: a comparison needs every outcome, not the first failure.
           # $targets is a word list on purpose.
           # shellcheck disable=SC2086
-          pytest -n "$WORKERS" --tb=short --cov=app --cov-report=term-missing -q $targets \
+          # The same options as CI's backend run (ci.yml), so the full scope measures the CI command; only -n differs.
+          pytest -n "$WORKERS" --tb=short --cov=app --cov-report=term-missing \
+            --cov-report=json:test-artifacts/coverage.json -q $targets \
             --junitxml=test-artifacts/junit.xml --phase-report=test-artifacts/phases.jsonl \
             2>&1 | tee test-artifacts/pytest-output.txt || status=$?
           echo "tests_finished=$(date +%s)" >> "$RUNNER_TEMP/timings.env"
+          echo "$status" > test-artifacts/exit-status
           exit $status
 
       # Runs after a rejected input too: it reports the rejection instead of the value, and tolerates missing evidence.
