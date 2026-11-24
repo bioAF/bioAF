@@ -5,8 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
 import { loadFailureMessage } from "@/lib/errorReporting";
-import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
-import type { PdfEngine } from "@/lib/pdfSession";
+import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
 import { usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
@@ -19,11 +18,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 // Each document gets its own worker so a stuck one can be terminated
 // (src/lib/pdfSession.ts).
-const ENGINE: PdfEngine<PDFDocumentProxy> = {
-  createWorker: () => new pdfjsLib.PDFWorker(),
-  open: (data, worker) =>
-    pdfjsLib.getDocument({ data, worker: worker as pdfjsLib.PDFWorker, ...HARDENED_PDF_OPTIONS }),
-};
+const ENGINE = createPdfEngine<PDFDocumentProxy, pdfjsLib.PDFWorker>(pdfjsLib);
 
 interface Props {
   paperId: number;
@@ -73,7 +68,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
     };
   }, [paperId]);
 
-  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy>(ENGINE, data, canvasRef, RENDER_SCALE, "a paper PDF");
+  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy, OwnedPdfWorker<pdfjsLib.PDFWorker>>(ENGINE, data, canvasRef, RENDER_SCALE, "a paper PDF");
   const { numPages, page, setPage, pageFailed } = pdf;
   const error = fetchError ?? pdf.error;
   const loading = !error && (data === null || pdf.opening);

@@ -1,5 +1,6 @@
 import {
   PDF_DEADLINES,
+  createPdfEngine,
   PdfDeadlineError,
   openPdfSession,
   renderWithDeadline,
@@ -118,4 +119,84 @@ test("a page drawing that finishes in time succeeds", async () => {
   const render = { promise: Promise.resolve(), cancel: jest.fn() };
   await expect(renderWithDeadline(render)).resolves.toBeUndefined();
   expect(render.cancel).not.toHaveBeenCalled();
+});
+
+describe("createPdfEngine", () => {
+  const webWorkers: Array<{ url: unknown; options: unknown; terminate: jest.Mock }> = [];
+  const realWorker = global.Worker;
+  beforeAll(() => {
+    global.Worker = class {
+      terminate = jest.fn();
+      constructor(
+        public url: unknown,
+        public options: unknown,
+      ) {
+        webWorkers.push(this);
+      }
+    } as unknown as typeof Worker;
+  });
+  afterAll(() => {
+    global.Worker = realWorker;
+  });
+  beforeEach(() => (webWorkers.length = 0));
+
+  function fakePdfJs(destroyThrows = false) {
+    const pdfWorkers: Array<{ port: unknown; destroy: jest.Mock }> = [];
+    const pdfjs = {
+      GlobalWorkerOptions: { workerSrc: "/_next/static/media/pdf.worker.min.mjs" },
+      PDFWorker: class {
+        port: unknown;
+        destroy = jest.fn(() => {
+          if (destroyThrows) throw new Error("already destroyed");
+        });
+        constructor({ port }: { port: unknown }) {
+          this.port = port;
+          pdfWorkers.push(this);
+        }
+      },
+      getDocument: jest.fn(() => ({ promise: Promise.resolve({}), destroy: async () => {} })),
+    };
+    return { pdfjs, pdfWorkers };
+  }
+
+  test("each worker is a module Web Worker from the configured source, given to pdf.js as its port", () => {
+    const { pdfjs, pdfWorkers } = fakePdfJs();
+    const worker = createPdfEngine(pdfjs).createWorker();
+    expect(webWorkers).toHaveLength(1);
+    expect(webWorkers[0].url).toBe("/_next/static/media/pdf.worker.min.mjs");
+    expect(webWorkers[0].options).toEqual({ type: "module" });
+    expect(pdfWorkers[0].port).toBe(webWorkers[0]);
+    expect(worker.pdfWorker).toBe(pdfWorkers[0]);
+  });
+
+  test("documents open with the hardened options on that worker", () => {
+    const { pdfjs } = fakePdfJs();
+    const engine = createPdfEngine(pdfjs);
+    const worker = engine.createWorker();
+    const data = new ArrayBuffer(2);
+    engine.open(data, worker);
+    expect(pdfjs.getDocument).toHaveBeenCalledWith({
+      data,
+      worker: worker.pdfWorker,
+      enableScripting: false,
+      isEvalSupported: false,
+    });
+  });
+
+  test("destroying the worker terminates the Web Worker, even when pdf.js's cleanup throws", () => {
+    const { pdfjs } = fakePdfJs(true);
+    const worker = createPdfEngine(pdfjs).createWorker();
+    expect(() => worker.destroy()).toThrow("already destroyed");
+    expect(webWorkers[0].terminate).toHaveBeenCalled();
+  });
+
+  test("a session whose stop is never acknowledged terminates the Web Worker", async () => {
+    const { pdfjs } = fakePdfJs();
+    pdfjs.getDocument.mockReturnValue({ promise: Promise.resolve({}), destroy: never });
+    const session = openPdfSession(createPdfEngine(pdfjs), new ArrayBuffer(1));
+    await session.document;
+    session.stop();
+    await jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs);
+    expect(webWorkers[0].terminate).toHaveBeenCalled();
+  });
 });

@@ -35,6 +35,15 @@ function makePdf(numPages: number) {
   };
 }
 
+// jsdom has no Web Worker; the viewer creates one per document for pdf.js.
+const mockWebWorkers: Array<{ terminate: jest.Mock }> = [];
+global.Worker = class {
+  terminate = jest.fn();
+  constructor() {
+    mockWebWorkers.push(this);
+  }
+} as unknown as typeof Worker;
+
 beforeEach(() => {
   mockBlobFetch.mockReset();
   getDocumentMock.mockReset();
@@ -219,6 +228,7 @@ describe("page drawing", () => {
 describe("stuck PDFs", () => {
   beforeEach(() => {
     mockWorkers.length = 0;
+    mockWebWorkers.length = 0;
     jest.useFakeTimers();
     jest.spyOn(console, "error").mockImplementation(() => {});
     jest
@@ -242,8 +252,8 @@ describe("stuck PDFs", () => {
     await act(() => jest.advanceTimersByTimeAsync(1));
     expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
-    expect(mockWorkers).toHaveLength(1);
-    expect(mockWorkers[0].destroy).toHaveBeenCalled();
+    expect(mockWebWorkers).toHaveLength(1);
+    expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
   });
 
   test("a page that never finishes drawing is abandoned and the worker terminated", async () => {
@@ -262,7 +272,7 @@ describe("stuck PDFs", () => {
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs));
     expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
-    expect(mockWorkers[0].destroy).toHaveBeenCalled();
+    expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
   });
 
   test("closing a viewer whose worker never answers still terminates the worker", async () => {
@@ -271,8 +281,8 @@ describe("stuck PDFs", () => {
     await act(() => jest.advanceTimersByTimeAsync(0));
     expect(screen.getByText(/page 1 \/ 2/i)).toBeInTheDocument();
     unmount();
-    expect(mockWorkers[0].destroy).not.toHaveBeenCalled();
+    expect(mockWebWorkers[0].terminate).not.toHaveBeenCalled();
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
-    expect(mockWorkers[0].destroy).toHaveBeenCalled();
+    expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
   });
 });

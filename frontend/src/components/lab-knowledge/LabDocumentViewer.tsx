@@ -5,8 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
 import { loadFailureMessage } from "@/lib/errorReporting";
-import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
-import type { PdfEngine } from "@/lib/pdfSession";
+import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
 import { usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
@@ -18,11 +17,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 // Each document gets its own worker so a stuck one can be terminated
 // (src/lib/pdfSession.ts).
-const ENGINE: PdfEngine<PDFDocumentProxy> = {
-  createWorker: () => new pdfjsLib.PDFWorker(),
-  open: (data, worker) =>
-    pdfjsLib.getDocument({ data, worker: worker as pdfjsLib.PDFWorker, ...HARDENED_PDF_OPTIONS }),
-};
+const ENGINE = createPdfEngine<PDFDocumentProxy, pdfjsLib.PDFWorker>(pdfjsLib);
 
 interface Props {
   documentId: number;
@@ -95,7 +90,7 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
     };
   }, [documentId, version, kind]);
 
-  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy>(
+  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy, OwnedPdfWorker<pdfjsLib.PDFWorker>>(
     ENGINE,
     pdfData,
     canvasRef,

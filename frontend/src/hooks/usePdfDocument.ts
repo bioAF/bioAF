@@ -7,6 +7,7 @@ import {
   openPdfSession,
   renderWithDeadline,
   type PdfEngine,
+  type PdfWorkerHandle,
   type PdfRenderTask,
   type PdfSession,
 } from "@/lib/pdfSession";
@@ -51,8 +52,12 @@ export interface PdfDocumentState {
  * turn cancels a drawing still in progress, so a slow page cannot paint over
  * the current one. `what` names the document in logs.
  */
-export function usePdfDocument<V extends PdfViewport, D extends PdfDocument<V>>(
-  engine: PdfEngine<D>,
+export function usePdfDocument<
+  V extends PdfViewport,
+  D extends PdfDocument<V>,
+  W extends PdfWorkerHandle,
+>(
+  engine: PdfEngine<D, W>,
   data: ArrayBuffer | null,
   canvasRef: RefObject<HTMLCanvasElement | null>,
   scale: number,
