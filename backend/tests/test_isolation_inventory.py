@@ -154,3 +154,23 @@ def test_the_committed_inventory_lists_only_existing_files():
     recorded = json.loads((TESTS_DIR / "isolation_inventory.json").read_text())["files"]
     missing = sorted(name for name in recorded if not (TESTS_DIR / name).exists())
     assert missing == []
+
+
+def test_every_top_level_test_file_is_in_the_committed_inventory():
+    """A new file is classified and reviewed before it can join a pilot (nov_sec 02.5C). Until a pilot list
+    names it, an unpiloted file keeps the isolated ``existing`` route, so listing it never relaxes isolation."""
+    recorded = json.loads((TESTS_DIR / "isolation_inventory.json").read_text())["files"]
+    unlisted = sorted(path.name for path in TESTS_DIR.glob("test_*.py") if path.name not in recorded)
+    assert unlisted == [], "regenerate with `python -m tests.support.isolation_inventory --write` and review"
+
+
+def test_the_committed_inventory_matches_the_classifier():
+    """The recorded category is the one the classifier gives today, in either direction."""
+    recorded = json.loads((TESTS_DIR / "isolation_inventory.json").read_text())["files"]
+    current = inv.build(TESTS_DIR)
+    drift = sorted(
+        (name, entry["category"], current[name].category)
+        for name, entry in recorded.items()
+        if name in current and entry["category"] != current[name].category
+    )
+    assert drift == []

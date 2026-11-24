@@ -507,6 +507,69 @@ def test_the_benchmark_keeps_its_dispatch_choices_and_artifact_name():
     )
 
 
+# ── the full-scope benchmark measures what CI runs (nov_sec 02.5B1) ──
+# A worker-count decision is only evidence for CI if the benchmark's full scope runs CI's suite the CI way: the same
+# runner image, database service, checkout history, pytest options and evidence. Only -n and the target differ.
+
+
+def _ci_backend_job() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]["backend-test"]
+
+
+def _pytest_options(run: str) -> list[str]:
+    """The options of the one pytest command in a step, without the worker count or positional targets."""
+    joined = re.sub(r"\\\n\s*", " ", run)
+    [line] = [ln for ln in joined.splitlines() if re.match(r"\s*pytest ", ln)]
+    words = line.split("2>&1")[0].split()[1:]
+    options, skip = [], False
+    for word in words:
+        if skip:
+            skip = False
+        elif word == "-n":
+            skip = True
+        elif word.startswith("-"):
+            options.append(word)
+    return sorted(options)
+
+
+def test_the_benchmark_runs_on_the_backend_ci_runner_and_database():
+    benchmark, ci = _benchmark()["jobs"]["benchmark"], _ci_backend_job()
+    assert benchmark["runs-on"] == ci["runs-on"]
+    assert benchmark["services"] == ci["services"]
+    assert benchmark["env"]["BIOAF_TEST_DATABASE_URL"] == ci["env"]["BIOAF_TEST_DATABASE_URL"]
+
+
+def test_the_benchmark_checks_out_the_history_the_upgrade_tests_read():
+    # The historical upgrade matrix builds each released schema from local Git tags; a shallow clone tests less.
+    [checkout] = [
+        s for s in _benchmark()["jobs"]["benchmark"]["steps"] if s.get("uses", "").startswith("actions/checkout@")
+    ]
+    [ci_checkout] = [s for s in _ci_backend_job()["steps"] if s.get("uses", "").startswith("actions/checkout@")]
+    assert checkout == ci_checkout
+
+
+def test_the_benchmark_passes_pytest_the_ci_options():
+    ci_run = next(s for s in _ci_backend_job()["steps"] if s.get("name") == "Run tests")["run"]
+    assert _pytest_options(_benchmark_step("Run tests")[1]["run"]) == _pytest_options(ci_run)
+
+
+def test_the_benchmark_writes_ci_coverage_and_exit_status_evidence(tmp_path):
+    done, work = _run_benchmark_step("Run tests", tmp_path, pytest_exit=1)
+    assert done.returncode == 1
+    assert (work / "test-artifacts" / "exit-status").read_text().strip() == "1"
+    assert "--cov-report=json:test-artifacts/coverage.json" in _pytest_argv(tmp_path)
+
+
+def test_the_benchmark_records_the_runner_it_measured(tmp_path):
+    done, work = _run_benchmark_step("Run tests", tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    recorded = dict(
+        line.split("=", 1) for line in (work / "test-artifacts" / "environment.txt").read_text().splitlines()
+    )
+    assert {"commit", "runner_image", "cpus", "memory_bytes", "workers", "scope", "python", "uv"} <= set(recorded)
+    assert recorded["workers"] == BENCHMARK_INPUTS["workers"] and recorded["scope"] == "full"
+
+
 # ── no workflow expression is shell source (nov_sec 01A) ──
 
 ALL_WORKFLOWS = sorted((REPO / ".github" / "workflows").glob("*.yml"))
@@ -654,6 +717,65 @@ def test_dependabot_proposes_weekly_action_pin_updates():
     assert actions["schedule"]["interval"] == "weekly"
     assert 1 <= actions["open-pull-requests-limit"] <= 5
     assert "automerge" not in json.dumps(actions).lower()
+
+
+# ── dependency-update bursts (nov_sec 02.5A) ──
+# Routine minor/patch version updates arrive as one grouped pull request per ecosystem, on separate days outside
+# the working day, so a weekly cycle starts three full CI runs on three days instead of up to fifteen at once.
+
+DEPENDABOT = REPO / ".github" / "dependabot.yml"
+UPDATE_DAYS = {"uv": "tuesday", "npm": "wednesday", "github-actions": "thursday"}
+
+
+def _dependabot_updates() -> dict[str, dict]:
+    return {u["package-ecosystem"]: u for u in yaml.safe_load(DEPENDABOT.read_text())["updates"]}
+
+
+@pytest.mark.parametrize("ecosystem", sorted(UPDATE_DAYS))
+def test_each_ecosystem_updates_weekly_on_its_own_morning(ecosystem):
+    schedule = _dependabot_updates()[ecosystem]["schedule"]
+    assert schedule == {
+        "interval": "weekly",
+        "day": UPDATE_DAYS[ecosystem],
+        "time": "04:00",
+        "timezone": "America/Los_Angeles",
+    }
+
+
+def test_no_two_ecosystems_share_an_update_day():
+    days = [u["schedule"].get("day") for u in _dependabot_updates().values()]
+    assert len(days) == len(set(days))
+
+
+@pytest.mark.parametrize("ecosystem", ["uv", "github-actions"])
+def test_routine_updates_arrive_as_one_grouped_pull_request(ecosystem):
+    # A pattern group, not a dependency-type split: Dependabot does not support groups.dependency-type for uv.
+    groups = _dependabot_updates()[ecosystem].get("groups", {})
+    assert len(groups) == 1
+    [group] = groups.values()
+    assert group == {"applies-to": "version-updates", "patterns": ["*"], "update-types": ["minor", "patch"]}
+
+
+def test_npm_keeps_its_runtime_and_development_groups():
+    groups = _dependabot_updates()["npm"]["groups"]
+    assert groups == {
+        "frontend-runtime": {"dependency-type": "production", "update-types": ["minor", "patch"]},
+        "frontend-development": {"dependency-type": "development", "update-types": ["minor", "patch"]},
+    }
+
+
+def test_major_and_security_updates_stay_outside_routine_groups():
+    # A major upgrade is its own reviewed pull request; security updates are not held for the weekly group.
+    for ecosystem, update in _dependabot_updates().items():
+        for name, group in update.get("groups", {}).items():
+            assert "major" not in group["update-types"], (ecosystem, name)
+            assert group.get("applies-to", "version-updates") == "version-updates", (ecosystem, name)
+
+
+def test_grouping_adds_no_cooldown_and_keeps_the_open_pull_request_limit():
+    for ecosystem, update in _dependabot_updates().items():
+        assert "cooldown" not in update, ecosystem
+        assert update["open-pull-requests-limit"] == 5, ecosystem
 
 
 # ── checkout credentials do not outlive the checkout (nov_sec 01C) ──
