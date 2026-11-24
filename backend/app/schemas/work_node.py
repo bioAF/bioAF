@@ -38,6 +38,10 @@ class WorkNodeResponse(BaseModel):
     status: str
     # Set while status is "stop_failed": save_failed | delete_unconfirmed | state_unknown.
     stop_failure: str | None = None
+    # The Work Node SSH policy this node was launched with, and what the node reported applying:
+    # applied | failed (no range: password still allowed) | failed_closed (range unenforceable: key only).
+    ssh_policy_revision: int | None = None
+    ssh_policy_status: str | None = None
     failure_reason: str | None = None
     failure_message: str | None = None
     access_url: str | None = None

@@ -17749,6 +17749,10 @@ export interface components {
             resource_profile: string;
             /** Session Type */
             session_type: string;
+            /** Ssh Policy Revision */
+            ssh_policy_revision?: number | null;
+            /** Ssh Policy Status */
+            ssh_policy_status?: string | null;
             /** Started At */
             started_at?: string | null;
             /** Status */

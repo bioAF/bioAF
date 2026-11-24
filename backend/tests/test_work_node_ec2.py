@@ -148,15 +148,19 @@ def test_ec2_startup_script_uses_aws_s3_not_gsutil():
 
 
 def test_ec2_startup_script_enables_password_auth():
-    """Work nodes are reached via PAM/password SSH (session credentials). AWS Ubuntu
-    AMIs default to PasswordAuthentication no (in the cloudimg drop-in, which wins),
-    so the startup script must flip it and restart sshd or login is publickey-only."""
+    """Work nodes are reached via PAM/password SSH (session credentials) when no Work Node range is set.
+
+    Owner-approved change (2026-11-24, plan 03B): instead of a global PasswordAuthentication override
+    (which an AWS cloudimg default beats and which cannot express a range), the scientist's password
+    login comes from an account-scoped Match rule that sshd validates before it is reloaded."""
     script = _build_ec2_startup_script(_vm_spec())
-    # Neutralizes the cloudimg drop-in that wins on first match...
-    assert "/etc/ssh/sshd_config.d/*.conf" in script
-    assert "PasswordAuthentication yes" in script
-    # ...and reloads sshd so the change takes effect at boot.
-    assert "restart ssh" in script
+    assert "Match User scientist" in script
+    assert "    PasswordAuthentication yes" in script
+    assert "/usr/sbin/sshd -t" in script
+    assert "systemctl reload ssh" in script
+    # No global override is written, and an older one is removed.
+    assert "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf" not in script
+    assert "rm -f /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf" in script
 
 
 def _instance(state="running", ip="1.2.3.4", session="7", attempt="attempt-1"):

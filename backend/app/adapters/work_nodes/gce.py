@@ -22,6 +22,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.adapters.session_status import update_compute_session
+from app.adapters.work_nodes.sshd_policy import sshd_policy_install_lines
 from app.adapters.work_nodes.node_ssh import (
     STOP_DELETE_UNCONFIRMED,
     STOP_SAVE_FAILED,
@@ -158,6 +159,10 @@ def _build_startup_script(vm_spec: dict) -> str:
         lines.append(f"echo '{username}:{password_hash}' | chpasswd -e")
     else:
         lines.append(f"echo '{username}:{password_hash}' | chpasswd")
+
+    # 1b. Account-scoped SSH login policy (plan 03B, D03-5); no global password override.
+    ssh_policy = vm_spec.get("ssh_policy") or {}
+    lines += sshd_policy_install_lines(username, list(ssh_policy.get("ranges") or []))
 
     # 2. SSH keys for GitHub
     if ssh_private_key:
@@ -348,7 +353,8 @@ def _build_startup_script(vm_spec: dict) -> str:
         if api_base:
             lines += [
                 f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" > /dev/null 2>&1\' | crontab -',
+                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
+                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
             ]
 
     # 9. Ownership

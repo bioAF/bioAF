@@ -27472,6 +27472,28 @@
             "title": "Session Type",
             "type": "string"
           },
+          "ssh_policy_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Policy Revision"
+          },
+          "ssh_policy_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Policy Status"
+          },
           "started_at": {
             "anyOf": [
               {

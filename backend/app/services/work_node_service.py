@@ -644,6 +644,8 @@ class WorkNodeService:
         session: AsyncSession,
         session_id: int,
         token: str,
+        *,
+        ssh_policy_status: str | None = None,
     ) -> bool:
         """Validate heartbeat token and update heartbeat_at. Returns True if valid."""
         result = await session.execute(
@@ -661,6 +663,12 @@ class WorkNodeService:
             return False
 
         compute_session.heartbeat_at = datetime.now(timezone.utc)
+        # The node's own report of the login policy it applied (plan 03B); unknown values are ignored.
+        if ssh_policy_status in ("applied", "failed", "failed_closed"):
+            metadata = dict(compute_session.provider_metadata or {})
+            if metadata.get("ssh_policy_status") != ssh_policy_status:
+                metadata["ssh_policy_status"] = ssh_policy_status
+                compute_session.provider_metadata = metadata
         await session.flush()
         return True
 

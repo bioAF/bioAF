@@ -57,6 +57,8 @@ def _work_node_response(cs) -> WorkNodeResponse:
         requested_disk_gb=cs.requested_disk_gb,
         status=cs.status,
         stop_failure=cs.stop_failure,
+        ssh_policy_revision=cs.ssh_policy_revision,
+        ssh_policy_status=(cs.provider_metadata or {}).get("ssh_policy_status"),
         failure_reason=cs.failure_reason,
         failure_message=cs.failure_message,
         access_url=cs.access_url,
@@ -222,7 +224,9 @@ async def record_heartbeat(
     if not token:
         raise HTTPException(403, "Missing heartbeat token")
 
-    valid = await WorkNodeService.record_heartbeat(session, session_id, token)
+    valid = await WorkNodeService.record_heartbeat(
+        session, session_id, token, ssh_policy_status=request.headers.get("X-SSH-Policy")
+    )
     if not valid:
         raise HTTPException(403, "Invalid heartbeat token")
 

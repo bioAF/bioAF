@@ -37,6 +37,7 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.adapters.session_status import update_compute_session
+from app.adapters.work_nodes.sshd_policy import sshd_policy_install_lines
 from app.adapters.work_nodes.node_ssh import (
     STOP_DELETE_UNCONFIRMED,
     STOP_SAVE_FAILED,
@@ -129,20 +130,12 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
     else:
         lines.append(f"echo '{username}:{password_hash}' | chpasswd")
 
-    # 1b. Enable SSH password auth so the PAM session credentials actually work.
-    # AWS Ubuntu AMIs ship PasswordAuthentication no in
-    # /etc/ssh/sshd_config.d/60-cloudimg-settings.conf, which sshd reads BEFORE our
-    # 99-bioaf drop-in and wins (first match). Flip the cloudimg setting, the main
-    # config, and add our own drop-in, then restart sshd. Done at boot (not just in
-    # the Packer image) so an already-built AMI works without a rebuild.
-    lines += [
-        "",
-        "# 1b. Enable SSH password authentication for PAM session credentials",
-        "sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true",
-        "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
-        "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
-        "systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true",
-    ]
+    # 1b. Account-scoped SSH login policy (plan 03B, D03-5): the scientist's password works from
+    # anywhere without a Work Node range, only inside it with one; bioaf-sync is key-only. Replaces
+    # the older global PasswordAuthentication override, which an AWS cloudimg default would beat and
+    # which cannot express a range.
+    ssh_policy = vm_spec.get("ssh_policy") or {}
+    lines += sshd_policy_install_lines(username, list(ssh_policy.get("ranges") or []))
 
     # 2. SSH keys for GitHub
     if ssh_private_key:
@@ -325,7 +318,8 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
         if api_base:
             lines += [
                 f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" > /dev/null 2>&1\' | crontab -',
+                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
+                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
             ]
 
     # 11. Ownership
