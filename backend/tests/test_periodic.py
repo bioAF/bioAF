@@ -11,7 +11,6 @@ import logging
 
 import pytest
 
-from app.settings_contract import ComputeMode
 from app.tasks import jobs
 from app.tasks.periodic import PeriodicJob, run_periodic
 
@@ -171,7 +170,6 @@ TIMINGS = {
     "notebook-image-build": (30, 30),
     "cellxgene-image-build": (30, 30),
     "environment-build-poll": (30, 30),
-    "job-status-sync": (60, 60),
     "plot-archive-watcher": (60, 60),
     "postgres-backup": (60, 60),
     "config-backup": (60, 60),
@@ -203,7 +201,6 @@ TIMINGS = {
 
 # Each job's existing error message (the logger.error lines its loop had in app/main.py).
 MESSAGES = {
-    "job-status-sync": "Job status sync error: %s",
     "idle-session-check": "Idle session check error: %s",
     "notebook-lifecycle": "Notebook lifecycle pass error: %s",
     "quota-reset": "Quota reset error: %s",
@@ -242,7 +239,8 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    assert len(jobs.PERIODIC_JOBS) == 32
+    # 31 since the SLURM job-status-sync poll was retired (plan 03C, owner-approved 2026-11-24).
+    assert len(jobs.PERIODIC_JOBS) == 31
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):
@@ -264,28 +262,3 @@ async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch,
     assert (len(backfills), len(scans)) == (1, 3)
 
 
-@pytest.mark.parametrize(
-    ("stack", "mode", "expected"),
-    [
-        ("kubernetes", ComputeMode.LOCAL, False),
-        ("kubernetes", ComputeMode.KUBERNETES, False),
-        ("kubernetes", ComputeMode.SLURM, False),
-        ("slurm", ComputeMode.LOCAL, False),
-        ("slurm", ComputeMode.KUBERNETES, True),
-        ("slurm", ComputeMode.SLURM, True),
-    ],
-)
-async def test_slurm_job_sync_runs_only_for_an_initialized_slurm_stack_outside_simulation(
-    monkeypatch, stack, mode, expected
-):
-    from app.adapters.registry import initialize_adapters_sync, reset_registry
-    from app.config import settings
-
-    job = next(j for j in jobs.PERIODIC_JOBS if j.role == "job-status-sync")
-    enabled = job.enabled
-    assert enabled is not None
-    monkeypatch.setattr(settings, "compute_mode", mode)
-    initialize_adapters_sync(stack)
-    assert enabled() is expected
-    reset_registry()
-    assert not enabled(), "no initialized stack: polling must not start"

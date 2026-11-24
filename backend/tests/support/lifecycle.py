@@ -46,8 +46,6 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.lab_document_upload_service", "_pending"),
     ("app.services.upgrade_service", "_version_cache"),
     ("app.services.upgrade_service", "_version_cache_time"),
-    ("app.services.slurm_service", "_cluster_status_cache"),
-    ("app.services.slurm_service", "_cluster_status_cache_time"),
     ("app.services.terraform_executor", "_active_processes"),
     ("app.services.terraform_executor", "_captured_children"),
     ("app.services.infrastructure_operations", "_op_tasks"),
