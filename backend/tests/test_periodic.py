@@ -260,5 +260,3 @@ async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch,
     job = next(j for j in jobs.PERIODIC_JOBS if j.role == "plot-archive-watcher")
     await run_periodic(job, wait=FakeWait(stop_after=3))
     assert (len(backfills), len(scans)) == (1, 3)
-
-
