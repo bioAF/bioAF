@@ -154,7 +154,8 @@ describe("pdf.js lifecycle", () => {
     const task = loadingTask(Promise.reject(new Error("Invalid PDF structure.")));
     getDocumentMock.mockReturnValue(task);
     render(<LabDocumentViewer documentId={1} {...PDF} />);
-    await screen.findByText(/invalid pdf structure/i);
+    await screen.findByText(/this pdf could not be displayed/i);
+    expect(screen.queryByText(/invalid pdf structure/i)).not.toBeInTheDocument();
     expect(task.destroy).toHaveBeenCalled();
   });
 });
@@ -191,7 +192,7 @@ describe("page drawing", () => {
     getDocumentMock.mockReturnValue({ promise: Promise.resolve(pdf) });
     render(<LabDocumentViewer documentId={1} {...PDF} />);
 
-    expect(await screen.findByText(/page 1 could not be loaded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/page 1 could not be displayed\. try another page or download the pdf\./i)).toBeInTheDocument();
     expect(screen.queryByText(/bad page stream/i)).not.toBeInTheDocument();
     const next = screen.getByRole("button", { name: /next/i });
     expect(next).toBeEnabled();
@@ -199,7 +200,7 @@ describe("page drawing", () => {
     await userEvent.click(next);
     await screen.findByText(/page 2 \/ 2/i);
     await waitFor(() =>
-      expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/could not be displayed/i)).not.toBeInTheDocument(),
     );
   });
 
@@ -217,7 +218,7 @@ describe("page drawing", () => {
     await userEvent.click(screen.getByRole("button", { name: /next/i }));
     await screen.findByText(/page 2 \/ 2/i);
     expect(stale.cancel).toHaveBeenCalled();
-    expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not be displayed/i)).not.toBeInTheDocument();
   });
 });
 
@@ -252,7 +253,7 @@ describe("stuck PDFs", () => {
     expect(screen.getByText(/loading document/i)).toBeInTheDocument();
 
     await act(() => jest.advanceTimersByTimeAsync(1));
-    expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
+    expect(screen.getByText(/this pdf could not be displayed\. reload the page to try again\./i)).toBeInTheDocument();
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
     expect(mockWebWorkers).toHaveLength(1);
     expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
@@ -272,8 +273,34 @@ describe("stuck PDFs", () => {
     expect(screen.getByText(/page 1 \/ 2/i)).toBeInTheDocument();
 
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs));
-    expect(screen.getByText(/the pdf could not be loaded/i)).toBeInTheDocument();
+    expect(screen.getByText(/this pdf could not be displayed\. reload the page to try again\./i)).toBeInTheDocument();
     await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
+    expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
+  });
+
+  test("a page that never comes back from the worker is abandoned and the worker terminated", async () => {
+    const pdf = { numPages: 2, getPage: jest.fn(() => stuck()) };
+    getDocumentMock.mockReturnValue({ promise: Promise.resolve(pdf), destroy: jest.fn(stuck) });
+    render(<LabDocumentViewer documentId={1} {...PDF} />);
+    await act(() => jest.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/page 1 \/ 2/i)).toBeInTheDocument();
+
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs - 1));
+    expect(screen.queryByText(/could not be displayed/i)).not.toBeInTheDocument();
+    await act(() => jest.advanceTimersByTimeAsync(1));
+    expect(screen.getByText(/this pdf could not be displayed/i)).toBeInTheDocument();
+    await act(() => jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs));
+    expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
+  });
+
+  test("pdf.js refusing the bytes outright shows the error and terminates the new worker", async () => {
+    getDocumentMock.mockImplementation(() => {
+      throw new TypeError("Cannot perform Construct on a detached ArrayBuffer");
+    });
+    render(<LabDocumentViewer documentId={1} {...PDF} />);
+    await act(() => jest.advanceTimersByTimeAsync(0));
+    expect(screen.getByText(/this pdf could not be displayed/i)).toBeInTheDocument();
+    expect(mockWebWorkers).toHaveLength(1);
     expect(mockWebWorkers[0].terminate).toHaveBeenCalled();
   });
 

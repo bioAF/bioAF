@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
-import { loadFailureMessage } from "@/lib/errorReporting";
 import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
-import { usePdfDocument } from "@/hooks/usePdfDocument";
+import { pageFailureMessage, usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
 // to an emitted asset served from our own origin, so there is no CDN dependency
@@ -127,7 +126,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
             scrollbar. Sized for desktop; small screens are not a target. */}
         {pageFailed && (
           <p role="alert" className="text-sm text-red-700 p-4">
-            {loadFailureMessage(`Page ${page}`)}
+            {pageFailureMessage(page)}
           </p>
         )}
         <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />

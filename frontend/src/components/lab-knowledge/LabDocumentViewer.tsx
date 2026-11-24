@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
-import { loadFailureMessage } from "@/lib/errorReporting";
 import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
-import { usePdfDocument } from "@/hooks/usePdfDocument";
+import { pageFailureMessage, usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
 // our own origin (no CDN), so a strict CSP won't block it.
@@ -184,7 +183,7 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
       >
         {pageFailed && (
           <p role="alert" className="text-sm text-red-700 p-4">
-            {loadFailureMessage(`Page ${page}`)}
+            {pageFailureMessage(page)}
           </p>
         )}
         <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />

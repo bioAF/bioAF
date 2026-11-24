@@ -3,7 +3,7 @@ import {
   createPdfEngine,
   PdfDeadlineError,
   openPdfSession,
-  renderWithDeadline,
+  drawPageWithDeadline,
   type PdfEngine,
 } from "./pdfSession";
 
@@ -107,9 +107,61 @@ test("a document that fails to open terminates its worker", async () => {
   expect(worker.destroy).toHaveBeenCalledTimes(1);
 });
 
+test("an engine that throws while opening fails the document and terminates the worker", async () => {
+  const { engine, worker } = fakeEngine();
+  (engine.open as jest.Mock).mockImplementation(() => {
+    throw new TypeError("Cannot perform Construct on a detached ArrayBuffer");
+  });
+  let session: ReturnType<typeof openPdfSession> | undefined;
+  expect(() => (session = openPdfSession(engine, new ArrayBuffer(1)))).not.toThrow();
+  await expect(session!.document).rejects.toThrow("detached ArrayBuffer");
+  await jest.advanceTimersByTimeAsync(0);
+  expect(worker.destroy).toHaveBeenCalledTimes(1);
+  session!.stop();
+  await jest.advanceTimersByTimeAsync(PDF_DEADLINES.shutdownGraceMs);
+  expect(worker.destroy).toHaveBeenCalledTimes(1);
+});
+
+test("an engine that cannot create a worker fails the document instead of throwing", async () => {
+  const { engine } = fakeEngine();
+  (engine.createWorker as jest.Mock).mockImplementation(() => {
+    throw new Error("Worker blocked");
+  });
+  let session: ReturnType<typeof openPdfSession> | undefined;
+  expect(() => (session = openPdfSession(engine, new ArrayBuffer(1)))).not.toThrow();
+  await expect(session!.document).rejects.toThrow("Worker blocked");
+  expect(engine.open).not.toHaveBeenCalled();
+  expect(() => session!.stop()).not.toThrow();
+});
+
+test("a page whose extraction never finishes fails at the page deadline", async () => {
+  const outcome = drawPageWithDeadline(async () => {
+    await never<void>(); // getPage() stuck in the worker
+  }).catch((e) => e);
+  await jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs);
+  expect(await outcome).toBeInstanceOf(PdfDeadlineError);
+});
+
+test("one page deadline covers extraction and drawing together", async () => {
+  const render = { promise: never<void>(), cancel: jest.fn() };
+  const outcome = drawPageWithDeadline(async (track) => {
+    await new Promise((r) => setTimeout(r, PDF_DEADLINES.renderMs - 10)); // slow getPage()
+    track(render);
+    await render.promise;
+  }).catch((e) => e);
+  await jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs - 1);
+  expect(render.cancel).not.toHaveBeenCalled();
+  await jest.advanceTimersByTimeAsync(1);
+  expect(await outcome).toBeInstanceOf(PdfDeadlineError);
+  expect(render.cancel).toHaveBeenCalled();
+});
+
 test("a page drawing that does not finish in time is cancelled and fails", async () => {
   const render = { promise: never<void>(), cancel: jest.fn() };
-  const outcome = renderWithDeadline(render).catch((e) => e);
+  const outcome = drawPageWithDeadline(async (track) => {
+    track(render);
+    await render.promise;
+  }).catch((e) => e);
   await jest.advanceTimersByTimeAsync(PDF_DEADLINES.renderMs);
   expect(await outcome).toBeInstanceOf(PdfDeadlineError);
   expect(render.cancel).toHaveBeenCalled();
@@ -117,7 +169,12 @@ test("a page drawing that does not finish in time is cancelled and fails", async
 
 test("a page drawing that finishes in time succeeds", async () => {
   const render = { promise: Promise.resolve(), cancel: jest.fn() };
-  await expect(renderWithDeadline(render)).resolves.toBeUndefined();
+  await expect(
+    drawPageWithDeadline(async (track) => {
+      track(render);
+      await render.promise;
+    }),
+  ).resolves.toBeUndefined();
   expect(render.cancel).not.toHaveBeenCalled();
 });
 

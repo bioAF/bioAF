@@ -21,7 +21,7 @@ import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
 export const PDF_DEADLINES = {
   /** Parsing the document structure; the bytes are already downloaded. */
   loadMs: 30_000,
-  /** Parsing and drawing one page. */
+  /** Extracting (getPage) and drawing one page, as one budget. */
   renderMs: 30_000,
   /** How long the worker gets to acknowledge a stop before it is terminated. */
   shutdownGraceMs: 2_000,
@@ -68,13 +68,26 @@ export function withDeadline<T>(promise: Promise<T>, ms: number, what: string): 
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Never throws: a failure to create the worker or start opening (pdf.js
+ * throws synchronously for, e.g., a detached buffer) rejects `document` and
+ * releases whatever was already allocated.
+ */
 export function openPdfSession<D, W extends PdfWorkerHandle>(
   engine: PdfEngine<D, W>,
   data: ArrayBuffer,
   deadlines = PDF_DEADLINES,
 ): PdfSession<D> {
-  const worker = engine.createWorker();
-  const task = engine.open(data, worker);
+  let worker: W | null = null;
+  let task: PdfLoadingTask<D>;
+  try {
+    worker = engine.createWorker();
+    task = engine.open(data, worker);
+  } catch (e) {
+    if (worker) terminateWorker(worker);
+    return { document: Promise.reject(e), stop: () => {} };
+  }
+  const ownedWorker: W = worker;
   let stopped = false;
 
   const stop = () => {
@@ -85,11 +98,7 @@ export function openPdfSession<D, W extends PdfWorkerHandle>(
       if (terminated) return;
       terminated = true;
       clearTimeout(grace);
-      try {
-        worker.destroy();
-      } catch (e) {
-        logError("terminating the PDF worker", e);
-      }
+      terminateWorker(ownedWorker);
     };
     const grace = setTimeout(terminate, deadlines.shutdownGraceMs);
     let destroying: Promise<void>;
@@ -110,10 +119,30 @@ export function openPdfSession<D, W extends PdfWorkerHandle>(
   return { document, stop };
 }
 
-/** Waits for a page drawing, cancelling it if it misses the render deadline. */
-export function renderWithDeadline(task: PdfRenderTask, deadlines = PDF_DEADLINES): Promise<void> {
-  return withDeadline(task.promise, deadlines.renderMs, "drawing a PDF page").catch((e: unknown) => {
-    if (e instanceof PdfDeadlineError) task.cancel();
+function terminateWorker(worker: PdfWorkerHandle) {
+  try {
+    worker.destroy();
+  } catch (e) {
+    logError("terminating the PDF worker", e);
+  }
+}
+
+/**
+ * Runs `draw` (page extraction and rendering) under one page deadline. `draw`
+ * reports its render task through `track`, so a drawing in progress when the
+ * deadline passes is cancelled.
+ */
+export function drawPageWithDeadline(
+  draw: (track: (task: PdfRenderTask) => void) => Promise<void>,
+  deadlines = PDF_DEADLINES,
+): Promise<void> {
+  let task: PdfRenderTask | null = null;
+  return withDeadline(
+    draw((t) => (task = t)),
+    deadlines.renderMs,
+    "drawing a PDF page",
+  ).catch((e: unknown) => {
+    if (e instanceof PdfDeadlineError) (task as PdfRenderTask | null)?.cancel();
     throw e;
   });
 }

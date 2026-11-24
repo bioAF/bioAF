@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { loadFailureMessage, logError } from "@/lib/errorReporting";
+import { logError } from "@/lib/errorReporting";
 import {
   PdfDeadlineError,
   openPdfSession,
-  renderWithDeadline,
+  drawPageWithDeadline,
   type PdfEngine,
   type PdfWorkerHandle,
   type PdfRenderTask,
@@ -28,6 +28,14 @@ interface PdfPage<V extends PdfViewport> {
 export interface PdfDocument<V extends PdfViewport = PdfViewport> {
   numPages: number;
   getPage(n: number): Promise<PdfPage<V>>;
+}
+
+/** Shown when the document cannot be opened or its worker had to be stopped. */
+export const PDF_FAILURE_MESSAGE = "This PDF could not be displayed. Reload the page to try again.";
+
+/** Shown in place of a page that could not be drawn; the other pages stay reachable. */
+export function pageFailureMessage(page: number): string {
+  return `Page ${page} could not be displayed. Try another page or download the PDF.`;
 }
 
 export interface PdfDocumentState {
@@ -96,11 +104,7 @@ export function usePdfDocument<
       .catch((e: unknown) => {
         if (cancelled) return;
         logError(`opening ${what}`, e);
-        setError(
-          e instanceof PdfDeadlineError || !(e instanceof Error)
-            ? loadFailureMessage("The PDF")
-            : e.message,
-        );
+        setError(PDF_FAILURE_MESSAGE);
       });
     return () => {
       cancelled = true;
@@ -118,7 +122,9 @@ export function usePdfDocument<
     let cancelled = false;
     let renderTask: PdfRenderTask | null = null;
     setPageFailed(false);
-    (async () => {
+    // One deadline covers getPage() and the drawing: a worker stuck on either
+    // is stopped.
+    drawPageWithDeadline(async (track) => {
       const pdfPage = await doc.getPage(page);
       if (cancelled) return;
       const canvas = canvasRef.current;
@@ -129,14 +135,15 @@ export function usePdfDocument<
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       renderTask = pdfPage.render({ canvas, canvasContext: ctx, viewport });
-      await renderWithDeadline(renderTask);
-    })().catch((e: unknown) => {
+      track(renderTask);
+      await renderTask.promise;
+    }).catch((e: unknown) => {
       if (cancelled) return;
       logError(`rendering page ${page} of ${what}`, e);
       if (e instanceof PdfDeadlineError) {
         sessionRef.current?.stop();
         docRef.current = null;
-        setError(loadFailureMessage("The PDF"));
+        setError(PDF_FAILURE_MESSAGE);
       } else {
         setPageFailed(true);
       }
