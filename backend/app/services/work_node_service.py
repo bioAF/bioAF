@@ -113,6 +113,16 @@ class WorkNodeService:
                 raise ValidationError(f"GitHub repos not found: {missing}")
             github_repos_data = [{"git_ssh_url": r.git_ssh_url, "display_name": r.display_name} for r in repos]
 
+        # Git server trust for the node's clones (plan 03C): shipped GitHub keys plus approved hosts.
+        from app.platform.git_trust import trust_for_repositories
+
+        git_trust = await trust_for_repositories(session, [r["git_ssh_url"] for r in github_repos_data])
+        if git_trust.untrusted_hosts:
+            logger.warning(
+                "A connected code repository needs a security setting: no approved host key for %s",
+                ", ".join(sorted(f"{h}:{p}" for h, p in git_trust.untrusted_hosts)),
+            )
+
         # Check concurrent work node quota
         max_nodes = await WorkNodeService._get_max_nodes_per_user(session)
         running_count_result = await session.execute(
@@ -226,6 +236,8 @@ class WorkNodeService:
                 "ssh_public_key": cred.ssh_public_key,
                 "ssh_private_key": cred.ssh_private_key,
                 "github_repos": github_repos_data,
+                "git_known_hosts": git_trust.known_hosts,
+                "git_untrusted_hosts": sorted(f"{h}:{p}" for h, p in git_trust.untrusted_hosts),
                 "conda_env_name": conda_env_name,
                 "environment_label": env_label,
             }

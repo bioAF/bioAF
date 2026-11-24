@@ -99,6 +99,7 @@ def notebook_pod_name(session_id) -> str:
 
 
 from app.adapters.notebooks.readiness import INTERACTIVE_SESSION_TYPES  # noqa: E402
+from app.platform.git_trust import github_known_hosts  # noqa: E402
 
 
 def _config_text(value) -> str:
@@ -189,6 +190,26 @@ def notebook_service_name(session_id) -> str:
 HOME_DIR = "/home/jovyan"
 # The jupyter image's notebook user (jovyan) and group (users).
 JUPYTER_UID_GID = "1000:100"
+
+
+def rstudio_git_ssh_setup(*, home_dir: str, username: str, ssh_private_key: str, known_hosts: str) -> str:
+    """The RStudio session's Git SSH setup: the user's key, shipped/approved server keys, strict checking.
+
+    Plan 03C: no key scan; ``~/.ssh/config`` makes every Git or ssh use in the session verify the
+    server against the written known_hosts file.
+    """
+    escaped_key = ssh_private_key.replace("'", "'\\''")
+    escaped_hosts = known_hosts.strip().replace("'", "'\\''")
+    return (
+        f"mkdir -p {home_dir}/.ssh && "
+        f"printf '%s\\n' '{escaped_key}' > {home_dir}/.ssh/id_rsa && "
+        f"chmod 600 {home_dir}/.ssh/id_rsa && "
+        f"printf '%s\\n' '{escaped_hosts}' > {home_dir}/.ssh/known_hosts && "
+        f"printf 'Host *\\n    StrictHostKeyChecking yes\\n    UserKnownHostsFile {home_dir}/.ssh/known_hosts\\n' "
+        f"> {home_dir}/.ssh/config && "
+        f"chmod 600 {home_dir}/.ssh/config && "
+        f"chown -R {username}:{username} {home_dir}/.ssh && "
+    )
 
 
 class KubernetesNotebookProvider(NotebookProvider):
@@ -685,14 +706,11 @@ class KubernetesNotebookProvider(NotebookProvider):
             ssh_setup = ""
             ssh_private_key = session_spec.get("ssh_private_key")
             if ssh_private_key:
-                # Escape the key for shell embedding
-                escaped_key = ssh_private_key.replace("'", "'\\''")
-                ssh_setup = (
-                    f"mkdir -p {HOME_DIR}/.ssh && "
-                    f"printf '%s\\n' '{escaped_key}' > {HOME_DIR}/.ssh/id_rsa && "
-                    f"chmod 600 {HOME_DIR}/.ssh/id_rsa && "
-                    f"ssh-keyscan github.com >> {HOME_DIR}/.ssh/known_hosts 2>/dev/null && "
-                    f"chown -R {cred_username}:{cred_username} {HOME_DIR}/.ssh && "
+                ssh_setup = rstudio_git_ssh_setup(
+                    home_dir=HOME_DIR,
+                    username=cred_username,
+                    ssh_private_key=ssh_private_key,
+                    known_hosts=session_spec.get("git_known_hosts") or github_known_hosts(),
                 )
 
             # Build git setup commands if git_config is provided

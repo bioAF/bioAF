@@ -47,6 +47,13 @@ from app.adapters.work_nodes.node_ssh import (
     sync_outputs_command,
 )
 from app.exceptions import ValidationError
+from app.platform.git_trust import (
+    LEGACY_UNVERIFIED_OPTIONS,
+    STRICT_OPTIONS,
+    github_known_hosts,
+    ssh_host,
+    write_known_hosts_lines,
+)
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app import runtime
 
@@ -146,8 +153,11 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             f"mkdir -p {home_dir}/.ssh",
             f"printf '%s\\n' '{escaped_key}' > {home_dir}/.ssh/id_rsa",
             f"chmod 600 {home_dir}/.ssh/id_rsa",
-            f"ssh-keyscan github.com >> {home_dir}/.ssh/known_hosts 2>/dev/null",
         ]
+        # Git server trust: shipped GitHub keys plus operator-approved hosts, never a key scan.
+        lines += write_known_hosts_lines(
+            f"{home_dir}/.ssh/known_hosts", vm_spec.get("git_known_hosts") or github_known_hosts()
+        )
         if ssh_public_key:
             escaped_pub = ssh_public_key.replace("'", "'\\''")
             lines.append(f"printf '%s\\n' '{escaped_pub}' > {home_dir}/.ssh/id_rsa.pub")
@@ -160,14 +170,20 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             "# 3. Clone GitHub repos",
             f"mkdir -p {home_dir}/repos",
         ]
+        untrusted = set(vm_spec.get("git_untrusted_hosts") or [])
+        strict = STRICT_OPTIONS.format(path=f"{home_dir}/.ssh/known_hosts")
         for repo in github_repos:
             url = repo["git_ssh_url"]
             name = repo["display_name"]
             safe_name = name.replace("'", "'\\''")
             safe_url = url.replace("'", "'\\''")
+            host = ssh_host(url)
+            # A custom host with no approved key keeps its previous behavior for this repository only
+            # (plan 03C deferral; reported to operators). Everything else is verified.
+            options = LEGACY_UNVERIFIED_OPTIONS if host and f"{host[0]}:{host[1]}" in untrusted else strict
             lines.append(
                 f"cd {home_dir}/repos && "
-                f"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -i {home_dir}/.ssh/id_rsa' "
+                f"GIT_SSH_COMMAND='ssh {options} -i {home_dir}/.ssh/id_rsa' "
                 f"git clone '{safe_url}' '{safe_name}' || "
                 f"echo 'Warning: failed to clone {safe_name}'"
             )
