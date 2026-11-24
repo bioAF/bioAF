@@ -17,15 +17,13 @@ jobs:
       tag: ${{ steps.compute.outputs.tag }}
       new_release: ${{ steps.check_entries.outputs.has_entries }}
     steps:
-      - uses: actions/checkout@v5
+      # The job token checks out and is not kept: the GPG importer, setup-uv and the build scripts run without a
+      # repository credential in git configuration. The public tag fetch below needs none. Only the push step
+      # authenticates, with RELEASE_PAT.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           fetch-depth: 0
-          # RELEASE_PAT is a fine-grained PAT with Contents: write on this repo.
-          # The PAT inherits its owner's identity, which has the Admin
-          # RepositoryRole bypass on the main-protective ruleset, so the
-          # workflow's commit + tag push to main is accepted.
-          token: ${{ secrets.RELEASE_PAT }}
-          persist-credentials: true
 
       # Imports the maintainer's GPG key so the release commit and tag are
       # signed and show as Verified on GitHub. The action also sets the git
@@ -33,7 +31,7 @@ jobs:
       # <brent.c.mills@gmail.com>); that email must stay a verified email on
       # the account, or signatures will show Unverified.
       - name: Import GPG signing key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6.3.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -42,7 +40,7 @@ jobs:
           git_tag_gpgsign: true
 
       # The uv version the backend image copies (docker/Dockerfile.backend).
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.5"
 
@@ -90,7 +88,9 @@ jobs:
           {
             echo "## ${TAG}"
             echo
-            for f in $(ls changes/unreleased/*.md 2>/dev/null | grep -v 'README\.md$' | sort); do
+            # The glob expands in sorted order; README.md is the directory's instructions, not an entry.
+            for f in changes/unreleased/*.md; do
+              [ -f "$f" ] && [ "$(basename "$f")" != "README.md" ] || continue
               cat "$f"
               echo
             done
@@ -157,21 +157,36 @@ jobs:
           uv lock --check
           git diff --stat -- uv.lock
 
+      # RELEASE_PAT is a fine-grained PAT with Contents: write on this repo. The PAT inherits its owner's identity,
+      # which has the Admin RepositoryRole bypass on the main-protective ruleset, so the workflow's commit + tag push
+      # to main is accepted. Only this step receives it: git gets it from a credential helper given on the push's own
+      # command line, which reads this step's environment when asked. It is never written to git configuration or a
+      # remote URL, and never printed. A missing PAT fails here, before anything is committed.
       - name: Commit, tag, and push
         if: steps.check_entries.outputs.has_entries == 'true'
         env:
           TAG: ${{ steps.compute.outputs.tag }}
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
         run: |
+          if [ -z "$RELEASE_PAT" ]; then
+            echo "::error::RELEASE_PAT is not available to this workflow; nothing was committed, tagged or pushed."
+            exit 1
+          fi
           git add backend/pyproject.toml backend/uv.lock frontend/package.json RELEASE_NOTES.md changes/unreleased
           # -S signs the commit; -s makes a signed annotated tag (-m avoids the
           # editor in CI). Both also follow from commit.gpgsign/tag.gpgsign set
           # by the import step, but the explicit flags keep the intent clear.
           git commit -S -m "chore: release ${TAG} [skip ci]"
           git tag -s "$TAG" -m "Release ${TAG}"
-          # Push the commit and the tag atomically. If the push is rejected
-          # (concurrent merge raced us), the workflow fails and the next push
-          # to main will re-run this job with a fresh N.
-          git push origin HEAD:main "$TAG"
+          # Push the commit and the tag atomically (--atomic): if either ref is
+          # rejected (a concurrent merge raced us), neither is updated, the
+          # workflow fails, and the next push to main re-runs this job with a
+          # fresh N.
+          # The first -c clears any inherited helper; the second answers git's credential request from RELEASE_PAT.
+          # shellcheck disable=SC2016 # $RELEASE_PAT is expanded by the helper when git calls it, not here.
+          git -c credential.helper= \
+            -c 'credential.helper=!f() { if [ "$1" = get ]; then printf "username=x-access-token\npassword=%s\n" "$RELEASE_PAT"; fi; }; f' \
+            push --atomic origin HEAD:main "$TAG"
 
       - name: Create GitHub Release
         if: steps.check_entries.outputs.has_entries == 'true'
@@ -192,20 +207,21 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           ref: ${{ needs.release.outputs.tag }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ./backend
           file: docker/Dockerfile.backend
@@ -217,7 +233,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and push frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ./frontend
           file: docker/Dockerfile.frontend
@@ -230,7 +246,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=frontend
 
       - name: Build and push cellxgene
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/Dockerfile.cellxgene

@@ -31,3 +31,12 @@ updates:
       frontend-development:
         dependency-type: development
         update-types: ["minor", "patch"]
+
+  # Workflow actions are pinned to full commit SHAs with the reviewed release as a comment
+  # (backend/tests/test_ci_workflow.py). Dependabot proposes the next release's SHA and comment together; a maintainer
+  # reviews the upstream change and the pull request runs full CI before merge. Nothing merges automatically.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

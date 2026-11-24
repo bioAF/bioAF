@@ -25,6 +25,21 @@ The `main` branch is protected. All changes must go through a pull request with:
 4. Address any review feedback
 5. Once approved, the code owner will merge
 
+## CI Modes
+
+The CI workflow runs on every pull request and picks its jobs from everything the pull request changes since it
+branched from `main` (`scripts/ci/classify_changes.py`). The job summary of **Classify Changes** shows the mode and why.
+
+| Mode | When | What runs |
+| --- | --- | --- |
+| docs | Only listed documentation: the root `README.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `GEMINI.md` and `RELEASE_NOTES.md`; Markdown under `docs/`, `decisions/` and `ai_guides/`; entries in `changes/unreleased/`; the PR template; the two architecture diagrams in `assets/` | Markdown lint, secret scan, dependency review |
+| ci-config | Only `.github/dependabot.yml` or `.markdownlint.json`, with or without documentation | The above, plus workflow lint (actionlint, ShellCheck, zizmor) and the workflow regression tests |
+| full | Anything else, including every file under `.github/workflows/` and any path the classifier does not know | Every job, with coverage gates |
+
+To force full validation, add the `ci:full` label; removing it starts a new classified run. Label events trigger CI,
+so adding or removing **any** label restarts the run in progress. **Build** keeps its own path filters and is not
+affected by these modes.
+
 ## Development Setup
 
 See the [README](README.md) for local development instructions.

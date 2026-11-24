@@ -1,8 +1,12 @@
 name: CI
 
+# Every pull request runs this workflow; the changes job selects which jobs inside it run. Label events are subscribed
+# so adding or removing `ci:full` starts a new classified run. Any label change restarts CI (the concurrency group
+# cancels the run in progress), which is the accepted cost of a label-only override.
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,23 +28,108 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────
+  # Change classification
+  # ──────────────────────────────────────────────
+  # One explicit path classifier (scripts/ci/classify_changes.py) reads every path the pull request changes since its
+  # merge base and selects a mode: docs (allowlisted documentation only), ci-config (Dependabot or markdownlint
+  # configuration, optionally with docs) or full (anything else, including every workflow file). The `ci:full` label
+  # forces full. A failed classification selects nothing, so the application jobs skip and the merge gate fails.
+  changes:
+    name: Classify Changes
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      allowed_skips: ${{ steps.classify.outputs.allowed_skips }}
+    steps:
+      # Full history: the pull request is compared with its merge base, across all of its commits.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify the pull request
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/ci/classify_changes.py --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --event "$GITHUB_EVENT_PATH" --output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  # ──────────────────────────────────────────────
+  # Workflow lint and focused workflow regressions (ci-config and full modes)
+  # ──────────────────────────────────────────────
+  # actionlint (with ShellCheck) and zizmor come from fixed release archives verified against committed SHA-256
+  # values (scripts/ci/workflow_linter_versions.json). The workflow regressions run from a hash-locked pytest/PyYAML
+  # environment with no backend packages: --noconftest skips backend/tests/conftest.py, which imports the application.
+  workflow-lint:
+    name: Workflow Lint & Regressions
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mode == 'ci-config' || needs.changes.outputs.mode == 'full'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the workflow linters
+        run: |
+          python3 scripts/ci/install_workflow_linters.py --manifest scripts/ci/workflow_linter_versions.json \
+            --dest "$RUNNER_TEMP/workflow-linters" --path-file "$GITHUB_PATH"
+
+      # actionlint runs ShellCheck over every run: script when shellcheck is on PATH.
+      - name: actionlint
+        run: |
+          actionlint -version
+          actionlint
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zizmor --version
+          zizmor --persona regular .github/workflows
+
+      - name: Focused workflow regressions
+        run: |
+          python -m venv "$RUNNER_TEMP/workflow-tests"
+          "$RUNNER_TEMP/workflow-tests/bin/python" -m pip install --require-hashes -r scripts/ci/workflow-tests.lock
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+            "$RUNNER_TEMP/workflow-tests/bin/python" -m pytest \
+            --noconftest -c /dev/null --rootdir=. -p no:cacheprovider \
+            backend/tests/test_ci_workflow.py \
+            backend/tests/test_ci_coverage_workflow.py \
+            backend/tests/test_dependency_installers.py \
+            backend/tests/test_ci_change_classifier.py \
+            backend/tests/test_workflow_linters.py -q
+
+  # ──────────────────────────────────────────────
   # Terraform validation
   # ──────────────────────────────────────────────
   terraform-validate:
     name: Terraform Validate
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
-    if: true
     defaults:
       run:
         # A job's defaults.run replaces the workflow's, so the shell is restated here (pipefail).
         shell: bash
         working-directory: backend/terraform
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # The version the backend image ships (docker/Dockerfile.backend); backend/tests/test_ci_workflow.py
       # fails when the two drift apart.
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: "1.10.5"
           terraform_wrapper: false
@@ -91,6 +180,8 @@ jobs:
   # ──────────────────────────────────────────────
   backend-lint:
     name: Backend Lint & Type Check
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -98,14 +189,16 @@ jobs:
         shell: bash
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.5"
           enable-cache: true
@@ -140,6 +233,8 @@ jobs:
 
   backend-test:
     name: Backend Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     # Pinned: the schema-upgrade and historical-upgrade tests need the PostgreSQL 16 client
     # (pg_dump, pg_restore under /usr/lib/postgresql/16/bin), which the ubuntu-24.04 image ships and
     # the ubuntu-26.04 image that ubuntu-latest moved to in November 2026 does not.
@@ -168,16 +263,17 @@ jobs:
     steps:
       # Full history and tags: the historical upgrade matrix (plan 9) builds every released schema
       # from the release's own migrations, read from local Git objects.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.5"
           enable-cache: true
@@ -251,7 +347,7 @@ jobs:
 
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backend-test-evidence
           path: backend/test-artifacts/
@@ -262,6 +358,8 @@ jobs:
   # ──────────────────────────────────────────────
   frontend-lint:
     name: Frontend Lint & Type Check
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -269,9 +367,11 @@ jobs:
         shell: bash
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "20"
           cache: npm
@@ -292,6 +392,8 @@ jobs:
 
   frontend-test:
     name: Frontend Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -299,9 +401,11 @@ jobs:
         shell: bash
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "20"
           cache: npm
@@ -321,7 +425,7 @@ jobs:
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frontend-coverage
           path: |
@@ -336,11 +440,15 @@ jobs:
   # outside the checkout, so a packaging defect fails here rather than for a user.
   python-sdk:
     name: Python SDK
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
           cache: pip
@@ -390,7 +498,7 @@ jobs:
 
       - name: Upload Python SDK evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: python-sdk-evidence
           path: sdk-evidence/
@@ -403,11 +511,15 @@ jobs:
   # R CMD check run without it.
   r-sdk:
     name: R SDK
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     env:
       R_EVIDENCE: ${{ github.workspace }}/r-evidence
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Start the clock
         run: |
@@ -415,12 +527,12 @@ jobs:
           echo "deps_started=$(date +%s)" >> "$R_EVIDENCE/timings.env"
 
       # Prebuilt Ubuntu binaries from Posit Public Package Manager; pak installs their system libraries.
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
         with:
           r-version: "4.6.2"
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
         with:
           working-directory: sdk/r
           dependencies: '"hard"'
@@ -483,7 +595,7 @@ jobs:
 
       - name: Upload R SDK evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: r-sdk-evidence
           path: r-evidence/
@@ -494,11 +606,15 @@ jobs:
   # lets the encryption bootstrap test run. The only skip accepted is the network guard's.
   shell-tests:
     name: Shell Tests
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -531,7 +647,7 @@ jobs:
 
       - name: Upload shell test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: shell-test-evidence
           path: shell-evidence/
@@ -550,10 +666,14 @@ jobs:
   # The script installs and removes its own unit and refuses a host that already has one.
   update-agent-systemd:
     name: Update Agent (systemd)
+    needs: changes
+    if: needs.changes.outputs.mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Run the update agent against systemd
         run: |
@@ -569,7 +689,7 @@ jobs:
 
       - name: Upload update agent evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: update-agent-systemd-evidence
           path: systemd-evidence/
@@ -579,6 +699,8 @@ jobs:
     name: Coverage Report
     runs-on: ubuntu-latest
     needs:
+      - changes
+      - workflow-lint
       - terraform-validate
       - backend-lint
       - backend-test
@@ -596,23 +718,29 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
           name: backend-test-evidence
           path: coverage-in/backend
 
-      - uses: actions/download-artifact@v4
+      # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
           name: frontend-coverage
           path: coverage-in/frontend
 
       - name: Build report
+        if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -635,6 +763,16 @@ jobs:
           echo "$status" > gate-status
           cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
 
+      # A cheaper mode reports why tests and coverage did not run, and the results of the jobs that did.
+      - name: Report the selected mode
+        if: needs.changes.result == 'success' && needs.changes.outputs.mode != 'full'
+        env:
+          MODE: ${{ needs.changes.outputs.mode }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 scripts/ci/classify_changes.py report --mode "$MODE" --needs "$NEEDS_JSON" --output coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Post or update the pull request comment
         if: github.event.pull_request.head.repo.full_name == github.repository
         env:
@@ -650,21 +788,35 @@ jobs:
             gh pr comment "$PR" --body-file coverage-report.md
           fi
 
+      # Always runs. Only a successfully classified docs or ci-config pull request skips the thresholds; full mode, a
+      # failed classification or an unknown mode needs the report's passing status.
       - name: Enforce coverage gates
         if: always()
+        env:
+          CLASSIFIED: ${{ needs.changes.result }}
+          MODE: ${{ needs.changes.outputs.mode }}
         run: |
+          if [ "$CLASSIFIED" = "success" ] && { [ "$MODE" = "docs" ] || [ "$MODE" = "ci-config" ]; }; then
+            echo "Coverage gates not applied: this $MODE pull request did not require tests or coverage."
+            exit 0
+          fi
           status=$(cat gate-status 2>/dev/null || echo missing)
           if [ "$status" != "0" ]; then
             echo "::error::Coverage gates failed (report status: $status). See the Gates table in the job summary."
             exit 1
           fi
 
-      # Only success passes: a failed, cancelled or skipped dependency fails the merge gate.
+      # Only success passes: a failed, cancelled or skipped dependency fails the merge gate. The one exception is a job
+      # the classifier planned to skip for this mode, and only when the classification itself succeeded. The
+      # classifier, secret scan, dependency review and markdown lint can never be skipped.
       - name: Enforce required checks
         if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/ci/required_checks.py --needs "$NEEDS_JSON" --summary "$GITHUB_STEP_SUMMARY"
+          ALLOWED_SKIPS: ${{ needs.changes.result == 'success' && needs.changes.outputs.allowed_skips || '' }}
+        run: |
+          python3 scripts/ci/required_checks.py --needs "$NEEDS_JSON" --allowed-skips-json "$ALLOWED_SKIPS" \
+            --never-skip changes,security-scan,dependency-review,docs-lint --summary "$GITHUB_STEP_SUMMARY"
 
   # ──────────────────────────────────────────────
   # Security & docs
@@ -673,11 +825,18 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Check for secrets in code
-        uses: trufflesecurity/trufflehog@v3.88.8
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
+
+      # The action is a wrapper that runs ghcr.io/trufflesecurity/trufflehog:<version>, `latest` unless told otherwise,
+      # so pinning the wrapper alone leaves the scanner moving. `version` names the release and its image digest (the
+      # image `latest` resolved to when pinned); Dependabot does not track it, so a maintainer moves it by hand with the
+      # digest from ghcr.io.
+      - name: Check for secrets in code
+        uses: trufflesecurity/trufflehog@8cd2fdddd14a513cce30888e975d09233a61705c # v3.88.8
+        with:
+          version: 3.100.1@sha256:9c7a8325d43a4af2960d3f21d61a08981d8a1bf0542e007efa2e47097e386452
           extra_args: --only-verified
 
   # Newly introduced high or critical vulnerabilities fail the pull request in every dependency scope. Accepted risk
@@ -689,8 +848,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the base branch's exception policy
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           sparse-checkout: |
@@ -722,10 +882,12 @@ jobs:
     name: Docs & ADR Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Markdown lint
-        uses: DavidAnson/markdownlint-cli2-action@v19
+        uses: DavidAnson/markdownlint-cli2-action@05f32210e84442804257b2a6f20b273450ec8265 # v19.1.0
         with:
           globs: "**/*.md"
           config: ".markdownlint.json"

@@ -1,0 +1,28 @@
+{
+  "tools": [
+    {
+      "name": "actionlint",
+      "version": "1.7.12",
+      "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+      "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+      "binary": "actionlint",
+      "version_args": ["-version"]
+    },
+    {
+      "name": "zizmor",
+      "version": "1.32.0",
+      "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.32.0/zizmor-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b",
+      "binary": "zizmor",
+      "version_args": ["--version"]
+    },
+    {
+      "name": "shellcheck",
+      "version": "0.11.0",
+      "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz",
+      "sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6",
+      "binary": "shellcheck",
+      "version_args": ["--version"]
+    }
+  ]
+}
