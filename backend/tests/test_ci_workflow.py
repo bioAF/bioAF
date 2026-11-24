@@ -541,7 +541,9 @@ def test_the_benchmark_runs_on_the_backend_ci_runner_and_database():
 
 def test_the_benchmark_checks_out_the_history_the_upgrade_tests_read():
     # The historical upgrade matrix builds each released schema from local Git tags; a shallow clone tests less.
-    [checkout] = [s for s in _benchmark()["jobs"]["benchmark"]["steps"] if s.get("uses", "").startswith("actions/checkout@")]
+    [checkout] = [
+        s for s in _benchmark()["jobs"]["benchmark"]["steps"] if s.get("uses", "").startswith("actions/checkout@")
+    ]
     [ci_checkout] = [s for s in _ci_backend_job()["steps"] if s.get("uses", "").startswith("actions/checkout@")]
     assert checkout == ci_checkout
 
