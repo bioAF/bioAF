@@ -2,7 +2,7 @@
 
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,7 @@ export function SSHKeyTab() {
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
   const [copied, setCopied] = useState(false);
+  const [refusal, setRefusal] = useState("");
 
   useEffect(() => {
     loadSSHKey();
@@ -39,7 +40,9 @@ export function SSHKeyTab() {
     if (sshKey?.configured) {
       const ok = await confirm({
         title: "Replace your existing SSH key?",
-        message: "This cannot be undone.",
+        message:
+          "This cannot be undone. Afterwards, add the new public key to GitHub and download the new key " +
+          "for work node login. A new key cannot log in to a work node launched with the old one.",
         confirmLabel: "Replace",
         variant: "danger",
       });
@@ -47,14 +50,26 @@ export function SSHKeyTab() {
     }
     setGenerating(true);
     setMessage("");
+    setRefusal("");
     try {
       const data = await api.post<{ public_key: string; message: string }>("/api/auth/me/ssh-key/generate");
       setSSHKey({ configured: true, public_key: data.public_key });
       setMessage(data.message);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Failed to generate key");
+      // A 409 means work nodes may still need the current key: it is unchanged and still downloadable.
+      if (err instanceof ApiError && err.status === 409) setRefusal(err.message);
+      else setMessage(err instanceof Error ? err.message : "Failed to generate key");
     }
     setGenerating(false);
+  }
+
+  async function handleDownload() {
+    try {
+      await api.download("/api/auth/me/ssh-key/private");
+    } catch (e) {
+      logError("downloading the SSH key", e);
+      toast.error("Your SSH key could not be downloaded. Try again.");
+    }
   }
 
   function handleCopy() {
@@ -89,9 +104,15 @@ export function SSHKeyTab() {
     <div className="max-w-lg">
       <h2 className="text-lg font-semibold text-gray-900 mb-1">Git SSH Key</h2>
       <p className="text-sm text-gray-500 mb-4">
-        This key lets you use git inside notebook sessions to push and pull from GitHub.
-        After generating a key, add the public key to your GitHub account.
+        This key lets you use git inside notebook sessions to push and pull from GitHub, and log in to your
+        own work nodes. After generating a key, add the public key to your GitHub account.
       </p>
+
+      {refusal && (
+        <div role="alert" className="mb-4 p-3 rounded bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          {refusal}
+        </div>
+      )}
 
       {message && (
         <div className="mb-4 p-3 rounded bg-green-50 border border-green-200 text-green-700 text-sm">
@@ -122,6 +143,22 @@ export function SSHKeyTab() {
                 Add to GitHub
               </a>
             </div>
+          </div>
+
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
+            <h3 className="text-sm font-semibold text-gray-800">Work node login</h3>
+            <p className="text-xs text-gray-600">
+              Download your key to log in to your own work nodes from this computer. It also gives access to your
+              GitHub repositories, so keep it private.
+            </p>
+            <Button onClick={handleDownload}>Download key</Button>
+            <p className="text-xs text-gray-600">Save it, then restrict its permissions and connect:</p>
+            <pre className="text-xs font-mono bg-white border rounded p-2 whitespace-pre-wrap break-all">
+              {"mv ~/Downloads/bioaf_id_rsa ~/.ssh/bioaf_id_rsa\nchmod 600 ~/.ssh/bioaf_id_rsa\nssh -i ~/.ssh/bioaf_id_rsa <username>@<work node address>"}
+            </pre>
+            <p className="text-xs text-gray-500">
+              Lost the file? Download it again; the key does not change.
+            </p>
           </div>
 
           <p className="text-xs text-gray-500">
