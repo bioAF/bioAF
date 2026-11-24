@@ -724,7 +724,7 @@ jobs:
           fetch-depth: 0
 
       # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
@@ -732,7 +732,7 @@ jobs:
           path: coverage-in/backend
 
       # A documentation or CI-configuration pull request runs no test job, so there is no coverage to collect.
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.changes.result != 'success' || needs.changes.outputs.mode == 'full'
         continue-on-error: true
         with:
