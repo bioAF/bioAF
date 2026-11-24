@@ -76,6 +76,13 @@ class ComputeSession(Base):
     stop_failure: Mapped[str | None] = mapped_column(String(30), nullable=True)
     stop_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     stop_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Work Node login (plan 03B): the user's key fingerprint installed at launch (None: no key, so
+    # password login only), and the Work Node SSH policy revision the node was launched with. Running
+    # nodes keep their launch-time policy; a later range change applies to later launches.
+    login_key_fingerprint: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ssh_policy_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The backend sync route this node was provisioned for ("public" or "private-v1").
+    sync_route: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     user = relationship("User")
     organization = relationship("Organization")

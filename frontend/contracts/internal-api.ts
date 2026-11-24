@@ -712,9 +712,34 @@ export interface paths {
         put?: never;
         /**
          * Generate Ssh Key
-         * @description Generate an RSA key pair for the user. Stores the private key, returns the public key.
+         * @description Generate the user's SSH key (Git and Work Node login). Stores the private key, returns the public key.
+         *
+         *     A replacement waits until none of the user's Work Nodes may still need the current key
+         *     (plan 03B, D03-10); the current key stays unchanged and downloadable meanwhile.
          */
         post: operations["generate_ssh_key_api_auth_me_ssh_key_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me/ssh-key/private": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Ssh Key
+         * @description The caller's own current private key as a file (plan 03B, D03-6). No other user's key, ever.
+         *
+         *     Uncached; the audit records actor, fingerprint and time, never key material.
+         */
+        get: operations["download_ssh_key_api_auth_me_ssh_key_private_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -19213,6 +19238,26 @@ export interface operations {
         };
     };
     generate_ssh_key_api_auth_me_ssh_key_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    download_ssh_key_api_auth_me_ssh_key_private_get: {
         parameters: {
             query?: never;
             header?: never;

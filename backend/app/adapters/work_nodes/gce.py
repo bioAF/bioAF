@@ -178,6 +178,21 @@ def _build_startup_script(vm_spec: dict) -> str:
             lines.append(f"printf '%s\\n' '{escaped_pub}' > {home_dir}/.ssh/id_rsa.pub")
         lines.append(f"chown -R {username}:{username} {home_dir}/.ssh")
 
+    # 2b. The user's own login key (plan 03B, D03-6): only this user's public key, in their own
+    # authorized_keys, with sshd's required ownership and permissions.
+    login_public_key = (vm_spec.get("login_public_key") or "").strip()
+    if login_public_key:
+        safe_login = login_public_key.replace("'", "")
+        lines += [
+            "",
+            "# 2b. The user's login key",
+            f"mkdir -p {home_dir}/.ssh",
+            f"printf '%s\\n' '{safe_login}' > {home_dir}/.ssh/authorized_keys",
+            f"chmod 700 {home_dir}/.ssh",
+            f"chmod 600 {home_dir}/.ssh/authorized_keys",
+            f"chown -R {username}:{username} {home_dir}/.ssh",
+        ]
+
     # 3. Clone GitHub repos
     if github_repos:
         lines += [

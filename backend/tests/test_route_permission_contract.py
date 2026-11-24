@@ -49,6 +49,7 @@ SELF_SERVICE_ROUTES = {
     ("PUT", "/api/auth/me/session-credentials"),
     ("GET", "/api/auth/me/ssh-key"),
     ("POST", "/api/auth/me/ssh-key/generate"),
+    ("GET", "/api/auth/me/ssh-key/private"),
     ("GET", "/api/beta-features"),
     ("GET", "/api/dashboard/layout"),
     ("PUT", "/api/dashboard/layout"),

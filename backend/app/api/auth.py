@@ -373,40 +373,25 @@ async def get_ssh_key(request: Request, session: AsyncSession = Depends(get_sess
 
 @router.post("/me/ssh-key/generate")
 async def generate_ssh_key(request: Request, session: AsyncSession = Depends(get_session)):
-    """Generate an RSA key pair for the user. Stores the private key, returns the public key."""
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
+    """Generate the user's SSH key (Git and Work Node login). Stores the private key, returns the public key.
 
+    A replacement waits until none of the user's Work Nodes may still need the current key
+    (plan 03B, D03-10); the current key stays unchanged and downloadable meanwhile.
+    """
     current_user = request.state.current_user
     user_id = int(current_user["sub"])
     email = str(current_user["email"])
 
-    cred = await SessionCredentialService.get_by_user_id(session, user_id)
+    cred = await SessionCredentialService.lock_for_user(session, user_id)
     if not cred:
         raise HTTPException(400, "Set up session credentials first before generating an SSH key")
+    if cred.ssh_private_key or cred.ssh_public_key:
+        await SessionCredentialService.assert_key_replaceable(session, user_id, int(current_user["org_id"]))
 
-    # Generate RSA 4096-bit key pair
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-
-    private_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.OpenSSH,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("utf-8")
-
-    public_key = private_key.public_key()
-    public_openssh = public_key.public_bytes(
-        encoding=serialization.Encoding.OpenSSH,
-        format=serialization.PublicFormat.OpenSSH,
-    ).decode("utf-8")
-
-    # Add email as comment
-    public_openssh = f"{public_openssh} {email}"
-
+    private_pem, public_openssh = SessionCredentialService.generate_ssh_keypair(email)
     cred.ssh_public_key = public_openssh
     cred.ssh_private_key = private_pem
     await session.flush()
-    await session.commit()
 
     await log_action(
         session,
@@ -414,10 +399,46 @@ async def generate_ssh_key(request: Request, session: AsyncSession = Depends(get
         entity_type="session_credential",
         entity_id=cred.id,
         action="generate_ssh_key",
-        details={},
+        details={"fingerprint": SessionCredentialService.key_fingerprint(public_openssh)},
     )
+    await session.commit()
 
     return {
         "public_key": public_openssh,
-        "message": "SSH key generated. Add the public key to your GitHub account under Settings > SSH and GPG keys.",
+        "message": "SSH key generated. Add the public key to your GitHub account under Settings > SSH and GPG keys, "
+        "then download the key again for work node login.",
     }
+
+
+@router.get("/me/ssh-key/private")
+async def download_ssh_key(request: Request, session: AsyncSession = Depends(get_session)):
+    """The caller's own current private key as a file (plan 03B, D03-6). No other user's key, ever.
+
+    Uncached; the audit records actor, fingerprint and time, never key material.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    current_user = request.state.current_user
+    user_id = int(current_user["sub"])
+    cred = await SessionCredentialService.get_by_user_id(session, user_id)
+    if not cred or not cred.ssh_private_key:
+        raise HTTPException(404, "You have no SSH key yet. Generate one first.")
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="session_credential",
+        entity_id=cred.id,
+        action="download_ssh_key",
+        details={"fingerprint": SessionCredentialService.key_fingerprint(cred.ssh_public_key)},
+    )
+    await session.commit()
+    body = cred.ssh_private_key if cred.ssh_private_key.endswith("\n") else cred.ssh_private_key + "\n"
+    return PlainTextResponse(
+        body,
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "Content-Disposition": 'attachment; filename="bioaf_id_rsa"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

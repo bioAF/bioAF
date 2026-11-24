@@ -29949,7 +29949,7 @@
     },
     "/api/auth/me/ssh-key/generate": {
       "post": {
-        "description": "Generate an RSA key pair for the user. Stores the private key, returns the public key.",
+        "description": "Generate the user's SSH key (Git and Work Node login). Stores the private key, returns the public key.\n\nA replacement waits until none of the user's Work Nodes may still need the current key\n(plan 03B, D03-10); the current key stays unchanged and downloadable meanwhile.",
         "operationId": "generate_ssh_key_api_auth_me_ssh_key_generate_post",
         "responses": {
           "200": {
@@ -29962,6 +29962,26 @@
           }
         },
         "summary": "Generate Ssh Key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me/ssh-key/private": {
+      "get": {
+        "description": "The caller's own current private key as a file (plan 03B, D03-6). No other user's key, ever.\n\nUncached; the audit records actor, fingerprint and time, never key material.",
+        "operationId": "download_ssh_key_api_auth_me_ssh_key_private_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Download Ssh Key",
         "tags": [
           "auth"
         ]

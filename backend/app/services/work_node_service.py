@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.notebook_session import ComputeSession
+from app.models.user import User
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.audit_service import log_action
 from app.services.post_commit_events import defer_event
@@ -88,12 +89,26 @@ class WorkNodeService:
         # Require session credentials for SSH
         from app.services.session_credential_service import SessionCredentialService
 
-        cred = await SessionCredentialService.get_by_user_id(session, user_id)
+        # The credential row stays locked until 'starting' is committed below, so a concurrent key
+        # replacement either finishes first (this launch uses the new key) or sees this launch.
+        cred = await SessionCredentialService.lock_for_user(session, user_id)
         if not cred:
             raise ValidationError(
                 "Session credentials are required for work nodes. "
                 "Please set up your session credentials in your profile settings."
             )
+
+        # The Work Node SSH policy this launch applies (plan 03B, D03-5). With a range, login from
+        # outside it is key-only, so the user's key is generated now if they have none.
+        from app.services.ssh_access_policy import applied_work_node_policy
+
+        ssh_policy = await applied_work_node_policy(session)
+        if ssh_policy.ranges:
+            owner = await session.get(User, user_id)
+            await SessionCredentialService.ensure_login_key(session, cred, owner.email if owner else "")
+        elif cred.ssh_public_key or cred.ssh_private_key:
+            await SessionCredentialService.ensure_login_key(session, cred, "")
+        login_public_key = cred.ssh_public_key if cred.ssh_private_key else None
 
         # Validate and fetch GitHub repos
         github_repos_data: list[dict] = []
@@ -184,6 +199,8 @@ class WorkNodeService:
             started_at=datetime.now(timezone.utc),
             heartbeat_token=heartbeat_token,
             heartbeat_at=datetime.now(timezone.utc),
+            login_key_fingerprint=SessionCredentialService.key_fingerprint(login_public_key),
+            ssh_policy_revision=ssh_policy.revision,
         )
         session.add(compute_session)
         await session.flush()
@@ -235,6 +252,9 @@ class WorkNodeService:
                 },
                 "ssh_public_key": cred.ssh_public_key,
                 "ssh_private_key": cred.ssh_private_key,
+                # The user's own public key for login to this, their own, node (never another user's).
+                "login_public_key": login_public_key,
+                "ssh_policy": ssh_policy.as_spec(),
                 "github_repos": github_repos_data,
                 "git_known_hosts": git_trust.known_hosts,
                 "git_untrusted_hosts": sorted(f"{h}:{p}" for h, p in git_trust.untrusted_hosts),
