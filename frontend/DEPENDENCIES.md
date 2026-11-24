@@ -59,7 +59,7 @@ Remove a floor only when every parent's declared range excludes the vulnerable v
 | `baseline-browser-mapping` `^2.11.0` | GHSA-w5vr-8v7q-w6rv | `browserslist` `^2.10.44` (development build) |
 | `postcss-selector-parser@<6.1.5` `^6.1.5` | GHSA-rj75-hqrm-r3gf, GHSA-w9m9-85wc-3x92 | `@tailwindcss/typography` pins `6.0.10` exactly; `tailwindcss` and `postcss-nested` `^6.1.1` (development build) |
 | `es-toolkit` `^1.51.0` | GHSA-9qjg-mfqr-5gqq (AIKIDO-2026-523264, `es-toolkit/compat` path writes through `constructor.prototype`) | `recharts` `^1.39.3` (runtime) |
-| `@ungap/structured-clone` `^1.3.1` | AIKIDO-2026-11068 (`deserialize` constructs any global by name) | `eslint` 8 `^1.2.0` (development) |
+| `@ungap/structured-clone` `^1.3.1` | AIKIDO-2026-11068 (`deserialize` constructs any global by name) | `mdast-util-to-hast` `^1.0.0` under `react-markdown` (runtime); `jest-worker` `^1.3.0` (test tooling); `eslint` 8 `^1.2.0` (development) |
 | `style-to-object@1.0.14`: `inline-style-parser` `^0.2.9` | AIKIDO-2026-866435 (comment-stripping regular expression) | `style-to-object` 1.0.14 pins `0.2.7` exactly, and `style-to-js` 1.1.21 pins that `style-to-object` exactly, under `react-markdown` > `hast-util-to-jsx-runtime` (runtime) |
 
 The direct `next` and `eslint-config-next` declarations are held at `^15.5.29` (GHSA-2464-fhr4-w9xw,
@@ -80,6 +80,11 @@ The direct `recharts` declaration is held at `^3.11.1` (AIKIDO-2026-172842, Sank
 `immer ^11.2.9`, so the single shared Immer copy is above the 11.1.9 prototype-pollution fix (AIKIDO-2026-445255)
 without an override, and Recharts 3.9+ no longer pulls Immer 10. If `npm ls immer` ever shows a second 11.x copy
 below 11.1.9, add an `immer` floor here.
+
+`@ungap/structured-clone` reaches the browser through Markdown rendering: `mdast-util-to-hast` calls its default
+`structuredClone(value)` to copy tree nodes, so the input to `deserialize` is what `serialize` just produced from
+in-memory values, never serialized data from a request. `jest-worker` deserializes messages between Jest's own
+processes. One deduplicated copy serves all three consumers.
 
 Remove the `inline-style-parser` override when the `style-to-js` used by `hast-util-to-jsx-runtime` reaches
 `style-to-object` 2.0.2 or later, which pins 0.2.9 itself. In this app the parser only sees `style` values the
