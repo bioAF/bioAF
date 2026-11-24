@@ -247,3 +247,166 @@ def test_work_node_sa_resolution_drops_legacy_email_fallback():
     # Helper mirrors the adapter logic; the regression check is that the
     # third fallback (gcp_service_account_email) is NOT consulted.
     assert sa_email is None
+
+
+# -- Plan 03A: save over verified SSH, then delete and confirm -------------------------------
+
+
+def _gce_instance(status="RUNNING", ip="34.1.2.3", session="7", attempt="attempt-1", instance_id=555):
+    from types import SimpleNamespace
+
+    access = [SimpleNamespace(nat_i_p=ip)] if ip else []
+    return SimpleNamespace(
+        id=instance_id,
+        status=status,
+        labels={"bioaf-session": session, "bioaf-launch": attempt},
+        network_interfaces=[SimpleNamespace(access_configs=access, network_i_p="10.128.0.5")],
+    )
+
+
+_GCE_CREDS = dict(
+    gcp_project_id="proj",
+    session_id=7,
+    working_bucket="bioaf-working",
+    sync_private_key="sync-private",
+    host_public_key="ssh-ed25519 AAAAhost",
+    provider_instance_id="555",
+    launch_attempt_id="attempt-1",
+)
+
+
+async def _gce_delete(client, sync=None, **over):
+    provider = _launch_provider()
+    provider._delete_poll_interval = 0
+    sync = sync or AsyncMock(return_value=0)
+    blob = MagicMock()
+    blob.name = "sessions/7/outputs/result.csv"
+    blob.size = 12
+    storage_client = MagicMock()
+    storage_client.bucket.return_value.list_blobs.return_value = [blob]
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=client),
+        patch("google.cloud.storage.Client", return_value=storage_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch("app.adapters.work_nodes.gce.run_sync_command", sync),
+    ):
+        result = await provider.delete("bioaf-worknode-7", "us-central1-b", **{**_GCE_CREDS, **over})
+    return result, sync
+
+
+def _not_found():
+    from google.api_core.exceptions import NotFound
+
+    return NotFound("gone")
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_saves_with_recorded_identity_then_confirms_deletion():
+    client = MagicMock()
+    client.get.side_effect = [_gce_instance(), _not_found()]
+    result, sync = await _gce_delete(client)
+    assert sync.call_args.args[0] == "34.1.2.3"
+    assert sync.call_args.kwargs["host_public_key"] == "ssh-ed25519 AAAAhost"
+    assert "exit $rc" in sync.call_args.kwargs["command"]
+    client.delete.assert_called_once()
+    assert result.stop_failure is None
+    assert result.status.value == "stopped"
+    assert [o.filename for o in result.output_files] == ["result.csv"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_status", [1, 255])
+async def test_gce_delete_keeps_the_vm_when_the_save_fails(exit_status):
+    client = MagicMock()
+    client.get.return_value = _gce_instance()
+    result, _ = await _gce_delete(client, AsyncMock(return_value=exit_status))
+    client.delete.assert_not_called()
+    client.stop.assert_not_called()
+    assert result.stop_failure == "save_failed"
+    assert result.status.value == "running"
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_keeps_the_vm_without_an_address_or_credentials():
+    for over, instance in [
+        ({}, _gce_instance(ip=None)),
+        ({"sync_private_key": None}, _gce_instance()),
+        ({"host_public_key": None}, _gce_instance()),
+        ({"working_bucket": ""}, _gce_instance()),
+    ]:
+        client = MagicMock()
+        client.get.return_value = instance
+        result, sync = await _gce_delete(client, **over)
+        sync.assert_not_called()
+        client.delete.assert_not_called()
+        assert result.stop_failure == "save_failed", over
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_refuses_a_replacement_vm_with_the_same_name():
+    """A VM recreated under the recorded name is a different instance: it is never trusted or deleted."""
+    client = MagicMock()
+    client.get.return_value = _gce_instance(instance_id=999)
+    result, sync = await _gce_delete(client)
+    sync.assert_not_called()
+    client.delete.assert_not_called()
+    assert result.stop_failure == "state_unknown"
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_reports_unknown_when_the_vm_cannot_be_read():
+    client = MagicMock()
+    client.get.side_effect = RuntimeError("permission denied")
+    result, _ = await _gce_delete(client)
+    client.delete.assert_not_called()
+    assert result.stop_failure == "state_unknown"
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_reports_unconfirmed_deletion_after_a_save():
+    client = MagicMock()
+    client.get.return_value = _gce_instance()  # still there after delete
+    result, _ = await _gce_delete(client)
+    client.delete.assert_called_once()
+    assert result.stop_failure == "delete_unconfirmed"
+
+
+@pytest.mark.asyncio
+async def test_gce_delete_of_a_missing_vm_is_stopped():
+    client = MagicMock()
+    client.get.side_effect = _not_found()
+    result, sync = await _gce_delete(client)
+    sync.assert_not_called()
+    client.delete.assert_not_called()
+    assert result.stop_failure is None
+
+
+@pytest.mark.asyncio
+async def test_gce_launch_installs_host_key_labels_attempt_and_returns_instance_id():
+    from app.adapters.work_nodes.node_ssh import generate_node_identity
+
+    identity = generate_node_identity()
+    provider = _launch_provider()
+    fake_client = MagicMock()
+    fake_client.insert.return_value.result.return_value = None
+    fake_client.get.return_value = _gce_instance(instance_id=4242)
+    spec = {
+        **_launch_vm_spec(),
+        "sync_public_key": identity.sync_public_key,
+        "host_private_key": identity.host_private_key,
+        "host_public_key": identity.host_public_key,
+        "launch_attempt_id": "attempt-9",
+    }
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
+        result = await provider._gce_launch_vm(spec)
+
+    instance = fake_client.insert.call_args.kwargs["instance_resource"]
+    items = {i.key: i.value for i in instance.metadata.items}
+    assert "/etc/ssh/bioaf_host_ed25519_key" in items["startup-script"]
+    assert items["bioaf-host-public-key"] == identity.host_public_key
+    assert instance.labels["bioaf-launch"] == "attempt-9"
+    assert result["provider_instance_id"] == "4242"

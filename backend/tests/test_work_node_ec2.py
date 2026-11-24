@@ -159,23 +159,192 @@ def test_ec2_startup_script_enables_password_auth():
     assert "restart ssh" in script
 
 
-@pytest.mark.asyncio
-async def test_ec2_terminate_terminates_instance():
-    p = _aws_provider()
-    ec2 = MagicMock()
-    # No public IP -> SSH output sync is skipped; instance is still terminated.
-    ec2.describe_instances.return_value = {"Reservations": [{"Instances": [{"InstanceId": "i-0abc"}]}]}
-    s3 = MagicMock()
-    s3.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
+def _instance(state="running", ip="1.2.3.4", session="7", attempt="attempt-1"):
+    tags = [{"Key": "bioaf-session", "Value": session}, {"Key": "bioaf-launch", "Value": attempt}]
+    inst = {"InstanceId": "i-0abc", "State": {"Name": state}, "Tags": tags}
+    if ip:
+        inst["PublicIpAddress"] = ip
+    return {"Reservations": [{"Instances": [inst]}]}
+
+
+def _clients(ec2, s3=None):
+    s3 = s3 or MagicMock()
+    s3.get_paginator.return_value.paginate.return_value = [
+        {"Contents": [{"Key": "sessions/7/outputs/result.csv", "Size": 12}]}
+    ]
 
     def client(service):
         return s3 if service == "s3" else ec2
 
-    with patch.object(p, "_client", side_effect=client):
-        result = await p.delete("i-0abc", "us-west-1a", session_id=7, working_bucket="bioaf-working-5f6286")
+    return client
 
+
+_CREDS = dict(
+    session_id=7,
+    working_bucket="bioaf-working-5f6286",
+    sync_private_key="sync-private",
+    host_public_key="ssh-ed25519 AAAAhost",
+    launch_attempt_id="attempt-1",
+)
+
+
+async def _delete(p, ec2, sync=AsyncMock(return_value=0), **over):
+    kwargs = {**_CREDS, **over}
+    p._delete_poll_interval = 0
+    with (
+        patch.object(p, "_client", side_effect=_clients(ec2)),
+        patch("app.adapters.work_nodes.ec2.run_sync_command", sync),
+    ):
+        return await p.delete("i-0abc", "us-west-1a", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_keeps_a_running_instance_without_an_address():
+    """Owner-approved change (2026-11-24, plan 03A): an unsaved node is kept, never terminated."""
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance(ip=None)
+    sync = AsyncMock(return_value=0)
+    result = await _delete(p, ec2, sync)
+
+    ec2.terminate_instances.assert_not_called()
+    sync.assert_not_called()
+    assert result.stop_failure == "save_failed"
+    assert result.status.value == "running"
+    assert result.output_files == []
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_saves_with_the_recorded_identity_then_confirms_termination():
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.side_effect = [_instance(), _instance(state="terminated")]
+    sync = AsyncMock(return_value=0)
+    result = await _delete(p, ec2, sync)
+
+    call = sync.call_args
+    assert call.args[0] == "1.2.3.4"
+    assert call.kwargs["sync_private_key"] == "sync-private"
+    assert call.kwargs["host_public_key"] == "ssh-ed25519 AAAAhost"
+    # Both transfers must succeed: a failed output sync is not masked by the later script capture.
+    assert "|| rc=1" in call.kwargs["command"]
+    assert "exit $rc" in call.kwargs["command"]
     ec2.terminate_instances.assert_called_once_with(InstanceIds=["i-0abc"])
+    assert result.stop_failure is None
+    assert result.status.value == "stopped"
+    assert [o.filename for o in result.output_files] == ["result.csv"]
     assert result.output_prefix == "s3://bioaf-working-5f6286/sessions/7/outputs/"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sync",
+    [
+        AsyncMock(return_value=1),
+        AsyncMock(side_effect=__import__("app.adapters.work_nodes.node_ssh", fromlist=["x"]).NodeTrustError("x")),
+        AsyncMock(side_effect=__import__("app.adapters.work_nodes.node_ssh", fromlist=["x"]).NodeSyncError("x")),
+    ],
+    ids=["nonzero", "untrusted-server", "unreachable"],
+)
+async def test_ec2_terminate_keeps_the_instance_when_saving_fails(sync):
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance()
+    result = await _delete(p, ec2, sync)
+    ec2.terminate_instances.assert_not_called()
+    assert result.stop_failure == "save_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["sync_private_key", "host_public_key", "working_bucket"])
+async def test_ec2_terminate_keeps_the_instance_without_credentials_or_bucket(missing):
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance()
+    sync = AsyncMock(return_value=0)
+    result = await _delete(p, ec2, sync, **{missing: ""})
+    ec2.terminate_instances.assert_not_called()
+    sync.assert_not_called()
+    assert result.stop_failure == "save_failed"
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_never_touches_an_instance_bound_to_another_session():
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance(session="8")
+    sync = AsyncMock(return_value=0)
+    result = await _delete(p, ec2, sync)
+    ec2.terminate_instances.assert_not_called()
+    sync.assert_not_called()
+    assert result.stop_failure == "state_unknown"
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_reports_unknown_when_the_instance_cannot_be_described():
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.side_effect = RuntimeError("throttled")
+    result = await _delete(p, ec2)
+    ec2.terminate_instances.assert_not_called()
+    assert result.stop_failure == "state_unknown"
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_reports_unconfirmed_deletion_after_a_save():
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance()  # never reaches terminated
+    result = await _delete(p, ec2)
+    ec2.terminate_instances.assert_called_once()
+    assert result.stop_failure == "delete_unconfirmed"
+
+
+@pytest.mark.asyncio
+async def test_ec2_terminate_of_an_already_terminated_instance_is_stopped():
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = _instance(state="terminated")
+    sync = AsyncMock(return_value=0)
+    result = await _delete(p, ec2, sync)
+    sync.assert_not_called()
+    ec2.terminate_instances.assert_not_called()
+    assert result.stop_failure is None
+    assert result.status.value == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_ec2_launch_installs_the_launch_host_key_and_tags_the_attempt():
+    from app.adapters.work_nodes.node_ssh import generate_node_identity
+
+    identity = generate_node_identity()
+    p = _aws_provider()
+    ec2 = MagicMock()
+    ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-1", "CreationDate": "2026"}]}
+    ec2.run_instances.return_value = {
+        "OwnerId": "123456789012",
+        "Instances": [{"InstanceId": "i-0new", "Placement": {"AvailabilityZone": "us-west-1b"}}],
+    }
+    spec = _vm_spec(
+        sync_public_key=identity.sync_public_key,
+        host_private_key=identity.host_private_key,
+        host_public_key=identity.host_public_key,
+        launch_attempt_id="attempt-9",
+    )
+    with (
+        patch.object(p, "_client", return_value=ec2),
+        patch.object(p, "_poll_vm_ready", new=MagicMock()),
+        patch("app.adapters.work_nodes.ec2.runtime.spawn"),
+    ):
+        info = await p.provision(spec)
+
+    kwargs = ec2.run_instances.call_args.kwargs
+    assert "/etc/ssh/bioaf_host_ed25519_key" in kwargs["UserData"]
+    assert identity.sync_public_key in kwargs["UserData"]
+    tags = {t["Key"]: t["Value"] for t in kwargs["TagSpecifications"][0]["Tags"]}
+    assert tags["bioaf-launch"] == "attempt-9"
+    assert info.provider_details["provider_instance_id"] == "i-0new"
+    assert info.provider_details["aws_account_id"] == "123456789012"
 
 
 @pytest.mark.asyncio

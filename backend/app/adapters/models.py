@@ -582,6 +582,10 @@ class TerminationResult(BaseModel):
     output_files: list[StoredObject] = Field(default_factory=list)
     output_prefix: str = ""
     provider_details: dict = Field(default_factory=dict)
+    # None when the resource was saved (if a save was owed) and its deletion confirmed. Otherwise
+    # the bounded reason the resource was kept: "save_failed" (running, files not saved),
+    # "delete_unconfirmed" (files saved, deletion not confirmed) or "state_unknown".
+    stop_failure: str | None = None
 
 
 # --- Cellxgene ---------------------------------------------------------------

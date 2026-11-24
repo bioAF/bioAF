@@ -22,6 +22,15 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.adapters.session_status import update_compute_session
+from app.adapters.work_nodes.node_ssh import (
+    STOP_DELETE_UNCONFIRMED,
+    STOP_SAVE_FAILED,
+    STOP_STATE_UNKNOWN,
+    NodeSyncError,
+    host_key_install_lines,
+    run_sync_command,
+    sync_outputs_command,
+)
 from app.exceptions import ValidationError
 from app.adapters.storage.gcs import gcs_cli_source, gcs_fetch_command
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
@@ -32,6 +41,18 @@ logger = logging.getLogger("bioaf.adapters.work_nodes.gce")
 
 # In-memory session store for local mode
 _local_vms: dict[str, dict] = {}
+
+# Sentinel: the provider could not say whether an instance exists.
+_UNKNOWN = object()
+
+
+def _external_ip(instance) -> str | None:
+    for iface in instance.network_interfaces:
+        for ac in iface.access_configs:
+            if ac.nat_i_p:
+                return ac.nat_i_p
+    return None
+
 
 _VM_INFO_KEYS = {"instance_name", "status", "zone", "access_url", "created_at"}
 _VM_STATUS_KEYS = {"instance_name", "status", "zone", "external_ip", "session_id", "user_id"}
@@ -76,6 +97,7 @@ def _termination_result_from_dict(d: dict) -> TerminationResult:
             "instance_name": d.get("instance_name"),
             "stopped_at": d.get("stopped_at"),
         },
+        stop_failure=d.get("stop_failure"),
     )
 
 
@@ -86,7 +108,7 @@ _EACH_FILE = ShellExpr('"$f"')
 def _capture_each(scripts_prefix: str) -> str:
     """The per-file copy `find -exec sh -c` runs: each found name is an argument, never re-parsed."""
     copy = shell_join(["gsutil", "cp", gcs_cli_source(_EACH_FILE), scripts_prefix])
-    return f"for f do {copy}; done"
+    return f"for f do {copy} || exit 1; done"
 
 
 def _build_startup_script(vm_spec: dict) -> str:
@@ -114,6 +136,12 @@ def _build_startup_script(vm_spec: dict) -> str:
         "#!/bin/bash",
         "# Log all output for debugging",
         "exec > >(tee -a /var/log/bioaf-startup.log) 2>&1",
+    ]
+    host_private_key = vm_spec.get("host_private_key", "")
+    host_public_key = vm_spec.get("host_public_key", "")
+    if host_private_key and host_public_key:
+        lines += host_key_install_lines(host_private_key, host_public_key)
+    lines += [
         "",
         "# 1. Create PAM user with session credentials",
         f"useradd -m -d {home_dir} -s /bin/bash {username} || true",
@@ -315,9 +343,9 @@ class GceVmInstance(VmInstance):
         self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         self._gcp_config: dict | None = None
-        # In-memory store for sync SSH private keys, keyed by session_id.
-        # Generated at launch, used at terminate to SSH in for output sync.
-        self._sync_keys: dict[int, str] = {}
+        # Deletion is confirmed by polling for the instance (seconds between polls, poll count).
+        self._delete_poll_interval: float = 5
+        self._delete_poll_attempts: int = 24
 
     @property
     def is_local(self) -> bool:
@@ -448,16 +476,8 @@ class GceVmInstance(VmInstance):
         boot_disk_gb = vm_spec.get("boot_disk_gb", 100)
         boot_disk_type = vm_spec.get("boot_disk_type", "pd-ssd")
 
-        # Generate an SSH key pair for the bioaf-sync user so the backend
-        # can SSH into the VM at terminate time to sync outputs.
-        import asyncssh
-
-        sync_key = asyncssh.generate_private_key("ssh-ed25519")
-        sync_private_pem = sync_key.export_private_key().decode()
-        sync_public_key = sync_key.export_public_key().decode().strip()
-        self._sync_keys[session_id] = sync_private_pem
-        vm_spec["sync_public_key"] = sync_public_key
-
+        # The service generated and committed the sync key and host identity before this call;
+        # only their public halves (and the node's own host key) are in the spec.
         # Build startup script
         startup_script = _build_startup_script(vm_spec)
 
@@ -518,11 +538,18 @@ class GceVmInstance(VmInstance):
                     "bioaf-user": str(user_id),
                     "bioaf-managed": "true",
                 }
+                if vm_spec.get("launch_attempt_id"):
+                    instance.labels["bioaf-launch"] = str(vm_spec["launch_attempt_id"])
 
                 metadata = compute_v1.Metadata()
                 metadata.items = [
                     compute_v1.Items(key="startup-script", value=startup_script),
                 ]
+                if vm_spec.get("host_public_key"):
+                    # The node's server identity, readable by authorized cloud users with bioAF down.
+                    metadata.items.append(
+                        compute_v1.Items(key="bioaf-host-public-key", value=vm_spec["host_public_key"])
+                    )
                 instance.metadata = metadata
 
                 if accelerator_type:
@@ -559,6 +586,13 @@ class GceVmInstance(VmInstance):
                 "Try again later or choose a different machine type."
             )
 
+        # Bind the immutable instance id: a later VM recreated under this name is a different server.
+        provider_instance_id = ""
+        try:
+            provider_instance_id = str(instances_client.get(project=project, zone=zone, instance=instance_name).id)
+        except Exception as exc:
+            logger.warning("Could not read the instance id of %s: %s", instance_name, exc)
+
         # Launch background poller
         creds = vm_spec.get("session_credentials", {})
         ssh_username = creds.get("username", "")
@@ -578,6 +612,7 @@ class GceVmInstance(VmInstance):
             "instance_name": instance_name,
             "zone": zone,
             "gcp_project_id": project,
+            "provider_instance_id": provider_instance_id,
             "status": "starting",
             "access_url": None,
         }
@@ -736,119 +771,84 @@ class GceVmInstance(VmInstance):
         gcp_project_id: str = "",
         session_id: int = 0,
         working_bucket: str = "",
+        sync_private_key: str | None = None,
+        host_public_key: str | None = None,
+        provider_instance_id: str | None = None,
+        launch_attempt_id: str | None = None,
         **kwargs,
     ) -> dict:
-        """Sync outputs from VM, then delete it."""
+        """Save the node's outputs over verified SSH, then delete the VM and confirm it is gone.
+
+        The VM is deleted only after every required transfer succeeded. Unknown state, a
+        different instance under the recorded name, missing credentials/bucket/address, an
+        untrusted server or a failed transfer keep the VM and its disks and report why.
+        """
         from google.cloud import compute_v1
 
         await self.load_gcp_config()
         cfg = self._gcp_config or {}
         project = gcp_project_id or cfg.get("gcp_project_id", "")
+        gcs_output_prefix = f"gs://{working_bucket}/sessions/{session_id}/outputs/" if working_bucket else ""
 
-        output_files: list[dict] = []
-        gcs_output_prefix = ""
+        def kept(reason: str, state: str = "unknown") -> dict:
+            logger.warning("Kept work node VM %s (session %s): %s", instance_name, session_id, reason)
+            return {
+                "instance_name": instance_name,
+                "status": state,
+                "output_files": [],
+                "gcs_output_prefix": gcs_output_prefix,
+                "stop_failure": reason,
+            }
 
-        # Sync outputs from the running VM before stopping it.
-        # SSH into the VM as the bioaf-sync user (key-based) and run gsutil,
-        # mirroring the K8s approach of exec'ing into the pod before deletion.
-        if working_bucket and session_id:
-            gcs_output_prefix = f"gs://{working_bucket}/sessions/{session_id}/outputs/"
-            gcs_scripts_prefix = f"gs://{working_bucket}/sessions/{session_id}/scripts/"
-
-            # Get the VM's external IP
-            external_ip = None
-            try:
-                credentials = self._get_gcp_credentials()
-                instances_client = compute_v1.InstancesClient(credentials=credentials)
-                instance = instances_client.get(project=project, zone=zone, instance=instance_name)
-                for iface in instance.network_interfaces:
-                    for ac in iface.access_configs:
-                        if ac.nat_i_p:
-                            external_ip = ac.nat_i_p
-                            break
-            except Exception as e:
-                logger.warning("Could not get external IP for VM %s: %s", instance_name, e)
-
-            if external_ip:
-                sync_cmd = (
-                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
-                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}; fi; "
-                    f"find /home -maxdepth 4 "
-                    r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
-                    f"-type f "
-                    f"-exec sh -c {shell_word(_capture_each(gcs_scripts_prefix))} sh {{}} +"
+        credentials = self._get_gcp_credentials()
+        instances_client = compute_v1.InstancesClient(credentials=credentials)
+        instance = self._get_instance(instances_client, project, zone, instance_name)
+        if instance is _UNKNOWN:
+            return kept(STOP_STATE_UNKNOWN)
+        if instance is not None:
+            labels = dict(instance.labels or {})
+            if provider_instance_id and str(instance.id) != str(provider_instance_id):
+                return kept(STOP_STATE_UNKNOWN)
+            if session_id and labels.get("bioaf-session") != str(session_id):
+                return kept(STOP_STATE_UNKNOWN)
+            if launch_attempt_id and labels.get("bioaf-launch") != launch_attempt_id:
+                return kept(STOP_STATE_UNKNOWN)
+            if instance.status != "RUNNING":
+                return kept(STOP_STATE_UNKNOWN)
+            if session_id:
+                address = _external_ip(instance)
+                if not (working_bucket and address and sync_private_key and host_public_key):
+                    return kept(STOP_SAVE_FAILED, "running")
+                command = sync_outputs_command(
+                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}",
+                    shell_word(_capture_each(f"gs://{working_bucket}/sessions/{session_id}/scripts/")),
                 )
                 try:
-                    import asyncssh
+                    status = await run_sync_command(
+                        address,
+                        sync_private_key=sync_private_key,
+                        host_public_key=host_public_key,
+                        command=command,
+                    )
+                except NodeSyncError as exc:
+                    logger.warning("Output sync for VM %s failed: %s", instance_name, exc)
+                    return kept(STOP_SAVE_FAILED, "running")
+                if status != 0:
+                    logger.warning("Output sync for VM %s exited %s", instance_name, status)
+                    return kept(STOP_SAVE_FAILED, "running")
+                logger.info("Output sync complete for VM %s", instance_name)
 
-                    # Read the sync private key that was embedded at launch
-                    sync_key = self._sync_keys.get(session_id)
-                    if sync_key:
-                        key = asyncssh.import_private_key(sync_key)
-                        async with asyncssh.connect(
-                            external_ip,
-                            port=22,
-                            username="bioaf-sync",
-                            client_keys=[key],
-                            known_hosts=None,
-                        ) as conn:
-                            result = await asyncio.wait_for(conn.run(sync_cmd), timeout=300)
-                            if result.exit_status == 0:
-                                logger.info("Output sync complete for VM %s", instance_name)
-                            else:
-                                logger.warning(
-                                    "Output sync returned %d for VM %s: %s",
-                                    result.exit_status,
-                                    instance_name,
-                                    result.stderr,
-                                )
-                    else:
-                        logger.warning("No sync key for session %d, skipping output sync", session_id)
-                except Exception as e:
-                    logger.warning("SSH output sync failed for VM %s: %s", instance_name, e)
+            if not await self._delete_and_confirm(instances_client, project, zone, instance_name):
+                return kept(STOP_DELETE_UNCONFIRMED, "running")
 
-        # Stop and delete the VM
-        try:
-            credentials = self._get_gcp_credentials()
-            instances_client = compute_v1.InstancesClient(credentials=credentials)
-            instances_client.stop(project=project, zone=zone, instance=instance_name)
-
-            for _ in range(60):
-                try:
-                    instance = instances_client.get(project=project, zone=zone, instance=instance_name)
-                    if instance.status in ("TERMINATED", "STOPPED"):
-                        break
-                except Exception:
-                    break
-                await asyncio.sleep(5)
-
-            logger.info("VM %s stopped", instance_name)
-        except Exception as e:
-            logger.warning("Failed to stop VM %s: %s", instance_name, e)
-
-        # Delete the VM
-        try:
-            credentials = self._get_gcp_credentials()
-            instances_client = compute_v1.InstancesClient(credentials=credentials)
-            instances_client.delete(project=project, zone=zone, instance=instance_name)
-            logger.info("Deleted VM %s", instance_name)
-        except Exception as e:
-            logger.warning("Failed to delete VM %s: %s", instance_name, e)
-
-        # Clean up sync key
-        self._sync_keys.pop(session_id, None)
-
-        # List output files from GCS
-        if gcs_output_prefix:
+        output_files: list[dict] = []
+        if working_bucket and session_id:
             try:
                 from google.cloud import storage
 
-                credentials = self._get_gcp_credentials()
                 storage_client = storage.Client(project=project, credentials=credentials)
                 bucket = storage_client.bucket(working_bucket)
-                prefix = f"sessions/{session_id}/"
-                blobs = bucket.list_blobs(prefix=prefix)
-                for blob in blobs:
+                for blob in bucket.list_blobs(prefix=f"sessions/{session_id}/"):
                     output_files.append(
                         {
                             "gcs_uri": f"gs://{working_bucket}/{blob.name}",
@@ -866,6 +866,32 @@ class GceVmInstance(VmInstance):
             "output_files": output_files,
             "gcs_output_prefix": gcs_output_prefix,
         }
+
+    @staticmethod
+    def _get_instance(instances_client, project: str, zone: str, instance_name: str):
+        """The instance, None when GCE confirms it does not exist, or _UNKNOWN."""
+        from google.api_core.exceptions import NotFound
+
+        try:
+            return instances_client.get(project=project, zone=zone, instance=instance_name)
+        except NotFound:
+            return None
+        except Exception as exc:
+            logger.warning("Could not read VM %s: %s", instance_name, exc)
+            return _UNKNOWN
+
+    async def _delete_and_confirm(self, instances_client, project: str, zone: str, instance_name: str) -> bool:
+        try:
+            operation = instances_client.delete(project=project, zone=zone, instance=instance_name)
+            await asyncio.to_thread(operation.result)
+        except Exception as exc:
+            logger.warning("Failed to delete VM %s: %s", instance_name, exc)
+        for _ in range(self._delete_poll_attempts):
+            if self._get_instance(instances_client, project, zone, instance_name) is None:
+                logger.info("Deleted VM %s", instance_name)
+                return True
+            await asyncio.sleep(self._delete_poll_interval)
+        return False
 
     async def _gce_get_vm_status(self, instance_name: str, zone: str) -> dict:
         """Query GCE API for VM status."""

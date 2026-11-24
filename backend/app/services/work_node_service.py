@@ -6,9 +6,12 @@ with Packer-built images and conda environments.
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from datetime import timedelta
+
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,8 +26,9 @@ from app.services.event_types import (
 )
 from app.services.machine_types import MACHINE_TYPES, get_machine_type
 from app.services.session_bucket import _bucket_filter
-from app.adapters.models import TerminationResult
+from app.adapters.models import ServiceState, TerminationResult
 from app.adapters.registry import get_work_node_adapter
+from app.adapters.work_nodes.node_ssh import NODE_TRUST_VERSION, STOP_STATE_UNKNOWN, generate_node_identity
 from app.exceptions import ConflictError, NotFoundError, ValidationError
 from app.services.launch_scope import owned_environment_version, resolve_launch_scope
 from app import runtime
@@ -35,6 +39,13 @@ DEFAULT_MAX_WORK_NODES_PER_USER = 2
 DEFAULT_IDLE_TIMEOUT_HOURS = 24
 DEFAULT_BOOT_DISK_GB = 100
 DEFAULT_BOOT_DISK_TYPE = "pd-ssd"
+
+# Nodes that may still be running and so count against the per-user limit and the costs view.
+ACTIVE_NODE_STATUSES = ("pending", "starting", "running", "stopping", "stop_failed")
+# A Stop claim older than this is treated as abandoned (its worker died) and may be retried.
+STOP_CLAIM_TTL = timedelta(minutes=15)
+# Background idle cleanup retries a kept node this many times, then leaves it for Retry stop.
+MAX_BACKGROUND_STOP_ATTEMPTS = 3
 
 
 class WorkNodeService:
@@ -108,7 +119,7 @@ class WorkNodeService:
             select(func.count(ComputeSession.id)).where(
                 ComputeSession.user_id == user_id,
                 ComputeSession.session_type == "ssh",
-                ComputeSession.status.in_(["pending", "starting", "running"]),
+                ComputeSession.status.in_(ACTIVE_NODE_STATUSES),
             )
         )
         running_count = running_count_result.scalar() or 0
@@ -259,6 +270,20 @@ class WorkNodeService:
             # re-writes status afterward, it clobbers the poll's 'running' back
             # to 'starting', leaving the node stuck in 'starting' though the VM
             # is up.
+            # Durable trust (plan 03A): the backend sync key and the node's server identity are
+            # generated and committed with 'starting', before the provider call, so any worker
+            # can save this node's outputs after a restart. Only public halves and the node's own
+            # host key travel to the node; the sync private key stays encrypted on this row.
+            identity = generate_node_identity()
+            compute_session.sync_private_key = identity.sync_private_key
+            compute_session.host_public_key = identity.host_public_key
+            compute_session.launch_attempt_id = uuid.uuid4().hex
+            compute_session.node_trust_version = NODE_TRUST_VERSION
+            vm_spec["sync_public_key"] = identity.sync_public_key
+            vm_spec["host_private_key"] = identity.host_private_key
+            vm_spec["host_public_key"] = identity.host_public_key
+            vm_spec["launch_attempt_id"] = compute_session.launch_attempt_id
+
             compute_session.status = "starting"
             await session.commit()
 
@@ -267,6 +292,7 @@ class WorkNodeService:
             compute_session.gce_instance_name = result.instance_name
             compute_session.gce_zone = result.zone
             compute_session.gce_project_id = result.provider_details.get("gcp_project_id")
+            compute_session.provider_instance_id = result.provider_details.get("provider_instance_id")
             adapter_status = result.status
             if adapter_status == "error":
                 compute_session.status = "failed"
@@ -330,19 +356,57 @@ class WorkNodeService:
         *,
         org_id: int,
     ) -> ComputeSession:
+        """Save the node's outputs, then delete it; keep it and say why when either is not confirmed.
+
+        Retry stop is the same call. A Stop already in progress on another request answers 409.
+        """
         compute_session = await WorkNodeService.get_work_node(session, session_id, org_id=org_id)
         if not compute_session:
             raise NotFoundError("Work node not found")
-
         old_status = compute_session.status
+        if not await WorkNodeService._claim_stop(session, compute_session):
+            raise ConflictError("This work node is already stopping. Try again shortly.")
+        await WorkNodeService._finish_stop(session, compute_session, actor_user_id=user_id, old_status=old_status)
+        return compute_session
 
-        # Set status to "stopping" and commit immediately so the UI
-        # reflects the in-progress state even if the request times out.
-        compute_session.status = "stopping"
-        await session.flush()
+    @staticmethod
+    async def _claim_stop(session: AsyncSession, node: ComputeSession) -> bool:
+        """Atomically mark the node 'stopping' unless another Stop holds a fresh claim. Commits."""
+        now = datetime.now(timezone.utc)
+        claim = await session.execute(
+            update(ComputeSession)
+            .where(
+                ComputeSession.id == node.id,
+                ComputeSession.organization_id == node.organization_id,
+                or_(
+                    ComputeSession.status != "stopping",
+                    ComputeSession.stop_claimed_at.is_(None),
+                    ComputeSession.stop_claimed_at < now - STOP_CLAIM_TTL,
+                ),
+            )
+            .values(status="stopping", stop_claimed_at=now)
+            .execution_options(synchronize_session=False)
+        )
         await session.commit()
+        if not claim.rowcount:
+            return False
+        await session.refresh(node)
+        return True
 
-        # Look up working bucket for output sync
+    @staticmethod
+    async def _finish_stop(
+        session: AsyncSession,
+        node: ComputeSession,
+        *,
+        actor_user_id: int,
+        old_status: str,
+        stopped_event: tuple[str, str, str] | None = None,
+    ) -> bool:
+        """Run the provider save-then-delete for a claimed node and record the truthful outcome.
+
+        Returns True when the node is stopped. On any kept outcome the node stays 'stop_failed'
+        with its sync credential, save obligation and no stopped timestamp or event.
+        """
         working_bucket = ""
         working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
         if working_bucket_value is not None:
@@ -351,20 +415,44 @@ class WorkNodeService:
                 working_bucket = val
 
         terminate_result = TerminationResult()
-        if compute_session.gce_instance_name:
+        if node.gce_instance_name:
             try:
                 adapter = get_work_node_adapter()
                 terminate_result = await adapter.terminate_vm(
-                    compute_session.gce_instance_name,
-                    compute_session.gce_zone or "",
-                    gcp_project_id=compute_session.gce_project_id or "",
-                    session_id=compute_session.id,
+                    node.gce_instance_name,
+                    node.gce_zone or "",
+                    gcp_project_id=node.gce_project_id or "",
+                    session_id=node.id,
                     working_bucket=working_bucket,
+                    sync_private_key=node.sync_private_key,
+                    host_public_key=node.host_public_key,
+                    provider_instance_id=node.provider_instance_id,
+                    launch_attempt_id=node.launch_attempt_id,
                 )
-            except Exception as e:
-                logger.warning("Failed to terminate work node %d: %s", session_id, e)
+            except Exception:
+                logger.exception("Stopping work node %d raised; keeping it", node.id)
+                terminate_result = TerminationResult(status=ServiceState.UNKNOWN, stop_failure=STOP_STATE_UNKNOWN)
 
-        # Register output files (ADR-040)
+        if terminate_result.stop_failure:
+            node.status = "stop_failed"
+            node.stop_failure = terminate_result.stop_failure
+            node.stop_attempts = (node.stop_attempts or 0) + 1
+            node.stop_claimed_at = None
+            await session.flush()
+            await log_action(
+                session,
+                user_id=actor_user_id,
+                entity_type="work_node",
+                entity_id=node.id,
+                action="stop_failed",
+                details={"reason": terminate_result.stop_failure, "attempt": node.stop_attempts},
+                previous_value={"status": old_status},
+            )
+            await session.commit()
+            logger.warning("Work node %d kept after Stop: %s", node.id, terminate_result.stop_failure)
+            return False
+
+        # Register output files (ADR-040); a retry does not register a file twice.
         output_files = terminate_result.output_files
         if output_files:
             try:
@@ -372,11 +460,11 @@ class WorkNodeService:
 
                 await SessionOutputService.register_outputs(
                     session,
-                    session_id=compute_session.id,
-                    organization_id=compute_session.organization_id,
-                    project_id=compute_session.project_id,
-                    experiment_id=compute_session.experiment_id,
-                    user_id=compute_session.user_id,
+                    session_id=node.id,
+                    organization_id=node.organization_id,
+                    project_id=node.project_id,
+                    experiment_id=node.experiment_id,
+                    user_id=node.user_id,
                     gcs_files=[
                         {"filename": o.filename, "gcs_uri": o.storage_uri, "size_bytes": o.size_bytes}
                         for o in output_files
@@ -384,11 +472,11 @@ class WorkNodeService:
                     source_type="work_node_output",
                 )
             except Exception as e:
-                logger.warning("Output registration failed for work node %d: %s", session_id, e)
+                logger.warning("Output registration failed for work node %d: %s", node.id, e)
 
         gcs_output_prefix = terminate_result.output_prefix
         if gcs_output_prefix:
-            compute_session.gcs_output_prefix = gcs_output_prefix
+            node.gcs_output_prefix = gcs_output_prefix
 
         # Move outputs from working to results bucket (ADR-040: two-phase)
         if working_bucket and output_files:
@@ -400,45 +488,53 @@ class WorkNodeService:
 
                     final_prefix = await SessionOutputService.move_outputs_to_results_bucket(
                         session,
-                        session_id=compute_session.id,
+                        session_id=node.id,
                         working_bucket=working_bucket,
                         results_bucket=results_bucket,
                     )
-                    compute_session.gcs_output_prefix = final_prefix
+                    node.gcs_output_prefix = final_prefix
             except Exception as e:
-                logger.warning("Failed to move outputs to results bucket for work node %d: %s", session_id, e)
+                logger.warning("Failed to move outputs to results bucket for work node %d: %s", node.id, e)
 
-        compute_session.status = "stopped"
-        compute_session.stopped_at = datetime.now(timezone.utc)
+        node.status = "stopped"
+        node.stopped_at = datetime.now(timezone.utc)
+        node.stop_failure = None
+        node.stop_claimed_at = None
+        # Saving and deletion are confirmed: the backend sync secret is no longer needed.
+        node.sync_private_key = None
         await session.flush()
 
         await log_action(
             session,
-            user_id=user_id,
+            user_id=actor_user_id,
             entity_type="work_node",
-            entity_id=compute_session.id,
+            entity_id=node.id,
             action="stop",
-            details={"machine_type": compute_session.machine_type},
+            details={"machine_type": node.machine_type},
             previous_value={"status": old_status},
         )
 
+        event_type, title, message = stopped_event or (
+            WORK_NODE_STOPPED,
+            "Work node stopped",
+            f"Work node {node.id} stopped",
+        )
         defer_event(
             session,
-            WORK_NODE_STOPPED,
+            event_type,
             {
-                "event_type": WORK_NODE_STOPPED,
-                "org_id": compute_session.organization_id,
-                "user_id": user_id,
-                "target_user_id": compute_session.user_id,
+                "event_type": event_type,
+                "org_id": node.organization_id,
+                "user_id": actor_user_id,
+                "target_user_id": node.user_id,
                 "entity_type": "work_node",
-                "entity_id": compute_session.id,
-                "title": "Work node stopped",
-                "message": f"Work node {compute_session.id} stopped",
-                "summary": f"Work node {compute_session.id} stopped",
+                "entity_id": node.id,
+                "title": title,
+                "message": message,
+                "summary": message if event_type != WORK_NODE_STOPPED else f"Work node {node.id} stopped",
             },
         )
-
-        return compute_session
+        return True
 
     @staticmethod
     async def list_work_nodes(
@@ -522,7 +618,7 @@ class WorkNodeService:
             select(ComputeSession).where(
                 ComputeSession.id == session_id,
                 ComputeSession.session_type == "ssh",
-                ComputeSession.status.in_(["running", "starting"]),
+                ComputeSession.status.in_(["running", "starting", "stopping", "stop_failed"]),
             )
         )
         compute_session = result.scalar_one_or_none()
@@ -541,7 +637,11 @@ class WorkNodeService:
         session: AsyncSession,
         idle_timeout_hours: int | None = None,
     ) -> None:
-        """Terminate SSH sessions with stale heartbeats."""
+        """Stop SSH sessions with stale heartbeats, through the same save-then-delete Stop.
+
+        A node whose save failed stays 'stop_failed'; cleanup retries it a bounded number of
+        times, then leaves it for its owner's Retry stop.
+        """
         try:
             if idle_timeout_hours is None:
                 idle_timeout_hours = await WorkNodeService._get_idle_timeout(session)
@@ -549,7 +649,11 @@ class WorkNodeService:
             result = await session.execute(
                 select(ComputeSession).where(
                     ComputeSession.session_type == "ssh",
-                    ComputeSession.status.in_(["running", "starting"]),
+                    or_(
+                        ComputeSession.status.in_(["running", "starting"]),
+                        (ComputeSession.status == "stop_failed")
+                        & (ComputeSession.stop_attempts < MAX_BACKGROUND_STOP_ATTEMPTS),
+                    ),
                 )
             )
             active_nodes = list(result.scalars().all())
@@ -561,43 +665,23 @@ class WorkNodeService:
                     continue
 
                 idle_hours = (now - last_beat).total_seconds() / 3600
-                if idle_hours >= idle_timeout_hours:
-                    logger.info(
-                        "Terminating work node %d (no heartbeat for %.1fh)",
-                        node.id,
-                        idle_hours,
-                    )
-
-                    if node.gce_instance_name:
-                        try:
-                            adapter = get_work_node_adapter()
-                            await adapter.terminate_vm(
-                                node.gce_instance_name,
-                                node.gce_zone or "",
-                                gcp_project_id=node.gce_project_id or "",
-                                session_id=node.id,
-                            )
-                        except Exception as e:
-                            logger.warning("Failed to terminate stale work node %d: %s", node.id, e)
-
-                    node.status = "stopped"
-                    node.stopped_at = now
-
-                    defer_event(
-                        session,
+                if idle_hours < idle_timeout_hours:
+                    continue
+                logger.info("Stopping work node %d (no heartbeat for %.1fh)", node.id, idle_hours)
+                old_status = node.status
+                if not await WorkNodeService._claim_stop(session, node):
+                    continue
+                await WorkNodeService._finish_stop(
+                    session,
+                    node,
+                    actor_user_id=node.user_id,
+                    old_status=old_status,
+                    stopped_event=(
                         WORK_NODE_HEARTBEAT_TIMEOUT,
-                        {
-                            "event_type": WORK_NODE_HEARTBEAT_TIMEOUT,
-                            "org_id": node.organization_id,
-                            "user_id": node.user_id,
-                            "target_user_id": node.user_id,
-                            "entity_type": "work_node",
-                            "entity_id": node.id,
-                            "title": "Work node auto-stopped (no heartbeat)",
-                            "message": (f"Work node {node.id} was stopped after {idle_hours:.1f}h without a heartbeat"),
-                            "summary": f"Work node {node.id} heartbeat timeout",
-                        },
-                    )
+                        "Work node auto-stopped (no heartbeat)",
+                        f"Work node {node.id} was stopped after {idle_hours:.1f}h without a heartbeat",
+                    ),
+                )
 
             await session.flush()
             await session.commit()

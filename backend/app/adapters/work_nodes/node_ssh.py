@@ -32,6 +32,28 @@ SYNC_USER = "bioaf-sync"
 NODE_TRUST_VERSION = 1
 
 
+# Why a Stop kept the node (TerminationResult.stop_failure / ComputeSession.stop_failure).
+STOP_SAVE_FAILED = "save_failed"
+STOP_DELETE_UNCONFIRMED = "delete_unconfirmed"
+STOP_STATE_UNKNOWN = "state_unknown"
+
+
+def sync_outputs_command(sync_outputs: str, capture_each: str) -> str:
+    """The node-side save: output directory sync plus notebook/script capture.
+
+    Exits nonzero if either transfer fails, so a successful later command cannot mask a failed
+    earlier one. An empty /outputs is a checked, successful no-op.
+    """
+    return (
+        "rc=0; "
+        f'if [ -d /outputs ] && [ -n "$(ls -A /outputs)" ]; then {sync_outputs} || rc=1; fi; '
+        "find /home -maxdepth 4 "
+        r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
+        f"-type f -exec sh -c {capture_each} sh {{}} + || rc=1; "
+        "exit $rc"
+    )
+
+
 class NodeSyncError(Exception):
     """The backend could not complete a command on the node (unreachable, timeout, refused)."""
 

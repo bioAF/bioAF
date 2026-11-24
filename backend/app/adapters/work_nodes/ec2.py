@@ -37,6 +37,15 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.adapters.session_status import update_compute_session
+from app.adapters.work_nodes.node_ssh import (
+    STOP_DELETE_UNCONFIRMED,
+    STOP_SAVE_FAILED,
+    STOP_STATE_UNKNOWN,
+    NodeSyncError,
+    host_key_install_lines,
+    run_sync_command,
+    sync_outputs_command,
+)
 from app.exceptions import ValidationError
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app import runtime
@@ -45,6 +54,9 @@ logger = logging.getLogger("bioaf.adapters.work_nodes.ec2")
 
 # In-memory session store for local mode
 _local_vms: dict[str, dict] = {}
+
+# Sentinel: the provider could not say whether an instance exists.
+_UNKNOWN = object()
 
 # EC2 instance state -> the neutral status strings the work-node service expects
 # (the same vocabulary the GCE adapter emits).
@@ -65,7 +77,7 @@ _EACH_FILE = ShellExpr('"$f"')
 def _capture_each(scripts_prefix: str) -> str:
     """The per-file copy `find -exec sh -c` runs: each found name is an argument, never re-parsed."""
     copy = shell_join(["aws", "s3", "cp", _EACH_FILE, scripts_prefix])
-    return f"for f do {copy}; done"
+    return f"for f do {copy} || exit 1; done"
 
 
 def _build_ec2_startup_script(vm_spec: dict) -> str:
@@ -94,6 +106,12 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
         "#!/bin/bash",
         "# Log all output for debugging",
         "exec > >(tee -a /var/log/bioaf-startup.log) 2>&1",
+    ]
+    host_private_key = vm_spec.get("host_private_key", "")
+    host_public_key = vm_spec.get("host_public_key", "")
+    if host_private_key and host_public_key:
+        lines += host_key_install_lines(host_private_key, host_public_key)
+    lines += [
         "",
         "# 1. Create PAM user with session credentials",
         f"useradd -m -d {home_dir} -s /bin/bash {username} || true",
@@ -302,9 +320,9 @@ class Ec2VmInstance(VmInstance):
         self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         self._aws_config: dict | None = None
-        # Sync SSH private keys keyed by session_id (generated at launch, used at
-        # terminate to SSH in for output sync), mirroring the GCE adapter.
-        self._sync_keys: dict[int, str] = {}
+        # Deletion is confirmed by polling the instance state (seconds between polls, poll count).
+        self._delete_poll_interval: float = 5
+        self._delete_poll_attempts: int = 24
 
     @property
     def is_local(self) -> bool:
@@ -410,14 +428,8 @@ class Ec2VmInstance(VmInstance):
         boot_disk_gb = vm_spec.get("boot_disk_gb", 100)
         instance_label = f"bioaf-worknode-{session_id}"
 
-        # Generate an SSH key pair for the bioaf-sync user so the backend can SSH
-        # into the VM at terminate time to sync outputs (same as GCE).
-        import asyncssh
-
-        sync_key = asyncssh.generate_private_key("ssh-ed25519")
-        self._sync_keys[session_id] = sync_key.export_private_key().decode()
-        vm_spec["sync_public_key"] = sync_key.export_public_key().decode().strip()
-
+        # The service generated and committed the sync key and host identity before this call;
+        # only their public halves (and the node's own host key) are in the spec.
         startup_script = _build_ec2_startup_script(vm_spec)
 
         ec2 = self._client("ec2")
@@ -458,6 +470,7 @@ class Ec2VmInstance(VmInstance):
                         {"Key": "bioaf-session", "Value": str(session_id)},
                         {"Key": "bioaf-user", "Value": str(user_id)},
                         {"Key": "bioaf-managed", "Value": "true"},
+                        {"Key": "bioaf-launch", "Value": str(vm_spec.get("launch_attempt_id") or "")},
                     ],
                 }
             ],
@@ -484,7 +497,11 @@ class Ec2VmInstance(VmInstance):
             status=to_service_state("starting"),
             zone=az,
             access_url=None,
-            provider_details={"image_id": ami_id},
+            provider_details={
+                "image_id": ami_id,
+                "provider_instance_id": instance_id,
+                "aws_account_id": result.get("OwnerId", ""),
+            },
         )
 
     async def _poll_vm_ready(
@@ -575,101 +592,127 @@ class Ec2VmInstance(VmInstance):
         *,
         session_id: int = 0,
         working_bucket: str = "",
+        sync_private_key: str | None = None,
+        host_public_key: str | None = None,
+        launch_attempt_id: str | None = None,
         **kwargs,
     ) -> TerminationResult:
-        """Sync outputs from the instance over SSH, then terminate it."""
+        """Save the node's outputs over verified SSH, then terminate it and confirm termination.
+
+        The instance is terminated only after every required transfer succeeded. Unknown state,
+        a binding mismatch, missing credentials/bucket/address, an untrusted server or a failed
+        transfer keep the instance and report why (``TerminationResult.stop_failure``).
+        """
         await self.load_config()
         ec2 = self._client("ec2")
+        s3_output_prefix = f"s3://{working_bucket}/sessions/{session_id}/outputs/" if working_bucket else ""
 
-        output_files: list[StoredObject] = []
-        s3_output_prefix = ""
+        def kept(reason: str, state: str = "unknown") -> TerminationResult:
+            logger.warning("Kept EC2 work node %s (session %s): %s", instance_name, session_id, reason)
+            return TerminationResult(
+                status=to_service_state(state),
+                output_prefix=s3_output_prefix,
+                provider_details={"instance_name": instance_name},
+                stop_failure=reason,
+            )
 
-        # Sync outputs from the running instance before terminating it (SSH in as
-        # bioaf-sync, run aws s3 sync), mirroring the GCE flow.
-        if working_bucket and session_id:
-            s3_output_prefix = f"s3://{working_bucket}/sessions/{session_id}/outputs/"
-            s3_scripts_prefix = f"s3://{working_bucket}/sessions/{session_id}/scripts/"
-
-            public_ip = None
-            try:
-                resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[instance_name]))
-                public_ip = resp["Reservations"][0]["Instances"][0].get("PublicIpAddress")
-            except Exception as e:
-                logger.warning("Could not get public IP for EC2 work node %s: %s", instance_name, e)
-
-            if public_ip:
-                sync_cmd = (
-                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
-                    f"aws s3 sync /outputs {s3_output_prefix}; fi; "
-                    f"find /home -maxdepth 4 "
-                    r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
-                    f"-type f "
-                    f"-exec sh -c {shell_word(_capture_each(s3_scripts_prefix))} sh {{}} +"
-                )
-                try:
-                    import asyncssh
-
-                    sync_key = self._sync_keys.get(session_id)
-                    if sync_key:
-                        key = asyncssh.import_private_key(sync_key)
-                        async with asyncssh.connect(
+        inst = await self._describe_instance(ec2, instance_name)
+        if inst is _UNKNOWN:
+            return kept(STOP_STATE_UNKNOWN)
+        if inst is not None:
+            state = inst.get("State", {}).get("Name", "")
+            if state != "terminated":
+                tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                if session_id and tags.get("bioaf-session") != str(session_id):
+                    return kept(STOP_STATE_UNKNOWN)
+                if launch_attempt_id and tags.get("bioaf-launch") != launch_attempt_id:
+                    return kept(STOP_STATE_UNKNOWN)
+                if state == "shutting-down":
+                    return kept(STOP_DELETE_UNCONFIRMED, "stopping")
+                if state != "running":
+                    return kept(STOP_STATE_UNKNOWN)
+                if session_id:
+                    public_ip = inst.get("PublicIpAddress")
+                    if not (working_bucket and public_ip and sync_private_key and host_public_key):
+                        return kept(STOP_SAVE_FAILED, "running")
+                    command = sync_outputs_command(
+                        f"aws s3 sync /outputs {s3_output_prefix}",
+                        shell_word(_capture_each(f"s3://{working_bucket}/sessions/{session_id}/scripts/")),
+                    )
+                    try:
+                        status = await run_sync_command(
                             public_ip,
-                            port=22,
-                            username="bioaf-sync",
-                            client_keys=[key],
-                            known_hosts=None,
-                        ) as conn:
-                            res = await asyncio.wait_for(conn.run(sync_cmd), timeout=300)
-                            if res.exit_status == 0:
-                                logger.info("Output sync complete for EC2 work node %s", instance_name)
-                            else:
-                                logger.warning(
-                                    "Output sync returned %s for %s: %s",
-                                    res.exit_status,
-                                    instance_name,
-                                    res.stderr,
-                                )
-                    else:
-                        logger.warning("No sync key for session %d, skipping output sync", session_id)
-                except Exception as e:
-                    logger.warning("SSH output sync failed for EC2 work node %s: %s", instance_name, e)
-
-        # Terminate the instance.
-        try:
-            await asyncio.to_thread(lambda: ec2.terminate_instances(InstanceIds=[instance_name]))
-            logger.info("Terminated EC2 work node %s", instance_name)
-        except Exception as e:
-            logger.warning("Failed to terminate EC2 work node %s: %s", instance_name, e)
-
-        self._sync_keys.pop(session_id, None)
-
-        # List the synced output objects from S3.
-        if working_bucket and session_id:
-            try:
-                s3 = self._client("s3")
-                prefix = f"sessions/{session_id}/"
-                paginator = s3.get_paginator("list_objects_v2")
-                for page in await asyncio.to_thread(
-                    lambda: list(paginator.paginate(Bucket=working_bucket, Prefix=prefix))
-                ):
-                    for obj in page.get("Contents", []):
-                        key = obj["Key"]
-                        output_files.append(
-                            StoredObject(
-                                filename=key.split("/")[-1],
-                                storage_uri=f"s3://{working_bucket}/{key}",
-                                size_bytes=obj.get("Size", 0),
-                            )
+                            sync_private_key=sync_private_key,
+                            host_public_key=host_public_key,
+                            command=command,
                         )
-            except Exception as e:
-                logger.warning("Failed to list output files for session %s: %s", session_id, e)
+                    except NodeSyncError as exc:
+                        logger.warning("Output sync for EC2 work node %s failed: %s", instance_name, exc)
+                        return kept(STOP_SAVE_FAILED, "running")
+                    if status != 0:
+                        logger.warning("Output sync for EC2 work node %s exited %s", instance_name, status)
+                        return kept(STOP_SAVE_FAILED, "running")
+                    logger.info("Output sync complete for EC2 work node %s", instance_name)
 
+                if not await self._terminate_and_confirm(ec2, instance_name):
+                    return kept(STOP_DELETE_UNCONFIRMED, "running")
+
+        output_files = await self._list_outputs(working_bucket, session_id) if working_bucket and session_id else []
         return TerminationResult(
             status=to_service_state("stopped"),
             output_files=output_files,
             output_prefix=s3_output_prefix,
             provider_details={"instance_name": instance_name, "stopped_at": datetime.now(timezone.utc).isoformat()},
         )
+
+    async def _describe_instance(self, ec2, instance_id: str):
+        """The instance dict, None when AWS confirms it does not exist, or _UNKNOWN."""
+        try:
+            resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[instance_id]))
+        except Exception as exc:
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "") if hasattr(exc, "response") else ""
+            if code == "InvalidInstanceID.NotFound":
+                return None
+            logger.warning("Could not describe EC2 work node %s: %s", instance_id, exc)
+            return _UNKNOWN
+        reservations = resp.get("Reservations", [])
+        if not reservations or not reservations[0].get("Instances"):
+            return None
+        return reservations[0]["Instances"][0]
+
+    async def _terminate_and_confirm(self, ec2, instance_id: str) -> bool:
+        try:
+            await asyncio.to_thread(lambda: ec2.terminate_instances(InstanceIds=[instance_id]))
+        except Exception as exc:
+            logger.warning("Failed to terminate EC2 work node %s: %s", instance_id, exc)
+            return False
+        for _ in range(self._delete_poll_attempts):
+            inst = await self._describe_instance(ec2, instance_id)
+            if inst is None or (inst is not _UNKNOWN and inst.get("State", {}).get("Name") == "terminated"):
+                logger.info("Terminated EC2 work node %s", instance_id)
+                return True
+            await asyncio.sleep(self._delete_poll_interval)
+        return False
+
+    async def _list_outputs(self, working_bucket: str, session_id: int) -> list[StoredObject]:
+        output_files: list[StoredObject] = []
+        try:
+            s3 = self._client("s3")
+            prefix = f"sessions/{session_id}/"
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in await asyncio.to_thread(lambda: list(paginator.paginate(Bucket=working_bucket, Prefix=prefix))):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    output_files.append(
+                        StoredObject(
+                            filename=key.split("/")[-1],
+                            storage_uri=f"s3://{working_bucket}/{key}",
+                            size_bytes=obj.get("Size", 0),
+                        )
+                    )
+        except Exception as e:
+            logger.warning("Failed to list output files for session %s: %s", session_id, e)
+        return output_files
 
     async def _ec2_get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
         ec2 = self._client("ec2")

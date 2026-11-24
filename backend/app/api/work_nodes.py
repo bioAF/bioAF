@@ -56,6 +56,7 @@ def _work_node_response(cs) -> WorkNodeResponse:
         memory_gb=cs.memory_gb,
         requested_disk_gb=cs.requested_disk_gb,
         status=cs.status,
+        stop_failure=cs.stop_failure,
         failure_reason=cs.failure_reason,
         failure_message=cs.failure_message,
         access_url=cs.access_url,
