@@ -4,10 +4,12 @@
   and looping form-field structures in crafted PDFs. Embedded PDF scripts stay disabled.
 - Closing a PDF, opening another document or version, or opening a file that cannot be read now stops the
   background PDF reader instead of leaving it running, including when the reader is stuck and does not respond.
-- A PDF that takes more than 30 seconds to open, or to draw a page, is stopped and reported as not loaded instead of
-  keeping the browser busy.
-- A page that cannot be drawn shows a message in place of that page; the other pages, paging and Download stay
-  available. Turning pages quickly no longer lets a slow page draw over the one you moved to.
+- A PDF that cannot be opened, or that takes more than 30 seconds to open or to show a page (after it has
+  downloaded), is stopped and shows "This PDF could not be displayed. Reload the page to try again." instead of
+  keeping the browser busy. Large scanned papers display well within that time.
+- A page that cannot be drawn shows "Page N could not be displayed. Try another page or download the PDF."; the other
+  pages, paging and Download stay available. Turning pages quickly no longer lets a slow page draw over the one you
+  moved to.
 
 ### Security and dependencies
 
