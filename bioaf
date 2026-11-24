@@ -1577,7 +1577,9 @@ cmd_update() {
         write_update_status in_progress ensure_encryption_key
         # This updater reconciles the Ops Agent itself (cloud_logging step below), so the install.sh
         # hook that does it for older updaters is skipped here.
-        BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+        # BIOAF_UPDATE_GATE=caller declares this updater's Work Node safety gate (below), so the hook does not
+        # stop it for the one-time preparation an older updater gets.
+        BIOAF_UPDATE_GATE=caller BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
             update_failed ensure_encryption_key "encryption key bootstrap failed"
 
         # Pull pre-built images while old containers are still running,

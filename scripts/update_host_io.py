@@ -12,6 +12,7 @@ arguments, never as generated code.
     record-agent-code <repo>            note which agent code is running (host-state/agent-code)
     agent-code-current <repo>           exit 0 when the recorded agent code matches the code on disk
     read-status-fields <repo>           "status<TAB>step<TAB>from_version<TAB>to_version" of current.json
+                                        ("-" for a missing field; nothing unless a regular file)
     record-preparation <repo> <target> <from> <prepared|failed>
                                         record the one-time updater preparation (host-state, 0600)
     normalize-prepared-failure <repo>   rewrite an older updater's fixed error after a matching,
@@ -224,8 +225,10 @@ def read_status_fields(repo_fd: int) -> str:
     record = _status_record(repo_fd)
     if not record:
         return ""
+    # "-" marks a missing or unsafe field, so a shell `read` never shifts the fields that follow.
     return "\t".join(
-        (
+        value or "-"
+        for value in (
             _field(record, "status", IDENT),
             _field(record, "step", IDENT),
             _field(record, "from_version", VERSION).lstrip("v"),

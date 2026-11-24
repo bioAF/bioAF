@@ -251,6 +251,46 @@ EOF
     [ "${#key}" -eq 44 ]
 }
 
+# The gate-aware caller contract (plan 03A): this release's updater sets BIOAF_UPDATE_GATE=caller and the
+# hook does its normal work; only an older updater mid-update gets the preparation pass.
+gate_fixture() {
+    mkdir -p "$BIOAF_ROOT/scripts" "$BIOAF_ROOT/update-status"
+    cp "$BATS_TEST_DIRNAME/../../scripts/update_host_io.py" "$BIOAF_ROOT/scripts/"
+    printf '#!/usr/bin/env bash\necho "bioaf $*" >> "%s/calls"\n' "$BIOAF_ROOT" > "$BIOAF_ROOT/bioaf"
+    printf '{"status": "in_progress", "step": "ensure_encryption_key", "from_version": "2026.11.21", "to_version": "2026.12.1"}\n' \
+        > "$BIOAF_ROOT/update-status/current.json"
+    printf 'POSTGRES_USER=bioaf\n' > "$BIOAF_ROOT/docker/.env"
+}
+
+@test "ensure-encryption-key under the gate-aware updater does its normal work" {
+    command -v openssl >/dev/null 2>&1 || skip "openssl required for Fernet key generation"
+    cd "$BIOAF_ROOT"; gate_fixture
+    run env BIOAF_UPDATE_GATE=caller BIOAF_HOST_LOG_COLLECTION=caller bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_ENCRYPTION_KEYS=' "$BIOAF_ROOT/docker/.env"
+    [ ! -e "$BIOAF_ROOT/host-state/update-preparation.json" ]
+}
+
+@test "ensure-encryption-key under an older updater prepares the agent and refuses before the env changes" {
+    cd "$BIOAF_ROOT"; gate_fixture
+    cp docker/.env env.before
+    run env -u BIOAF_UPDATE_GATE bash install.sh ensure-encryption-key
+    [ "$status" -ne 0 ]
+    cmp -s docker/.env env.before
+    [ "$(cat "$BIOAF_ROOT/calls")" = "bioaf ensure-update-agent" ]
+    [[ "$output" == *"The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."* ]]
+    grep -q '"target": "2026.12.1"' "$BIOAF_ROOT/host-state/update-preparation.json"
+}
+
+@test "ensure-encryption-key outside an update keeps its normal behavior" {
+    command -v openssl >/dev/null 2>&1 || skip "openssl required for Fernet key generation"
+    cd "$BIOAF_ROOT"; gate_fixture
+    printf '{"status": "completed", "step": "done"}\n' > "$BIOAF_ROOT/update-status/current.json"
+    run env -u BIOAF_UPDATE_GATE bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+    grep -q '^BIOAF_ENCRYPTION_KEYS=' "$BIOAF_ROOT/docker/.env"
+}
+
 @test "ensure-encryption-key is a no-op when docker/.env does not exist" {
     cd "$BIOAF_ROOT"
     rm -f "$BIOAF_ROOT/docker/.env"

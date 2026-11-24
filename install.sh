@@ -393,6 +393,55 @@ prepare_update_agent() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# One-time updater preparation (plan 03A first-update gate).
+#
+# Every supported updater since v0.13.0 checks out the target release, records step
+# ensure_encryption_key in update-status/current.json, and runs this release's
+# `install.sh ensure-encryption-key` before it pins or restarts anything. An older updater cannot
+# check whether Work Nodes launched by the running backend would lose their in-memory sync keys, so
+# it must not replace that backend. When the caller has not declared the gate-aware contract
+# (BIOAF_UPDATE_GATE=caller, set by this release's ./bioaf update), this hook prepares only the host
+# update agent, records the host-owned outcome in host-state/, and refuses before the environment
+# file, image pin or containers change. The operator retries; the retry runs the new updater.
+# ---------------------------------------------------------------------------
+PREPARED_UPDATE_MESSAGE="The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."
+
+older_updater_in_progress() {
+    # True when an update that has not declared the gate-aware contract is running this hook.
+    [ "${BIOAF_UPDATE_GATE:-}" = caller ] && return 1
+    [ -f "$SCRIPT_DIR/bioaf" ] && [ -f "$SCRIPT_DIR/scripts/update_host_io.py" ] || return 1
+    local fields status step
+    fields=$(python3 -I "$SCRIPT_DIR/scripts/update_host_io.py" read-status-fields "$SCRIPT_DIR" 2>/dev/null) || return 1
+    IFS=$'\t' read -r status step _ _ <<< "$fields"
+    [ "$status" = in_progress ] && [ "$step" = ensure_encryption_key ]
+}
+
+prepare_for_gated_update() {
+    # Prepare only the host update agent, record the outcome, then refuse. Never returns success.
+    local fields from target host_io="$SCRIPT_DIR/scripts/update_host_io.py"
+    fields=$(python3 -I "$host_io" read-status-fields "$SCRIPT_DIR" 2>/dev/null) || fields=""
+    IFS=$'\t' read -r _ _ from target <<< "$fields"
+    [ "$from" = - ] && from=""
+    [ "$target" = - ] && target=""
+    yellow "This release checks running work nodes before it replaces bioAF. Preparing the update helper first;"
+    yellow "nothing else is changed on this pass."
+    if bash "$SCRIPT_DIR/bioaf" ensure-update-agent; then
+        if [ -n "$from" ] && [ -n "$target" ]; then
+            python3 -I "$host_io" record-preparation "$SCRIPT_DIR" "$target" "$from" prepared \
+                || yellow "The preparation could not be recorded; the update page may show the older updater's message."
+        fi
+        green "$PREPARED_UPDATE_MESSAGE"
+        exit 3
+    fi
+    if [ -n "$from" ] && [ -n "$target" ]; then
+        python3 -I "$host_io" record-preparation "$SCRIPT_DIR" "$target" "$from" failed || true
+    fi
+    red "The update helper could not be prepared. bioAF and your work nodes are still running unchanged."
+    red "Run ./bioaf start on the host to see why, then retry the update."
+    exit 1
+}
+
 ensure_encryption_key_in_env() {
     if [ ! -f "$ENV_FILE" ]; then
         # Nothing to amend; generate-env hasn't been run. Not an error.
@@ -584,6 +633,11 @@ case "$command" in
         # The ./bioaf host hooks below run python3; check it before the env file changes.
         if [ -f "$SCRIPT_DIR/bioaf" ]; then
             host_python_require || exit 1
+        fi
+        # An older, ungated updater gets the one-time preparation pass and stops here, before the
+        # environment file changes (see prepare_for_gated_update).
+        if older_updater_in_progress; then
+            prepare_for_gated_update
         fi
         ensure_encryption_key_in_env "$@"
         prepare_host_log_collection

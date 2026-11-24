@@ -1027,10 +1027,11 @@ OLD_BIOAF="$BATS_TEST_DIRNAME/fixtures/bioaf.v2026.11.21"
 # old_update_env <tmp>: update_env, but driven by the previous release's updater, with the target's
 # real install.sh and a target ./bioaf whose ensure-cloud-logging records the call.
 old_update_env() {
-    local tmp="$1"
+    local tmp="$1" fixture="${2:-$OLD_BIOAF}"
     update_env "$tmp" v1.0.0
-    sed -i.bak "s|source '$BIOAF_SCRIPT'|source '$OLD_BIOAF'|" "$tmp/harness.sh"
+    sed -i.bak "s|source '$BIOAF_SCRIPT'|source '$fixture'|" "$tmp/harness.sh"
     cp "$BATS_TEST_DIRNAME/../../install.sh" "$tmp/install.sh"
+    mkdir -p "$tmp/scripts"; cp "$BATS_TEST_DIRNAME/../../scripts/update_host_io.py" "$tmp/scripts/"
     mkdir -p "$tmp/installer"; cp "$BATS_TEST_DIRNAME/../../installer/host_prereqs.sh" "$tmp/installer/"
     cat > "$tmp/bioaf" <<'STUB'
 #!/usr/bin/env bash
@@ -1042,13 +1043,41 @@ STUB
     printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
 }
 
-@test "the previous release's updater reconciles the agent config before the new backend starts" {
+# Owner-approved change (2026-11-24, plan 03A): an older updater no longer restarts the services.
+# The target's hook prepares only the host update agent and refuses, so the backend that may hold
+# older Work Nodes' sync keys keeps running; the retry runs the new updater and its safety check.
+@test "every supported older updater only prepares the update helper and leaves the services running" {
+    for fixture in v0.13.0 v0.13.1 v2026.11.20 v2026.11.21; do
+        tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp" "$BATS_TEST_DIRNAME/fixtures/bioaf.$fixture"
+        cp "$tmp/.env" "$tmp/env.before"
+        run env -u BIOAF_IMAGE_TAG -u BIOAF_UPDATE_GATE FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+            source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
+        [ "$status" -ne 0 ] || { echo "$fixture proceeded"; false; }
+        # Host-only preparation: the agent, nothing else.
+        grep -q '^target-bioaf ensure-update-agent' "$tmp/log"
+        ! grep -q '^target-bioaf ensure-cloud-logging' "$tmp/log"
+        ! grep -qE '^(pull|up |schema_upgrade)' "$tmp/log" || { echo "$fixture restarted"; false; }
+        cmp -s "$tmp/.env" "$tmp/env.before" || { echo "$fixture changed docker/.env"; false; }
+        [ "$(cat "$tmp/state/backend")" = v1.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v1.0.0 ]
+        [[ "$output" == *"The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."* ]]
+        # The older updater records its own fixed error; the prepared agent turns it into the instruction.
+        grep -q '"status": "failed"' "$tmp/update-status/current.json"
+        grep -q '"outcome": "prepared"' "$tmp/host-state/update-preparation.json"
+        python3 -I "$tmp/scripts/update_host_io.py" normalize-prepared-failure "$tmp"
+        grep -q 'Retry the update to continue.' "$tmp/update-status/current.json" || { echo "$fixture not normalized"; cat "$tmp/update-status/current.json"; false; }
+    done
+}
+
+@test "an older updater whose helper preparation fails reports it and is never normalized" {
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"; old_update_env "$tmp"
-    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+    run env -u BIOAF_IMAGE_TAG -u BIOAF_UPDATE_GATE FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_AGENT_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
         source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
-    [ "$status" -eq 0 ]
-    [ "$(grep -E '^(git .* checkout |target-bioaf|pull|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
-      "$(printf 'git -C\ntarget-bioaf ensure-cloud-logging\ntarget-bioaf ensure-update-agent\npull tag=v2.0.0\nup args=[--env-file')" ]
+    [ "$status" -ne 0 ]
+    ! grep -qE '^(pull|up |schema_upgrade)' "$tmp/log"
+    [[ "$output" != *"The update helper is ready"* ]]
+    grep -q '"outcome": "failed"' "$tmp/host-state/update-preparation.json"
+    python3 -I "$tmp/scripts/update_host_io.py" normalize-prepared-failure "$tmp"
+    ! grep -q 'Retry the update to continue.' "$tmp/update-status/current.json"
 }
 
 @test "a failed reconciliation stops the previous release's update before the services restart" {
