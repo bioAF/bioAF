@@ -63,6 +63,15 @@ The direct `next` and `eslint-config-next` declarations are held at `^15.5.29` (
 GHSA-p3m5-59mp-jv5r, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p), and the direct
 `postcss` declaration at `^8.5.33`, whose own range requires `source-map-js` `^1.2.2`.
 
+The direct `pdfjs-dist` declaration is held at `^6.5.438`. Both viewers parse untrusted PDFs (user uploads and
+publisher papers); 6.3.289 and 6.4.299 fix CSS injection through font family names, super-linear regular expressions
+and cyclic `Parent` walks (Aikido AIKIDO-2026-169371, AIKIDO-2026-990697), and 6.2.108 already closed
+GHSA-hq66-cqwq-w95j. Its optional `@napi-rs/canvas` `^1.0.13` keeps the canvas parent and every platform binary at
+one version above the 1.0.7 fix (AIKIDO-2026-687599); canvas is only loaded when pdf.js runs in Node, never in the
+browser. pdf.js 6.5 declares Node `>=22.13.0`; the Node 20 runtime still installs and builds it because npm does not
+enforce engines here, and the browser build needs nothing Node 20 lacks.
+`src/__tests__/pdf-parser-bounds.test.ts` runs the real parser against malformed files with a deadline.
+
 ### Parent-scoped overrides
 
 An override nested under a package (`"test-exclude": {"glob": "^14.0.2"}`) applies to that package's whole

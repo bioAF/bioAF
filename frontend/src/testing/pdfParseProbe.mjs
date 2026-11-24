@@ -5,7 +5,25 @@
 // parse each page's content into drawing operations), and prints one JSON
 // line with the outcome. The parent kills this process at its deadline, which
 // is the only way to stop a parser that never yields.
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+//
+// pdf.js 6.5 requires Node 22.13 or later and no longer polyfills
+// Promise.withResolvers, which Node 20 (CI and the image today) lacks. Every
+// browser the viewers support has it. Supply it here, before pdf.js loads, so
+// the parser can be exercised on the current runtime; delete this once the
+// frontend runtime is Node 22 or later.
+if (typeof Promise.withResolvers !== "function") {
+  Promise.withResolvers = function withResolvers() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
+const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
 const MAX_PAGES = 50;
 
