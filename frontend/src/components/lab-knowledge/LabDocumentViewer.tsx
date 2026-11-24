@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
+import { loadFailureMessage, logError } from "@/lib/errorReporting";
 import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
@@ -46,11 +47,16 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [pageFailed, setPageFailed] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // pdf.js parses on a worker that lives until its loading task is destroyed,
+  // so closing the viewer, moving to another document or version, or failing
+  // to parse all destroy it.
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
+    let loadingTask: PDFDocumentLoadingTask | null = null;
     setLoading(true);
     setError(null);
     setNumPages(0);
@@ -66,7 +72,8 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         if (kind === "pdf") {
           const data = await blob.arrayBuffer();
           if (cancelled) return;
-          const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
+          loadingTask = pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS });
+          const pdf = await loadingTask.promise;
           if (cancelled) return;
           pdfRef.current = pdf;
           setNumPages(pdf.numPages);
@@ -79,6 +86,7 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         setLoading(false);
       })
       .catch((e) => {
+        void loadingTask?.destroy();
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Could not load the document.");
           setLoading(false);
@@ -87,16 +95,22 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
 
     return () => {
       cancelled = true;
+      void loadingTask?.destroy();
+      pdfRef.current = null;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [documentId, version, kind]);
 
   // Render the current PDF page whenever it (or the loaded document) changes.
+  // A page turn cancels a drawing still in progress, so a slow page can never
+  // paint over the one the reader moved to.
   useEffect(() => {
     if (kind !== "pdf") return;
     const pdf = pdfRef.current;
     if (!pdf || numPages === 0) return;
     let cancelled = false;
+    let renderTask: RenderTask | null = null;
+    setPageFailed(false);
     (async () => {
       const pdfPage = await pdf.getPage(page);
       if (cancelled) return;
@@ -107,10 +121,16 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
       canvas.height = viewport.height;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
-    })();
+      renderTask = pdfPage.render({ canvas, canvasContext: ctx, viewport });
+      await renderTask.promise;
+    })().catch((e) => {
+      if (cancelled) return;
+      logError(`rendering page ${page} of a lab document PDF`, e);
+      setPageFailed(true);
+    });
     return () => {
       cancelled = true;
+      renderTask?.cancel();
     };
   }, [page, numPages, kind]);
 
@@ -195,7 +215,12 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         className="overflow-auto border border-gray-200 rounded bg-gray-50 flex items-center justify-center"
         style={{ height: "85vh" }}
       >
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+        {pageFailed && (
+          <p role="alert" className="text-sm text-red-700 p-4">
+            {loadFailureMessage(`Page ${page}`)}
+          </p>
+        )}
+        <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />
       </div>
     </div>
   );
