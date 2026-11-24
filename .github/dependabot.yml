@@ -1,12 +1,25 @@
 version: 2
 updates:
+  # Each ecosystem updates on its own weekday morning (Pacific), and routine minor/patch version updates arrive as
+  # grouped pull requests, so one weekly cycle does not start a burst of full CI runs that queue against each other.
+  # Major upgrades stay separate pull requests; security updates are never held for a weekly group.
+
   # Backend Python dependencies: pyproject.toml declares them, uv.lock pins them (backend/DEPENDENCIES.md).
-  # Each pull request changes the lock (and a floor, when one must move) and runs the full CI gate.
+  # Each pull request changes the lock (and a floor, when one must move) and runs the full CI gate. Dependabot
+  # cannot split uv groups by dependency type, so routine updates form one pattern group.
   - package-ecosystem: uv
     directory: /backend
     schedule:
       interval: weekly
+      day: tuesday
+      time: "04:00"
+      timezone: America/Los_Angeles
     open-pull-requests-limit: 5
+    groups:
+      backend-routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # Deliberate pins and caps, moved only by a reviewed pyproject change; the reasons are next to each one.
       - dependency-name: ruff
@@ -23,6 +36,9 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+      day: wednesday
+      time: "04:00"
+      timezone: America/Los_Angeles
     open-pull-requests-limit: 5
     groups:
       frontend-runtime:
@@ -35,8 +51,17 @@ updates:
   # Workflow actions are pinned to full commit SHAs with the reviewed release as a comment
   # (backend/tests/test_ci_workflow.py). Dependabot proposes the next release's SHA and comment together; a maintainer
   # reviews the upstream change and the pull request runs full CI before merge. Nothing merges automatically.
+  # Minor and patch releases arrive as one grouped pull request; a major release arrives as its own.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: thursday
+      time: "04:00"
+      timezone: America/Los_Angeles
     open-pull-requests-limit: 5
+    groups:
+      actions-routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

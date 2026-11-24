@@ -656,6 +656,65 @@ def test_dependabot_proposes_weekly_action_pin_updates():
     assert "automerge" not in json.dumps(actions).lower()
 
 
+# ── dependency-update bursts (nov_sec 02.5A) ──
+# Routine minor/patch version updates arrive as one grouped pull request per ecosystem, on separate days outside
+# the working day, so a weekly cycle starts three full CI runs on three days instead of up to fifteen at once.
+
+DEPENDABOT = REPO / ".github" / "dependabot.yml"
+UPDATE_DAYS = {"uv": "tuesday", "npm": "wednesday", "github-actions": "thursday"}
+
+
+def _dependabot_updates() -> dict[str, dict]:
+    return {u["package-ecosystem"]: u for u in yaml.safe_load(DEPENDABOT.read_text())["updates"]}
+
+
+@pytest.mark.parametrize("ecosystem", sorted(UPDATE_DAYS))
+def test_each_ecosystem_updates_weekly_on_its_own_morning(ecosystem):
+    schedule = _dependabot_updates()[ecosystem]["schedule"]
+    assert schedule == {
+        "interval": "weekly",
+        "day": UPDATE_DAYS[ecosystem],
+        "time": "04:00",
+        "timezone": "America/Los_Angeles",
+    }
+
+
+def test_no_two_ecosystems_share_an_update_day():
+    days = [u["schedule"].get("day") for u in _dependabot_updates().values()]
+    assert len(days) == len(set(days))
+
+
+@pytest.mark.parametrize("ecosystem", ["uv", "github-actions"])
+def test_routine_updates_arrive_as_one_grouped_pull_request(ecosystem):
+    # A pattern group, not a dependency-type split: Dependabot does not support groups.dependency-type for uv.
+    groups = _dependabot_updates()[ecosystem].get("groups", {})
+    assert len(groups) == 1
+    [group] = groups.values()
+    assert group == {"applies-to": "version-updates", "patterns": ["*"], "update-types": ["minor", "patch"]}
+
+
+def test_npm_keeps_its_runtime_and_development_groups():
+    groups = _dependabot_updates()["npm"]["groups"]
+    assert groups == {
+        "frontend-runtime": {"dependency-type": "production", "update-types": ["minor", "patch"]},
+        "frontend-development": {"dependency-type": "development", "update-types": ["minor", "patch"]},
+    }
+
+
+def test_major_and_security_updates_stay_outside_routine_groups():
+    # A major upgrade is its own reviewed pull request; security updates are not held for the weekly group.
+    for ecosystem, update in _dependabot_updates().items():
+        for name, group in update.get("groups", {}).items():
+            assert "major" not in group["update-types"], (ecosystem, name)
+            assert group.get("applies-to", "version-updates") == "version-updates", (ecosystem, name)
+
+
+def test_grouping_adds_no_cooldown_and_keeps_the_open_pull_request_limit():
+    for ecosystem, update in _dependabot_updates().items():
+        assert "cooldown" not in update, ecosystem
+        assert update["open-pull-requests-limit"] == 5, ecosystem
+
+
 # ── checkout credentials do not outlive the checkout (nov_sec 01C) ──
 
 RELEASE = REPO / ".github" / "workflows" / "release.yml"
