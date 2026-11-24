@@ -25,7 +25,13 @@ import { ListContent } from "@/components/shared/ListContent";
 import { WorkNodeLaunchDialog } from "@/components/workNodes/WorkNodeLaunchDialog";
 import { WorkNodeDetailModal } from "@/components/workNodes/WorkNodeDetailModal";
 import { GitHubReposPanel } from "@/components/workNodes/GitHubReposPanel";
-import { sshCommand, workNodeStatusLabel } from "@/components/workNodes/workNodeDisplay";
+import {
+  canRequestStop,
+  isConnectable,
+  sshCommand,
+  stopFailedMessage,
+  workNodeStatusLabel,
+} from "@/components/workNodes/workNodeDisplay";
 
 interface ProvisioningNotice {
   id: number;
@@ -141,9 +147,15 @@ export default function WorkNodesPage() {
     if (!ok) return;
     setStoppingNodes((prev) => new Set(prev).add(nodeId));
     try {
-      await api.post(`/api/v1/work-nodes/sessions/${nodeId}/stop`);
+      const result = await api.post<WorkNode>(`/api/v1/work-nodes/sessions/${nodeId}/stop`);
       void loadNodes();
-      setViewingNode((current) => (current?.id === nodeId ? null : current));
+      if (result?.status === "stop_failed") {
+        // The node was kept: say so plainly and keep its details open with Retry stop.
+        toast.error(`Stop failed. ${stopFailedMessage(result)}`);
+        setViewingNode((current) => (current?.id === nodeId ? result : current));
+      } else {
+        setViewingNode((current) => (current?.id === nodeId ? null : current));
+      }
     } catch (e) {
       // A silent failure here leaves a node running and billing while the user
       // believes they stopped it.
@@ -283,7 +295,7 @@ export default function WorkNodesPage() {
                     {formatRecordedTime(node.started_at)}
                   </td>
                   <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
-                    {node.access_url && node.status === "running" ? (
+                    {isConnectable(node) ? (
                       <button
                         onClick={() => navigator.clipboard.writeText(sshCommand(node.access_url))}
                         className="text-bioaf-600 hover:underline"
@@ -295,12 +307,12 @@ export default function WorkNodesPage() {
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-2">
-                      {canStop && node.status === "running" && (
+                      {canStop && canRequestStop(node) && (
                         <button
                           onClick={() => handleStop(node.id)}
                           className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50"
                         >
-                          Stop
+                          {node.status === "stop_failed" ? "Retry stop" : "Stop"}
                         </button>
                       )}
                       {canLaunch && (

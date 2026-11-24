@@ -17728,6 +17728,8 @@ export interface components {
             started_at?: string | null;
             /** Status */
             status: string;
+            /** Stop Failure */
+            stop_failure?: string | null;
             /** Stopped At */
             stopped_at?: string | null;
             user?: components["schemas"]["UserSummary"] | null;

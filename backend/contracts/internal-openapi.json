@@ -27488,6 +27488,17 @@
             "title": "Status",
             "type": "string"
           },
+          "stop_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Failure"
+          },
           "stopped_at": {
             "anyOf": [
               {

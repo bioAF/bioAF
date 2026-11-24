@@ -7,7 +7,14 @@ import { formatSessionStatusLabel, formatLinkedTo } from "@/lib/sessionStatus";
 import { formatRecordedTime } from "@/lib/recordedTime";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import type { GitHubRepo, WorkNode } from "@/lib/types";
-import { formatUptime, sshCommand, workNodeStatusLabel } from "./workNodeDisplay";
+import {
+  canRequestStop,
+  formatUptime,
+  isConnectable,
+  sshCommand,
+  stopFailedMessage,
+  workNodeStatusLabel,
+} from "./workNodeDisplay";
 
 /** One work node's details, from the page's current list. It stays a dialog, not a route. */
 export function WorkNodeDetailModal({
@@ -40,6 +47,12 @@ export function WorkNodeDetailModal({
           {workNodeStatusLabel(node)}
         </span>
       </div>
+      {node.status === "stop_failed" && (
+        <div role="alert" className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+          <div className="font-medium mb-1">Stop failed</div>
+          <div>{stopFailedMessage(node)}</div>
+        </div>
+      )}
       {node.status === "failed" && node.failure_message && (
         <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
           <div className="font-medium mb-1">
@@ -89,7 +102,7 @@ export function WorkNodeDetailModal({
           <span>{node.gce_zone}</span>
         </div>
       )}
-      {node.access_url && node.status === "running" && (
+      {isConnectable(node) && (
         <div>
           <span className="text-gray-500 block mb-1">SSH Command</span>
           <div className="bg-gray-900 text-green-400 rounded p-3 font-mono text-xs flex items-center justify-between">
@@ -145,11 +158,11 @@ export function WorkNodeDetailModal({
         </div>
       )}
     </div>
-    {canStop && node.status === "running" && (
+    {canStop && canRequestStop(node) && (
       <div className="mt-4 pt-4 border-t">
         <Button variant="danger" className="w-full"
           onClick={() => onStop(node.id)}>
-          Stop Work Node
+          {node.status === "stop_failed" ? "Retry stop" : "Stop Work Node"}
         </Button>
         <p className="text-xs text-gray-500 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
       </div>
