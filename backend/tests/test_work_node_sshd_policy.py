@@ -90,7 +90,9 @@ def test_unsafe_usernames_are_refused(username):
         compile_account_policy(username, [])
 
 
-@pytest.mark.parametrize("ranges", [["0.0.0.0/0"], ["::/0"], ["10.0.0.0/8 PasswordAuthentication yes"], ["nope"], ["10.0.0.1/8"]])
+@pytest.mark.parametrize(
+    "ranges", [["0.0.0.0/0"], ["::/0"], ["10.0.0.0/8 PasswordAuthentication yes"], ["nope"], ["10.0.0.1/8"]]
+)
 def test_unsafe_or_malformed_ranges_are_refused(ranges):
     with pytest.raises(SshPolicyError):
         compile_account_policy("sci", ranges)
@@ -151,9 +153,12 @@ def test_new_work_node_images_carry_no_global_password_override(template):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reported, stored", [("applied", "applied"), ("failed_closed", "failed_closed"), ("bogus", None)])
-async def test_heartbeat_records_the_nodes_applied_login_policy(client, session, comp_bio_user, comp_bio_token, reported, stored):
-    from sqlalchemy import select
+@pytest.mark.parametrize(
+    "reported, stored", [("applied", "applied"), ("failed_closed", "failed_closed"), ("bogus", None)]
+)
+async def test_heartbeat_records_the_nodes_applied_login_policy(
+    client, session, comp_bio_user, comp_bio_token, reported, stored
+):
 
     from app.models.notebook_session import ComputeSession
 
@@ -175,7 +180,9 @@ async def test_heartbeat_records_the_nodes_applied_login_policy(client, session,
         headers={"X-Heartbeat-Token": "hb-tok", "X-SSH-Policy": reported},
     )
     assert response.status_code == 200
-    detail = await client.get(f"/api/v1/work-nodes/sessions/{node.id}", headers={"Authorization": f"Bearer {comp_bio_token}"})
+    detail = await client.get(
+        f"/api/v1/work-nodes/sessions/{node.id}", headers={"Authorization": f"Bearer {comp_bio_token}"}
+    )
     body = detail.json()
     assert body["ssh_policy_status"] == stored
     assert body["ssh_policy_revision"] == 4

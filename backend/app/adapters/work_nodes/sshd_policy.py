@@ -97,7 +97,8 @@ def compile_account_policy(username: str, ranges: list[str]) -> str:
 
 def _key_only_policy(username: str) -> str:
     return compile_account_policy(username, ["127.0.0.1/32"]).replace(
-        "    AuthenticationMethods any\n    PasswordAuthentication yes", "    AuthenticationMethods publickey\n    PasswordAuthentication no"
+        "    AuthenticationMethods any\n    PasswordAuthentication yes",
+        "    AuthenticationMethods publickey\n    PasswordAuthentication no",
     )
 
 
