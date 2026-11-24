@@ -53,6 +53,9 @@ const MARKDOWN_ESM_PACKAGES = [
   "trough",
   "zwitch",
   "@ungap/structured-clone",
+  // remark-gfm (settings release notes)
+  "escape-string-regexp",
+  "markdown-table",
 ];
 
 module.exports = async () => {
