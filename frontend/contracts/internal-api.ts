@@ -8481,6 +8481,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ssh-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ssh Access */
+        get: operations["get_ssh_access_api_v1_settings_ssh_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Work Node Draft */
+        post: operations["apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Work Node Draft */
+        post: operations["check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Work Node Draft */
+        put: operations["save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Work Node Policy */
+        post: operations["rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/work-nodes": {
         parameters: {
             query?: never;
@@ -9334,6 +9419,11 @@ export interface components {
             scopes: string[];
             /** Service Account User Id */
             service_account_user_id: number;
+        };
+        /** ApplyRequest */
+        ApplyRequest: {
+            /** Draft Version */
+            draft_version: number;
         };
         /** ApplyUpdatesRequest */
         ApplyUpdatesRequest: {
@@ -14450,6 +14540,18 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** RangeEntry */
+        RangeEntry: {
+            /** Cidr */
+            cidr: string;
+            /** Id */
+            id?: string | null;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
         /** ReachabilityTestResult */
         ReachabilityTestResult: {
             /**
@@ -17684,6 +17786,15 @@ export interface components {
             name?: string | null;
             /** Url */
             url?: string | null;
+        };
+        /** WorkNodeDraftRequest */
+        WorkNodeDraftRequest: {
+            /** Base Version */
+            base_version: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Ranges */
+            ranges?: components["schemas"]["RangeEntry"][];
         };
         /** WorkNodeLaunchRequest */
         WorkNodeLaunchRequest: {
@@ -34065,6 +34176,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ssh_access_api_v1_settings_ssh_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkNodeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

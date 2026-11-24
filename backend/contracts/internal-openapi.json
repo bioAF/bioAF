@@ -784,6 +784,19 @@
         "title": "ApiKeyOut",
         "type": "object"
       },
+      "ApplyRequest": {
+        "properties": {
+          "draft_version": {
+            "title": "Draft Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_version"
+        ],
+        "title": "ApplyRequest",
+        "type": "object"
+      },
       "ApplyUpdatesRequest": {
         "properties": {
           "modules": {
@@ -16911,6 +16924,37 @@
         "title": "QuotaVerdictResponse",
         "type": "object"
       },
+      "RangeEntry": {
+        "properties": {
+          "cidr": {
+            "maxLength": 64,
+            "title": "Cidr",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cidr"
+        ],
+        "title": "RangeEntry",
+        "type": "object"
+      },
       "ReachabilityTestResult": {
         "properties": {
           "checked_at": {
@@ -27205,6 +27249,32 @@
           }
         },
         "title": "WebhookSubscriptionUpdate",
+        "type": "object"
+      },
+      "WorkNodeDraftRequest": {
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/RangeEntry"
+            },
+            "maxItems": 50,
+            "title": "Ranges",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "base_version"
+        ],
+        "title": "WorkNodeDraftRequest",
         "type": "object"
       },
       "WorkNodeLaunchRequest": {
@@ -51398,6 +51468,141 @@
         "summary": "Update Notebook Settings",
         "tags": [
           "notebook-settings"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access": {
+      "get": {
+        "operationId": "get_ssh_access_api_v1_settings_ssh_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ssh Access",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/apply": {
+      "post": {
+        "operationId": "apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/check": {
+      "post": {
+        "operationId": "check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/draft": {
+      "put": {
+        "operationId": "save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkNodeDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/rollback": {
+      "post": {
+        "operationId": "rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollback Work Node Policy",
+        "tags": [
+          "ssh-access"
         ]
       }
     },
