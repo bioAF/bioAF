@@ -1625,6 +1625,16 @@ run_waiter() {
         sed -i.bak "s|source '$OLD_BIOAF'|source '$updater'|" "$tmp/harness.sh"
         run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_AGENT_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
             source '$tmp/harness.sh'; ensure_cloud_logging() { :; }; cmd_update 2.0.0 --yes"
+        if [ "$updater" = "$OLD_BIOAF" ]; then
+            # Owner-approved change (2026-11-24, plan 03A): the older updater runs the reconciliation as its
+            # one-time preparation and then stops before restarting anything.
+            [ "$status" -ne 0 ]
+            [ "$(grep -E '^(git .* checkout |target-bioaf ensure-update-agent|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
+              "$(printf 'git -C\ntarget-bioaf ensure-update-agent')" ]
+            [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+            [[ "$output" == *"update helper could not be prepared"* ]]
+            continue
+        fi
         [ "$status" -eq 0 ]
         [ "$(grep -E '^(git .* checkout |target-bioaf ensure-update-agent|up )' "$tmp/log" | cut -d' ' -f1,2)" = \
           "$(printf 'git -C\ntarget-bioaf ensure-update-agent\nup args=[--env-file')" ]
