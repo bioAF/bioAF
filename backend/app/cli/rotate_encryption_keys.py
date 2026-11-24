@@ -40,6 +40,7 @@ _ENCRYPTED_COLUMNS: list[tuple[str, str]] = [
     ("organizations", "slack_signing_secret"),
     ("session_credentials", "ssh_private_key"),
     ("compute_sessions", "heartbeat_token"),
+    ("compute_sessions", "sync_private_key"),
     ("slack_installations", "bot_token"),
     ("slack_webhooks", "webhook_url"),
     ("upload_checkpoints", "session_handle"),

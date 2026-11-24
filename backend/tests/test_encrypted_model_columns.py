@@ -158,6 +158,45 @@ async def test_compute_session_heartbeat_token_encrypted(db_engine, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_compute_session_sync_private_key_encrypted_and_host_identity_plain(db_engine, admin_user):
+    """A work node's backend sync key is a secret; its recorded server public key is not."""
+    from app.models.notebook_session import ComputeSession
+    from app.cli import rotate_encryption_keys as rotate_cli
+
+    async with _factory(db_engine)() as session:
+        cs = ComputeSession(
+            user_id=admin_user.id,
+            organization_id=admin_user.organization_id,
+            session_type="ssh",
+            resource_profile="custom",
+            cpu_cores=2,
+            memory_gb=4,
+            status="pending",
+            sync_private_key="-----BEGIN OPENSSH PRIVATE KEY-----\nsync\n",
+            host_public_key="ssh-ed25519 AAAAhost",
+            node_trust_version=1,
+        )
+        session.add(cs)
+        await session.commit()
+        cs_id = cs.id
+
+    async with _factory(db_engine)() as session:
+        loaded = (await session.execute(select(ComputeSession).where(ComputeSession.id == cs_id))).scalar_one()
+        assert loaded.sync_private_key == "-----BEGIN OPENSSH PRIVATE KEY-----\nsync\n"
+        raw = (
+            await session.execute(
+                sa_text("SELECT sync_private_key, host_public_key FROM compute_sessions WHERE id = :id"),
+                {"id": cs_id},
+            )
+        ).one()
+        assert raw.sync_private_key.startswith("gAAAA")
+        assert raw.host_public_key == "ssh-ed25519 AAAAhost"
+
+    # Key rotation re-encrypts it with the other secrets.
+    assert ("compute_sessions", "sync_private_key") in rotate_cli._ENCRYPTED_COLUMNS
+
+
+@pytest.mark.asyncio
 async def test_slack_installation_bot_token_encrypted(db_engine, admin_user):
     from app.models.notification import SlackInstallation
 
