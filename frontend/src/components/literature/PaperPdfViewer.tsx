@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
-import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
+import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
+import { pageFailureMessage, usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
 // to an emitted asset served from our own origin, so there is no CDN dependency
@@ -13,6 +14,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
+
+// Each document gets its own worker so a stuck one can be terminated
+// (src/lib/pdfSession.ts).
+const ENGINE = createPdfEngine<PDFDocumentProxy, pdfjsLib.PDFWorker>(pdfjsLib);
 
 interface Props {
   paperId: number;
@@ -30,45 +35,30 @@ const RENDER_SCALE = 1.4;
 // app can observe page turns and drive reading status from them.
 export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const onReachRef = useRef(onReachPage);
   onReachRef.current = onReachPage;
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [numPages, setNumPages] = useState(0);
-  const [page, setPage] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<ArrayBuffer | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Load the document (and a download URL) once per paper.
+  // Fetch the bytes (and a download URL) once per paper.
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
-    setLoading(true);
-    setError(null);
-    setNumPages(0);
-    setPage(1);
-    pdfRef.current = null;
+    setData(null);
+    setFetchError(null);
 
     fetchPaperPdfBlob(paperId)
       .then(async (blob) => {
         if (cancelled) return;
         createdUrl = URL.createObjectURL(blob);
         setDownloadUrl(createdUrl);
-        const data = await blob.arrayBuffer();
-        if (cancelled) return;
-        const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
-        if (cancelled) return;
-        pdfRef.current = pdf;
-        setNumPages(pdf.numPages);
-        setPage(1);
-        setLoading(false);
+        const bytes = await blob.arrayBuffer();
+        if (!cancelled) setData(bytes);
       })
       .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Could not load the PDF.");
-          setLoading(false);
-        }
+        if (!cancelled) setFetchError(e instanceof Error ? e.message : "Could not load the PDF.");
       });
 
     return () => {
@@ -77,27 +67,10 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
     };
   }, [paperId]);
 
-  // Render the current page whenever it (or the loaded document) changes.
-  useEffect(() => {
-    const pdf = pdfRef.current;
-    if (!pdf || numPages === 0) return;
-    let cancelled = false;
-    (async () => {
-      const pdfPage = await pdf.getPage(page);
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [page, numPages]);
+  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy, OwnedPdfWorker<pdfjsLib.PDFWorker>>(ENGINE, data, canvasRef, RENDER_SCALE, "a paper PDF");
+  const { numPages, page, setPage, pageFailed } = pdf;
+  const error = fetchError ?? pdf.error;
+  const loading = !error && (data === null || pdf.opening);
 
   // Report the reached page to the parent on every page change.
   useEffect(() => {
@@ -151,7 +124,12 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
             page's intrinsic ratio scale it down to fit both bounds, so a portrait
             page shows in full on a laptop or external display without an inner
             scrollbar. Sized for desktop; small screens are not a target. */}
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+        {pageFailed && (
+          <p role="alert" className="text-sm text-red-700 p-4">
+            {pageFailureMessage(page)}
+          </p>
+        )}
+        <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />
       </div>
     </div>
   );

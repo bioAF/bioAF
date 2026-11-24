@@ -58,10 +58,39 @@ Remove a floor only when every parent's declared range excludes the vulnerable v
 | `browserslist` `^4.28.9` | GHSA-73wf-gq98-2v4g | `autoprefixer`, `@babel/helper-compilation-targets` (development build) |
 | `baseline-browser-mapping` `^2.11.0` | GHSA-w5vr-8v7q-w6rv | `browserslist` `^2.10.44` (development build) |
 | `postcss-selector-parser@<6.1.5` `^6.1.5` | GHSA-rj75-hqrm-r3gf, GHSA-w9m9-85wc-3x92 | `@tailwindcss/typography` pins `6.0.10` exactly; `tailwindcss` and `postcss-nested` `^6.1.1` (development build) |
+| `es-toolkit` `^1.51.0` | GHSA-9qjg-mfqr-5gqq (AIKIDO-2026-523264, `es-toolkit/compat` path writes through `constructor.prototype`) | `recharts` `^1.39.3` (runtime) |
+| `@ungap/structured-clone` `^1.3.1` | AIKIDO-2026-11068 (`deserialize` constructs any global by name) | `mdast-util-to-hast` `^1.0.0` under `react-markdown` (runtime); `jest-worker` `^1.3.0` (test tooling); `eslint` 8 `^1.2.0` (development) |
+| `style-to-object@1.0.14`: `inline-style-parser` `^0.2.9` | AIKIDO-2026-866435 (comment-stripping regular expression) | `style-to-object` 1.0.14 pins `0.2.7` exactly, and `style-to-js` 1.1.21 pins that `style-to-object` exactly, under `react-markdown` > `hast-util-to-jsx-runtime` (runtime) |
 
 The direct `next` and `eslint-config-next` declarations are held at `^15.5.29` (GHSA-2464-fhr4-w9xw,
 GHSA-p3m5-59mp-jv5r, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p), and the direct
 `postcss` declaration at `^8.5.33`, whose own range requires `source-map-js` `^1.2.2`.
+
+The direct `pdfjs-dist` declaration is held at `^6.5.438`. Both viewers parse untrusted PDFs (user uploads and
+publisher papers); 6.3.289 and 6.4.299 fix CSS injection through font family names, super-linear regular expressions
+and cyclic `Parent` walks (Aikido AIKIDO-2026-169371, AIKIDO-2026-990697), and 6.2.108 already closed
+GHSA-hq66-cqwq-w95j. Its optional `@napi-rs/canvas` `^1.0.13` keeps the canvas parent and every platform binary at
+one version above the 1.0.7 fix (AIKIDO-2026-687599); canvas is only loaded when pdf.js runs in Node, never in the
+browser. pdf.js 6.5 declares Node `>=22.13.0`; the Node 20 runtime still installs and builds it because npm does not
+enforce engines here, and the browser build needs nothing Node 20 lacks.
+`src/__tests__/pdf-parser-bounds.test.ts` runs the real parser against malformed files with a deadline.
+
+The direct `recharts` declaration is held at `^3.11.1` (AIKIDO-2026-172842, Sankey depth recursion, fixed in
+3.9.2; the app draws no Sankey). Recharts requests `immer ^11.1.8` and `@reduxjs/toolkit` `2.x`; Toolkit 2.15 requests
+`immer ^11.2.9`, so the single shared Immer copy is above the 11.1.9 prototype-pollution fix (AIKIDO-2026-445255)
+without an override, and Recharts 3.9+ no longer pulls Immer 10. If `npm ls immer` ever shows a second 11.x copy
+below 11.1.9, add an `immer` floor here.
+
+`@ungap/structured-clone` reaches the browser through Markdown rendering: `mdast-util-to-hast` calls its default
+`structuredClone(value)` to copy tree nodes, so the input to `deserialize` is what `serialize` just produced from
+in-memory values, never serialized data from a request. `jest-worker` deserializes messages between Jest's own
+processes. One deduplicated copy serves all three consumers.
+
+Remove the `inline-style-parser` override when the `style-to-js` used by `hast-util-to-jsx-runtime` reaches
+`style-to-object` 2.0.2 or later, which pins 0.2.9 itself. In this app the parser only sees `style` values the
+Markdown pipeline generates (GFM column alignment): neither Markdown consumer renders raw HTML.
+`src/__tests__/inline-style-parsing.test.ts` holds valid, commented, URL-bearing and malformed styles through
+`style-to-js`.
 
 ### Parent-scoped overrides
 

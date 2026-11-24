@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
-import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
+import { createPdfEngine, type OwnedPdfWorker } from "@/lib/pdfSession";
+import { pageFailureMessage, usePdfDocument } from "@/hooks/usePdfDocument";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
 // our own origin (no CDN), so a strict CSP won't block it.
@@ -12,6 +13,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
+
+// Each document gets its own worker so a stuck one can be terminated
+// (src/lib/pdfSession.ts).
+const ENGINE = createPdfEngine<PDFDocumentProxy, pdfjsLib.PDFWorker>(pdfjsLib);
 
 interface Props {
   documentId: number;
@@ -39,24 +44,21 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
   const kind = kindFor(mimeType, fileName);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pdfRef = useRef<PDFDocumentProxy | null>(null);
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
-  const [numPages, setNumPages] = useState(0);
-  const [page, setPage] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(true);
 
+  // Fetch the bytes (and a download URL) once per document version.
   useEffect(() => {
     let cancelled = false;
     let createdUrl: string | null = null;
-    setLoading(true);
-    setError(null);
-    setNumPages(0);
-    setPage(1);
+    setFetching(true);
+    setFetchError(null);
     setTextContent(null);
-    pdfRef.current = null;
+    setPdfData(null);
 
     fetchLabDocumentBlob(documentId, version)
       .then(async (blob) => {
@@ -66,22 +68,18 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         if (kind === "pdf") {
           const data = await blob.arrayBuffer();
           if (cancelled) return;
-          const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
-          if (cancelled) return;
-          pdfRef.current = pdf;
-          setNumPages(pdf.numPages);
-          setPage(1);
+          setPdfData(data);
         } else if (kind === "text") {
           const text = await blob.text();
           if (cancelled) return;
           setTextContent(text);
         }
-        setLoading(false);
+        setFetching(false);
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Could not load the document.");
-          setLoading(false);
+          setFetchError(e instanceof Error ? e.message : "Could not load the document.");
+          setFetching(false);
         }
       });
 
@@ -91,28 +89,16 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
     };
   }, [documentId, version, kind]);
 
-  // Render the current PDF page whenever it (or the loaded document) changes.
-  useEffect(() => {
-    if (kind !== "pdf") return;
-    const pdf = pdfRef.current;
-    if (!pdf || numPages === 0) return;
-    let cancelled = false;
-    (async () => {
-      const pdfPage = await pdf.getPage(page);
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const viewport = pdfPage.getViewport({ scale: RENDER_SCALE });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      await pdfPage.render({ canvas, canvasContext: ctx, viewport }).promise;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [page, numPages, kind]);
+  const pdf = usePdfDocument<PageViewport, PDFDocumentProxy, OwnedPdfWorker<pdfjsLib.PDFWorker>>(
+    ENGINE,
+    pdfData,
+    canvasRef,
+    RENDER_SCALE,
+    "a lab document PDF",
+  );
+  const { numPages, page, setPage, pageFailed } = pdf;
+  const error = fetchError ?? pdf.error;
+  const loading = !error && (fetching || pdf.opening);
 
   if (loading) {
     return <div className="text-sm text-gray-500 p-4">Loading document...</div>;
@@ -195,7 +181,12 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         className="overflow-auto border border-gray-200 rounded bg-gray-50 flex items-center justify-center"
         style={{ height: "85vh" }}
       >
-        <canvas ref={canvasRef} className="max-w-full max-h-full" />
+        {pageFailed && (
+          <p role="alert" className="text-sm text-red-700 p-4">
+            {pageFailureMessage(page)}
+          </p>
+        )}
+        <canvas ref={canvasRef} className={pageFailed ? "hidden" : "max-w-full max-h-full"} />
       </div>
     </div>
   );

@@ -44,7 +44,10 @@ test("an experiment past the first hundred filters the Library", async () => {
   const user = userEvent.setup();
   render(<LiteraturePage />);
   await user.type(await screen.findByRole("searchbox", { name: "Search names" }), "Lib 237");
-  await user.selectOptions(screen.getByLabelText("Experiment"), await screen.findByRole("option", { name: "Lib 237" }));
+  // Typing searches the server once per keystroke and the matching page arrives last; under a loaded CI runner that
+  // takes longer than Testing Library's default 1 s, so wait up to 5 s for it (owner-approved).
+  const option = await screen.findByRole("option", { name: "Lib 237" }, { timeout: 5000 });
+  await user.selectOptions(screen.getByLabelText("Experiment"), option);
   await waitFor(() =>
     expect((literature.listPapers as jest.Mock).mock.calls.at(-1)?.[0]).toMatchObject({ experiment_id: 237 }),
   );
