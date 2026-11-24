@@ -11,6 +11,12 @@ arguments, never as generated code.
     read-status <repo>                  the "status" of current.json; nothing unless it is a regular file
     record-agent-code <repo>            note which agent code is running (host-state/agent-code)
     agent-code-current <repo>           exit 0 when the recorded agent code matches the code on disk
+    read-status-fields <repo>           "status<TAB>step<TAB>from_version<TAB>to_version" of current.json
+    record-preparation <repo> <target> <from> <prepared|failed>
+                                        record the one-time updater preparation (host-state, 0600)
+    normalize-prepared-failure <repo>   rewrite an older updater's fixed error after a matching,
+                                        successful preparation to the plain retry instruction
+    clear-preparation <repo>            forget any preparation record
 
 Writes are staged in host-state/: a directory outside every backend mount, owned by this user and
 closed to group and other. The temporary file is created exclusively there, completed, set to 0644,
@@ -34,6 +40,16 @@ STATE_DIR = "host-state"
 STATUS_FILE = "current.json"
 AGENT_CODE = "agent-code"
 AGENT_SOURCES = ("scripts/update-agent.sh", "scripts/update_host_io.py", "installer/host_prereqs.sh")
+
+PREPARATION = "update-preparation.json"
+# The plain instruction after a successful one-time preparation (plan 03A copy).
+PREPARED_MESSAGE = (
+    "The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."
+)
+# The fixed errors older updaters and agents record when the target's install hook refuses. Matching
+# one only selects which status to rewrite; the host-owned preparation record is the authority.
+LEGACY_FAILURE = re.compile(r"encryption key bootstrap failed|Update process exited with code [0-9]+", re.ASCII)
+IDENT = re.compile(r"[a-z_]{1,64}", re.ASCII)
 
 TRIGGER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.json", re.ASCII)
 VERSION = re.compile(r"v?[0-9]+\.[0-9]+\.[0-9]+", re.ASCII)
@@ -187,6 +203,112 @@ def read_status(repo_fd: int) -> str:
     return status if isinstance(status, str) and status.isidentifier() else ""
 
 
+def _status_record(repo_fd: int) -> dict:
+    try:
+        dir_fd = open_subdir(repo_fd, STATUS_DIR)
+        try:
+            data = json.loads(read_regular(dir_fd, STATUS_FILE, MAX_STATUS_BYTES).decode("utf-8"))
+        finally:
+            os.close(dir_fd)
+    except (Refused, UnicodeDecodeError, ValueError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _field(record: dict, key: str, pattern: re.Pattern) -> str:
+    value = record.get(key)
+    return value if isinstance(value, str) and pattern.fullmatch(value) else ""
+
+
+def read_status_fields(repo_fd: int) -> str:
+    record = _status_record(repo_fd)
+    if not record:
+        return ""
+    return "\t".join(
+        (
+            _field(record, "status", IDENT),
+            _field(record, "step", IDENT),
+            _field(record, "from_version", VERSION).lstrip("v"),
+            _field(record, "to_version", VERSION).lstrip("v"),
+        )
+    )
+
+
+def _write_private(repo_fd: int, name: str, content: bytes) -> None:
+    """Write host-state/<name> at 0600 by an exclusive temporary file and a rename inside host-state."""
+    state_fd = open_subdir(repo_fd, STATE_DIR, create=True, private=True)
+    try:
+        tmp = f".{name}.{secrets.token_hex(8)}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=state_fd)
+        try:
+            os.write(fd, content)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, name, src_dir_fd=state_fd, dst_dir_fd=state_fd)
+    finally:
+        os.close(state_fd)
+
+
+def record_preparation(repo_fd: int, target: str, source: str, outcome: str) -> None:
+    if not VERSION.fullmatch(target) or not VERSION.fullmatch(source):
+        raise Refused("preparation versions must be release numbers")
+    if outcome not in ("prepared", "failed"):
+        raise Refused("preparation outcome must be prepared or failed")
+    record = {"target": target.lstrip("v"), "from": source.lstrip("v"), "outcome": outcome}
+    _write_private(repo_fd, PREPARATION, (json.dumps(record) + "\n").encode("ascii"))
+
+
+def _read_preparation(repo_fd: int) -> dict:
+    try:
+        state_fd = open_subdir(repo_fd, STATE_DIR)
+    except (Refused, OSError):
+        return {}
+    try:
+        data = json.loads(read_regular(state_fd, PREPARATION, 4096).decode("ascii"))
+    except (Refused, OSError, UnicodeDecodeError, ValueError):
+        return {}
+    finally:
+        os.close(state_fd)
+    return data if isinstance(data, dict) else {}
+
+
+def clear_preparation(repo_fd: int) -> None:
+    try:
+        state_fd = open_subdir(repo_fd, STATE_DIR)
+    except (Refused, OSError):
+        return
+    try:
+        os.unlink(PREPARATION, dir_fd=state_fd)
+    except FileNotFoundError:
+        pass
+    finally:
+        os.close(state_fd)
+
+
+def normalize_prepared_failure(repo_fd: int) -> bool:
+    prepared = _read_preparation(repo_fd)
+    if prepared.get("outcome") != "prepared":
+        return False
+    status = _status_record(repo_fd)
+    if status.get("status") != "failed":
+        return False
+    if _field(status, "to_version", VERSION).lstrip("v") != prepared.get("target"):
+        return False
+    source = _field(status, "from_version", VERSION).lstrip("v")
+    if source and source != prepared.get("from"):
+        return False
+    error = status.get("error")
+    if not isinstance(error, str) or not LEGACY_FAILURE.fullmatch(error):
+        return False
+    updated = dict(status)
+    updated["error"] = PREPARED_MESSAGE
+    updated["step"] = "prepare_updater"
+    publish(repo_fd, STATUS_DIR, STATUS_FILE, (json.dumps(updated) + "\n").encode("utf-8"))
+    clear_preparation(repo_fd)
+    return True
+
+
 def agent_code(repo: str) -> str:
     digest = hashlib.sha256()
     for rel in AGENT_SOURCES:
@@ -212,6 +334,15 @@ def main(argv: list[str]) -> int:
             write_status(repo_fd, rest)
         elif command == "read-status":
             print(read_status(repo_fd))
+        elif command == "read-status-fields":
+            print(read_status_fields(repo_fd))
+        elif command == "record-preparation" and len(rest) == 3:
+            record_preparation(repo_fd, *rest)
+        elif command == "normalize-prepared-failure":
+            if normalize_prepared_failure(repo_fd):
+                print("normalized")
+        elif command == "clear-preparation":
+            clear_preparation(repo_fd)
         elif command == "record-agent-code":
             publish(repo_fd, STATE_DIR, AGENT_CODE, agent_code(repo).encode("ascii"))
         elif command == "agent-code-current":
