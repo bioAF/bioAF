@@ -737,6 +737,7 @@ for v in cfg.get('volumes', {}).values():
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
     deploy_mark_candidate setup "$BIOAF_IMAGE_TAG" || yellow "WARNING: The deployment record (host-state/deployments.json) could not be updated."
     ensure_backups_dir
+    ensure_update_gate_dir
     step "Start services (docker compose up -d)" -- $DC up -d
 
     # Wait for DB
@@ -865,6 +866,7 @@ cmd_start() {
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
     ensure_backups_dir
+    ensure_update_gate_dir
 
     # The agent must parse the backend's JSON lines before they are collected (GCE only).
     if ! ensure_cloud_logging; then
@@ -898,6 +900,8 @@ cmd_start() {
     pinned="$(grep '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2-)" || pinned=""
     if [ -d "$(deploy_state_dir)" ]; then
         ( deploy_lock >/dev/null 2>&1 && deploy_finish "${pinned:-unpinned}" ) || true
+        # No update holds the lock, so a Work Node launch gate marker left by an interrupted one is stale.
+        ( deploy_lock >/dev/null 2>&1 && reopen_work_node_launches ) || true
     fi
 
     echo ""
@@ -1432,6 +1436,70 @@ update_settings_preflight() {
     esac
 }
 
+# ---------------------------------------------------------------------------
+# Work Node first-update gate (plan 03A). Work Nodes launched before durable credentials keep their
+# backend sync key only in the running backend's memory, so that backend is not replaced while such
+# a node may still exist. The check runs from the target image (backend/app/cli/
+# check_work_node_readiness.py, schema-tolerant, authenticated provider inventory). New launch POSTs
+# are refused at nginx while the update gate marker exists, so no launch can slip in between the
+# final check and the restart. Nodes are never stopped to pass the check.
+# ---------------------------------------------------------------------------
+UPDATE_GATE_DIR="$SCRIPT_DIR/update-gate"
+OLDER_NODES_MESSAGE="Some older work nodes are still running. Finish saving your work and stop them when convenient, then retry the update. bioAF will leave them running."
+READINESS_UNAVAILABLE_MESSAGE="bioAF could not check whether this update is safe. Your current installation is still running. Try again shortly."
+
+launch_gate_marker() { echo "$SCRIPT_DIR/update-gate/work-node-launch.closed"; }
+
+ensure_update_gate_dir() {
+    # The nginx bind mount's source; created here so Docker never creates it owned by root.
+    mkdir -p "$SCRIPT_DIR/update-gate"
+}
+
+reopen_work_node_launches() {
+    rm -f "$(launch_gate_marker)"
+}
+
+check_work_node_readiness() {
+    # check_work_node_readiness <target> <step>: the target's checker in a one-off container (no server,
+    # no database upgrade), under a tag scoped to this call. 0 ready, 3 older nodes, other: unchecked.
+    write_update_status in_progress "$2"
+    BIOAF_IMAGE_TAG="v$1" $DC run --rm --no-deps -T backend python -m app.cli.check_work_node_readiness
+}
+
+work_node_readiness_outcome() {
+    # work_node_readiness_outcome <status>: stop the update unless the check said ready.
+    case "$1" in
+        0) green "No older work nodes need the running backend." ;;
+        3) reopen_work_node_launches; update_failed work_node_readiness "$OLDER_NODES_MESSAGE" ;;
+        *) reopen_work_node_launches; update_failed work_node_readiness "$READINESS_UNAVAILABLE_MESSAGE" ;;
+    esac
+}
+
+update_work_node_gate() {
+    # update_work_node_gate <target>: check, close launch admission at the proxy, drain, check again.
+    local target="$1" rc=0
+    echo ""
+    bold "Checking running work nodes..."
+    check_work_node_readiness "$target" work_node_readiness || rc=$?
+    work_node_readiness_outcome "$rc"
+
+    # nginx alone is recreated with the target's config and the update-gate mount (it carries no
+    # application state); the backend holding any older keys keeps running.
+    write_update_status in_progress work_node_admission
+    ensure_update_gate_dir
+    if ! $DC up -d --no-deps nginx; then
+        update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    fi
+    printf '%s\n' "${_update_operation:-update}" > "$(launch_gate_marker)" \
+        || update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    trap reopen_work_node_launches EXIT
+    sleep "${BIOAF_LAUNCH_DRAIN_SECONDS:-15}"
+
+    rc=0
+    check_work_node_readiness "$target" work_node_recheck || rc=$?
+    work_node_readiness_outcome "$rc"
+}
+
 cmd_update() {
     host_python_require || exit 1
     local target_version="${1:-}"
@@ -1474,6 +1542,11 @@ cmd_update() {
     local lock_status=0
     deploy_begin update "v${target_version}" || lock_status=$?
     [ "$lock_status" = 0 ] || exit "$lock_status"
+
+    # This update holds the deployment lock, so a launch gate marker or a one-time preparation record
+    # left by an interrupted or older update is stale: reopen launches and forget the record.
+    reopen_work_node_launches
+    [ -n "$HOST_IO_PY" ] && python3 -I -c "$HOST_IO_PY" clear-preparation "$SCRIPT_DIR" 2>/dev/null || true
 
     bold "=== bioAF Update ==="
     echo ""
@@ -1591,6 +1664,9 @@ cmd_update() {
         BIOAF_IMAGE_TAG="v${target_version}" $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
 
         update_settings_preflight "$target_version"
+
+        # The Work Node gate, before the pin: nothing below runs while older nodes may need this backend.
+        update_work_node_gate "$target_version"
     fi
 
     # Pin the target in docker/.env (and this process) only now that its settings passed, so this
@@ -1639,6 +1715,8 @@ cmd_update() {
     if ! wait_for_backend_ready; then
         update_failed ready "The backend did not report ready after the database upgrade. Check ./bioaf logs backend."
     fi
+    # The new backend is serving: Work Node launches reopen.
+    reopen_work_node_launches
 
     local new_version
     new_version=$(get_running_version)
@@ -1784,6 +1862,19 @@ cmd_rotate_encryption_keys() {
     $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
 }
 
+cmd_import_git_known_hosts() {
+    # import-git-known-hosts <file> <source>: approve custom Git server keys (plan 03C). The file holds
+    # known_hosts lines obtained and checked independently of the connection (never ssh-keyscan output);
+    # <source> records where they came from. Replaces the previously approved set.
+    local file="${1:-}" source="${2:-}"
+    if [ -z "$file" ] || [ -z "$source" ] || [ ! -r "$file" ] || [ ! -f "$file" ]; then
+        red "Usage: ./bioaf import-git-known-hosts <known_hosts file> \"<where the keys came from>\""
+        return 2
+    fi
+    bold "=== Approve custom Git server keys ==="
+    $DC exec -T backend python -m app.cli.import_git_known_hosts /dev/stdin --source "$source" < "$file"
+}
+
 cmd_help() {
     bold "bioAF Management"
     echo ""
@@ -1826,6 +1917,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  import-git-known-hosts <file> \"<source>\""
+    echo "                      Approve SSH host keys for a custom Git server (checked"
+    echo "                      independently, never ssh-keyscan output)."
     echo "  reset-install-metrics-identity --confirm"
     echo "                      Give a deliberate copy of an installation its own"
     echo "                      installation metrics identity (clears queued reports)."
@@ -1884,6 +1978,7 @@ case "$command" in
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
+    import-git-known-hosts) cmd_import_git_known_hosts "$@" ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)

@@ -174,18 +174,18 @@ process_pending() {
     # One polling round: every trigger present now, in name order.
     local trigger_file
     rotate_agent_log
-    # An older updater that ran this release's install hook stopped after the one-time preparation of
-    # this agent and recorded its own fixed error; publish the plain retry instruction instead, when the
-    # host-owned preparation record matches (scripts/update_host_io.py).
-    if [ "$(host_io normalize-prepared-failure 2>/dev/null)" = normalized ]; then
-        log "The update helper is prepared; the previous update attempt now asks for a retry."
-    fi
     for trigger_file in "$TRIGGER_DIR"/*.json; do
         # Skip an unmatched glob and plain directories; everything else is judged by the parser.
         [ -e "$trigger_file" ] || [ -L "$trigger_file" ] || continue
         [ -d "$trigger_file" ] && [ ! -L "$trigger_file" ] && continue
         process_trigger "$trigger_file" || true
     done
+    # An older updater that ran this release's install hook stopped after the one-time preparation of
+    # this agent and recorded its own fixed error; publish the plain retry instruction instead, when the
+    # host-owned preparation record matches (scripts/update_host_io.py).
+    if [ "$(host_io normalize-prepared-failure 2>/dev/null)" = normalized ]; then
+        log "The update helper is prepared; the previous update attempt now asks for a retry."
+    fi
 }
 
 # Sourcing the file (tests) defines the functions without starting the loop.

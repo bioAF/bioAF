@@ -44,6 +44,7 @@ frontend/coverage/
 # Update system
 update-status/
 update-requests/
+update-gate/
 # Recovery dumps the update writes on the host (each holds the whole database)
 /backups/
 # Host-only detail from managed-file reconciliation (candidates, validation output) and the update
