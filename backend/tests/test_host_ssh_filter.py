@@ -475,3 +475,47 @@ def test_aws_recovery_never_set_up_is_missing_not_a_problem():
     assert not any("security group" in p for p in net.check_recovery())
     net.ensure_recovery()
     assert net.recovery_missing() is False
+
+
+# -- The whole recovery rule must work (review 7) -------------------------------------------------
+
+
+def _break(rule, how):
+    from google.cloud import compute_v1
+
+    if how == "disabled":
+        rule.disabled = True
+    elif how == "wrong_port":
+        rule.allowed = [compute_v1.Allowed(I_p_protocol="tcp", ports=["2222"])]
+    elif how == "wrong_target":
+        rule.target_tags = ["someone-else"]
+    elif how == "egress":
+        rule.direction = "EGRESS"
+
+
+@pytest.mark.parametrize("how", ["disabled", "wrong_port", "wrong_target", "egress"])
+def test_gcp_an_unusable_recovery_rule_is_reported_and_repaired(how):
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    _break(fw.rules["bioaf-ssh-recovery-iap"], how)
+    assert net.check_recovery() == ["The IAP recovery rule was changed outside bioAF."]
+    net.ensure_recovery()
+    assert ("patch", "bioaf-ssh-recovery-iap") in fw.calls
+    rule = fw.rules["bioaf-ssh-recovery-iap"]
+    assert rule.disabled is False
+    assert _rule_summary(rule)["allowed"] == [("tcp", ["22"])]
+    assert net.check_recovery() == []
+
+
+def test_gcp_a_recovery_rule_reported_with_a_full_network_url_is_still_ours():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    fw.calls.clear()
+    fw.rules[
+        "bioaf-ssh-recovery-iap"
+    ].network = "https://www.googleapis.com/compute/v1/projects/lab-project/global/networks/default"
+    assert net.check_recovery() == []
+    net.ensure_recovery()
+    assert fw.calls == []

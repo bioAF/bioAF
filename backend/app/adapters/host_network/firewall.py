@@ -93,6 +93,7 @@ class GcpHostNetwork:
         rule = compute_v1.Firewall(
             name=name,
             network=self.network,
+            disabled=False,
             direction="INGRESS",
             priority=priority,
             source_ranges=list(sources),
@@ -114,17 +115,30 @@ class GcpHostNetwork:
         except NotFound:
             return None
 
+    @staticmethod
+    def _network_path(network: str) -> str:
+        """projects/<p>/global/networks/<n>, whether the API returned a full URL or the short form."""
+        index = (network or "").find("projects/")
+        return network[index:] if index >= 0 else network or ""
+
+    def _effect(self, rule) -> tuple:
+        """Everything that decides what a rule lets through (or blocks), for comparison."""
+        return (
+            rule.priority,
+            sorted(rule.source_ranges),
+            sorted(rule.target_tags),
+            sorted((a.I_p_protocol, tuple(sorted(a.ports))) for a in rule.allowed),
+            sorted((d.I_p_protocol, tuple(sorted(d.ports))) for d in rule.denied),
+            bool(rule.disabled),
+            rule.direction or "INGRESS",
+            self._network_path(rule.network),
+        )
+
     def _upsert(self, rule) -> None:
         current = self._existing(rule.name)
         if current is None:
             self.client.insert(project=self.project, firewall_resource=rule).result(timeout=120)
-        elif (
-            current.priority != rule.priority
-            or sorted(current.source_ranges) != sorted(rule.source_ranges)
-            or list(current.target_tags) != list(rule.target_tags)
-            or len(current.allowed) != len(rule.allowed)
-            or len(current.denied) != len(rule.denied)
-        ):
+        elif self._effect(current) != self._effect(rule):
             self.client.patch(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
 
     def _delete(self, name) -> None:
@@ -146,7 +160,8 @@ class GcpHostNetwork:
         """Problems with recovery that exists; a rule never set up is recovery_missing, not a problem."""
         problems = []
         iap = self._existing(IAP_RULE)
-        if iap is not None and (iap.priority != GCP_IAP_PRIORITY or list(iap.source_ranges) != [GCP_IAP_SOURCE]):
+        expected = self._rule(IAP_RULE, priority=GCP_IAP_PRIORITY, sources=[GCP_IAP_SOURCE], allow=True)
+        if iap is not None and self._effect(iap) != self._effect(expected):
             problems.append("The IAP recovery rule was changed outside bioAF.")
         iap_net = ipaddress.ip_network(GCP_IAP_SOURCE)
         for rule in self.client.list(project=self.project):
