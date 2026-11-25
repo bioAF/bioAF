@@ -102,3 +102,59 @@ async def get_restore_link(
     from app.services.ssh_recovery import restore_view
 
     return await restore_view(session)
+
+
+@router.put("/host/draft")
+async def save_host_filter_draft(
+    body: WorkNodeDraftRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services import host_ssh_access
+
+    draft = await host_ssh_access.save_draft(
+        session,
+        enabled=body.enabled,
+        ranges=[r.model_dump() for r in body.ranges],
+        base_version=body.base_version,
+        actor_id=_actor(current_user),
+    )
+    await session.commit()
+    return {"draft": draft}
+
+
+@router.post("/host/check")
+async def check_host_access(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Read-only automatic preflight; also asks the host for fresh fixed guest diagnostics."""
+    from app.services import host_ssh_access
+
+    return await host_ssh_access.check_access(session)
+
+
+@router.post("/host/apply")
+async def apply_host_filter(
+    body: ApplyRequest,
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Reconcile protected recovery, re-check, then apply the filter (a cloud change: infrastructure:deploy)."""
+    from app.services import host_ssh_access
+
+    return {
+        "applied": await host_ssh_access.apply_draft(
+            session, draft_version=body.draft_version, actor_id=_actor(current_user)
+        )
+    }
+
+
+@router.post("/host/rollback")
+async def rollback_host_filter(
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services import host_ssh_access
+
+    return {"applied": await host_ssh_access.rollback(session, actor_id=_actor(current_user))}

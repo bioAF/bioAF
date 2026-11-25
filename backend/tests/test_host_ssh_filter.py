@@ -13,8 +13,14 @@ from app.services.host_ssh_filter import AwsHostNetwork, FilterApplyError, GcpHo
 from app.services.ssh_recovery import HostIdentity
 
 GCP = HostIdentity(
-    provider="gcp", account="lab-project", region="us-central1", zone="us-central1-b",
-    instance_id="481516", instance_name="bioaf", public=True, network="default",
+    provider="gcp",
+    account="lab-project",
+    region="us-central1",
+    zone="us-central1-b",
+    instance_id="481516",
+    instance_name="bioaf",
+    public=True,
+    network="default",
 )
 
 
@@ -108,7 +114,11 @@ def test_gcp_filter_adds_allows_before_separate_v4_and_v6_denies():
     assert _rule_summary(fw.rules["bioaf-ssh-filter-allow-v4"])["priority"] == 875
     assert _rule_summary(fw.rules["bioaf-ssh-filter-allow-v6"])["sources"] == ["2001:db8::/32"]
     assert _rule_summary(fw.rules["bioaf-ssh-filter-deny-v4"]) | {} == {
-        "priority": 1000, "sources": ["0.0.0.0/0"], "targets": ["bioaf"], "allowed": [], "denied": [("tcp", ["22"])],
+        "priority": 1000,
+        "sources": ["0.0.0.0/0"],
+        "targets": ["bioaf"],
+        "allowed": [],
+        "denied": [("tcp", ["22"])],
         "network": "projects/lab-project/global/networks/default",
     }
     assert _rule_summary(fw.rules["bioaf-ssh-filter-deny-v6"])["sources"] == ["::/0"]
@@ -138,8 +148,12 @@ def test_gcp_a_higher_priority_deny_blocking_recovery_is_reported():
     from google.cloud import compute_v1
 
     blocker = compute_v1.Firewall(
-        name="corp-deny-ssh", priority=100, direction="INGRESS", network="projects/lab-project/global/networks/default",
-        source_ranges=["0.0.0.0/0"], denied=[compute_v1.Denied(I_p_protocol="tcp", ports=["22"])],
+        name="corp-deny-ssh",
+        priority=100,
+        direction="INGRESS",
+        network="projects/lab-project/global/networks/default",
+        source_ranges=["0.0.0.0/0"],
+        denied=[compute_v1.Denied(I_p_protocol="tcp", ports=["22"])],
     )
     fw = FakeFirewalls(existing=[blocker])
     net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
@@ -151,8 +165,14 @@ def test_gcp_a_higher_priority_deny_blocking_recovery_is_reported():
 # -- AWS -----------------------------------------------------------------------------------------
 
 AWS = HostIdentity(
-    provider="aws", account="123456789012", region="us-west-1", zone="us-west-1b",
-    instance_id="i-0abc123def4567890", instance_name="bioaf", public=True, os_username="ubuntu",
+    provider="aws",
+    account="123456789012",
+    region="us-west-1",
+    zone="us-west-1b",
+    instance_id="i-0abc123def4567890",
+    instance_name="bioaf",
+    public=True,
+    os_username="ubuntu",
 )
 
 
@@ -160,11 +180,19 @@ def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=()):
     ec2 = MagicMock()
     state = {"attached": list(groups), "sgs": {"sg-base": {"ssh": list(base_ssh)}}}
     ec2.describe_instances.return_value = {
-        "Reservations": [{"Instances": [{
-            "InstanceId": AWS.instance_id, "VpcId": "vpc-1", "SubnetId": "subnet-1",
-            "PublicIpAddress": "54.1.2.3" if AWS.public else None,
-            "SecurityGroups": [{"GroupId": g} for g in state["attached"]],
-        }]}]
+        "Reservations": [
+            {
+                "Instances": [
+                    {
+                        "InstanceId": AWS.instance_id,
+                        "VpcId": "vpc-1",
+                        "SubnetId": "subnet-1",
+                        "PublicIpAddress": "54.1.2.3" if AWS.public else None,
+                        "SecurityGroups": [{"GroupId": g} for g in state["attached"]],
+                    }
+                ]
+            }
+        ]
     }
     ec2.describe_managed_prefix_lists.return_value = {
         "PrefixLists": [{"PrefixListId": "pl-eic4", "PrefixListName": "com.amazonaws.us-west-1.ec2-instance-connect"}]
@@ -172,10 +200,23 @@ def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=()):
 
     def describe_sgs(Filters=None, GroupIds=None):
         if GroupIds:
-            return {"SecurityGroups": [{
-                "GroupId": g,
-                "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": c} for c in state["sgs"].get(g, {}).get("ssh", [])], "Ipv6Ranges": []}],
-            } for g in GroupIds]}
+            return {
+                "SecurityGroups": [
+                    {
+                        "GroupId": g,
+                        "IpPermissions": [
+                            {
+                                "IpProtocol": "tcp",
+                                "FromPort": 22,
+                                "ToPort": 22,
+                                "IpRanges": [{"CidrIp": c} for c in state["sgs"].get(g, {}).get("ssh", [])],
+                                "Ipv6Ranges": [],
+                            }
+                        ],
+                    }
+                    for g in GroupIds
+                ]
+            }
         name = next(f["Values"][0] for f in Filters if f["Name"] == "group-name")
         found = [{"GroupId": gid, "GroupName": name} for gid, sg in state["sgs"].items() if sg.get("name") == name]
         return {"SecurityGroups": found}
@@ -187,7 +228,9 @@ def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=()):
 
     def modify(InstanceId, Groups):
         state["attached"] = list(Groups)
-        ec2.describe_instances.return_value["Reservations"][0]["Instances"][0]["SecurityGroups"] = [{"GroupId": g} for g in Groups]
+        ec2.describe_instances.return_value["Reservations"][0]["Instances"][0]["SecurityGroups"] = [
+            {"GroupId": g} for g in Groups
+        ]
 
     def revoke(GroupId, IpPermissions):
         for perm in IpPermissions:
@@ -213,7 +256,9 @@ def test_aws_recovery_uses_the_regions_managed_prefix_list_and_is_attached():
     net = AwsHostNetwork(AWS, client=ec2)
     sources = net.ensure_recovery()
     perms = ec2.authorize_security_group_ingress.call_args.kwargs["IpPermissions"]
-    assert perms == [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "PrefixListIds": [{"PrefixListId": "pl-eic4"}]}]
+    assert perms == [
+        {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "PrefixListIds": [{"PrefixListId": "pl-eic4"}]}
+    ]
     assert "sg-bioaf-ssh-recovery" in state["attached"] and "sg-base" in state["attached"]
     assert sources[0]["kind"] == "aws_eic_prefix_list" and sources[0]["source"] == "pl-eic4"
 

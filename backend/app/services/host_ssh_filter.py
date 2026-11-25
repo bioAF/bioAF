@@ -31,7 +31,12 @@ from __future__ import annotations
 import ipaddress
 import logging
 
-from app.services.ssh_recovery import GCP_FILTER_ALLOW_PRIORITY, GCP_FILTER_DENY_PRIORITY, GCP_IAP_PRIORITY, GCP_IAP_SOURCE
+from app.services.ssh_recovery import (
+    GCP_FILTER_ALLOW_PRIORITY,
+    GCP_FILTER_DENY_PRIORITY,
+    GCP_IAP_PRIORITY,
+    GCP_IAP_SOURCE,
+)
 
 logger = logging.getLogger("bioaf.host_ssh_filter")
 
@@ -140,12 +145,26 @@ class GcpHostNetwork:
         try:
             for version in (4, 6):
                 if families[version]:
-                    self._upsert(self._rule(ALLOW_RULES[version], priority=GCP_FILTER_ALLOW_PRIORITY, sources=families[version], allow=True))
+                    self._upsert(
+                        self._rule(
+                            ALLOW_RULES[version],
+                            priority=GCP_FILTER_ALLOW_PRIORITY,
+                            sources=families[version],
+                            allow=True,
+                        )
+                    )
                     written.append(ALLOW_RULES[version])
                 else:
                     self._delete(ALLOW_RULES[version])
             for version in (4, 6):
-                self._upsert(self._rule(DENY_RULES[version], priority=GCP_FILTER_DENY_PRIORITY, sources=[EVERYWHERE[version]], allow=False))
+                self._upsert(
+                    self._rule(
+                        DENY_RULES[version],
+                        priority=GCP_FILTER_DENY_PRIORITY,
+                        sources=[EVERYWHERE[version]],
+                        allow=False,
+                    )
+                )
                 written.append(DENY_RULES[version])
         except Exception as exc:
             logger.warning("Host SSH filter apply failed (%s); removing partial rules", type(exc).__name__)
@@ -191,7 +210,10 @@ class AwsHostNetwork:
             self.client.modify_instance_attribute(InstanceId=self.identity.instance_id, Groups=wanted)
 
     def _prefix_lists(self) -> list[str]:
-        names = [f"com.amazonaws.{self.identity.region}.ec2-instance-connect", f"com.amazonaws.{self.identity.region}.ipv6.ec2-instance-connect"]
+        names = [
+            f"com.amazonaws.{self.identity.region}.ec2-instance-connect",
+            f"com.amazonaws.{self.identity.region}.ipv6.ec2-instance-connect",
+        ]
         lists = self.client.describe_managed_prefix_lists(Filters=[{"Name": "prefix-list-name", "Values": names}])
         return [p["PrefixListId"] for p in lists.get("PrefixLists", [])]
 
@@ -217,7 +239,9 @@ class AwsHostNetwork:
         else:
             for endpoint in self._endpoints(instance["VpcId"]):
                 for sg in endpoint.get("SecurityGroupIds", []):
-                    permissions.append({"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "UserIdGroupPairs": [{"GroupId": sg}]})
+                    permissions.append(
+                        {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "UserIdGroupPairs": [{"GroupId": sg}]}
+                    )
         for perm in permissions:
             try:
                 self.client.authorize_security_group_ingress(GroupId=group, IpPermissions=[perm])
@@ -225,10 +249,14 @@ class AwsHostNetwork:
                 if "Duplicate" not in str(exc):
                     raise
         self._attach(group)
-        return self.recovery_sources() if self.identity.public else [
-            {"kind": "aws_eic_endpoint", "source": e.get("InstanceConnectEndpointId", ""), "ports": "tcp:22"}
-            for e in self._endpoints(instance["VpcId"])
-        ]
+        return (
+            self.recovery_sources()
+            if self.identity.public
+            else [
+                {"kind": "aws_eic_endpoint", "source": e.get("InstanceConnectEndpointId", ""), "ports": "tcp:22"}
+                for e in self._endpoints(instance["VpcId"])
+            ]
+        )
 
     def check_recovery(self) -> list[str]:
         problems = []
@@ -255,7 +283,18 @@ class AwsHostNetwork:
                     ranges6 = [{"CidrIpv6": r["CidrIpv6"]} for r in perm.get("Ipv6Ranges", [])]
                     if ranges or ranges6:
                         revoked.append(
-                            {"GroupId": sg["GroupId"], "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": ranges, "Ipv6Ranges": ranges6}]}
+                            {
+                                "GroupId": sg["GroupId"],
+                                "IpPermissions": [
+                                    {
+                                        "IpProtocol": "tcp",
+                                        "FromPort": 22,
+                                        "ToPort": 22,
+                                        "IpRanges": ranges,
+                                        "Ipv6Ranges": ranges6,
+                                    }
+                                ],
+                            }
                         )
         return revoked
 
@@ -268,14 +307,20 @@ class AwsHostNetwork:
         try:
             self.client.authorize_security_group_ingress(
                 GroupId=filter_group,
-                IpPermissions=[{
-                    "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
-                    "IpRanges": [{"CidrIp": c} for c in families[4]],
-                    "Ipv6Ranges": [{"CidrIpv6": c} for c in families[6]],
-                }],
+                IpPermissions=[
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 22,
+                        "ToPort": 22,
+                        "IpRanges": [{"CidrIp": c} for c in families[4]],
+                        "Ipv6Ranges": [{"CidrIpv6": c} for c in families[6]],
+                    }
+                ],
             )
             self._attach(filter_group)
-            others = [g["GroupId"] for g in self._instance()["SecurityGroups"] if g["GroupId"] not in (recovery, filter_group)]
+            others = [
+                g["GroupId"] for g in self._instance()["SecurityGroups"] if g["GroupId"] not in (recovery, filter_group)
+            ]
             for rule in self._ssh_rules(others):
                 self.client.revoke_security_group_ingress(**rule)
                 revoked.append(rule)

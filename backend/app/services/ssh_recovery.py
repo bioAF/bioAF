@@ -264,4 +264,6 @@ async def restore_view(session) -> dict:
 
 
 async def application_host_view(session) -> dict:
-    return {"restore": await restore_view(session), "recovery_caption": RECOVERY_CAPTION}
+    from app.services.host_ssh_access import view
+
+    return {**await view(session), "restore": await restore_view(session), "recovery_caption": RECOVERY_CAPTION}

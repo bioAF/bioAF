@@ -51490,6 +51490,124 @@
         ]
       }
     },
+    "/api/v1/settings/ssh-access/host/apply": {
+      "post": {
+        "description": "Reconcile protected recovery, re-check, then apply the filter (a cloud change: infrastructure:deploy).",
+        "operationId": "apply_host_filter_api_v1_settings_ssh_access_host_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Host Filter",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/check": {
+      "post": {
+        "description": "Read-only automatic preflight; also asks the host for fresh fixed guest diagnostics.",
+        "operationId": "check_host_access_api_v1_settings_ssh_access_host_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Host Access",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/draft": {
+      "put": {
+        "operationId": "save_host_filter_draft_api_v1_settings_ssh_access_host_draft_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkNodeDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Host Filter Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/rollback": {
+      "post": {
+        "operationId": "rollback_host_filter_api_v1_settings_ssh_access_host_rollback_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollback Host Filter",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
     "/api/v1/settings/ssh-access/restore": {
       "get": {
         "description": "Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).\n\nChanges no key, rule or session and uses no bioAF cloud credential.",
