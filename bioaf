@@ -1489,19 +1489,29 @@ stop_frozen_backend() {
 }
 
 STALE_GATE_MESSAGE="The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update."
+STALE_GATE_RESTARTED="The update stopped before it finished. bioAF has been restarted. Retry the update."
+STALE_GATE_DOWN="The update stopped before it finished and bioAF did not start again. On the bioAF server run ./bioaf start, or contact support."
 
 cmd_release_stale_update_gate() {
     # release-stale-update-gate: run by the update agent each polling round while a launch pause marker
-    # exists. An updater killed outright (SIGKILL, a lost session) cannot run its EXIT trap, so its pause,
-    # and a backend it froze, would otherwise stay until someone ran ./bioaf start. Once no update, build
-    # or setup holds the deployment lock, the backend resumes, launches reopen and the status says so.
+    # exists. An updater killed outright (SIGKILL, a lost session) cannot run its EXIT trap. Once no update,
+    # build or setup holds the deployment lock, the backend is brought back by its actual state:
+    #   paused  (frozen by the gate)          -> resumed, and the release it was running pinned again;
+    #   exited / not created (stopped by it)  -> started on the pinned release;
+    #   running (its replacement had started) -> left as it is.
+    # Launches reopen and the status says bioAF is running only once the backend reports ready. Otherwise
+    # the pause stays, the status says so plainly, and the next attempt waits (no restart every round).
     [ -e "$(launch_gate_marker)" ] || return 0
     (
         DEPLOY_LOCK_WAIT=0
         deploy_lock >/dev/null 2>&1 || exit 0
-        $DC unpause backend >/dev/null 2>&1 || true
-        reopen_work_node_launches
-        local versions
+        local stamp="$SCRIPT_DIR/update-gate/stale-recovery-attempted" now last
+        now="$(date +%s)"
+        last="$(cat "$stamp" 2>/dev/null)" || last=0
+        case "$last" in ''|*[!0-9]*) last=0 ;; esac
+        [ $((now - last)) -ge "${BIOAF_STALE_GATE_RETRY_SECONDS:-300}" ] || exit 0
+
+        local versions=""
         versions="$(python3 -I -c '
 import json, re, sys
 try:
@@ -1515,7 +1525,30 @@ print(ok(d.get("from_version")), ok(d.get("to_version")))
 ' "$SCRIPT_DIR/update-status/current.json" 2>/dev/null)" || versions=""
         if [ -n "$versions" ]; then
             _update_from="${versions%% *}"; _update_to="${versions#* }"
-            write_update_status failed interrupted "$STALE_GATE_MESSAGE" >/dev/null 2>&1 || true
+        fi
+
+        local state message
+        state="$($DC ps -a --format '{{.State}}' backend 2>/dev/null | head -n 1)"
+        case "$state" in
+            paused)
+                # The old backend never stopped: it runs the release it had, so that is pinned again.
+                [ -n "${_update_from:-}" ] && pin_image_tag "v${_update_from}" >/dev/null 2>&1
+                $DC unpause backend >/dev/null 2>&1
+                message="$STALE_GATE_MESSAGE" ;;
+            running)
+                message="$STALE_GATE_RESTARTED" ;;
+            *)
+                $DC up -d backend >/dev/null 2>&1
+                message="$STALE_GATE_RESTARTED" ;;
+        esac
+
+        if wait_for_backend_ready; then
+            reopen_work_node_launches
+            rm -f "$stamp"
+            [ -n "$versions" ] && { write_update_status failed interrupted "$message" >/dev/null 2>&1 || true; }
+        else
+            echo "$now" > "$stamp"
+            [ -n "$versions" ] && { write_update_status failed interrupted "$STALE_GATE_DOWN" >/dev/null 2>&1 || true; }
         fi
     )
     return 0

@@ -416,9 +416,13 @@ checks again. If the check passes, the frozen backend is stopped and replaced, n
 it accepted just before launches paused cannot start a VM afterwards. If the check fails, or anything
 before the restart fails, the old backend resumes. The app does not answer during that window, so the
 restart warning is shown before it. If the updater itself is killed while the backend is frozen, the
-update agent notices within a few seconds that no update is running, resumes the backend, reopens
-launches and shows **The update stopped before it finished. bioAF is running again and nothing was
-changed. Retry the update.** (`./bioaf start` also resumes it.)
+update agent notices within a few seconds that no update is running and brings the backend back by its
+state: a frozen backend is resumed on the release it was running (**The update stopped before it
+finished. bioAF is running again and nothing was changed. Retry the update.**); a stopped one is started
+again (**... bioAF has been restarted. Retry the update.**). Launches reopen only once the backend reports
+ready. If it does not, the update page says **The update stopped before it finished and bioAF did not
+start again. On the bioAF server run ./bioaf start, or contact support.** and the agent tries again
+every five minutes.
 
 **One-time retry from an older release.** An updater from v0.13.0 through v2026.11.21 cannot run that
 check, so the first attempt only prepares the new update helper and stops without changing bioAF:

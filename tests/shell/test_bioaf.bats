@@ -437,6 +437,9 @@ case "$args" in
         fi
         exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+    *" ps -a --format "*)
+        # The backend container's state for stale-update recovery (default: frozen by the gate).
+        echo "${FAKE_BACKEND_STATE-paused}"; exit 0 ;;
     *" pause "*|*" unpause "*|*" kill "*)
         # The first-update gate freezes, resumes or stops the old backend (plan 03A review).
         for verb in unpause pause kill; do
@@ -651,7 +654,7 @@ gate_run() {
     grep -q '"step": "work_node_readiness"' "$tmp/update-status/current.json"
     grep -qF 'Some older work nodes are still running. Finish saving your work and stop them when convenient, then retry the update. bioAF will leave them running.' "$tmp/update-status/current.json"
     grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
-    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+    absent -E '^(up|schema_upgrade)' "$tmp/log"
     [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
     [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
 }
@@ -662,7 +665,7 @@ gate_run() {
     gate_run FAKE_READINESS=1
     [ "$status" -ne 0 ]
     grep -qF 'bioAF could not check whether this update is safe. Your current installation is still running. Try again shortly.' "$tmp/update-status/current.json"
-    ! grep -qE '^(up|schema_upgrade)' "$tmp/log"
+    absent -E '^(up|schema_upgrade)' "$tmp/log"
     grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
 }
 
@@ -715,7 +718,7 @@ gate_steps() { grep -E '^(readiness|pause|unpause|kill|up )' "$tmp/log" | cut -d
     [ "$status" -ne 0 ]
     grep -q '"step": "work_node_admission"' "$tmp/update-status/current.json"
     [ "$(grep -c '^readiness' "$tmp/log")" -eq 1 ]
-    ! grep -q '^kill' "$tmp/log"
+    absent '^kill' "$tmp/log"
     grep -q '^unpause' "$tmp/log"
     grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
     [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
@@ -757,6 +760,55 @@ stale_gate_env() {
     grep -qF 'The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update.' "$tmp/update-status/current.json"
 }
 
+# absent <grep args>: fails the test when the pattern is found (a bare "! grep" mid-test never fails it).
+absent() { if grep -q "$@"; then return 1; fi; }
+
+stale_recover() {
+    # stale_recover [env...]: one recovery round with the stubbed Compose; the env file pins the target.
+    printf '{"status": "in_progress", "step": "restart", "from_version": "1.0.0", "to_version": "2.0.0"}' > "$tmp/update-status/current.json"
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env FAKE_LOG="$tmp/log" BIOAF_READY_TIMEOUT_SECONDS=5 "$@" bash -c "source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'; sleep() { :; }
+        cmd_release_stale_update_gate"
+}
+
+@test "a frozen backend is resumed on the release it was running, then confirmed ready" {
+    stale_gate_env; stale_recover
+    [ "$status" -eq 0 ]
+    grep -q '^unpause' "$tmp/log"
+    grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+}
+
+@test "a backend stopped by a killed update is started again and confirmed ready before launches reopen" {
+    for state in exited ""; do
+        stale_gate_env; stale_recover FAKE_BACKEND_STATE="$state"
+        [ "$status" -eq 0 ]
+        absent '^unpause' "$tmp/log"
+        grep -q '^up args=\[.* up -d backend\]' "$tmp/log"
+        [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+        grep -qF 'The update stopped before it finished. bioAF has been restarted. Retry the update.' "$tmp/update-status/current.json"
+    done
+}
+
+@test "a replacement that is already running is only confirmed, never restarted" {
+    stale_gate_env; stale_recover FAKE_BACKEND_STATE=running
+    [ "$status" -eq 0 ]
+    absent -E '^(unpause|up )' "$tmp/log"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+}
+
+@test "recovery never says bioAF is running when it is not ready, and does not retry at once" {
+    stale_gate_env; stale_recover FAKE_BACKEND_STATE=exited FAKE_READY=no
+    [ "$status" -eq 0 ]
+    [ -e "$tmp/update-gate/work-node-launch.closed" ]
+    absent 'running again\|has been restarted' "$tmp/update-status/current.json"
+    grep -qF 'The update stopped before it finished and bioAF did not start again. On the bioAF server run ./bioaf start, or contact support.' "$tmp/update-status/current.json"
+    : > "$tmp/log"
+    stale_recover FAKE_BACKEND_STATE=exited FAKE_READY=no
+    absent '^up ' "$tmp/log"
+}
+
 @test "release-stale-update-gate leaves a running update alone" {
     stale_gate_env
     python3 -I -c '
@@ -769,7 +821,7 @@ f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w"
         cmd_release_stale_update_gate"
     kill "$holder" 2>/dev/null || true
     [ "$status" -eq 0 ]
-    ! grep -q '^unpause' "$tmp/log" 2>/dev/null
+    absent '^unpause' "$tmp/log" 2>/dev/null
     [ -e "$tmp/update-gate/work-node-launch.closed" ]
     grep -q '"status": "in_progress"' "$tmp/update-status/current.json"
 }
@@ -806,7 +858,7 @@ f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w"
     run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_STATUS_EXEC_FAILS=1 bash -c "
         source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
     [ "$status" -eq 0 ]
-    ! grep -q '^readiness' "$tmp/log"
+    absent '^readiness' "$tmp/log"
 }
 
 @test "nginx refuses Work Node launch POSTs while the update gate marker exists" {
@@ -1275,7 +1327,7 @@ STUB
         [ "$status" -ne 0 ] || { echo "$fixture proceeded"; false; }
         # Host-only preparation: the agent, nothing else.
         grep -q '^target-bioaf ensure-update-agent' "$tmp/log"
-        ! grep -q '^target-bioaf ensure-cloud-logging' "$tmp/log"
+        absent '^target-bioaf ensure-cloud-logging' "$tmp/log"
         ! grep -qE '^(pull|up |schema_upgrade)' "$tmp/log" || { echo "$fixture restarted"; false; }
         cmp -s "$tmp/.env" "$tmp/env.before" || { echo "$fixture changed docker/.env"; false; }
         [ "$(cat "$tmp/state/backend")" = v1.0.0 ] && [ "$(cat "$tmp/state/frontend")" = v1.0.0 ]
@@ -1293,11 +1345,11 @@ STUB
     run env -u BIOAF_IMAGE_TAG -u BIOAF_UPDATE_GATE FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" FAKE_AGENT_HOOK_STATUS=1 BIOAF_SKIP_RESTART_WARN=1 bash -c "
         source '$tmp/harness.sh'; cmd_update 2.0.0 --yes"
     [ "$status" -ne 0 ]
-    ! grep -qE '^(pull|up |schema_upgrade)' "$tmp/log"
+    absent -E '^(pull|up |schema_upgrade)' "$tmp/log"
     [[ "$output" != *"The update helper is ready"* ]]
     grep -q '"outcome": "failed"' "$tmp/host-state/update-preparation.json"
     python3 -I "$tmp/scripts/update_host_io.py" normalize-prepared-failure "$tmp"
-    ! grep -q 'Retry the update to continue.' "$tmp/update-status/current.json"
+    absent 'Retry the update to continue.' "$tmp/update-status/current.json"
 }
 
 @test "a failed reconciliation stops the previous release's update before the services restart" {

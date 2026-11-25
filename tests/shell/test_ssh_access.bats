@@ -6,6 +6,10 @@
 
 HELPER="$BATS_TEST_DIRNAME/../../installer/ssh_access.sh"
 
+
+# absent <grep args>: fails the test when the pattern is found (a bare "! grep" mid-test never fails it).
+absent() { if grep -q "$@"; then return 1; fi; }
+
 setup() {
     TEST_DIR="$(mktemp -d)"
     export HOME="$TEST_DIR/home"; mkdir -p "$HOME/.ssh"
@@ -59,7 +63,7 @@ teardown() { rm -rf "$TEST_DIR"; }
     grep -q "gcloud compute ssh bioaf --project=lab-project --zone=us-central1-b --tunnel-through-iap" "$sheet"
     grep -q "Instance ID: 4815162342" "$sheet"
     grep -qi "bookmark" "$sheet"
-    ! grep -qi "PRIVATE KEY\|password" "$sheet"
+    absent -i "PRIVATE KEY\|password" "$sheet"
 }
 
 @test "the administrator key is a dedicated key that is created once and never overwrites another key" {
@@ -121,7 +125,7 @@ teardown() { rm -rf "$TEST_DIR"; }
 @test "a denied EC2 Instance Connect key delivery is a probe failure, never a laptop-key fallback" {
     run env FAIL_ON="send-ssh-public-key" bash -c "source '$HELPER'; ssh_access_probe_aws i-0abc123def4567890 us-west-1 ubuntu 54.1.2.3"
     [ "$output" = denied ]
-    ! grep -q '^ssh ' "$CALLS"
+    absent '^ssh ' "$CALLS"
 }
 
 @test "the probe record for setup is bound to the instance and carries no key" {

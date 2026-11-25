@@ -4,6 +4,10 @@
 AGENT="$BATS_TEST_DIRNAME/../../scripts/update-agent.sh"
 HOST_IO="$BATS_TEST_DIRNAME/../../scripts/update_host_io.py"
 
+
+# absent <grep args>: fails the test when the pattern is found (a bare "! grep" mid-test never fails it).
+absent() { if grep -q "$@"; then return 1; fi; }
+
 setup() {
     REPO="$(mktemp -d)"
     mkdir -p "$REPO/scripts" "$REPO/update-requests" "$REPO/update-status"
@@ -713,5 +717,5 @@ status_json() {
 @test "with no launch pause the agent never calls the release" {
     stub_updater 0
     agent_round
-    ! grep -q "release-stale-update-gate" "$REPO/updater-calls"
+    absent "release-stale-update-gate" "$REPO/updater-calls"
 }
