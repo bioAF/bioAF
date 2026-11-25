@@ -437,6 +437,14 @@ case "$args" in
         fi
         exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+    *" pause "*|*" unpause "*|*" kill "*)
+        # The first-update gate freezes, resumes or stops the old backend (plan 03A review).
+        for verb in unpause pause kill; do
+            case " $args " in *" $verb "*) echo "$verb args=[$args]" >> "$log"; break ;; esac
+        done
+        [ "$verb" = pause ] && exit "${FAKE_PAUSE_STATUS:-0}"
+        [ "$verb" = kill ] && exit "${FAKE_KILL_STATUS:-0}"
+        exit 0 ;;
     *"app.cli.reset_install_metrics_identity"*)
         echo "reset_install_metrics_identity args=[$args]" >> "$log"; exit 0 ;;
     *"app.cli.record_upgrade_metric"*)
@@ -598,6 +606,8 @@ git() { echo "git \$*" >> '$tmp/log'; }
 wait_for_db() { :; }
 ensure_cloud_logging() { :; }
 backup_database() { echo backup >> '$tmp/log'; }
+# The gate's provider settle wait is real time; harness runs skip it unless a test sets it.
+export BIOAF_LAUNCH_DRAIN_SECONDS="\${BIOAF_LAUNCH_DRAIN_SECONDS:-0}"
 HARNESS
 }
 
@@ -668,6 +678,66 @@ gate_run() {
     [ "$(grep -c '^up ' "$tmp/log")" -eq 1 ]
     grep -q '^up args=\[.*--no-deps nginx\]' "$tmp/log"
     [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+}
+
+gate_steps() { grep -E '^(readiness|pause|unpause|kill|up )' "$tmp/log" | cut -d' ' -f1; }
+
+@test "the final check runs with the old backend frozen, and a ready update stops it before replacing it" {
+    # A launch the old backend accepted before launches closed cannot be tracked (its code predates the
+    # gate), so the backend is paused (its memory, and older nodes' keys, kept), the provider gets time to
+    # show any VM already requested, and the check runs again. A ready update never resumes it: an
+    # accepted launch could otherwise reach the provider after the check.
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    gate_run
+    [ "$status" -eq 0 ]
+    [ "$(gate_steps)" = "$(printf 'readiness\nup\npause\nreadiness\nkill\nup')" ]
+    grep -q '^pause args=\[.* pause backend\]' "$tmp/log"
+    grep -q '^kill args=\[.* kill backend\]' "$tmp/log"
+    [ "$(grep '^readiness' "$tmp/log" | tail -1 | sed 's/ tag=.* pin=/ pin=/; s/ marker=.*//')" = "readiness pin=v1.0.0" ]
+}
+
+@test "a late launch found by the frozen check resumes the old backend and defers" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    gate_run FAKE_READINESS="0 3"
+    [ "$status" -ne 0 ]
+    [ "$(gate_steps)" = "$(printf 'readiness\nup\npause\nreadiness\nunpause')" ]
+    grep -qF 'Some older work nodes are still running.' "$tmp/update-status/current.json"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+}
+
+@test "a backend that cannot be frozen refuses the update with the running services unchanged" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    gate_run FAKE_PAUSE_STATUS=1
+    [ "$status" -ne 0 ]
+    grep -q '"step": "work_node_admission"' "$tmp/update-status/current.json"
+    [ "$(grep -c '^readiness' "$tmp/log")" -eq 1 ]
+    ! grep -q '^kill' "$tmp/log"
+    grep -q '^unpause' "$tmp/log"
+    grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+}
+
+@test "a failure after the frozen check and before the restart resumes the old backend" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 BIOAF_LAUNCH_DRAIN_SECONDS=0 \
+        bash -c "source '$tmp/harness.sh'; ensure_cloud_logging() { return 1; }; cmd_update 2.0.0 --yes"
+    [ "$status" -ne 0 ]
+    [ "$(gate_steps)" = "$(printf 'readiness\nup\npause\nreadiness\nunpause')" ]
+    [ "$(cat "$tmp/state/backend")" = v1.0.0 ]
+}
+
+@test "the restart warning is given before the backend is frozen, never while it cannot answer" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_RESTART_WARN_SECONDS=1 BIOAF_LAUNCH_DRAIN_SECONDS=0 \
+        bash -c "source '$tmp/harness.sh'; write_update_status() { echo \"status \$*\" >> '$tmp/log'; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(status in_progress warn|pause)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'status\npause')" ]
 }
 
 @test "a successful update reopens launches once the new backend is ready" {
@@ -1059,6 +1129,15 @@ STUB
     [ "$status" -ne 0 ]
     ! grep -q '^up' "$tmp/log"
     [[ "$output" != *"All services started"* ]]
+}
+
+@test "start resumes a backend left frozen by an update that was killed, before starting services" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; mkdir -p "$tmp/host-state"
+    stubs="DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'; ensure_pinned_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }; cmd_status() { :; }; sleep() { :; }; ensure_cloud_logging() { :; }; ensure_update_agent() { :; }"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs; cmd_start"
+    [ "$status" -eq 0 ]
+    [ "$(grep -E '^(unpause|up)' "$tmp/log" | head -1 | cut -d' ' -f1)" = unpause ]
+    grep -q '^unpause args=\[.* unpause backend\]' "$tmp/log"
 }
 
 @test "direct delivery on a GCE host without an agent installs and configures nothing" {
@@ -1977,6 +2056,19 @@ run_update() {
     [ "$(operation "$tmp" id)" != "$first" ]
     [ "$(operation "$tmp" from_version)" = 2.0.0 ]
     [ "$(grep -c '^record_upgrade_metric' "$tmp/log")" = 2 ]
+}
+
+@test "the background recovery diagnostics never hold the deployment lock after the update returns" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
+    printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"
+    run env -u BIOAF_IMAGE_TAG FAKE_LOG="$tmp/log" FAKE_STATE="$tmp/state" BIOAF_SKIP_RESTART_WARN=1 bash -c "
+        source '$tmp/harness.sh'; cmd_ssh_recovery_diagnostics() { /bin/sleep 5; }; cmd_update 2.0.0 --yes"
+    [ "$status" -eq 0 ]
+    python3 -I -c '
+import fcntl, sys
+with open(sys.argv[1], "a") as f:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+' "$tmp/host-state/deployment.lock"
 }
 
 @test "a failed metrics record never changes the update's outcome" {

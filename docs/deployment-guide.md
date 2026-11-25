@@ -410,6 +410,14 @@ says **bioAF could not check whether this update is safe. Your current installat
 again shortly.** While the backend is replaced, new work node launches are paused for a few minutes and
 then reopen; work nodes launched after this release keep running through later normal updates.
 
+For the final check the updater freezes the old backend (`docker pause`, which keeps its memory and so
+those keys), waits about 30 seconds so any VM it had already requested shows in the provider's list, and
+checks again. If the check passes, the frozen backend is stopped and replaced, never resumed, so a launch
+it accepted just before launches paused cannot start a VM afterwards. If the check fails, or anything
+before the restart fails, the old backend resumes. The app does not answer during that window, so the
+restart warning is shown before it. If the updater itself is killed while the backend is frozen,
+`./bioaf start` resumes it.
+
 **One-time retry from an older release.** An updater from v0.13.0 through v2026.11.21 cannot run that
 check, so the first attempt only prepares the new update helper and stops without changing bioAF:
 

@@ -879,6 +879,11 @@ cmd_start() {
         yellow "WARNING: The update agent could not be configured; in-app updates will not run until this is fixed."
     fi
 
+    # A backend frozen by an update that was killed mid-gate resumes (never while an update holds the lock).
+    if [ -d "$(deploy_state_dir)" ]; then
+        ( deploy_lock >/dev/null 2>&1 && $DC unpause backend >/dev/null 2>&1 ) || true
+    fi
+
     for svc in db backend frontend nginx; do
         echo "Starting $svc..."
         $DC up -d "$svc"
@@ -905,7 +910,8 @@ cmd_start() {
     fi
 
     # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks start.
-    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 & )
+    # Fd 9 (the deployment lock) is closed so the background refresh never holds it.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 9>&- & )
 
     echo ""
     green "All services started."
@@ -1462,6 +1468,39 @@ reopen_work_node_launches() {
     rm -f "$(launch_gate_marker)"
 }
 
+_update_backend_frozen=0
+
+release_update_gate() {
+    # EXIT trap of an update that closed launches: the old backend resumes unless this update stopped it
+    # for the restart, and launches reopen.
+    if [ "$_update_backend_frozen" = 1 ]; then
+        $DC unpause backend >/dev/null 2>&1 || true
+        _update_backend_frozen=0
+    fi
+    reopen_work_node_launches
+}
+
+stop_frozen_backend() {
+    # Stop the frozen old backend without resuming it: a launch it accepted before launches closed must
+    # not reach the provider after the final check (docker kill delivers the signal to a paused container).
+    [ "$_update_backend_frozen" = 1 ] || return 0
+    $DC kill backend || update_failed restart "The previous backend could not be stopped for the restart. It has been resumed. Try again shortly."
+    _update_backend_frozen=0
+}
+
+update_restart_warning() {
+    # Warning window before restart: give the UI time to show a countdown so users know the app is
+    # about to go offline briefly. Given while the backend still answers (before it is frozen).
+    # Skipped when BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
+    local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
+    if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
+        write_update_status in_progress warn
+        echo ""
+        yellow "Restarting in ${warn_seconds}s (notifying active users)..."
+        sleep "$warn_seconds"
+    fi
+}
+
 check_work_node_readiness() {
     # check_work_node_readiness <target> <step>: the target's checker in a one-off container (no server,
     # no database upgrade), under a tag scoped to this call. 0 ready, 3 older nodes, other: unchecked.
@@ -1479,7 +1518,11 @@ work_node_readiness_outcome() {
 }
 
 update_work_node_gate() {
-    # update_work_node_gate <target>: check, close launch admission at the proxy, drain, check again.
+    # update_work_node_gate <target>: check, close launch admission at the proxy, warn, freeze the old
+    # backend, let the provider settle, check again. The old backend's code predates the gate, so a
+    # launch it accepted before admission closed cannot be tracked; freezing it (docker pause keeps its
+    # memory, and older nodes' keys) means the final provider inventory sees every VM it could create.
+    # Ready: the frozen backend is later stopped, never resumed. Otherwise it resumes and the update stops.
     local target="$1" rc=0
     echo ""
     bold "Checking running work nodes..."
@@ -1495,8 +1538,17 @@ update_work_node_gate() {
     fi
     printf '%s\n' "${_update_operation:-update}" > "$(launch_gate_marker)" \
         || update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
-    trap reopen_work_node_launches EXIT
-    sleep "${BIOAF_LAUNCH_DRAIN_SECONDS:-15}"
+    trap release_update_gate EXIT
+
+    update_restart_warning
+
+    write_update_status in_progress work_node_admission
+    _update_backend_frozen=1
+    if ! $DC pause backend; then
+        update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    fi
+    # A provider request the backend sent before it froze becomes visible in the inventory.
+    sleep "${BIOAF_LAUNCH_DRAIN_SECONDS:-30}"
 
     rc=0
     check_work_node_readiness "$target" work_node_recheck || rc=$?
@@ -1676,19 +1728,7 @@ cmd_update() {
     # version sticks for any future start/restart and the up below uses it.
     pin_image_tag "v${target_version}"
 
-    if [ "$retry_only" = false ]; then
-
-        # Warning window before restart: give the UI time to show a countdown
-        # so users know the app is about to go offline briefly. Skipped when
-        # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
-        local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
-        if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
-            write_update_status in_progress warn
-            echo ""
-            yellow "Restarting in ${warn_seconds}s (notifying active users)..."
-            sleep "$warn_seconds"
-        fi
-    fi
+    # (The restart warning is given inside the Work Node gate, before the old backend is frozen.)
 
     # Bring the services to the pinned target with the current env file, on a fresh update and on a
     # retry alike: a backend restarting on bad settings keeps its old environment until Compose
@@ -1702,6 +1742,7 @@ cmd_update() {
     ensure_cloud_logging || update_failed cloud_logging "Cloud Logging collection could not be configured for v${target_version}, so the services were not restarted. Run ./bioaf start on the host to see why, fix it, then run ./bioaf update ${target_version} again."
 
     write_update_status in_progress restart
+    stop_frozen_backend
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
 
@@ -1721,7 +1762,8 @@ cmd_update() {
     # The new backend is serving: Work Node launches reopen.
     reopen_work_node_launches
     # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks the update.
-    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 & )
+    # Fd 9 (the deployment lock) is closed so the background refresh never holds it.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 9>&- & )
 
     local new_version
     new_version=$(get_running_version)
