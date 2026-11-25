@@ -235,14 +235,14 @@ export default function LiteratureLibraryPage() {
     <>
       <Breadcrumb />
       <main className="flex-1 overflow-y-auto p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
+        <div className="flex flex-col gap-4 mb-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold">Literature Library</h1>
             <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
               Papers your lab works from, with their metadata, full text and any validation studies run against them.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap shrink-0 gap-2 whitespace-nowrap">
             <button
               onClick={() => router.push("/lab-knowledge/literature/recommendations")}
               className="border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50"
@@ -270,8 +270,8 @@ export default function LiteratureLibraryPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 mb-4 items-end">
-          <div>
+        <div className="flex flex-wrap gap-3 mb-4 items-start">
+          <div className="w-full sm:w-48 min-w-0">
             <label htmlFor="project" className="block text-xs text-gray-600 mb-1">Project</label>
             <select id="project"
               value={filterProjectId}
@@ -281,7 +281,7 @@ export default function LiteratureLibraryPage() {
               }}
               disabled={projectsDenied}
               title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
-              className="border border-gray-300 rounded px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full border border-gray-300 rounded px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
             >
               <option value="">All projects</option>
               {projects.map((p) => (
@@ -291,11 +291,12 @@ export default function LiteratureLibraryPage() {
               ))}
             </select>
           </div>
-          <div>
+          <div className="w-full sm:w-64 min-w-0">
             <label htmlFor="experiment" className="block text-xs text-gray-600 mb-1">Experiment</label>
             <ExperimentPicker
               id="experiment"
               label="Experiment"
+              variant="filter"
               value={filterExperimentId ? Number(filterExperimentId) : null}
               onChange={(id) => setFilterExperimentId(id == null ? "" : String(id))}
               projectId={filterProjectId ? Number(filterProjectId) : null}
@@ -303,14 +304,14 @@ export default function LiteratureLibraryPage() {
               className="border border-gray-300 rounded px-3 py-2 w-full"
             />
           </div>
-          <div>
+          <div className="w-full sm:w-48 min-w-0">
             <label htmlFor="provenance" className="block text-xs text-gray-600 mb-1">Provenance</label>
             <select id="provenance"
               value={provenance}
               onChange={(e) =>
                 setProvenance(e.target.value as Provenance | "")
               }
-              className="border border-gray-300 rounded px-3 py-2"
+              className="w-full border border-gray-300 rounded px-3 py-2"
             >
               <option value="">All</option>
               <option value="user_upload">Uploaded by humans</option>
@@ -318,7 +319,7 @@ export default function LiteratureLibraryPage() {
               <option value="lit_review_run">From AI Lit Review</option>
             </select>
           </div>
-          <div>
+          <div className="w-full sm:w-40 min-w-0">
             <label htmlFor="sort" className="block text-xs text-gray-600 mb-1">Sort</label>
             <select id="sort"
               value={sort}
@@ -331,7 +332,7 @@ export default function LiteratureLibraryPage() {
                     | "comments",
                 )
               }
-              className="border border-gray-300 rounded px-3 py-2"
+              className="w-full border border-gray-300 rounded px-3 py-2"
             >
               <option value="added">Date added</option>
               <option value="title">Title</option>
@@ -339,7 +340,7 @@ export default function LiteratureLibraryPage() {
               <option value="comments">Comment count</option>
             </select>
           </div>
-          <span className="ml-auto text-sm text-gray-500 self-center">
+          <span className="ml-auto pt-5 text-sm text-gray-500">
             {total} papers
           </span>
           {projectsDenied && (

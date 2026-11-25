@@ -169,3 +169,23 @@ test("a session ending drops the experiments shown", async () => {
   await settle();
   expect(options()).not.toContain("Exp 3");
 });
+
+describe("layout variants", () => {
+  function order(variant?: "form" | "filter") {
+    serveMany(3);
+    render(<ExperimentPicker label="Experiment" value={null} onChange={() => {}} variant={variant} />);
+    const select = screen.getByRole("combobox", { name: "Experiment" });
+    const search = screen.getByRole("searchbox", { name: "Search names" });
+    return select.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING ? "select-first" : "search-first";
+  }
+
+  it("puts the search above the select in a form", async () => {
+    expect(order()).toBe("search-first");
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+  });
+
+  it("puts the select first in a filter row, so it lines up with the controls beside it", async () => {
+    expect(order("filter")).toBe("select-first");
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+  });
+});
