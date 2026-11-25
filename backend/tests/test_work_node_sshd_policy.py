@@ -204,3 +204,24 @@ def test_the_heartbeat_reports_the_policy_status(builder):
     )
     cron = next(line for line in script.splitlines() if "heartbeat" in line and "crontab" in line)
     assert "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status" in cron
+
+
+@pytest.mark.parametrize("ranges", [[], ["10.20.0.0/16"]])
+@pytest.mark.parametrize("builder", ["gce", "ec2"])
+def test_the_sync_account_exists_before_the_policy_is_checked(builder, ranges):
+    """sshd -T -C exits without output for an account that does not exist, so checking bioaf-sync
+    before it is created failed every node closed (found live on Ubuntu 22.04, OpenSSH 8.9)."""
+    from app.adapters.work_nodes.ec2 import _build_ec2_startup_script
+    from app.adapters.work_nodes.gce import _build_startup_script
+
+    build = _build_startup_script if builder == "gce" else _build_ec2_startup_script
+    script = build(
+        {
+            "session_id": 7,
+            "session_credentials": {"username": "sci", "password_hash": "$2b$x"},
+            "ssh_policy": {"revision": 3, "ranges": ranges},
+            "sync_public_key": "ssh-ed25519 AAAAsync",
+        }
+    )
+    first_check = script.index("user=bioaf-sync,")
+    assert "useradd -r -m -s /bin/bash bioaf-sync" in script[:first_check]

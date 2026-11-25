@@ -132,6 +132,9 @@ def sshd_policy_install_lines(username: str, ranges: list[str]) -> list[str]:
         "BIOAF_SSH_POLICY_EOF",
         f"chown root:root {POLICY_PATH}",
         f"chmod 644 {POLICY_PATH}",
+        # sshd -T -C prints nothing for an account that does not exist, so the sync account is created
+        # (as the sync step below creates it) before its effective settings are checked.
+        f"id {SYNC_USER} >/dev/null 2>&1 || useradd -r -m -s /bin/bash {SYNC_USER} || true",
         "bioaf_policy=applied",
         "/usr/sbin/sshd -t || bioaf_policy=failed",
     ]
