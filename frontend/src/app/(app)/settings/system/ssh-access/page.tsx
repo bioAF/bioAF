@@ -55,6 +55,8 @@ interface Restore {
 }
 
 interface HostSection {
+  admin_key?: { fingerprint: string; account: string; current: boolean } | null;
+  git_trust?: { hosts_needing_keys: string[]; message: string | null; procedure: string | null };
   filter: { draft: Draft; applied: Applied; can_roll_back: boolean; scope: string };
   recovery: Recovery;
   recovery_caption: string;
@@ -333,6 +335,13 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
           <RangeEditor draft={draft} onChange={setDraft} toggleLabel="Restrict SSH by IP address" />
         </div>
 
+        <h3 className="mt-4 text-sm font-semibold">Administrator SSH authentication</h3>
+        <p className="text-sm text-gray-700">
+          {section.admin_key
+            ? `Administrator login as ${section.admin_key.account} requires the key ${section.admin_key.fingerprint}, set up by the installer${section.admin_key.current ? "" : " for an earlier server"}. This does not limit which networks can reach SSH.`
+            : "No installer key requirement is recorded; administrator login follows the server's own settings."}
+        </p>
+
         <h3 className="mt-4 text-sm font-semibold">Cloud recovery access</h3>
         <p className="text-sm text-gray-700">{section.recovery_caption}</p>
         <p className="text-sm">
@@ -374,6 +383,18 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
             onChecked={(r) => setRecovery((r as { recovery: Recovery }).recovery)}
           />
         </div>
+
+        {section.git_trust?.message && (
+          <div role="status" className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p>{section.git_trust.message}</p>
+            <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+              {section.git_trust.hosts_needing_keys.map((h) => (
+                <li key={h}>{h}</li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs">{section.git_trust.procedure}</p>
+          </div>
+        )}
 
         <h3 className="mt-4 text-sm font-semibold">Restore SSH access</h3>
         {restore.url ? (

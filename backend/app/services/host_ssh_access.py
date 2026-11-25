@@ -315,10 +315,60 @@ async def rollback(session, *, actor_id: int) -> dict:
     )
 
 
-async def view(session) -> dict:
+GIT_TRUST_MESSAGE = (
+    "A connected code repository needs a security setting before this update can finish. "
+    "Existing work has been left running."
+)
+GIT_TRUST_PROCEDURE = (
+    "Get the server's SSH host keys from its administrator (not from ssh-keyscan), save them in a file, then on "
+    'the bioAF server run: ./bioaf import-git-known-hosts <file> "<where the keys came from>"'
+)
+
+
+async def _admin_key(session, identity_id: str | None) -> dict | None:
+    from app.platform.platform_config_service import PlatformConfigService
+
+    raw = await PlatformConfigService.get(session, "admin_ssh_key")
+    try:
+        data = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not data.get("fingerprint"):
+        return None
+    return {
+        "fingerprint": str(data["fingerprint"]),
+        "account": str(data.get("account", "")),
+        "current": identity_id is None or data.get("instance_id") in (None, identity_id),
+    }
+
+
+async def _git_trust(session, org_id: int | None) -> dict:
+    """Repositories on SSH hosts with no approved key (plan 03C), scoped to the caller's organization."""
+    from sqlalchemy import select
+
+    from app.models.github_repo import GitHubRepo
+    from app.platform.git_trust import trust_for_repositories
+
+    query = select(GitHubRepo.git_ssh_url)
+    if org_id is not None:
+        query = query.where(GitHubRepo.organization_id == org_id)
+    urls = list((await session.execute(query)).scalars())
+    trust = await trust_for_repositories(session, urls)
+    hosts = sorted(h if p == 22 else f"{h}:{p}" for h, p in trust.untrusted_hosts)
+    return {
+        "hosts_needing_keys": hosts,
+        "message": GIT_TRUST_MESSAGE if hosts else None,
+        "procedure": GIT_TRUST_PROCEDURE if hosts else None,
+    }
+
+
+async def view(session, org_id: int | None = None) -> dict:
     record = await _read(session)
     applied = record["applied"]
+    recovery = record.get("recovery") or _empty()["recovery"]
     return {
+        "admin_key": await _admin_key(session, recovery.get("instance_id")),
+        "git_trust": await _git_trust(session, org_id),
         "filter": {
             "draft": record["draft"],
             "applied": {
@@ -330,5 +380,5 @@ async def view(session) -> dict:
             "can_roll_back": record.get("previous") is not None,
             "scope": "SSH only. Web and API access are not affected.",
         },
-        "recovery": record.get("recovery") or _empty()["recovery"],
+        "recovery": recovery,
     }

@@ -34,7 +34,7 @@ async def get_ssh_access(
     if await has_effective_permission(session, current_user, "infrastructure", "configure"):
         from app.services.ssh_recovery import application_host_view
 
-        body["application_host"] = await application_host_view(session)
+        body["application_host"] = await application_host_view(session, int(current_user["org_id"]))
     return body
 
 

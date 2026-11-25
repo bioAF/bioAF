@@ -251,3 +251,38 @@ async def test_a_probe_for_another_server_is_not_login_tested(client, session, a
     await session.commit()
     result = (await client.post(f"{BASE}/host/check", headers=admin)).json()
     assert result["recovery"]["status"] == "configured_automatic"
+
+
+@pytest.mark.asyncio
+async def test_the_installer_administrator_key_is_shown_by_fingerprint_only(client, session, admin, host):
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(
+        session,
+        "admin_ssh_key",
+        json.dumps({"fingerprint": "SHA256:abc", "account": "ubuntu", "instance_id": "481516"}),
+    )
+    await session.commit()
+    state = (await client.get(BASE, headers=admin)).json()["application_host"]
+    assert state["admin_key"] == {"fingerprint": "SHA256:abc", "account": "ubuntu", "current": True}
+
+
+@pytest.mark.asyncio
+async def test_a_repository_on_a_custom_host_without_an_approved_key_is_reported(
+    client, session, admin, admin_user, host
+):
+    from app.models.github_repo import GitHubRepo
+
+    session.add(
+        GitHubRepo(
+            user_id=admin_user.id,
+            organization_id=admin_user.organization_id,
+            git_ssh_url="git@git.lab.example.org:team/analysis.git",
+            display_name="analysis",
+        )
+    )
+    await session.commit()
+    state = (await client.get(BASE, headers=admin)).json()["application_host"]
+    assert state["git_trust"]["hosts_needing_keys"] == ["git.lab.example.org"]
+    assert state["git_trust"]["message"].startswith("A connected code repository needs a security setting")
+    assert "import-git-known-hosts" in state["git_trust"]["procedure"]

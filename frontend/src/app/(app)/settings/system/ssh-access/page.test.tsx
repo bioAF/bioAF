@@ -153,3 +153,29 @@ test("Check access on the server shows the result", async () => {
   fireEvent.click(within(section).getByRole("button", { name: "Check access" }));
   expect(await within(section).findByText("Login tested")).toBeInTheDocument();
 });
+
+test("the installer administrator key is shown by fingerprint, separately from network restriction", async () => {
+  serve({ application_host: { ...host, admin_key: { fingerprint: "SHA256:abc", account: "ubuntu", current: true }, git_trust: { hosts_needing_keys: [], message: null, procedure: null } } });
+  render(<SshAccessPage />);
+  const section = await screen.findByRole("region", { name: "Application server SSH" });
+  expect(within(section).getByText(/Administrator login as ubuntu requires the key SHA256:abc/)).toBeInTheDocument();
+  expect(within(section).getByText(/does not limit which networks can reach SSH/)).toBeInTheDocument();
+});
+
+test("a repository host without an approved key shows the plain notice and the import procedure", async () => {
+  serve({
+    application_host: {
+      ...host,
+      admin_key: null,
+      git_trust: {
+        hosts_needing_keys: ["git.lab.example.org"],
+        message: "A connected code repository needs a security setting before this update can finish. Existing work has been left running.",
+        procedure: 'Get the server\'s SSH host keys from its administrator (not from ssh-keyscan), save them in a file, then on the bioAF server run: ./bioaf import-git-known-hosts <file> "<where the keys came from>"',
+      },
+    },
+  });
+  render(<SshAccessPage />);
+  expect(await screen.findByText(/A connected code repository needs a security setting/)).toBeInTheDocument();
+  expect(screen.getByText("git.lab.example.org")).toBeInTheDocument();
+  expect(screen.getByText(/import-git-known-hosts/)).toBeInTheDocument();
+});

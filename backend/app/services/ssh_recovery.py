@@ -263,10 +263,10 @@ async def restore_view(session) -> dict:
         }
 
 
-async def application_host_view(session) -> dict:
+async def application_host_view(session, org_id: int | None = None) -> dict:
     from app.services.host_ssh_access import view
 
-    return {**await view(session), "restore": await restore_view(session), "recovery_caption": RECOVERY_CAPTION}
+    return {**await view(session, org_id), "restore": await restore_view(session), "recovery_caption": RECOVERY_CAPTION}
 
 
 async def record_aws_app_network(session) -> None:
