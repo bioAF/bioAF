@@ -12,6 +12,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from app.adapters.work_nodes.node_ssh import sync_outputs_command
 
 
@@ -46,3 +48,26 @@ def test_stop_does_not_search_home_directories():
     command = sync_outputs_command("true")
     assert "/home" not in command
     assert "find " not in command
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads every directory")
+def test_an_unreadable_outputs_directory_fails_the_save(tmp_path):
+    """Review 7: a listing failure was read as an empty /outputs and the VM was deleted unsaved."""
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "result.csv").write_text("a\n")
+    outputs.chmod(0o000)
+    try:
+        assert _run(outputs, "true") != 0
+    finally:
+        outputs.chmod(0o755)
+
+
+def test_a_missing_outputs_directory_has_nothing_to_save(tmp_path):
+    assert _run(tmp_path / "outputs", "false") == 0
+
+
+def test_an_outputs_path_that_is_not_a_directory_fails_the_save(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.write_text("not a directory\n")
+    assert _run(outputs, "true") != 0

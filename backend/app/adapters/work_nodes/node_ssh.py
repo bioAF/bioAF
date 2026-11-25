@@ -41,10 +41,17 @@ STOP_STATE_UNKNOWN = "state_unknown"
 def sync_outputs_command(sync_outputs: str, *, outputs: str = "/outputs") -> str:
     """The node-side save: the output directory sync, the one location Stop promises to save.
 
-    Exits nonzero if the sync fails, so the node is kept. An empty /outputs is a checked,
-    successful no-op. Home directories are not searched (owner decision, 2026-11-25).
+    Exits nonzero, so the node is kept, if the sync fails or /outputs cannot be read: an unreadable
+    or non-directory /outputs is never taken for an empty one. An empty or missing /outputs is a
+    checked, successful no-op. Home directories are not searched (owner decision, 2026-11-25).
     """
-    return f'if [ -d {outputs} ] && [ -n "$(ls -A {outputs})" ]; then {sync_outputs} || exit 1; fi; exit 0'
+    return (
+        f"if [ -e {outputs} ] || [ -L {outputs} ]; then "
+        f"[ -d {outputs} ] || exit 1; "
+        f"listing=$(ls -A {outputs}) || exit 1; "
+        f'if [ -n "$listing" ]; then {sync_outputs} || exit 1; fi; '
+        "fi; exit 0"
+    )
 
 
 class NodeSyncError(Exception):
