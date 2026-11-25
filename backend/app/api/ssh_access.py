@@ -88,3 +88,17 @@ async def rollback_work_node_policy(
         raise
     await session.commit()
     return {"applied": applied}
+
+
+@router.get("/restore")
+async def get_restore_link(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).
+
+    Changes no key, rule or session and uses no bioAF cloud credential.
+    """
+    from app.services.ssh_recovery import restore_view
+
+    return await restore_view(session)

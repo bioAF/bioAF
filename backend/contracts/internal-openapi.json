@@ -51490,6 +51490,26 @@
         ]
       }
     },
+    "/api/v1/settings/ssh-access/restore": {
+      "get": {
+        "description": "Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).\n\nChanges no key, rule or session and uses no bioAF cloud credential.",
+        "operationId": "get_restore_link_api_v1_settings_ssh_access_restore_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Restore Link",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
     "/api/v1/settings/ssh-access/work-nodes/apply": {
       "post": {
         "operationId": "apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post",
