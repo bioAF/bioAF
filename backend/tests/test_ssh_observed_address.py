@@ -58,3 +58,33 @@ async def test_without_a_configured_edge_token_nothing_is_suggested(client, admi
 async def test_the_helper_needs_an_ssh_settings_permission(client, comp_bio_token, edge_token):
     response = await client.get(URL, headers={"Authorization": f"Bearer {comp_bio_token}"})
     assert response.status_code == 403
+
+
+def _location_block(conf: str, header: str) -> str:
+    start = conf.index(header)
+    depth, i = 0, conf.index("{", start)
+    for j in range(i, len(conf)):
+        depth += {"{": 1, "}": -1}.get(conf[j], 0)
+        if depth == 0:
+            return conf[i : j + 1]
+    raise AssertionError(header)
+
+
+def test_the_work_node_launch_location_keeps_every_api_proxy_setting():
+    """The exact launch location (the update gate) must proxy like /api/: same headers and the same
+    long backend timeouts, so a slow launch is not cut off at nginx's 60 second default."""
+    import re
+    from pathlib import Path
+
+    conf = (Path(__file__).resolve().parents[2] / "docker" / "nginx.conf").read_text()
+    launch = _location_block(conf, "location = /api/v1/work-nodes/sessions")
+    api = _location_block(conf, "location /api/ {")
+
+    def directives(block):
+        return {
+            line.strip()
+            for line in block.splitlines()
+            if re.match(r"\s*(proxy_\w+|send_timeout|client_max_body_size)\s", line)
+        }
+
+    assert directives(api) <= directives(launch), directives(api) - directives(launch)
