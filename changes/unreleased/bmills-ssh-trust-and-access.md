@@ -43,7 +43,8 @@
   a link to this server's page in your cloud console.
 - On an installation from before this release, cloud recovery access shows **Not set up yet** with **Set up
   cloud recovery access** (needs permission to deploy infrastructure); no SSH filter or installer rerun is
-  needed. **Needs attention** now means recovery exists but was changed or is broken.
+  needed. **Needs attention** means recovery was changed, removed or is broken; the same action repairs it,
+  and a setup that does not finish is recorded as failed with its reason.
 - Applying the SSH filter is refused, with the rule named and current access kept, when an existing
   firewall or security group rule would let SSH bypass it. Only one filter change (or other
   infrastructure operation) runs at a time; one that is interrupted is undone before the next.

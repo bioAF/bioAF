@@ -367,7 +367,7 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
             ? ` (${formatRecordedTime(recovery.login_tested_at, "datetime", { missing: "" })})`
             : ""}
         </p>
-        {recovery.status === "not_configured" && (
+        {(recovery.status === "not_configured" || recovery.status === "needs_attention") && (
           <div className="mt-2">
             <Button onClick={() => void setUpRecovery()} disabled={settingUp}>
               Set up cloud recovery access

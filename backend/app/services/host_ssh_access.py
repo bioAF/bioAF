@@ -202,6 +202,21 @@ async def _probe(session) -> dict | None:
         return None
 
 
+RECOVERY_REMOVED = "The cloud recovery rule was removed outside bioAF."
+
+
+def _recovery_established(record: dict) -> bool:
+    """Evidence recovery access existed here: it was seen or created, or a filter was ever applied."""
+    return bool(record.get("recovery_seen")) or record["applied"].get("revision", 0) > 0 or bool(record.get("previous"))
+
+
+def _note_established(record: dict, recovery: dict) -> dict:
+    """Record that recovery was seen or created; return the result without the internal flag."""
+    if recovery.get("_present"):
+        record["recovery_seen"] = True
+    return {k: v for k, v in recovery.items() if k != "_present"}
+
+
 async def preflight(session, *, reconcile: bool) -> dict:
     """Recovery readiness. With ``reconcile`` (Apply), the protected sources are created or repaired."""
     from app.services.ssh_recovery import RecoveryError, current_host_identity
@@ -220,16 +235,21 @@ async def preflight(session, *, reconcile: bool) -> dict:
     problems: list[str] = []
     sources: list[dict] = []
     missing = False
+    present = False
     try:
         driver = await network_for(session, identity)
         # Provider calls can wait minutes; they run off the serving event loop.
         sources = await _provider(driver.ensure_recovery if reconcile else driver.recovery_sources)
         missing = (not reconcile) and bool(await _provider(driver.recovery_missing))
+        present = not missing
         problems += await _provider(driver.check_recovery)
     except Exception as exc:
         problems.append(f"bioAF could not read or change this server's firewall ({type(exc).__name__}).")
+    if missing and _recovery_established(record):
+        # It existed here before: its absence is lost protection, not an installation from before it.
+        problems.append(RECOVERY_REMOVED)
+        missing = False
     problems += guest_problems(identity)
-    # Never set up (an install from before recovery access) is not the same as changed or broken.
     status = "needs_attention" if problems else ("not_configured" if missing else "configured_automatic")
     probe = await _probe(session)
     if (
@@ -246,6 +266,8 @@ async def preflight(session, *, reconcile: bool) -> dict:
         "sources": sources,
         "checked_at": now,
         "instance_id": identity.instance_id,
+        # Internal: the recovery resource was seen or created; writers record it (_note_established).
+        "_present": present,
     }
     if status == "login_tested":
         result["login_tested_at"] = probe.get("probed_at")
@@ -258,6 +280,7 @@ async def check_access(session) -> dict:
 
     def change(record: dict) -> None:
         nonlocal recovery
+        recovery = _note_established(record, recovery)
         if record.get("pending"):
             recovery = {
                 **recovery,
@@ -353,8 +376,15 @@ async def _apply(
     await _restore_unfinished(session, driver, actor_id=actor_id)
 
     recovery = await preflight(session, reconcile=True)
+
+    def note(r: dict) -> None:
+        nonlocal recovery
+        recovery = _note_established(r, recovery)
+        if recovery["status"] == "needs_attention":
+            r["recovery"] = recovery
+
+    await _update(session, note)
     if recovery["status"] == "needs_attention":
-        await _update(session, lambda r: r.__setitem__("recovery", recovery))
         await session.commit()
         raise ConflictError(NEEDS_ATTENTION_REFUSAL)
     # Only the operation that holds the exclusive slot changes "applied", so this read stays current.
@@ -423,9 +453,18 @@ async def _apply(
 
 
 async def _as_operation(
-    session, *, actor_id: int, change, action: str = "host_ssh_filter", done: str = "SSH filter changed."
+    session,
+    *,
+    actor_id: int,
+    change,
+    action: str = "host_ssh_filter",
+    done: str = "SSH filter changed.",
+    outcome=None,
 ) -> dict:
-    """Run one host SSH change as the single running infrastructure operation (409 while another runs)."""
+    """Run one host SSH change as the single running infrastructure operation (409 while another runs).
+
+    ``outcome(result)`` decides the recorded result; without it a change that returns has succeeded.
+    """
     from app.services import infrastructure_operations as ops
 
     op_id, _ = await ops.accept(action=action, principal=ops.Principal(user_id=actor_id))
@@ -433,7 +472,7 @@ async def _as_operation(
         # Read the setting again inside the slot: a change that settled meanwhile is seen.
         session.expire_all()
         applied = await change(await _read(session), op_id)
-    await ops.finish(op_id, ops.succeeded(done))
+    await ops.finish(op_id, outcome(applied) if outcome else ops.succeeded(done))
     return applied
 
 
@@ -445,6 +484,8 @@ async def set_up_recovery(session, *, actor_id: int) -> dict:
         recovery = await preflight(session, reconcile=True)
 
         def store(r: dict) -> None:
+            nonlocal recovery
+            recovery = _note_established(r, recovery)
             r["recovery"] = recovery
 
         await _update(session, store)
@@ -459,9 +500,14 @@ async def set_up_recovery(session, *, actor_id: int) -> dict:
         await session.commit()
         return recovery
 
-    return await _as_operation(
-        session, actor_id=actor_id, change=change, action="host_recovery_setup", done="Cloud recovery access set up."
-    )
+    def outcome(recovery: dict):
+        from app.services import infrastructure_operations as ops
+
+        if recovery["status"] in ("configured_automatic", "login_tested"):
+            return ops.succeeded("Cloud recovery access set up.")
+        return ops.failed("Cloud recovery access could not be set up: " + " ".join(recovery["problems"]))
+
+    return await _as_operation(session, actor_id=actor_id, change=change, action="host_recovery_setup", outcome=outcome)
 
 
 def _check_draft(record: dict, draft_version: int) -> dict:

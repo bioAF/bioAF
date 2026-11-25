@@ -234,3 +234,11 @@ describe("cloud recovery that was never set up (owner decision 2026-11-25)", () 
     expect(within(section).getByRole("button", { name: "Set up cloud recovery access" })).toBeInTheDocument();
   });
 });
+
+it("offers the setup again when recovery needs attention, so a failed setup can be retried", async () => {
+  serve({ application_host: { ...host, recovery: { status: "needs_attention", problems: ["Permission denied"], sources: [], checked_at: null }, admin_key: null, git_trust: { hosts_needing_keys: [], message: null, procedure: null } } });
+  render(<SshAccessPage />);
+  const section = await screen.findByRole("region", { name: "Application server SSH" });
+  expect(within(section).getByText("Permission denied")).toBeInTheDocument();
+  expect(within(section).getByRole("button", { name: "Set up cloud recovery access" })).toBeInTheDocument();
+});

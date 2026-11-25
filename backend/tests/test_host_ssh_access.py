@@ -544,3 +544,46 @@ async def test_set_up_recovery_needs_deploy_permission(client, session, admin_us
     response = await client.post(f"{BASE}/host/recovery", headers=headers)
     assert response.status_code == 403
     host.driver.ensure_recovery.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_recovery_setup_is_recorded_as_failed_and_can_be_retried(client, session, admin, host):
+    """Review 7: a setup that did not end configured must not be recorded as succeeded."""
+    _diagnostics(host)
+    host.driver.recovery_missing.return_value = True
+    host.driver.check_recovery.return_value = ["Permission denied"]
+    response = await client.post(f"{BASE}/host/recovery", headers=admin)
+    assert response.status_code == 200, response.text
+    assert response.json()["recovery"]["status"] == "needs_attention"
+    op = (
+        await session.execute(
+            text("SELECT action, status, message FROM infrastructure_operations ORDER BY id DESC LIMIT 1")
+        )
+    ).one()
+    assert (op.action, op.status) == ("host_recovery_setup", "failed")
+    assert "Permission denied" in op.message
+    host.driver.check_recovery.return_value = []
+    retry = await client.post(f"{BASE}/host/recovery", headers=admin)
+    assert retry.json()["recovery"]["status"] == "configured_automatic"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("established_by", ["check", "setup", "filter"])
+async def test_recovery_removed_after_it_existed_needs_attention_not_first_setup(client, admin, host, established_by):
+    """Review 7: once recovery existed here, its absence is lost protection, not a new install."""
+    _diagnostics(host)
+    if established_by == "check":
+        assert (await client.post(f"{BASE}/host/check", headers=admin)).json()["recovery"]["status"] == (
+            "configured_automatic"
+        )
+    elif established_by == "setup":
+        assert (await client.post(f"{BASE}/host/recovery", headers=admin)).status_code == 200
+    else:
+        assert (await _save_draft(client, admin, [{"name": "Office", "cidr": "203.0.113.7"}])).status_code == 200
+        draft = (await client.get(BASE, headers=admin)).json()["application_host"]["filter"]["draft"]
+        applied = await client.post(f"{BASE}/host/apply", json={"draft_version": draft["version"]}, headers=admin)
+        assert applied.status_code == 200, applied.text
+    host.driver.recovery_missing.return_value = True
+    result = (await client.post(f"{BASE}/host/check", headers=admin)).json()["recovery"]
+    assert result["status"] == "needs_attention"
+    assert "The cloud recovery rule was removed outside bioAF." in result["problems"]
