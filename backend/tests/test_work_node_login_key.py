@@ -55,6 +55,15 @@ def _node(user, status, **extra):
 
 
 @pytest.mark.asyncio
+async def test_the_key_download_keeps_the_documented_file_name(client, comp_bio_token, keyed_user):
+    """A text/plain body makes Chromium save "bioaf_id_rsa.txt", which the Profile's mv command misses."""
+    response = await client.get("/api/auth/me/ssh-key/private", headers=_bearer(comp_bio_token))
+    assert response.status_code == 200
+    assert response.headers["content-type"].split(";")[0] == "application/octet-stream"
+    assert response.headers["content-disposition"] == 'attachment; filename="bioaf_id_rsa"'
+
+
+@pytest.mark.asyncio
 async def test_the_owner_downloads_their_current_private_key_uncached_and_audited(
     client, session, comp_bio_token, comp_bio_user, keyed_user
 ):

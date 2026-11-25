@@ -416,7 +416,7 @@ async def download_ssh_key(request: Request, session: AsyncSession = Depends(get
 
     Uncached; the audit records actor, fingerprint and time, never key material.
     """
-    from fastapi.responses import PlainTextResponse
+    from fastapi.responses import Response
 
     current_user = request.state.current_user
     user_id = int(current_user["sub"])
@@ -433,8 +433,11 @@ async def download_ssh_key(request: Request, session: AsyncSession = Depends(get
     )
     await session.commit()
     body = cred.ssh_private_key if cred.ssh_private_key.endswith("\n") else cred.ssh_private_key + "\n"
-    return PlainTextResponse(
+    # Binary, not text/plain: browsers would save a text body as bioaf_id_rsa.txt, which the
+    # Profile's instructions (mv ~/Downloads/bioaf_id_rsa ...) would not find.
+    return Response(
         body,
+        media_type="application/octet-stream",
         headers={
             "Cache-Control": "no-store",
             "Pragma": "no-cache",
