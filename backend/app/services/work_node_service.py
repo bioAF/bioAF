@@ -444,9 +444,10 @@ class WorkNodeService:
     async def _bind_unrecorded_launch(session: AsyncSession, node: ComputeSession) -> str | None:
         """Find the VM of a launch whose provider result was never recorded and bind it to the row.
 
-        Returns None when the node is bound or the provider confirms no VM exists for it, and a
-        stop failure reason when the provider cannot answer or what it reports does not match
-        this launch attempt (the node is then kept).
+        Returns None when the node is bound, or when the provider lists no VM for it and the launch
+        attempt has settled (``LAUNCH_SETTLE_WINDOW``); otherwise a stop failure reason, and the
+        node is kept: the provider cannot answer, its list may still lag the create, or what it
+        reports does not match this launch attempt.
         """
         from app.services.work_node_readiness import InventoryUnavailable
 
@@ -460,7 +461,12 @@ class WorkNodeService:
             return STOP_STATE_UNKNOWN
         mine = [i for i in instances if i.session_id == str(node.id)]
         if not mine:
-            return None
+            from app.services.work_node_readiness import launch_settled
+
+            if launch_settled(node.created_at):
+                return None
+            logger.info("Work node %d: launch not settled; an empty inventory is not yet proof", node.id)
+            return STOP_STATE_UNKNOWN
         if len(mine) != 1 or mine[0].launch_attempt_id != node.launch_attempt_id or not mine[0].zone:
             logger.warning("Work node %d: provider instances do not match its launch attempt", node.id)
             return STOP_STATE_UNKNOWN

@@ -218,14 +218,22 @@ class SessionCredentialService:
     async def assert_key_replaceable(session: AsyncSession, user_id: int, org_id: int) -> None:
         """Refuse replacement while any of the user's Work Nodes may still need the current key.
 
-        Pending, live, stopping or kept nodes block. For other records with an instance the provider
-        inventory decides (a database "stopped" alone is not proof); an unavailable inventory blocks.
+        Pending, live, stopping or kept nodes block. For other records with an instance, or with a
+        launch attempt whose instance was never recorded, the provider inventory decides (a database
+        "stopped" alone is not proof); an unavailable inventory blocks, and so does an unrecorded
+        attempt that has not settled (``LAUNCH_SETTLE_WINDOW``).
         """
         from app.models.notebook_session import ComputeSession
 
         rows = (
             await session.execute(
-                select(ComputeSession.id, ComputeSession.status, ComputeSession.gce_instance_name).where(
+                select(
+                    ComputeSession.id,
+                    ComputeSession.status,
+                    ComputeSession.gce_instance_name,
+                    ComputeSession.launch_attempt_id,
+                    ComputeSession.created_at,
+                ).where(
                     ComputeSession.user_id == user_id,
                     ComputeSession.organization_id == org_id,
                     ComputeSession.session_type == "ssh",
@@ -234,7 +242,13 @@ class SessionCredentialService:
         ).all()
         if any(r.status in _ACTIVE_NODE_STATUSES for r in rows):
             raise ConflictError(KEY_REPLACEMENT_REFUSAL)
-        with_instances = {str(r.id) for r in rows if r.gce_instance_name}
+        from app.services.work_node_readiness import launch_settled
+
+        # A launch attempt with no recorded instance may still have created one.
+        unresolved = [r for r in rows if not r.gce_instance_name and r.launch_attempt_id]
+        if any(not launch_settled(r.created_at) for r in unresolved):
+            raise ConflictError(KEY_REPLACEMENT_REFUSAL)
+        with_instances = {str(r.id) for r in rows if r.gce_instance_name} | {str(r.id) for r in unresolved}
         if not with_instances:
             return
         try:

@@ -290,3 +290,38 @@ async def test_launch_records_the_login_key_fingerprint(client, session, comp_bi
     assert row.login_key_fingerprint and row.login_key_fingerprint.startswith("SHA256:")
     assert (await session.execute(select(func.count()).select_from(ComputeSession))).scalar_one() == 1
     assert datetime.now(timezone.utc)  # keeps imports used
+
+
+@pytest.mark.asyncio
+async def test_a_failed_launch_without_a_recorded_instance_is_checked_before_replacement(
+    client, session, comp_bio_token, comp_bio_user, keyed_user
+):
+    """A launch attempt can have created a VM even when its result was never recorded."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.work_node_readiness import ManagedInstance
+
+    node = _node(comp_bio_user, "failed", launch_attempt_id="attempt-9")
+    session.add(node)
+    await session.commit()
+    adapter = MagicMock()
+    adapter.inventory_instances = AsyncMock(return_value=[])
+
+    async def generate():
+        with patch("app.services.session_credential_service.get_work_node_adapter", return_value=adapter):
+            return await client.post("/api/auth/me/ssh-key/generate", headers=_bearer(comp_bio_token))
+
+    # Right after the attempt, not being listed is not proof: refused.
+    assert (await generate()).status_code == 409
+
+    node.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    await session.commit()
+    # Settled, but the provider still lists its VM: refused.
+    adapter.inventory_instances = AsyncMock(
+        return_value=[ManagedInstance(name="bioaf-worknode-9", session_id=str(node.id))]
+    )
+    assert (await generate()).status_code == 409
+    adapter.inventory_instances.assert_awaited_once()
+    # Settled and not listed: replaced.
+    adapter.inventory_instances = AsyncMock(return_value=[])
+    assert (await generate()).status_code == 200

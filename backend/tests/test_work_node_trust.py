@@ -403,6 +403,10 @@ async def test_stop_of_an_unbound_launch_completes_only_when_the_provider_confir
     client, session, comp_bio_token, durable_node, adapter
 ):
     await _unbound(session, durable_node)
+    # Owner-approved (2026-11-24, review finding 1): a settled launch attempt; a recent one is covered by
+    # test_an_empty_inventory_right_after_an_unbound_launch_is_not_proof_the_vm_is_gone.
+    durable_node.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    await session.commit()
     adapter.inventory_instances = AsyncMock(return_value=[])
     response = await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
     assert response.json()["status"] == "stopped"
@@ -444,3 +448,31 @@ async def test_background_cleanup_leaves_a_fresh_stop_claim_alone(session, durab
     await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)
     adapter.terminate_vm.assert_not_called()
     assert (await _row(session, durable_node.id)).status == "stopping"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_inventory_right_after_an_unbound_launch_is_not_proof_the_vm_is_gone(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    """The provider's list can lag a create (and a launch may still be in flight), so an unbound
+    launch keeps its key until the attempt has settled."""
+    await _unbound(session, durable_node)
+    adapter.inventory_instances = AsyncMock(return_value=[])
+    await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    row = await _row(session, durable_node.id)
+    assert (row.status, row.stop_failure) == ("stop_failed", "state_unknown")
+    assert row.sync_private_key == "sync-private"
+    adapter.inventory_instances.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_empty_inventory_after_the_launch_settled_completes_the_stop(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    await _unbound(session, durable_node)
+    durable_node.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    await session.commit()
+    adapter.inventory_instances = AsyncMock(return_value=[])
+    response = await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    assert response.json()["status"] == "stopped"
+    assert (await _row(session, durable_node.id)).sync_private_key is None
