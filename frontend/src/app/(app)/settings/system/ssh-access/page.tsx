@@ -427,15 +427,15 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
 
 export default function SshAccessPage() {
   const [data, setData] = useState<SshAccess | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadFailed, setLoadFailed] = useState<"forbidden" | "error" | null>(null);
 
   const load = useCallback(async () => {
     try {
       setData(await api.get<SshAccess>(BASE));
-      setLoadFailed(false);
+      setLoadFailed(null);
     } catch (e) {
       logError("loading SSH access settings", e);
-      setLoadFailed(true);
+      setLoadFailed(e instanceof ApiError && e.status === 403 ? "forbidden" : "error");
     }
   }, []);
 
@@ -452,7 +452,12 @@ export default function SshAccessPage() {
           through your cloud account.
         </p>
       </div>
-      {loadFailed && (
+      {loadFailed === "forbidden" && (
+        <p role="alert" className="text-sm text-gray-700">
+          You don&rsquo;t have permission to view SSH access settings.
+        </p>
+      )}
+      {loadFailed === "error" && (
         <p role="alert" className="text-sm text-red-700">
           SSH access settings could not be loaded. The technical detail is in the application logs.
         </p>

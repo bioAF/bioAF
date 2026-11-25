@@ -179,3 +179,17 @@ test("a repository host without an approved key shows the plain notice and the i
   expect(screen.getByText("git.lab.example.org")).toBeInTheDocument();
   expect(screen.getByText(/import-git-known-hosts/)).toBeInTheDocument();
 });
+
+it("tells a caller without permission so, instead of reporting a load failure", async () => {
+  const { ApiError } = jest.requireMock("@/lib/api");
+  mockGet.mockRejectedValue(new ApiError(403, "role_missing"));
+  render(<SshAccessPage />);
+  expect(await screen.findByText("You don’t have permission to view SSH access settings.")).toBeInTheDocument();
+  expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+});
+
+it("still reports other load failures", async () => {
+  mockGet.mockRejectedValue(new Error("network"));
+  render(<SshAccessPage />);
+  expect(await screen.findByText(/SSH access settings could not be loaded/)).toBeInTheDocument();
+});
