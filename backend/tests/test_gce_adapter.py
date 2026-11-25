@@ -459,7 +459,7 @@ def _op(status="DONE", error=None, target_id=4242):
     return op
 
 
-async def _settle(requests, ops=None, instance=None, ops_error=None):
+async def _settle(requests, ops=None, instance=None, ops_error=None, instance_reads=None):
     provider = _launch_provider()
     zone_ops = MagicMock()
     if ops_error:
@@ -467,7 +467,9 @@ async def _settle(requests, ops=None, instance=None, ops_error=None):
     else:
         zone_ops.list.return_value = ops or []
     instances = MagicMock()
-    if instance is None:
+    if instance_reads is not None:
+        instances.get.side_effect = instance_reads
+    elif instance is None:
         from google.api_core.exceptions import NotFound
 
         instances.get.side_effect = NotFound("gone")
@@ -492,8 +494,10 @@ async def test_gce_an_attempt_that_sent_no_request_settles_as_no_vm():
 
 @pytest.mark.asyncio
 async def test_gce_a_request_the_zone_never_accepted_settles_as_no_vm():
+    # Owner-approved (2026-11-24, review 5 item 1): no instance and no insert operation for an
+    # unanswered request is not proof that nothing was made, so it stays unknown (the key is kept).
     outcome, zone_ops = await _settle([REQ], ops=[])
-    assert outcome.state == "none"
+    assert outcome.state == "unknown"
     query = zone_ops.list.call_args.kwargs["request"].filter
     assert 'operationType = "insert"' in query
     assert "zones/us-central1-b/instances/bioaf-worknode-7" in query
@@ -556,3 +560,35 @@ async def test_gce_an_ambiguous_error_is_not_recorded_as_a_failed_request(case):
     ):
         await provider._gce_launch_vm(spec)
     assert states == ["requested"]
+
+
+@pytest.mark.asyncio
+async def test_gce_a_vm_created_between_the_lookups_is_bound_not_discarded():
+    """Review 5 item 1: the VM read says not found, creation finishes, then the operation reads DONE
+    with no error. The VM is read again and bound; it is never settled as "no VM"."""
+    from google.api_core.exceptions import NotFound
+
+    outcome, _ = await _settle(
+        [REQ], ops=[_op(error=None)], instance_reads=[NotFound("not yet"), _gce_instance(instance_id=4242)]
+    )
+    assert outcome.state == "created"
+    assert outcome.instance.provider_instance_id == "4242"
+
+
+@pytest.mark.asyncio
+async def test_gce_a_completed_insert_whose_vm_cannot_be_read_again_is_unknown():
+    outcome, _ = await _settle([REQ], ops=[_op(error=None)], instance_reads=[NotFound_("a"), RuntimeError("denied")])
+    assert outcome.state == "unknown"
+
+
+def NotFound_(message):
+    from google.api_core.exceptions import NotFound
+
+    return NotFound(message)
+
+
+@pytest.mark.asyncio
+async def test_gce_a_recorded_failure_settles_as_no_vm_without_reading_anything():
+    outcome, zone_ops = await _settle([{**REQ, "state": "failed"}])
+    assert outcome.state == "none"
+    zone_ops.list.assert_not_called()

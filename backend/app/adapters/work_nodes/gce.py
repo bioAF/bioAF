@@ -1052,9 +1052,10 @@ class GceVmInstance(VmInstance):
     async def settle_launch(self, requests: list[dict], *, session_id: int):
         """Settle a launch attempt from its recorded zone requests (see LaunchOutcome).
 
-        Per zone: the VM under the attempt's fixed name is the answer when it exists; otherwise the
-        zone's insert operations for that name decide (none, or all finished: no VM from it; one still
-        running: unknown). Anything unreadable is unknown.
+        Per zone: the VM under the attempt's fixed name is the answer when it exists. Otherwise the
+        zone's insert operations for that name decide: all finished with an error, no VM from it; one
+        finished cleanly, the VM is read again and bound (it may have been created after the first
+        read); one still running, no operation at all, or anything unreadable, unknown.
         """
         from app.platform.work_node_inventory import LaunchOutcome, ManagedInstance
 
@@ -1071,30 +1072,38 @@ class GceVmInstance(VmInstance):
             instances = compute_v1.InstancesClient(credentials=credentials)
             operations = compute_v1.ZoneOperationsClient(credentials=credentials)
             name = f"bioaf-worknode-{session_id}"
+
+            def read_vm(project: str, zone: str):
+                """The attempt's VM as an outcome, None when GCE says it does not exist. Raises otherwise."""
+                try:
+                    found = instances.get(project=project, zone=zone, instance=name)
+                except NotFound:
+                    return None
+                labels = dict(found.labels or {})
+                return LaunchOutcome(
+                    "created",
+                    ManagedInstance(
+                        name=name,
+                        session_id=labels.get("bioaf-session"),
+                        zone=zone,
+                        provider_instance_id=str(found.id),
+                        launch_attempt_id=labels.get("bioaf-launch"),
+                    ),
+                )
+
             unknown = False
             for req in requests:
                 if req.get("state") == "failed":
-                    continue
+                    continue  # GCE finished this request's operation with an error
                 project, zone = req.get("project", ""), req.get("zone", "")
                 try:
-                    found = instances.get(project=project, zone=zone, instance=name)
-                    labels = dict(found.labels or {})
-                    return LaunchOutcome(
-                        "created",
-                        ManagedInstance(
-                            name=name,
-                            session_id=labels.get("bioaf-session"),
-                            zone=zone,
-                            provider_instance_id=str(found.id),
-                            launch_attempt_id=labels.get("bioaf-launch"),
-                        ),
-                    )
-                except NotFound:
-                    pass
+                    vm = read_vm(project, zone)
                 except Exception as exc:
                     logger.warning("Could not read VM %s in %s: %s", name, zone, type(exc).__name__)
                     unknown = True
                     continue
+                if vm is not None:
+                    return vm
                 target = f"https://www.googleapis.com/compute/v1/projects/{project}/zones/{zone}/instances/{name}"
                 query = f'(operationType = "insert") AND (targetLink = "{target}")'
                 try:
@@ -1107,8 +1116,27 @@ class GceVmInstance(VmInstance):
                     logger.warning("Could not read insert operations in %s: %s", zone, type(exc).__name__)
                     unknown = True
                     continue
+                if not found_ops:
+                    # No VM and no operation for a request that never got an answer is not proof
+                    # that nothing was made (review 5): the outcome stays unknown.
+                    unknown = True
+                    continue
                 if any(str(getattr(op.status, "name", op.status)) != "DONE" for op in found_ops):
                     unknown = True
+                    continue
+                if any(not op.error for op in found_ops):
+                    # An insert finished without an error after the first read: read the VM again so it
+                    # is bound, never discarded (creation is asynchronous).
+                    try:
+                        vm = read_vm(project, zone)
+                    except Exception as exc:
+                        logger.warning("Could not re-read VM %s in %s: %s", name, zone, type(exc).__name__)
+                        unknown = True
+                        continue
+                    if vm is not None:
+                        return vm
+                    # Created and since deleted: nothing remains of this request.
+                # Every insert for it finished with an error: no VM from this request.
             return LaunchOutcome("unknown") if unknown else LaunchOutcome("none")
 
         return await asyncio.to_thread(check)
