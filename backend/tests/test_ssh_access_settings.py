@@ -6,6 +6,8 @@ rollback restores the previous applied policy. Work Node range administration ne
 work_nodes:configure and grants nothing on the application host.
 """
 
+from typing import Any
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -206,7 +208,7 @@ async def test_a_range_enabled_launch_generates_the_missing_key_before_the_provi
     await _draft(client, admin, [{"name": "Lab", "cidr": "10.20.0.0/16"}])
     v = (await client.get(BASE, headers=admin)).json()["work_nodes"]["draft"]["version"]
     await client.post(f"{BASE}/work-nodes/apply", json={"draft_version": v}, headers=admin)
-    seen = {}
+    seen: dict[str, Any] = {}
 
     async def fake_launch(spec):
         async with async_session_factory() as other:

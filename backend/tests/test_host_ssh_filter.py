@@ -4,6 +4,8 @@ Provider clients are mocked: these prove the rules bioAF writes, their order, sc
 not that a live cloud accepts them (provider acceptance is a separate release gate).
 """
 
+from typing import Any
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -185,7 +187,10 @@ AWS = HostIdentity(
 
 def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=(), base_extra=()):
     ec2 = MagicMock()
-    state = {"attached": list(groups), "sgs": {"sg-base": {"ssh": list(base_ssh), "extra": list(base_extra)}}}
+    state: dict[str, Any] = {
+        "attached": list(groups),
+        "sgs": {"sg-base": {"ssh": list(base_ssh), "extra": list(base_extra)}},
+    }
     ec2.describe_instances.return_value = {
         "Reservations": [
             {

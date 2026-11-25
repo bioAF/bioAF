@@ -248,9 +248,14 @@ async def test_the_gcp_route_waits_for_the_provider_off_the_event_loop(session):
     from app.services.backend_sync_route import ensure_backend_sync_route
 
     fw = Firewalls()
-    seen = []
+    seen: list[bool] = []
     insert = fw.insert
-    fw.insert = lambda **kw: (seen.append(threading.current_thread() is threading.main_thread()), insert(**kw))[1]
+
+    def recording_insert(**kw):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return insert(**kw)
+
+    fw.insert = recording_insert
     with (
         patch("app.services.backend_sync_route._simulated", return_value=False),
         patch("app.services.ssh_recovery.current_host_identity", AsyncMock(return_value=GCP)),

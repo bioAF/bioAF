@@ -28,9 +28,7 @@ def upgrade() -> None:
     op.add_column("compute_sessions", sa.Column("launch_attempt_id", sa.String(64), nullable=True))
     op.add_column("compute_sessions", sa.Column("node_trust_version", sa.Integer(), nullable=True))
     op.add_column("compute_sessions", sa.Column("stop_failure", sa.String(30), nullable=True))
-    op.add_column(
-        "compute_sessions", sa.Column("stop_attempts", sa.Integer(), nullable=False, server_default="0")
-    )
+    op.add_column("compute_sessions", sa.Column("stop_attempts", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("compute_sessions", sa.Column("stop_claimed_at", sa.DateTime(timezone=True), nullable=True))
 
 

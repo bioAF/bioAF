@@ -19,8 +19,8 @@ from app.adapters.work_nodes.sshd_policy import (
     sshd_policy_install_lines,
 )
 
-SSHD = shutil.which("sshd") or ("/usr/sbin/sshd" if Path("/usr/sbin/sshd").exists() else None)
-needs_sshd = pytest.mark.skipif(SSHD is None, reason="OpenSSH sshd is not installed here")
+SSHD: str = shutil.which("sshd") or ("/usr/sbin/sshd" if Path("/usr/sbin/sshd").exists() else "")
+needs_sshd = pytest.mark.skipif(not SSHD, reason="OpenSSH sshd is not installed here")
 
 
 def _effective(tmp_path: Path, policy: str, user: str, addr: str, *, earlier_global: str = "yes") -> dict:

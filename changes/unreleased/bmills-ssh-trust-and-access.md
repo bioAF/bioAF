@@ -52,7 +52,15 @@
   access?** (password login is turned off for the administrator; other SSH keys already allowed for that
   account keep working), check recovery login with a temporary key, and save a non-secret access sheet with
   the console link in `~/.bioaf/`.
+- The GCP installer creates the server so it publishes its SSH host keys, so the administrator key step and
+  the recovery login check can verify the server on a new installation.
 - The GCP installer waits and retries when Google Cloud rate-limits its permission changes, instead of
   stopping partway; permission and configuration errors still stop it at once.
+- People without permission to manage SSH access who open the page see **You don’t have permission to view
+  SSH access settings.**
 - After updating an AWS installation, re-apply the compute stack (Infrastructure) so new work nodes are
   saved over the private network; until then they keep the existing route.
+
+### Fixes
+
+- The experiment filter on Literature Library, Plot Archive and Files lines up with the other filters again.
