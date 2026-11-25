@@ -109,6 +109,9 @@ class AwsTerraformCloud(TerraformCloud):
             "compute_stack_uid",
             "terraform_initialized",
             "terraform_state_bucket",
+            # The application network, recorded by the backend for private backend sync (plan 03B).
+            "aws_app_vpc_id",
+            "aws_app_security_group_id",
         ]
 
     def _state_bucket(self, config: dict) -> str:
@@ -157,6 +160,12 @@ class AwsTerraformCloud(TerraformCloud):
             app_role_arn = config.get("aws_app_role_arn")
             if app_role_arn:
                 tfvars["app_role_arn"] = app_role_arn
+            # Private backend sync (plan 03B): peer with the application VPC when it is recorded.
+            app_vpc = identifier_value(config.get("aws_app_vpc_id"))
+            app_sg = identifier_value(config.get("aws_app_security_group_id"))
+            if app_vpc and app_sg:
+                tfvars["app_vpc_id"] = app_vpc
+                tfvars["app_security_group_id"] = app_sg
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))

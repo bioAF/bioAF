@@ -722,3 +722,73 @@ resource "aws_autoscaling_group_tag" "ca" {
     propagate_at_launch = false
   }
 }
+
+# --- Private backend sync (plan 03B) -------------------------------------------
+#
+# The application VM runs in its own (default) VPC; Work Nodes run in this VPC. The backend saves
+# Work Node outputs over SSH as bioaf-sync, so the two VPCs are peered, each gets one explicit
+# route to the other's CIDR (existing and default routes are untouched), and Work Nodes join a
+# backend-sync group that allows tcp:22 only from the application's security group. Created only
+# when the backend recorded the application network (app_vpc_id / app_security_group_id);
+# otherwise Work Nodes keep the existing public sync route. Peering is not VPN transit.
+
+locals {
+  backend_sync_private = var.app_vpc_id != "" && var.app_security_group_id != ""
+}
+
+data "aws_vpc" "app" {
+  count = local.backend_sync_private ? 1 : 0
+  id    = var.app_vpc_id
+}
+
+data "aws_route_tables" "app" {
+  count  = local.backend_sync_private ? 1 : 0
+  vpc_id = var.app_vpc_id
+}
+
+resource "aws_vpc_peering_connection" "app" {
+  count       = local.backend_sync_private ? 1 : 0
+  vpc_id      = aws_vpc.this.id
+  peer_vpc_id = var.app_vpc_id
+  auto_accept = true
+
+  lifecycle {
+    precondition {
+      condition     = data.aws_vpc.app[0].cidr_block != aws_vpc.this.cidr_block
+      error_message = "The application VPC and the compute VPC use the same address range, so they cannot be peered."
+    }
+  }
+
+  tags = merge(local.tags, { Name = "${local.cluster_name}-app-peering" })
+}
+
+resource "aws_route" "compute_to_app" {
+  count                     = local.backend_sync_private ? 1 : 0
+  route_table_id            = aws_route_table.public.id
+  destination_cidr_block    = data.aws_vpc.app[0].cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.app[0].id
+}
+
+resource "aws_route" "app_to_compute" {
+  for_each                  = local.backend_sync_private ? toset(data.aws_route_tables.app[0].ids) : toset([])
+  route_table_id            = each.value
+  destination_cidr_block    = aws_vpc.this.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.app[0].id
+}
+
+resource "aws_security_group" "backend_sync" {
+  count       = local.backend_sync_private ? 1 : 0
+  name        = "${local.cluster_name}-backend-sync"
+  description = "bioAF backend output sync to work nodes (SSH from the application only)"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "SSH from the bioAF application over VPC peering"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [var.app_security_group_id]
+  }
+
+  tags = merge(local.tags, { Name = "${local.cluster_name}-backend-sync" })
+}

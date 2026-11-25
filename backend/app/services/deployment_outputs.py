@@ -79,6 +79,8 @@ COMPUTE_AWS_OUTPUTS: OutputMap = {
     "work_node_subnet_id": "aws_work_node_subnet_id",
     "work_node_security_group_id": "aws_work_node_security_group_id",
     "work_node_instance_profile": "aws_work_node_instance_profile",
+    # Plan 03B private backend sync: empty until the application network is recorded and peered.
+    "backend_sync_security_group_id": "aws_backend_sync_security_group_id",
 }
 
 # Set to "null" by compute teardown. Everything else survives it.

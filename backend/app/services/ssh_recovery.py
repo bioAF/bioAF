@@ -267,3 +267,29 @@ async def application_host_view(session) -> dict:
     from app.services.host_ssh_access import view
 
     return {**await view(session), "restore": await restore_view(session), "recovery_caption": RECOVERY_CAPTION}
+
+
+async def record_aws_app_network(session) -> None:
+    """Record the AWS application VM's VPC and security group for private backend sync (plan 03B).
+
+    Read from the running instance through the backend's own authority; bioAF's own SSH groups
+    are never the application group. Best effort: without it the compute module keeps public sync.
+    """
+    from app.platform.platform_config_service import PlatformConfigService
+
+    identity = await current_host_identity(session)
+    if identity.provider != "aws":
+        return
+    import asyncio
+
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=identity.region)
+    resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[identity.instance_id]))
+    instance = resp["Reservations"][0]["Instances"][0]
+    groups = [g for g in instance.get("SecurityGroups", []) if not g.get("GroupName", "").startswith("bioaf-ssh-")]
+    if not groups:
+        return
+    await PlatformConfigService.set(session, "aws_app_vpc_id", instance["VpcId"])
+    await PlatformConfigService.set(session, "aws_app_security_group_id", groups[0]["GroupId"])
+    await session.commit()
