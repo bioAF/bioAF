@@ -11,7 +11,10 @@
   waits: **Some older work nodes are still running. Finish saving your work and stop them when convenient,
   then retry the update. bioAF will leave them running.** Use **View work nodes** and **Check again** on
   Settings > Platform Info. Nothing is stopped for you. New work node launches pause for a few minutes while
-  the backend is replaced.
+  the backend is replaced, and bioAF does not answer for about a minute during the final check (the restart
+  warning is shown first). If an update is stopped partway, bioAF resumes on its own within seconds and
+  shows **The update stopped before it finished. bioAF is running again and nothing was changed. Retry the
+  update.**
 
 ### Work nodes
 
@@ -35,6 +38,9 @@
   server, and **Cloud recovery access is always allowed. Your cloud-account permissions are still
   required.**, with **Configured (automatic checks)** or **Login tested** evidence and **Restore SSH access**,
   a link to this server's page in your cloud console.
+- Applying the SSH filter is refused, with the rule named and current access kept, when an existing
+  firewall or security group rule would let SSH bypass it. Only one filter change (or other
+  infrastructure operation) runs at a time; one that is interrupted is undone before the next.
 - The installers prepare cloud recovery access, can **Require this computer's SSH key for administrator
   access?**, check recovery login with a temporary key, and save a non-secret access sheet with the console
   link in `~/.bioaf/`.
