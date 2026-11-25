@@ -176,9 +176,9 @@ AWS = HostIdentity(
 )
 
 
-def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=()):
+def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=(), base_extra=()):
     ec2 = MagicMock()
-    state = {"attached": list(groups), "sgs": {"sg-base": {"ssh": list(base_ssh)}}}
+    state = {"attached": list(groups), "sgs": {"sg-base": {"ssh": list(base_ssh), "extra": list(base_extra)}}}
     ec2.describe_instances.return_value = {
         "Reservations": [
             {
@@ -212,7 +212,8 @@ def _ec2(groups=("sg-base",), base_ssh=("0.0.0.0/0",), endpoints=()):
                                 "IpRanges": [{"CidrIp": c} for c in state["sgs"].get(g, {}).get("ssh", [])],
                                 "Ipv6Ranges": [],
                             }
-                        ],
+                        ]
+                        + list(state["sgs"].get(g, {}).get("extra", [])),
                     }
                     for g in GroupIds
                 ]
@@ -284,3 +285,88 @@ def test_aws_filter_narrows_ssh_and_rollback_restores_what_it_revoked():
     assert state["sgs"]["sg-base"]["ssh"] == ["0.0.0.0/0"]
     assert "sg-bioaf-ssh-filter" not in state["attached"]
     assert "sg-bioaf-ssh-recovery" in state["attached"]
+
+
+# -- Review findings: edits, failed edits, unsupported rules, endpoint client IP preservation ------
+
+
+def test_gcp_a_failed_edit_restores_the_previous_rules_instead_of_opening_ssh():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    before = {name: _rule_summary(rule) for name, rule in fw.rules.items()}
+    fw.fail_on = "allow-v6"
+    with pytest.raises(FilterApplyError, match="previous access was kept"):
+        net.apply_filter(["2001:db8::/32"])
+    assert {name: _rule_summary(rule) for name, rule in fw.rules.items()} == before
+
+
+def test_aws_editing_the_ranges_removes_the_replaced_address():
+    ec2, state = _ec2()
+    net = AwsHostNetwork(AWS, client=ec2)
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    net.apply_filter(["198.51.100.9/32"])
+    assert state["sgs"]["sg-bioaf-ssh-filter"]["ssh"] == ["198.51.100.9/32"]
+
+
+def test_aws_a_rule_bioaf_cannot_narrow_refuses_the_filter_and_keeps_access():
+    for extra in (
+        {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 0, "ToPort": 65535, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+        {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "PrefixListIds": [{"PrefixListId": "pl-corp"}]},
+    ):
+        ec2, state = _ec2(base_ssh=(), base_extra=[extra])
+        net = AwsHostNetwork(AWS, client=ec2)
+        net.ensure_recovery()
+        with pytest.raises(FilterApplyError, match="sg-base"):
+            net.apply_filter(["203.0.113.7/32"])
+        ec2.revoke_security_group_ingress.assert_not_called()
+        assert "sg-bioaf-ssh-filter" not in state["attached"]
+        assert state["sgs"]["sg-base"]["extra"] == [extra]
+
+
+def test_aws_a_rule_that_does_not_reach_ssh_is_left_alone():
+    extra = {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
+    ec2, state = _ec2(base_extra=[extra])
+    net = AwsHostNetwork(AWS, client=ec2)
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    assert state["sgs"]["sg-base"]["ssh"] == []
+    assert state["sgs"]["sg-base"]["extra"] == [extra]
+
+
+def test_aws_a_failed_edit_keeps_the_previous_filter_attached():
+    ec2, state = _ec2()
+    net = AwsHostNetwork(AWS, client=ec2)
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    authorize = ec2.authorize_security_group_ingress.side_effect
+    ec2.authorize_security_group_ingress.side_effect = RuntimeError("limit")
+    with pytest.raises(FilterApplyError, match="previous access was kept"):
+        net.apply_filter(["198.51.100.9/32"])
+    ec2.authorize_security_group_ingress.side_effect = authorize
+    assert state["sgs"]["sg-bioaf-ssh-filter"]["ssh"] == ["203.0.113.7/32"]
+    assert "sg-bioaf-ssh-filter" in state["attached"]
+    assert state["sgs"]["sg-base"]["ssh"] == []
+
+
+def test_aws_private_recovery_needs_an_endpoint_that_does_not_preserve_client_addresses():
+    from dataclasses import replace
+
+    endpoint = {
+        "InstanceConnectEndpointId": "eice-1",
+        "State": "create-complete",
+        "SecurityGroupIds": ["sg-eice"],
+        "PreserveClientIp": True,
+    }
+    ec2, _ = _ec2(endpoints=[endpoint])
+    net = AwsHostNetwork(replace(AWS, public=False), client=ec2)
+    net.ensure_recovery()
+    assert any("eice-1" in p and "client" in p for p in net.check_recovery())
+
+    ec2, _ = _ec2(endpoints=[{**endpoint, "PreserveClientIp": False}])
+    net = AwsHostNetwork(replace(AWS, public=False), client=ec2)
+    net.ensure_recovery()
+    assert net.check_recovery() == []

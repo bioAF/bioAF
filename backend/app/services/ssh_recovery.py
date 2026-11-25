@@ -272,6 +272,9 @@ async def _aws_endpoint(identity: HostIdentity) -> str:
     except Exception:
         return ""
     ready = [e for e in endpoints if e.get("State") in (None, "create-complete")]
+    # The recovery rule admits the endpoint's security group, which is the source only when the
+    # endpoint does not preserve client addresses.
+    ready.sort(key=lambda e: bool(e.get("PreserveClientIp")))
     return ready[0].get("InstanceConnectEndpointId", "") if ready else ""
 
 

@@ -48,6 +48,13 @@ AWS_RECOVERY_GROUP = "bioaf-ssh-recovery"
 AWS_FILTER_GROUP = "bioaf-ssh-filter"
 
 
+KEPT = "The SSH filter could not be applied; previous access was kept."
+RESTORE_FAILED = (
+    "The SSH filter could not be applied, and bioAF could not confirm the previous rules were put back. "
+    "Cloud recovery access is unchanged. Select Check access, then apply again."
+)
+
+
 class FilterApplyError(Exception):
     """The filter could not be applied; the previous access was kept. The message names no secret."""
 
@@ -139,9 +146,26 @@ class GcpHostNetwork:
                 problems.append(f"The firewall rule {rule.name} denies SSH from IAP ahead of bioAF's recovery rule.")
         return problems
 
+    def _snapshot(self) -> dict:
+        return {name: self._existing(name) for name in (*ALLOW_RULES.values(), *DENY_RULES.values())}
+
+    def _restore(self, snapshot: dict) -> None:
+        """Put the managed filter rules back exactly as they were before this apply."""
+        # Previous rules first (allows, then denies), then remove rules this apply added.
+        for name in (*ALLOW_RULES.values(), *DENY_RULES.values()):
+            rule = snapshot.get(name)
+            if rule is not None:
+                self._upsert(
+                    self._rule(name, priority=rule.priority, sources=list(rule.source_ranges), allow=bool(rule.allowed))
+                )
+        for name in (*DENY_RULES.values(), *ALLOW_RULES.values()):
+            if snapshot.get(name) is None:
+                self._delete(name)
+
     def apply_filter(self, ranges: list[str]) -> dict:
         families = _by_family(ranges)
         written: list[str] = []
+        snapshot = self._snapshot()
         try:
             for version in (4, 6):
                 if families[version]:
@@ -167,9 +191,13 @@ class GcpHostNetwork:
                 )
                 written.append(DENY_RULES[version])
         except Exception as exc:
-            logger.warning("Host SSH filter apply failed (%s); removing partial rules", type(exc).__name__)
-            self.remove_filter()
-            raise FilterApplyError("The SSH filter could not be applied; previous access was kept.") from exc
+            logger.warning("Host SSH filter apply failed (%s); restoring the previous rules", type(exc).__name__)
+            try:
+                self._restore(snapshot)
+            except Exception as restore_exc:
+                logger.error("Restoring the previous SSH filter rules failed (%s)", type(restore_exc).__name__)
+                raise FilterApplyError(RESTORE_FAILED) from exc
+            raise FilterApplyError(KEPT) from exc
         return {"provider": "gcp", "rules": written}
 
     def remove_filter(self, record: dict | None = None) -> None:
@@ -224,6 +252,11 @@ class AwsHostNetwork:
             return []
         return [e for e in resp.get("InstanceConnectEndpoints", []) if e.get("State") in (None, "create-complete")]
 
+    def _usable_endpoints(self, vpc_id: str) -> list[dict]:
+        """Endpoints the recovery rule admits: it allows the endpoint's security group, which is the
+        source only when the endpoint does not preserve client addresses (the AWS default)."""
+        return [e for e in self._endpoints(vpc_id) if not e.get("PreserveClientIp") and e.get("SecurityGroupIds")]
+
     def recovery_sources(self) -> list[dict]:
         return [{"kind": "aws_eic_prefix_list", "source": pl, "ports": "tcp:22"} for pl in self._prefix_lists()]
 
@@ -237,7 +270,7 @@ class AwsHostNetwork:
                 for pl in self._prefix_lists()
             ]
         else:
-            for endpoint in self._endpoints(instance["VpcId"]):
+            for endpoint in self._usable_endpoints(instance["VpcId"]):
                 for sg in endpoint.get("SecurityGroupIds", []):
                     permissions.append(
                         {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "UserIdGroupPairs": [{"GroupId": sg}]}
@@ -254,7 +287,7 @@ class AwsHostNetwork:
             if self.identity.public
             else [
                 {"kind": "aws_eic_endpoint", "source": e.get("InstanceConnectEndpointId", ""), "ports": "tcp:22"}
-                for e in self._endpoints(instance["VpcId"])
+                for e in self._usable_endpoints(instance["VpcId"])
             ]
         )
 
@@ -270,8 +303,16 @@ class AwsHostNetwork:
                 problems.append("This server has no public address for EC2 Instance Connect.")
             if not self._prefix_lists():
                 problems.append("The Region's EC2 Instance Connect prefix list could not be found.")
-        elif not self._endpoints(instance["VpcId"]):
-            problems.append("A private server needs a prepared EC2 Instance Connect Endpoint in its VPC.")
+        else:
+            ready = self._endpoints(instance["VpcId"])
+            if not ready:
+                problems.append("A private server needs a prepared EC2 Instance Connect Endpoint in its VPC.")
+            elif not self._usable_endpoints(instance["VpcId"]):
+                ids = ", ".join(e.get("InstanceConnectEndpointId", "") for e in ready)
+                problems.append(
+                    f"The EC2 Instance Connect Endpoint {ids} keeps client addresses, so bioAF's recovery rule "
+                    "does not admit it. Turn off client IP preservation on it, or prepare another endpoint."
+                )
         return problems
 
     def _ssh_rules(self, group_ids: list[str]) -> list[dict]:
@@ -298,46 +339,108 @@ class AwsHostNetwork:
                         )
         return revoked
 
+    def _unsupported_ssh_rules(self, group_ids: list[str]) -> list[str]:
+        """Groups with a rule that reaches SSH from outside the VPC in a form bioAF cannot narrow
+        without changing other access: all traffic, a TCP port range including 22, or a prefix list."""
+        found = []
+        for sg in self.client.describe_security_groups(GroupIds=group_ids)["SecurityGroups"] if group_ids else []:
+            for perm in sg.get("IpPermissions", []):
+                proto = str(perm.get("IpProtocol", ""))
+                if proto in ("-1", "all"):
+                    covers, exact = True, False
+                elif proto in ("tcp", "6"):
+                    low, high = perm.get("FromPort", 0), perm.get("ToPort", 65535)
+                    covers, exact = low <= 22 <= high, (low, high) == (22, 22)
+                else:
+                    continue
+                if not covers:
+                    continue
+                outside = perm.get("PrefixListIds") or (not exact and (perm.get("IpRanges") or perm.get("Ipv6Ranges")))
+                if outside and sg["GroupId"] not in found:
+                    found.append(sg["GroupId"])
+        return found
+
+    def _filter_ranges(self, group_id: str) -> tuple[set[str], set[str]]:
+        v4: set[str] = set()
+        v6: set[str] = set()
+        for rule in self._ssh_rules([group_id]):
+            for perm in rule["IpPermissions"]:
+                v4.update(r["CidrIp"] for r in perm.get("IpRanges", []))
+                v6.update(r["CidrIpv6"] for r in perm.get("Ipv6Ranges", []))
+        return v4, v6
+
+    def _ssh_permission(self, v4, v6) -> list[dict]:
+        if not v4 and not v6:
+            return []
+        return [
+            {
+                "IpProtocol": "tcp",
+                "FromPort": 22,
+                "ToPort": 22,
+                "IpRanges": [{"CidrIp": c} for c in sorted(v4)],
+                "Ipv6Ranges": [{"CidrIpv6": c} for c in sorted(v6)],
+            }
+        ]
+
     def apply_filter(self, ranges: list[str]) -> dict:
         instance = self._instance()
         families = _by_family(ranges)
         recovery = self._group(AWS_RECOVERY_GROUP, instance["VpcId"])
         filter_group = self._group(AWS_FILTER_GROUP, instance["VpcId"])
+        attached_before = [g["GroupId"] for g in instance["SecurityGroups"]]
+        others = [g for g in attached_before if g not in (recovery, filter_group)]
+        blocked = self._unsupported_ssh_rules(others)
+        if blocked:
+            raise FilterApplyError(
+                f"The security group {', '.join(blocked)} allows SSH through a rule bioAF cannot narrow (all "
+                "traffic, a port range that includes 22, or a prefix list). Change that rule in your cloud "
+                "console, then apply again. Previous access was kept."
+            )
+        old4, old6 = self._filter_ranges(filter_group)
+        new4, new6 = set(families[4]), set(families[6])
+        added: list[dict] = []
+        removed: list[dict] = []
         revoked: list[dict] = []
         try:
-            self.client.authorize_security_group_ingress(
-                GroupId=filter_group,
-                IpPermissions=[
-                    {
-                        "IpProtocol": "tcp",
-                        "FromPort": 22,
-                        "ToPort": 22,
-                        "IpRanges": [{"CidrIp": c} for c in families[4]],
-                        "Ipv6Ranges": [{"CidrIpv6": c} for c in families[6]],
-                    }
-                ],
-            )
+            # Allow the new ranges first, attach, then narrow everything else.
+            for perm in self._ssh_permission(new4 - old4, new6 - old6):
+                self.client.authorize_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
+                added.append(perm)
             self._attach(filter_group)
-            others = [
-                g["GroupId"] for g in self._instance()["SecurityGroups"] if g["GroupId"] not in (recovery, filter_group)
-            ]
             for rule in self._ssh_rules(others):
                 self.client.revoke_security_group_ingress(**rule)
                 revoked.append(rule)
+            for perm in self._ssh_permission(old4 - new4, old6 - new6):
+                self.client.revoke_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
+                removed.append(perm)
         except Exception as exc:
             logger.warning("Host SSH filter apply failed (%s); restoring previous access", type(exc).__name__)
-            self.remove_filter({"revoked": revoked, "filter_group": filter_group})
-            raise FilterApplyError("The SSH filter could not be applied; previous access was kept.") from exc
+            try:
+                for rule in revoked:
+                    self._authorize(**rule)
+                for perm in removed:
+                    self._authorize(GroupId=filter_group, IpPermissions=[perm])
+                for perm in added:
+                    self.client.revoke_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
+                if filter_group not in attached_before:
+                    self._attach("", detach=filter_group)
+            except Exception as restore_exc:
+                logger.error("Restoring previous SSH access failed (%s)", type(restore_exc).__name__)
+                raise FilterApplyError(RESTORE_FAILED) from exc
+            raise FilterApplyError(KEPT) from exc
         return {"provider": "aws", "revoked": revoked, "filter_group": filter_group}
+
+    def _authorize(self, **rule) -> None:
+        try:
+            self.client.authorize_security_group_ingress(**rule)
+        except Exception as exc:  # an identical existing rule is fine
+            if "Duplicate" not in str(exc):
+                raise
 
     def remove_filter(self, record: dict | None = None) -> None:
         record = record or {}
         # Restore what the filter revoked before detaching the filter group.
         for rule in record.get("revoked", []):
-            try:
-                self.client.authorize_security_group_ingress(**rule)
-            except Exception as exc:
-                if "Duplicate" not in str(exc):
-                    raise
+            self._authorize(**rule)
         if record.get("filter_group"):
             self._attach("", detach=record["filter_group"])

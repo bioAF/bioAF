@@ -286,3 +286,25 @@ async def test_a_repository_on_a_custom_host_without_an_approved_key_is_reported
     assert state["git_trust"]["hosts_needing_keys"] == ["git.lab.example.org"]
     assert state["git_trust"]["message"].startswith("A connected code repository needs a security setting")
     assert "import-git-known-hosts" in state["git_trust"]["procedure"]
+
+
+async def _apply_ranges(client, admin, ranges, enabled=True):
+    await _save_draft(client, admin, ranges, enabled=enabled)
+    v = (await client.get(BASE, headers=admin)).json()["application_host"]["filter"]["draft"]["version"]
+    return await client.post(f"{BASE}/host/apply", json={"draft_version": v}, headers=admin)
+
+
+@pytest.mark.asyncio
+async def test_editing_the_aws_filter_keeps_the_original_revocations_so_turning_it_off_restores_them(
+    client, admin, host
+):
+    _diagnostics(host)
+    original = {"GroupId": "sg-base", "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22}]}
+    host.driver.apply_filter.return_value = {"provider": "aws", "revoked": [original], "filter_group": "sg-f"}
+    assert (await _apply_ranges(client, admin, [{"name": "A", "cidr": "203.0.113.7"}])).status_code == 200
+    host.driver.apply_filter.return_value = {"provider": "aws", "revoked": [], "filter_group": "sg-f"}
+    assert (await _apply_ranges(client, admin, [{"name": "B", "cidr": "198.51.100.9"}])).status_code == 200
+    assert (await _apply_ranges(client, admin, [], enabled=False)).status_code == 200
+    record = host.driver.remove_filter.call_args.args[0]
+    assert record["revoked"] == [original]
+    assert record["filter_group"] == "sg-f"

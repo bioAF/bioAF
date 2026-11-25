@@ -206,3 +206,37 @@ async def test_a_private_aws_server_links_to_its_prepared_endpoint(session):
     ):
         identity = await current_host_identity(session)
     assert restore_access(identity)["endpoint_id"] == "eice-0123456789abcdef0"
+
+
+@pytest.mark.asyncio
+async def test_a_private_aws_server_links_to_an_endpoint_the_recovery_rule_admits(session):
+    """An endpoint preserving client addresses is not admitted by the recovery rule (it allows the
+    endpoint's security group), so the link prefers one that does not."""
+    from unittest.mock import MagicMock
+
+    from app.services.ssh_recovery import current_host_identity
+
+    discovered = HostIdentity(**{**AWS_PRIVATE.__dict__, "eic_endpoint_id": ""})
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = {"Reservations": [{"Instances": [{"VpcId": "vpc-app"}]}]}
+    ec2.describe_instance_connect_endpoints.return_value = {
+        "InstanceConnectEndpoints": [
+            {
+                "InstanceConnectEndpointId": "eice-0aaaaaaaaaaaaaaa1",
+                "State": "create-complete",
+                "PreserveClientIp": True,
+            },
+            {
+                "InstanceConnectEndpointId": "eice-0bbbbbbbbbbbbbbb2",
+                "State": "create-complete",
+                "PreserveClientIp": False,
+            },
+        ]
+    }
+    with (
+        patch("app.services.ssh_recovery._metadata_identity", AsyncMock(return_value=discovered)),
+        patch("app.config.settings.compute_mode", "kubernetes"),
+        patch("boto3.client", return_value=ec2),
+    ):
+        identity = await current_host_identity(session)
+    assert restore_access(identity)["endpoint_id"] == "eice-0bbbbbbbbbbbbbbb2"

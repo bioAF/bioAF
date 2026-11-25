@@ -229,6 +229,15 @@ async def save_draft(session, *, enabled: bool, ranges: list[dict], base_version
     return record["draft"]
 
 
+def _carry_forward(previous: dict | None, resources: dict | None) -> dict | None:
+    """Keep what earlier applies revoked (AWS), so turning the filter off still restores it after edits."""
+    if not previous or not resources or "revoked" not in resources:
+        return resources
+    merged = list(previous.get("revoked") or [])
+    merged += [rule for rule in resources["revoked"] if rule not in merged]
+    return {**resources, "revoked": merged}
+
+
 async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], actor_id: int, action: str) -> dict:
     from app.services.audit_service import log_action
     from app.services.host_ssh_filter import FilterApplyError
@@ -246,7 +255,7 @@ async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], ac
     cidrs = [normalize_range(r["cidr"]) for r in ranges]
     try:
         if enabled:
-            resources = driver.apply_filter(cidrs)
+            resources = _carry_forward(applied.get("resources"), driver.apply_filter(cidrs))
         else:
             driver.remove_filter(applied.get("resources"))
             resources = None
