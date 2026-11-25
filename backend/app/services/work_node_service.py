@@ -23,7 +23,6 @@ from app.services.post_commit_events import defer_event
 from app.services.event_types import (
     WORK_NODE_LAUNCHED,
     WORK_NODE_STOPPED,
-    WORK_NODE_HEARTBEAT_TIMEOUT,
 )
 from app.services.machine_types import MACHINE_TYPES, get_machine_type
 from app.services.session_bucket import _bucket_filter
@@ -813,17 +812,15 @@ class WorkNodeService:
     @staticmethod
     async def check_heartbeat_timeouts(
         session: AsyncSession,
-        idle_timeout_hours: int | None = None,
+        idle_timeout_hours: int | None = None,  # unused: silence never stops a node (2026-11-25)
     ) -> None:
-        """Stop SSH sessions with stale heartbeats, through the same save-then-delete Stop.
+        """Background work node cleanup: finish interrupted Stops and retry failed ones.
 
-        A node whose save failed stays 'stop_failed'; cleanup retries it a bounded number of
-        times, then leaves it for its owner's Retry stop.
+        A running node is never stopped for missing heartbeats (owner decision 2026-11-25).
+        A node whose requested Stop failed stays 'stop_failed'; cleanup retries it a bounded
+        number of times, then leaves it for its owner's Retry stop.
         """
         try:
-            if idle_timeout_hours is None:
-                idle_timeout_hours = await WorkNodeService._get_idle_timeout(session)
-
             result = await session.execute(
                 select(ComputeSession).where(
                     ComputeSession.session_type == "ssh",
@@ -854,28 +851,16 @@ class WorkNodeService:
                         )
                     continue
 
-                last_beat = node.heartbeat_at or node.started_at
-                if not last_beat:
+                if node.status != "stop_failed":
+                    # Missing heartbeats are not evidence of idleness (owner decision 2026-11-25):
+                    # a network fault or a node that cannot report must not stop work in progress.
                     continue
-
-                idle_hours = (now - last_beat).total_seconds() / 3600
-                if idle_hours < idle_timeout_hours:
-                    continue
-                logger.info("Stopping work node %d (no heartbeat for %.1fh)", node.id, idle_hours)
-                old_status = node.status
+                # A Stop someone asked for that kept the node: retried here a bounded number of
+                # times (the query's stop_attempts bound), then left for its owner's Retry stop.
+                logger.info("Retrying the failed Stop of work node %d", node.id)
                 if not await WorkNodeService._claim_stop(session, node):
                     continue
-                await WorkNodeService._finish_stop(
-                    session,
-                    node,
-                    actor_user_id=node.user_id,
-                    old_status=old_status,
-                    stopped_event=(
-                        WORK_NODE_HEARTBEAT_TIMEOUT,
-                        "Work node auto-stopped (no heartbeat)",
-                        f"Work node {node.id} was stopped after {idle_hours:.1f}h without a heartbeat",
-                    ),
-                )
+                await WorkNodeService._finish_stop(session, node, actor_user_id=node.user_id, old_status="stop_failed")
 
             await session.flush()
             await session.commit()

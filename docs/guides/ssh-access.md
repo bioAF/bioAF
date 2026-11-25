@@ -132,8 +132,9 @@ does not succeed, bioAF keeps the VM and its disk and shows **Stop failed** with
 - **Your files were saved, but bioAF could not finish stopping this work node.**
 - **bioAF could not check this work node. Try again shortly.**
 
-Use **Retry stop**. There is no option to discard the VM or its files. Idle cleanup retries a stop a few
-times, then leaves the node for its owner.
+Use **Retry stop**. There is no option to discard the VM or its files. bioAF retries a failed stop in the
+background a few times, then leaves the node for its owner. bioAF does not stop a running work node on its
+own because the node has not reported in.
 
 ### How bioAF trusts a work node
 

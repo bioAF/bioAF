@@ -249,29 +249,17 @@ async def _stale_node(session, user, env, **extra) -> ComputeSession:
     return node
 
 
-async def test_a_heartbeat_timeout_is_announced_once_the_stop_commits(session, admin_user, ready_version, nodes):
+async def test_a_silent_node_is_not_stopped_or_announced(session, admin_user, ready_version, nodes):
+    """Owner-approved change (2026-11-25): missing heartbeats never stop a work node, so the
+    heartbeat-timeout announcement is not sent."""
     node = await _stale_node(session, admin_user, ready_version)
 
     await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)
     await nodes.settle()
 
-    [(payload, committed_status)] = nodes.seen(WORK_NODE_HEARTBEAT_TIMEOUT)
-    assert committed_status == "stopped"
-    assert (payload["org_id"], payload["entity_id"]) == (admin_user.organization_id, node.id)
-
-
-async def test_a_heartbeat_timeout_whose_commit_fails_is_not_announced(
-    session, admin_user, ready_version, nodes, monkeypatch
-):
-    await _stale_node(session, admin_user, ready_version)
-    _failing_commit(monkeypatch, session)
-
-    await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)  # logs the failure
-    monkeypatch.undo()
-    await session.rollback()
-    await nodes.settle()
-
-    assert nodes.events == []
+    assert nodes.seen(WORK_NODE_HEARTBEAT_TIMEOUT) == []
+    await session.refresh(node)
+    assert node.status == "running"
 
 
 # --- notebook idle auto-stop --------------------------------------------------------------------

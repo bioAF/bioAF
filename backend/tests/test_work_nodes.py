@@ -719,7 +719,7 @@ async def test_heartbeat_rejects_invalid_token(
 
 @pytest.mark.asyncio
 async def test_heartbeat_timeout_detection(session, admin_user, seed_environment, seed_project):
-    """WorkNodeService.check_heartbeat_timeouts terminates stale sessions."""
+    """Owner-approved change (2026-11-25): a node without heartbeats is never auto-stopped."""
     from datetime import datetime, timezone, timedelta
     from app.models.notebook_session import ComputeSession
     from app.services.work_node_service import WorkNodeService
@@ -748,7 +748,7 @@ async def test_heartbeat_timeout_detection(session, admin_user, seed_environment
         {"id": stale_session.id},
     )
     status = result.scalar()
-    assert status == "stopped"
+    assert status == "running"
 
 
 # -- Viewer can list but not launch --
@@ -869,7 +869,7 @@ async def test_work_node_settings_readable_by_comp_bio(client, comp_bio_token, c
 
 @pytest.mark.asyncio
 async def test_heartbeat_timeout_uses_configured_value(session, admin_user, seed_environment, seed_project):
-    """check_heartbeat_timeouts reads idle_timeout_hours from platform_config."""
+    """Owner-approved change (2026-11-25): the configured idle timeout no longer stops a silent node."""
     from datetime import datetime, timezone, timedelta
     from app.models.notebook_session import ComputeSession
     from app.services.work_node_service import WorkNodeService
@@ -908,7 +908,7 @@ async def test_heartbeat_timeout_uses_configured_value(session, admin_user, seed
         text("SELECT status FROM compute_sessions WHERE id = :id"),
         {"id": stale_session.id},
     )
-    assert result.scalar() == "stopped"
+    assert result.scalar() == "running"
 
 
 # -- Who may read and stop a work node --------------------------------------------------------

@@ -291,10 +291,32 @@ async def test_an_abandoned_stop_claim_can_be_retried(client, session, comp_bio_
 
 
 @pytest.mark.asyncio
-async def test_idle_cleanup_keeps_an_unsaved_node_and_retries_a_bounded_number_of_times(session, durable_node, adapter):
+async def test_a_silent_node_is_never_stopped_automatically(session, durable_node, adapter):
+    """Owner decision (2026-11-25): missing heartbeats are not evidence of idleness. A network
+    fault or a node that never reports must not stop work in progress."""
     from app.services.work_node_service import WorkNodeService
 
-    durable_node.heartbeat_at = datetime.now(timezone.utc) - timedelta(hours=30)
+    durable_node.heartbeat_at = datetime.now(timezone.utc) - timedelta(hours=300)
+    durable_node.started_at = datetime.now(timezone.utc) - timedelta(hours=300)
+    await session.commit()
+
+    await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)
+
+    row = await _row(session, durable_node.id)
+    assert row.status == "running"
+    adapter.terminate_vm.assert_not_called()
+    assert _stopped_events(adapter, durable_node.id) == []
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_retries_a_requested_stop_a_bounded_number_of_times(session, durable_node, adapter):
+    """Owner-approved change (2026-11-25): a node whose requested Stop failed is retried in the
+    background a bounded number of times; silence alone no longer starts a stop."""
+    from app.services.work_node_service import WorkNodeService
+
+    durable_node.status = "stop_failed"
+    durable_node.stop_failure = "save_failed"
+    durable_node.stop_attempts = 1
     await session.commit()
     adapter.terminate_vm.return_value = TerminationResult(status=ServiceState.RUNNING, stop_failure="save_failed")
 
@@ -305,8 +327,7 @@ async def test_idle_cleanup_keeps_an_unsaved_node_and_retries_a_bounded_number_o
     assert row.status == "stop_failed"
     assert row.stopped_at is None
     assert row.sync_private_key == "sync-private"
-    assert adapter.terminate_vm.call_count == 3
-    assert adapter.terminate_vm.call_args.kwargs["working_bucket"] == ""
+    assert adapter.terminate_vm.call_count == 2
     assert _stopped_events(adapter, durable_node.id) == []
 
 

@@ -18,9 +18,12 @@
 
 ### Work nodes
 
-- Stopping a work node now saves your files before the VM is deleted. If saving or deletion cannot be
+- Stopping a work node now saves `/outputs` before the VM is deleted. If saving or deletion cannot be
   confirmed, the node is kept and shows **Stop failed** with a plain reason and **Retry stop**; it stays
-  connectable while its files are unsaved. Idle cleanup no longer marks a node stopped while its VM runs.
+  connectable while its files are unsaved. Stop no longer searches home folders for scripts.
+- bioAF no longer stops a running work node on its own because it has not reported in; nodes run until
+  their owner stops them. The work node **Idle Timeout** in Workbench Settings is paused until nodes can
+  report activity.
 - Work nodes launched after this release keep their save credentials across backend restarts and updates,
   use a server key bioAF records at launch, and are saved over the private network.
 - Your bioAF Git key is also your work node login key. **Download key** on your profile, then
