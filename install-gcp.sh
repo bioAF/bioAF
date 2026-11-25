@@ -812,38 +812,8 @@ wait_for_sa() {
     return 1
 }
 
-# Run a gcloud IAM binding command, retrying when GCP returns the
-# "Service account ... does not exist" propagation-lag error. wait_for_sa
-# checks the SA endpoint, but the project IAM endpoint can lag behind it
-# by several seconds, so even a successful wait can be followed by a
-# rejected add-iam-policy-binding. Sleep 5s and retry up to twice.
-# shellcheck disable=SC2329 # called below; the { } script wrapper hides that
-retry_iam() {
-    local attempts=3
-    local delay=5
-    local i=0 rc=0 output=""
-    for ((i=1; i<=attempts; i++)); do
-        # Capture rc immediately after the assignment. Wrapping it in
-        # `if ... then ... fi` would let `$?` collapse to 0 once the
-        # false branch is taken, which silently swallowed real failures.
-        output=$("$@" 2>&1)
-        rc=$?
-        if [ "$rc" = "0" ]; then
-            [ -n "$output" ] && printf '%s\n' "$output"
-            return 0
-        fi
-        printf '%s\n' "$output" >&2
-        if [ "$i" -lt "$attempts" ] && \
-                printf '%s' "$output" | grep -q "does not exist"; then
-            printf '  (propagation lag detected; retrying in %ss, attempt %s/%s)\n' \
-                "$delay" "$((i+1))" "$attempts" >&2
-            sleep "$delay"
-            continue
-        fi
-        return "$rc"
-    done
-    return "$rc"
-}
+# IAM calls retry propagation lag and Google Cloud rate limits (installer/gcp_iam.sh).
+bioaf_load_helper installer/gcp_iam.sh required retry_iam || exit 1
 
 # 3. Create bioaf-bootstrap (idempotent).
 if gcloud iam service-accounts describe "${BOOTSTRAP_SA_EMAIL}" \
