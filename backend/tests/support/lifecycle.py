@@ -43,6 +43,7 @@ RESET_STATE: tuple[tuple[str, str], ...] = (
     ("app.services.storage_write_admission", "_in_flight"),
     ("app.services.storage_write_admission", "_paused_mirror"),
     ("app.adapters.storage.workers", "_running"),
+    ("app.services.work_node_service", "_LAUNCHING"),
     ("app.services.lab_document_upload_service", "_pending"),
     ("app.services.upgrade_service", "_version_cache"),
     ("app.services.upgrade_service", "_version_cache_time"),

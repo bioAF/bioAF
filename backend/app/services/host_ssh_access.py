@@ -83,14 +83,9 @@ async def _update(session, change) -> dict:
     the current stored record, so none can erase another's (for example a committed recovery journal).
     The lock is held until the caller's transaction ends.
     """
-    from sqlalchemy import text
-
     from app.platform.platform_config_service import PlatformConfigService
 
-    await session.execute(
-        text("INSERT INTO platform_config (key, value) VALUES (:k, :v) ON CONFLICT (key) DO NOTHING"),
-        {"k": FILTER_KEY, "v": PlatformConfigService._maybe_encrypt(FILTER_KEY, json.dumps(_empty()))},
-    )
+    await PlatformConfigService.insert_if_absent(session, FILTER_KEY, json.dumps(_empty()))
     record = _parse(await PlatformConfigService.get_for_update(session, FILTER_KEY))
     change(record)
     await _write(session, record)
@@ -98,29 +93,25 @@ async def _update(session, change) -> dict:
 
 
 async def _provider(fn, *args):
-    """Run a blocking provider call in a worker thread.
+    """Run a blocking provider call in a worker thread, as work the application owner tracks.
 
     A thread keeps running after its awaiting task is cancelled, so on cancellation this waits for
     the call to return before re-raising: the infrastructure operation keeps its exclusive slot until
-    the cloud work has settled, and a retry cannot race it.
+    the cloud work has settled, and a retry cannot race it. ``asyncio.wait`` never cancels the task
+    it waits on, so no shield is needed.
     """
-    future = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    from app import runtime
+
+    task = runtime.spawn(asyncio.to_thread(fn, *args), role="host_ssh_provider_call")
     cancelled = False
-    while True:
+    while not task.done():
         try:
-            result = await asyncio.shield(future)
-            break
+            await asyncio.wait({task})
         except asyncio.CancelledError:
-            if future.done():
-                raise
             cancelled = True
-        except Exception:
-            if cancelled:
-                raise asyncio.CancelledError() from None
-            raise
     if cancelled:
         raise asyncio.CancelledError()
-    return result
+    return task.result()
 
 
 async def network_for(session, identity):
