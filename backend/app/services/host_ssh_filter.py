@@ -66,6 +66,18 @@ def _by_family(ranges: list[str]) -> dict[int, list[str]]:
     return families
 
 
+def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
+    if str(protocol) not in ("tcp", "6", "all"):
+        return False
+    if not ports:
+        return True
+    for spec in ports:
+        low, _, high = str(spec).partition("-")
+        if int(low) <= 22 <= int(high or low):
+            return True
+    return False
+
+
 class GcpHostNetwork:
     def __init__(self, identity, *, client, target_tag: str = "bioaf"):
         self.identity = identity
@@ -162,7 +174,46 @@ class GcpHostNetwork:
             if snapshot.get(name) is None:
                 self._delete(name)
 
+    def _outranking_allows(self) -> list[str]:
+        """Rules that would let SSH from outside reach this host ahead of bioAF's deny.
+
+        GCP applies the highest-priority matching rule (a deny wins a tie), so any enabled allow for
+        tcp:22 at a priority above the deny's, targeting this host, from a range outside IAP's
+        defeats the filter. A rule targeting service accounts is counted (bioAF cannot tell which
+        account the host runs as); source tags are other instances on the network and are left.
+        """
+        managed = {IAP_RULE, *ALLOW_RULES.values(), *DENY_RULES.values()}
+        iap = ipaddress.ip_network(GCP_IAP_SOURCE)
+        found = []
+        for rule in self.client.list(project=self.project):
+            if rule.name in managed or rule.network != self.network or getattr(rule, "disabled", False):
+                continue
+            if (rule.direction or "INGRESS") != "INGRESS" or not rule.allowed:
+                continue
+            if rule.priority >= GCP_FILTER_DENY_PRIORITY:
+                continue
+            tags = list(rule.target_tags or [])
+            if tags and self.target_tag not in tags:
+                continue
+            if not any(_reaches_ssh(a.I_p_protocol, list(a.ports or [])) for a in rule.allowed):
+                continue
+            outside = [
+                s
+                for s in rule.source_ranges or []
+                if not (ipaddress.ip_network(s).version == 4 and ipaddress.ip_network(s).subnet_of(iap))
+            ]
+            if outside:
+                found.append(rule.name)
+        return found
+
     def apply_filter(self, ranges: list[str]) -> dict:
+        blocked = self._outranking_allows()
+        if blocked:
+            raise FilterApplyError(
+                f"The firewall rule {', '.join(blocked)} allows SSH to this server ahead of bioAF's filter, so "
+                "the filter would not restrict SSH. Remove or narrow that rule in your cloud console, then "
+                "apply again. Previous access was kept."
+            )
         families = _by_family(ranges)
         written: list[str] = []
         snapshot = self._snapshot()

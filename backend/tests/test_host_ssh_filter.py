@@ -370,3 +370,50 @@ def test_aws_private_recovery_needs_an_endpoint_that_does_not_preserve_client_ad
     net = AwsHostNetwork(replace(AWS, public=False), client=ec2)
     net.ensure_recovery()
     assert net.check_recovery() == []
+
+
+def _gcp_allow(name, *, priority, sources=("0.0.0.0/0",), ports=("22",), protocol="tcp", tags=(), disabled=False):
+    from google.cloud import compute_v1
+
+    return compute_v1.Firewall(
+        name=name,
+        priority=priority,
+        direction="INGRESS",
+        network="projects/lab-project/global/networks/default",
+        source_ranges=list(sources),
+        target_tags=list(tags),
+        disabled=disabled,
+        allowed=[compute_v1.Allowed(I_p_protocol=protocol, ports=list(ports))],
+    )
+
+
+def test_gcp_an_allow_that_outranks_the_deny_refuses_the_filter_and_changes_nothing():
+    """GCP applies the highest-priority matching rule, so an SSH allow above 1000 defeats the deny."""
+    for rule in (
+        _gcp_allow("corp-ssh", priority=900),
+        _gcp_allow("all-tcp", priority=500, ports=(), tags=("bioaf",)),
+        _gcp_allow("range", priority=999, ports=("20-30",)),
+        _gcp_allow("everything", priority=999, protocol="all", ports=()),
+    ):
+        fw = FakeFirewalls(existing=[rule])
+        net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+        net.ensure_recovery()
+        with pytest.raises(FilterApplyError, match=rule.name):
+            net.apply_filter(["203.0.113.7/32"])
+        assert set(fw.rules) == {rule.name, "bioaf-ssh-recovery-iap"}
+
+
+def test_gcp_allows_the_deny_already_outranks_or_that_miss_this_host_are_left_alone():
+    for rule in (
+        _gcp_allow("default-allow-ssh", priority=65534),
+        _gcp_allow("other-host", priority=900, tags=("db",)),
+        _gcp_allow("web", priority=900, ports=("443",)),
+        _gcp_allow("off", priority=900, disabled=True),
+        # At equal priority GCP applies the deny.
+        _gcp_allow("tie", priority=1000),
+    ):
+        fw = FakeFirewalls(existing=[rule])
+        net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+        net.ensure_recovery()
+        net.apply_filter(["203.0.113.7/32"])
+        assert "bioaf-ssh-filter-deny-v4" in fw.rules
