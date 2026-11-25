@@ -8555,6 +8555,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ssh-access/host/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Up Host Recovery
+         * @description Create or repair protected cloud recovery access (a cloud change: infrastructure:deploy).
+         *
+         *     For installs from before recovery access existed; no SSH filter or installer rerun is needed.
+         */
+        post: operations["set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/ssh-access/host/rollback": {
         parameters: {
             query?: never;
@@ -32392,7 +32414,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change" | "host_ssh_filter") | null;
+                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change" | "host_ssh_filter" | "host_recovery_setup") | null;
             };
             header?: never;
             path?: never;
@@ -34401,6 +34423,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

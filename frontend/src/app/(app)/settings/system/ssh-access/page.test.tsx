@@ -198,3 +198,39 @@ it("still reports other load failures", async () => {
   render(<SshAccessPage />);
   expect(await screen.findByText(/SSH access settings could not be loaded/)).toBeInTheDocument();
 });
+
+describe("cloud recovery that was never set up (owner decision 2026-11-25)", () => {
+  const notSetUp = { status: "not_configured", problems: [], sources: host.recovery.sources, checked_at: "2026-11-25T10:00:00Z" };
+  const withNotSetUp = { application_host: { ...host, recovery: notSetUp, admin_key: null, git_trust: { hosts_needing_keys: [], message: null, procedure: null } } };
+
+  it("says Not set up yet, offers the setup, and lists no source as if it existed", async () => {
+    serve(withNotSetUp);
+    render(<SshAccessPage />);
+    const section = await screen.findByRole("region", { name: "Application server SSH" });
+    expect(within(section).getByText("Not set up yet")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Set up cloud recovery access" })).toBeInTheDocument();
+    expect(within(section).queryByText(/Google Cloud IAP: 35\.235\.240\.0\/20/)).not.toBeInTheDocument();
+  });
+
+  it("sets it up through the recovery operation and shows the result", async () => {
+    serve(withNotSetUp);
+    mockPost.mockResolvedValue({ recovery: host.recovery });
+    render(<SshAccessPage />);
+    const section = await screen.findByRole("region", { name: "Application server SSH" });
+    fireEvent.click(within(section).getByRole("button", { name: "Set up cloud recovery access" }));
+    expect(await within(section).findByText("Configured (automatic checks)")).toBeInTheDocument();
+    expect(mockPost).toHaveBeenCalledWith("/api/v1/settings/ssh-access/host/recovery");
+    expect(within(section).queryByRole("button", { name: "Set up cloud recovery access" })).not.toBeInTheDocument();
+  });
+
+  it("shows why a setup was refused and keeps the offer", async () => {
+    const { ApiError } = jest.requireMock("@/lib/api");
+    serve(withNotSetUp);
+    mockPost.mockRejectedValue(new ApiError(409, "Another infrastructure operation is running."));
+    render(<SshAccessPage />);
+    const section = await screen.findByRole("region", { name: "Application server SSH" });
+    fireEvent.click(within(section).getByRole("button", { name: "Set up cloud recovery access" }));
+    expect(await within(section).findByText("Another infrastructure operation is running.")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Set up cloud recovery access" })).toBeInTheDocument();
+  });
+});

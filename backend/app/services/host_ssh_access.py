@@ -219,15 +219,18 @@ async def preflight(session, *, reconcile: bool) -> dict:
         }
     problems: list[str] = []
     sources: list[dict] = []
+    missing = False
     try:
         driver = await network_for(session, identity)
         # Provider calls can wait minutes; they run off the serving event loop.
         sources = await _provider(driver.ensure_recovery if reconcile else driver.recovery_sources)
+        missing = (not reconcile) and bool(await _provider(driver.recovery_missing))
         problems += await _provider(driver.check_recovery)
     except Exception as exc:
         problems.append(f"bioAF could not read or change this server's firewall ({type(exc).__name__}).")
     problems += guest_problems(identity)
-    status = "needs_attention" if problems else "configured_automatic"
+    # Never set up (an install from before recovery access) is not the same as changed or broken.
+    status = "needs_attention" if problems else ("not_configured" if missing else "configured_automatic")
     probe = await _probe(session)
     if (
         status == "configured_automatic"
@@ -419,17 +422,46 @@ async def _apply(
     return new_applied
 
 
-async def _as_operation(session, *, actor_id: int, change) -> dict:
-    """Run one filter change as the single running infrastructure operation (409 while another runs)."""
+async def _as_operation(
+    session, *, actor_id: int, change, action: str = "host_ssh_filter", done: str = "SSH filter changed."
+) -> dict:
+    """Run one host SSH change as the single running infrastructure operation (409 while another runs)."""
     from app.services import infrastructure_operations as ops
 
-    op_id, _ = await ops.accept(action="host_ssh_filter", principal=ops.Principal(user_id=actor_id))
+    op_id, _ = await ops.accept(action=action, principal=ops.Principal(user_id=actor_id))
     async with ops.owned(op_id):
         # Read the setting again inside the slot: a change that settled meanwhile is seen.
         session.expire_all()
         applied = await change(await _read(session), op_id)
-    await ops.finish(op_id, ops.succeeded("SSH filter changed."))
+    await ops.finish(op_id, ops.succeeded(done))
     return applied
+
+
+async def set_up_recovery(session, *, actor_id: int) -> dict:
+    """Create or repair protected cloud recovery access without touching the SSH filter."""
+    from app.services.audit_service import log_action
+
+    async def change(record: dict, op_id: int) -> dict:
+        recovery = await preflight(session, reconcile=True)
+
+        def store(r: dict) -> None:
+            r["recovery"] = recovery
+
+        await _update(session, store)
+        await log_action(
+            session,
+            user_id=actor_id,
+            entity_type="ssh_access_policy",
+            entity_id=0,
+            action="set_up_ssh_recovery",
+            details={"status": recovery["status"], "operation_id": op_id},
+        )
+        await session.commit()
+        return recovery
+
+    return await _as_operation(
+        session, actor_id=actor_id, change=change, action="host_recovery_setup", done="Cloud recovery access set up."
+    )
 
 
 def _check_draft(record: dict, draft_version: int) -> dict:

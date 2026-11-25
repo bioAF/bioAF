@@ -150,6 +150,20 @@ async def apply_host_filter(
     }
 
 
+@router.post("/host/recovery")
+async def set_up_host_recovery(
+    current_user: dict = require_permission("infrastructure", "deploy"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create or repair protected cloud recovery access (a cloud change: infrastructure:deploy).
+
+    For installs from before recovery access existed; no SSH filter or installer rerun is needed.
+    """
+    from app.services import host_ssh_access
+
+    return {"recovery": await host_ssh_access.set_up_recovery(session, actor_id=_actor(current_user))}
+
+
 @router.post("/host/rollback")
 async def rollback_host_filter(
     current_user: dict = require_permission("infrastructure", "deploy"),

@@ -48911,7 +48911,8 @@
                     "terraform_apply",
                     "config_sync",
                     "component_change",
-                    "host_ssh_filter"
+                    "host_ssh_filter",
+                    "host_recovery_setup"
                   ],
                   "type": "string"
                 },
@@ -51585,6 +51586,26 @@
           }
         },
         "summary": "Save Host Filter Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/recovery": {
+      "post": {
+        "description": "Create or repair protected cloud recovery access (a cloud change: infrastructure:deploy).\n\nFor installs from before recovery access existed; no SSH filter or installer rerun is needed.",
+        "operationId": "set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Set Up Host Recovery",
         "tags": [
           "ssh-access"
         ]

@@ -50,6 +50,7 @@ OperationAction = Literal[
     "config_sync",
     "component_change",
     "host_ssh_filter",
+    "host_recovery_setup",
 ]
 
 ADMIN_PERMISSIONS = [("infrastructure", "deploy"), ("infrastructure", "configure")]

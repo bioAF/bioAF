@@ -446,3 +446,32 @@ def test_aws_snapshot_and_restore_round_trip_ssh_access():
     assert "sg-bioaf-ssh-filter" not in state["attached"]
     assert state["sgs"]["sg-bioaf-ssh-filter"]["ssh"] == []
     assert "sg-bioaf-ssh-recovery" in state["attached"]
+
+
+# -- Not set up versus changed (owner decision 2026-11-25) -------------------------------------------
+
+
+def test_gcp_recovery_never_set_up_is_missing_not_a_problem():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    assert net.recovery_missing() is True
+    assert net.check_recovery() == []
+
+
+def test_gcp_recovery_changed_outside_bioaf_is_a_problem_not_missing():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    assert net.recovery_missing() is False
+    assert net.check_recovery() == []
+    fw.rules["bioaf-ssh-recovery-iap"].priority = 1000
+    assert net.check_recovery() == ["The IAP recovery rule was changed outside bioAF."]
+
+
+def test_aws_recovery_never_set_up_is_missing_not_a_problem():
+    ec2, _ = _ec2()
+    net = AwsHostNetwork(AWS, client=ec2)
+    assert net.recovery_missing() is True
+    assert not any("security group" in p for p in net.check_recovery())
+    net.ensure_recovery()
+    assert net.recovery_missing() is False

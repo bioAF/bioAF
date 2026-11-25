@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 
 from app.config import settings
 from app.models.user import User
@@ -47,6 +48,7 @@ def host(tmp_path, monkeypatch):
     ]
     driver.recovery_sources.return_value = driver.ensure_recovery.return_value
     driver.check_recovery.return_value = []
+    driver.recovery_missing.return_value = False
     driver.apply_filter.return_value = {"provider": "gcp", "rules": ["bioaf-ssh-filter-deny-v4"]}
     driver.snapshot.return_value = {"provider": "gcp", "rules": {}}
     with (
@@ -501,3 +503,44 @@ async def test_a_cancelled_filter_change_keeps_the_operation_until_the_cloud_cal
         await change
     async with database.async_session_factory() as s:
         assert await ops.active_operation(s) is None
+
+
+# -- Cloud recovery not set up yet (owner decision 2026-11-25) ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recovery_that_was_never_set_up_is_reported_as_not_set_up(client, admin, host):
+    _diagnostics(host)
+    host.driver.recovery_missing.return_value = True
+    result = (await client.post(f"{BASE}/host/check", headers=admin)).json()
+    assert result["recovery"]["status"] == "not_configured"
+    assert result["recovery"]["problems"] == []
+    host.driver.ensure_recovery.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_up_recovery_runs_the_reconcile_as_an_operation_without_a_filter(client, session, admin, host):
+    _diagnostics(host)
+    host.driver.recovery_missing.return_value = True
+    response = await client.post(f"{BASE}/host/recovery", headers=admin)
+    assert response.status_code == 200, response.text
+    host.driver.ensure_recovery.assert_called_once()
+    host.driver.apply_filter.assert_not_called()
+    assert response.json()["recovery"]["status"] == "configured_automatic"
+    ops = (
+        await session.execute(text("SELECT action, status FROM infrastructure_operations ORDER BY id DESC LIMIT 1"))
+    ).one()
+    assert tuple(ops) == ("host_recovery_setup", "succeeded")
+    state = (await client.get(BASE, headers=admin)).json()["application_host"]
+    assert state["recovery"]["status"] == "configured_automatic"
+    assert state["filter"]["applied"]["revision"] == 0
+
+
+@pytest.mark.asyncio
+async def test_set_up_recovery_needs_deploy_permission(client, session, admin_user, host):
+    headers = await _custom(
+        session, admin_user.organization_id, "configure-only@lab.org", [("infrastructure", "configure")]
+    )
+    response = await client.post(f"{BASE}/host/recovery", headers=headers)
+    assert response.status_code == 403
+    host.driver.ensure_recovery.assert_not_called()

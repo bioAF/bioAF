@@ -36,7 +36,7 @@ interface WorkNodeSection {
 }
 
 interface Recovery {
-  status: "not_checked" | "configured_automatic" | "login_tested" | "needs_attention";
+  status: "not_checked" | "not_configured" | "configured_automatic" | "login_tested" | "needs_attention";
   problems: string[];
   sources: { kind: string; source: string; priority?: number; ports: string }[];
   checked_at: string | null;
@@ -72,6 +72,7 @@ const BASE = "/api/v1/settings/ssh-access";
 
 const RECOVERY_LABELS: Record<Recovery["status"], string> = {
   not_checked: "Not checked yet",
+  not_configured: "Not set up yet",
   configured_automatic: "Configured (automatic checks)",
   login_tested: "Login tested",
   needs_attention: "Needs attention",
@@ -312,6 +313,22 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
   const [draft, setDraft] = useState<Draft>(section.filter.draft);
   const [savedVersion, setSavedVersion] = useState(section.filter.draft.version);
   const [recovery, setRecovery] = useState<Recovery>(section.recovery);
+  const [settingUp, setSettingUp] = useState(false);
+  const [setupError, setSetupError] = useState("");
+
+  async function setUpRecovery() {
+    setSettingUp(true);
+    setSetupError("");
+    try {
+      const r = await api.post<{ recovery: Recovery }>(`${BASE}/host/recovery`);
+      setRecovery(r.recovery);
+    } catch (e) {
+      logError("setting up cloud recovery access", e);
+      setSetupError(errorText(e, "Cloud recovery access could not be set up. Nothing was changed."));
+    } finally {
+      setSettingUp(false);
+    }
+  }
   useEffect(() => {
     setDraft(section.filter.draft);
     setSavedVersion(section.filter.draft.version);
@@ -350,7 +367,19 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
             ? ` (${formatRecordedTime(recovery.login_tested_at, "datetime", { missing: "" })})`
             : ""}
         </p>
-        {recovery.sources.length > 0 && (
+        {recovery.status === "not_configured" && (
+          <div className="mt-2">
+            <Button onClick={() => void setUpRecovery()} disabled={settingUp}>
+              Set up cloud recovery access
+            </Button>
+            {setupError && (
+              <p role="alert" className="mt-1 text-sm text-red-700">
+                {setupError}
+              </p>
+            )}
+          </div>
+        )}
+        {recovery.status !== "not_configured" && recovery.sources.length > 0 && (
           <ul className="text-xs text-gray-600">
             {recovery.sources.map((s) => (
               <li key={`${s.kind}-${s.source}`}>

@@ -67,6 +67,7 @@ ACTION_LABELS: dict[str, str] = {
     "config_sync": "Configuration sync",
     "component_change": "Component change",
     "host_ssh_filter": "SSH access filter change",
+    "host_recovery_setup": "Cloud recovery access setup",
 }
 
 _current: ContextVar[int | None] = ContextVar("bioaf_infrastructure_operation", default=None)

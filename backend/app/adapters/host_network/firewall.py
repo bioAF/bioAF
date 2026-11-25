@@ -138,11 +138,16 @@ class GcpHostNetwork:
         self._upsert(self._rule(IAP_RULE, priority=GCP_IAP_PRIORITY, sources=[GCP_IAP_SOURCE], allow=True))
         return self.recovery_sources()
 
+    def recovery_missing(self) -> bool:
+        """True when bioAF's recovery rule was never created here (an install from before it existed)."""
+        return self._existing(IAP_RULE) is None
+
     def check_recovery(self) -> list[str]:
+        """Problems with recovery that exists; a rule never set up is recovery_missing, not a problem."""
         problems = []
         iap = self._existing(IAP_RULE)
-        if iap is None or iap.priority != GCP_IAP_PRIORITY or list(iap.source_ranges) != [GCP_IAP_SOURCE]:
-            problems.append("The IAP recovery rule is missing or was changed outside bioAF.")
+        if iap is not None and (iap.priority != GCP_IAP_PRIORITY or list(iap.source_ranges) != [GCP_IAP_SOURCE]):
+            problems.append("The IAP recovery rule was changed outside bioAF.")
         iap_net = ipaddress.ip_network(GCP_IAP_SOURCE)
         for rule in self.client.list(project=self.project):
             if rule.name == IAP_RULE or rule.network != self.network or (rule.direction or "INGRESS") != "INGRESS":
@@ -351,12 +356,17 @@ class AwsHostNetwork:
             ]
         )
 
+    def recovery_missing(self) -> bool:
+        """True when bioAF's recovery security group was never created in this VPC."""
+        return self._find_group(AWS_RECOVERY_GROUP, self._instance()["VpcId"]) is None
+
     def check_recovery(self) -> list[str]:
+        """Problems with recovery that exists; a group never set up is recovery_missing, not a problem."""
         problems = []
         instance = self._instance()
         attached = [g["GroupId"] for g in instance["SecurityGroups"]]
         recovery = self._find_group(AWS_RECOVERY_GROUP, instance["VpcId"])
-        if recovery is None or recovery not in attached:
+        if recovery is not None and recovery not in attached:
             problems.append("The EC2 Instance Connect recovery security group is not attached to this server.")
         if self.identity.public:
             if not instance.get("PublicIpAddress"):
