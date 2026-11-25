@@ -821,7 +821,15 @@ class Ec2VmInstance(VmInstance):
             for reservation in page.get("Reservations", []):
                 for inst in reservation.get("Instances", []):
                     tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
-                    found.append(ManagedInstance(name=inst["InstanceId"], session_id=tags.get("bioaf-session")))
+                    found.append(
+                        ManagedInstance(
+                            name=inst["InstanceId"],
+                            session_id=tags.get("bioaf-session"),
+                            zone=inst.get("Placement", {}).get("AvailabilityZone") or None,
+                            provider_instance_id=inst["InstanceId"],
+                            launch_attempt_id=tags.get("bioaf-launch"),
+                        )
+                    )
         return found
 
     # -- Local mode implementations --

@@ -441,6 +441,38 @@ class WorkNodeService:
         return True
 
     @staticmethod
+    async def _bind_unrecorded_launch(session: AsyncSession, node: ComputeSession) -> str | None:
+        """Find the VM of a launch whose provider result was never recorded and bind it to the row.
+
+        Returns None when the node is bound or the provider confirms no VM exists for it, and a
+        stop failure reason when the provider cannot answer or what it reports does not match
+        this launch attempt (the node is then kept).
+        """
+        from app.services.work_node_readiness import InventoryUnavailable
+
+        try:
+            instances = await get_work_node_adapter().inventory_instances()
+        except InventoryUnavailable as exc:
+            logger.warning("Could not inventory instances to stop work node %d: %s", node.id, exc)
+            return STOP_STATE_UNKNOWN
+        except Exception:
+            logger.exception("Inventory for work node %d raised", node.id)
+            return STOP_STATE_UNKNOWN
+        mine = [i for i in instances if i.session_id == str(node.id)]
+        if not mine:
+            return None
+        if len(mine) != 1 or mine[0].launch_attempt_id != node.launch_attempt_id or not mine[0].zone:
+            logger.warning("Work node %d: provider instances do not match its launch attempt", node.id)
+            return STOP_STATE_UNKNOWN
+        found = mine[0]
+        node.gce_instance_name = found.name
+        node.gce_zone = found.zone
+        if found.provider_instance_id:
+            node.provider_instance_id = found.provider_instance_id
+        await session.commit()
+        return None
+
+    @staticmethod
     async def _finish_stop(
         session: AsyncSession,
         node: ComputeSession,
@@ -462,7 +494,13 @@ class WorkNodeService:
                 working_bucket = val
 
         terminate_result = TerminationResult()
-        if node.gce_instance_name:
+        if not node.gce_instance_name and node.launch_attempt_id:
+            # The launch was committed before the provider call; a restart can lose the result.
+            # Only the provider can say whether a VM exists, so ask it before anything is discarded.
+            unresolved = await WorkNodeService._bind_unrecorded_launch(session, node)
+            if unresolved:
+                terminate_result = TerminationResult(status=ServiceState.UNKNOWN, stop_failure=unresolved)
+        if node.gce_instance_name and not terminate_result.stop_failure:
             try:
                 adapter = get_work_node_adapter()
                 terminate_result = await adapter.terminate_vm(
@@ -706,7 +744,7 @@ class WorkNodeService:
                 select(ComputeSession).where(
                     ComputeSession.session_type == "ssh",
                     or_(
-                        ComputeSession.status.in_(["running", "starting"]),
+                        ComputeSession.status.in_(["running", "starting", "stopping"]),
                         (ComputeSession.status == "stop_failed")
                         & (ComputeSession.stop_attempts < MAX_BACKGROUND_STOP_ATTEMPTS),
                     ),
@@ -716,6 +754,22 @@ class WorkNodeService:
             now = datetime.now(timezone.utc)
 
             for node in active_nodes:
+                if node.status == "stopping":
+                    # A Stop someone asked for, interrupted (for example by a restart) after its
+                    # claim was committed: resume it once the claim has expired, whatever the
+                    # heartbeat, so it ends stopped or stop_failed with Retry stop.
+                    claimed = node.stop_claimed_at
+                    if claimed is not None and claimed.tzinfo is None:
+                        claimed = claimed.replace(tzinfo=timezone.utc)
+                    if claimed is not None and claimed >= now - STOP_CLAIM_TTL:
+                        continue
+                    logger.info("Resuming an interrupted Stop of work node %d", node.id)
+                    if await WorkNodeService._claim_stop(session, node):
+                        await WorkNodeService._finish_stop(
+                            session, node, actor_user_id=node.user_id, old_status="stopping"
+                        )
+                    continue
+
                 last_beat = node.heartbeat_at or node.started_at
                 if not last_beat:
                     continue

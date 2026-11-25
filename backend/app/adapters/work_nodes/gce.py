@@ -1056,7 +1056,15 @@ class GceVmInstance(VmInstance):
         for _zone, scoped in pages:
             for instance in getattr(scoped, "instances", None) or []:
                 labels = dict(instance.labels or {})
-                found.append(ManagedInstance(name=instance.name, session_id=labels.get("bioaf-session")))
+                found.append(
+                    ManagedInstance(
+                        name=instance.name,
+                        session_id=labels.get("bioaf-session"),
+                        zone=str(getattr(instance, "zone", "") or "").rsplit("/", 1)[-1] or None,
+                        provider_instance_id=str(instance.id) if getattr(instance, "id", None) else None,
+                        launch_attempt_id=labels.get("bioaf-launch"),
+                    )
+                )
         return found
 
     # -- Local mode implementations --

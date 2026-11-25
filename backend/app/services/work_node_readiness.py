@@ -40,6 +40,9 @@ class ManagedInstance:
 
     name: str
     session_id: str | None
+    zone: str | None = None
+    provider_instance_id: str | None = None
+    launch_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)

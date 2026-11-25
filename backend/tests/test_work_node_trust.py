@@ -314,3 +314,133 @@ async def test_the_notebook_idle_monitor_never_stops_a_work_node(session, durabl
         await SessionMonitorService.poll_notebook_sessions(session, idle_timeout_hours=4)
     row = await _row(session, durable_node.id)
     assert (row.status, row.stopped_at) == ("running", None)
+
+
+# -- Stop of a launch whose provider binding was never recorded (review finding) ------------
+
+
+async def _unbound(session, node):
+    """A launch committed 'starting' whose backend restarted before the provider result was saved."""
+    node.status = "starting"
+    node.gce_instance_name = None
+    node.gce_zone = None
+    node.provider_instance_id = None
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_stop_of_an_unbound_launch_keeps_the_node_when_the_provider_cannot_answer(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    from app.services.work_node_readiness import InventoryUnavailable
+
+    await _unbound(session, durable_node)
+    adapter.inventory_instances = AsyncMock(side_effect=InventoryUnavailable("timeout"))
+    response = await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    assert response.status_code == 200
+    row = await _row(session, durable_node.id)
+    assert (row.status, row.stop_failure, row.stopped_at) == ("stop_failed", "state_unknown", None)
+    assert row.sync_private_key == "sync-private"
+    adapter.terminate_vm.assert_not_called()
+    assert _stopped_events(adapter, durable_node.id) == []
+
+
+@pytest.mark.asyncio
+async def test_stop_of_an_unbound_launch_binds_the_found_instance_and_saves_it(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    from app.services.work_node_readiness import ManagedInstance
+
+    await _unbound(session, durable_node)
+    adapter.inventory_instances = AsyncMock(
+        return_value=[
+            ManagedInstance(name="bioaf-worknode-other", session_id="999", zone="us-central1-a"),
+            ManagedInstance(
+                name="bioaf-worknode-1",
+                session_id=str(durable_node.id),
+                zone="us-central1-c",
+                provider_instance_id="777",
+                launch_attempt_id="attempt-1",
+            ),
+        ]
+    )
+    response = await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    assert response.json()["status"] == "stopped"
+    args, kwargs = adapter.terminate_vm.call_args
+    assert args == ("bioaf-worknode-1", "us-central1-c")
+    assert kwargs["provider_instance_id"] == "777"
+    assert kwargs["sync_private_key"] == "sync-private"
+    row = await _row(session, durable_node.id)
+    assert (row.gce_instance_name, row.gce_zone, row.provider_instance_id) == (
+        "bioaf-worknode-1",
+        "us-central1-c",
+        "777",
+    )
+
+
+@pytest.mark.asyncio
+async def test_stop_of_an_unbound_launch_keeps_the_node_when_the_found_instance_is_another_attempt(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    from app.services.work_node_readiness import ManagedInstance
+
+    await _unbound(session, durable_node)
+    adapter.inventory_instances = AsyncMock(
+        return_value=[
+            ManagedInstance(
+                name="bioaf-worknode-1", session_id=str(durable_node.id), zone="us-central1-c", launch_attempt_id="x"
+            )
+        ]
+    )
+    await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    row = await _row(session, durable_node.id)
+    assert (row.status, row.stop_failure) == ("stop_failed", "state_unknown")
+    adapter.terminate_vm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stop_of_an_unbound_launch_completes_only_when_the_provider_confirms_no_instance(
+    client, session, comp_bio_token, durable_node, adapter
+):
+    await _unbound(session, durable_node)
+    adapter.inventory_instances = AsyncMock(return_value=[])
+    response = await client.post(f"/api/v1/work-nodes/sessions/{durable_node.id}/stop", headers=_bearer(comp_bio_token))
+    assert response.json()["status"] == "stopped"
+    adapter.inventory_instances.assert_awaited_once()
+    adapter.terminate_vm.assert_not_called()
+    row = await _row(session, durable_node.id)
+    assert row.sync_private_key is None
+
+
+# -- A Stop interrupted by a restart (review finding) ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_resumes_an_abandoned_stop(session, durable_node, adapter):
+    """A restart after the Stop claim leaves 'stopping'; cleanup resumes it once the claim expires,
+    whatever the heartbeat, so the node ends stopped or stop_failed (with Retry stop)."""
+    from app.services.work_node_service import WorkNodeService
+
+    durable_node.status = "stopping"
+    durable_node.stop_claimed_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    durable_node.heartbeat_at = datetime.now(timezone.utc)
+    await session.commit()
+    adapter.terminate_vm.return_value = TerminationResult(status=ServiceState.RUNNING, stop_failure="save_failed")
+
+    await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)
+
+    row = await _row(session, durable_node.id)
+    assert (row.status, row.stop_failure) == ("stop_failed", "save_failed")
+    adapter.terminate_vm.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_background_cleanup_leaves_a_fresh_stop_claim_alone(session, durable_node, adapter):
+    from app.services.work_node_service import WorkNodeService
+
+    durable_node.status = "stopping"
+    durable_node.stop_claimed_at = datetime.now(timezone.utc)
+    await session.commit()
+    await WorkNodeService.check_heartbeat_timeouts(session, idle_timeout_hours=24)
+    adapter.terminate_vm.assert_not_called()
+    assert (await _row(session, durable_node.id)).status == "stopping"
