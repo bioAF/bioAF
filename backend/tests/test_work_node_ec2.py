@@ -230,9 +230,8 @@ async def test_ec2_terminate_saves_with_the_recorded_identity_then_confirms_term
     assert call.args[0] == "1.2.3.4"
     assert call.kwargs["sync_private_key"] == "sync-private"
     assert call.kwargs["host_public_key"] == "ssh-ed25519 AAAAhost"
-    # Both transfers must succeed: a failed output sync is not masked by the later script capture.
-    assert "|| rc=1" in call.kwargs["command"]
-    assert "exit $rc" in call.kwargs["command"]
+    # A failed output sync fails the save (owner decision 2026-11-25: Stop saves /outputs only).
+    assert "|| exit 1" in call.kwargs["command"]
     ec2.terminate_instances.assert_called_once_with(InstanceIds=["i-0abc"])
     assert result.stop_failure is None
     assert result.status.value == "stopped"

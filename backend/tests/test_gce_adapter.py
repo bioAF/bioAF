@@ -307,7 +307,7 @@ async def test_gce_delete_saves_with_recorded_identity_then_confirms_deletion():
     result, sync = await _gce_delete(client)
     assert sync.call_args.args[0] == "34.1.2.3"
     assert sync.call_args.kwargs["host_public_key"] == "ssh-ed25519 AAAAhost"
-    assert "exit $rc" in sync.call_args.kwargs["command"]
+    assert "|| exit 1" in sync.call_args.kwargs["command"]
     client.delete.assert_called_once()
     assert result.stop_failure is None
     assert result.status.value == "stopped"

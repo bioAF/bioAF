@@ -887,10 +887,7 @@ class GceVmInstance(VmInstance):
                 address = _internal_ip(instance) if sync_route == "private-v1" else _external_ip(instance)
                 if not (working_bucket and address and sync_private_key and host_public_key):
                     return kept(STOP_SAVE_FAILED, "running")
-                command = sync_outputs_command(
-                    f"gsutil -m rsync -r /outputs {gcs_output_prefix}",
-                    shell_word(_capture_each(f"gs://{working_bucket}/sessions/{session_id}/scripts/")),
-                )
+                command = sync_outputs_command(f"gsutil -m rsync -r /outputs {gcs_output_prefix}")
                 try:
                     status = await run_sync_command(
                         address,

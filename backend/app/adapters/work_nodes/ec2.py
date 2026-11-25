@@ -717,10 +717,7 @@ class Ec2VmInstance(VmInstance):
                     )
                     if not (working_bucket and public_ip and sync_private_key and host_public_key):
                         return kept(STOP_SAVE_FAILED, "running")
-                    command = sync_outputs_command(
-                        f"aws s3 sync /outputs {s3_output_prefix}",
-                        shell_word(_capture_each(f"s3://{working_bucket}/sessions/{session_id}/scripts/")),
-                    )
+                    command = sync_outputs_command(f"aws s3 sync /outputs {s3_output_prefix}")
                     try:
                         status = await run_sync_command(
                             public_ip,

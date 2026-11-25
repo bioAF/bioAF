@@ -38,24 +38,13 @@ STOP_DELETE_UNCONFIRMED = "delete_unconfirmed"
 STOP_STATE_UNKNOWN = "state_unknown"
 
 
-def sync_outputs_command(
-    sync_outputs: str, capture_each: str, *, home: str = "/home", outputs: str = "/outputs"
-) -> str:
-    """The node-side save: output directory sync plus notebook/script capture.
+def sync_outputs_command(sync_outputs: str, *, outputs: str = "/outputs") -> str:
+    """The node-side save: the output directory sync, the one location Stop promises to save.
 
-    Exits nonzero if the output sync or any copy of a found script fails, so a successful later
-    command cannot mask a failed earlier one. An empty /outputs is a checked, successful no-op.
-    Directories bioaf-sync cannot read (other accounts' homes, ~/.ssh) are skipped, not failures:
-    find's own errors are dropped and only the copies' exit status (through xargs) counts.
+    Exits nonzero if the sync fails, so the node is kept. An empty /outputs is a checked,
+    successful no-op. Home directories are not searched (owner decision, 2026-11-25).
     """
-    return (
-        "rc=0; "
-        f'if [ -d {outputs} ] && [ -n "$(ls -A {outputs})" ]; then {sync_outputs} || rc=1; fi; '
-        f"find {home} -maxdepth 4 "
-        r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
-        f"-type f -print0 2>/dev/null | xargs -0 sh -c {capture_each} sh || rc=1; "
-        "exit $rc"
-    )
+    return f'if [ -d {outputs} ] && [ -n "$(ls -A {outputs})" ]; then {sync_outputs} || exit 1; fi; exit 0'
 
 
 class NodeSyncError(Exception):
