@@ -58,9 +58,11 @@ class FakeFirewalls:
         return self._op()
 
     def update(self, project, firewall, firewall_resource):
+        # Live GCP (2026-11-25): "Unsupported update operation. Please use firewall.patch API".
+        from google.api_core.exceptions import BadRequest
+
         self.calls.append(("update", firewall))
-        self.rules[firewall] = firewall_resource
-        return self._op()
+        raise BadRequest("Unsupported update operation. Please use firewall.patch API to update the firewall resource.")
 
     def delete(self, project, firewall):
         self.calls.append(("delete", firewall))
@@ -536,16 +538,34 @@ def test_gcp_a_recovery_rule_reported_with_a_full_network_url_is_still_ours():
 )
 def test_gcp_an_added_source_selector_is_reported_and_removed(field, value):
     """Review 8: GCP admits a source tag OR a source range, so an added selector widens access.
-    A patch cannot clear a list, so the rule is replaced whole."""
+    A patch cannot clear a list and GCP refuses a full update, so the rule is rebuilt make-before-break:
+    a correct twin first, then the tampered rule is replaced, then the twin is removed."""
     fw = FakeFirewalls()
     net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
     net.ensure_recovery()
     setattr(fw.rules["bioaf-ssh-recovery-iap"], field, value)
     assert net.check_recovery() == ["The IAP recovery rule was changed outside bioAF."]
+    fw.calls.clear()
     net.ensure_recovery()
-    assert ("update", "bioaf-ssh-recovery-iap") in fw.calls
+    assert fw.calls == [
+        ("insert", "bioaf-ssh-recovery-iap-repair"),
+        ("delete", "bioaf-ssh-recovery-iap"),
+        ("insert", "bioaf-ssh-recovery-iap"),
+        ("delete", "bioaf-ssh-recovery-iap-repair"),
+    ]
     assert list(getattr(fw.rules["bioaf-ssh-recovery-iap"], field)) == []
+    assert set(fw.rules) == {"bioaf-ssh-recovery-iap"}
     assert net.check_recovery() == []
+
+
+def test_gcp_a_repair_twin_left_by_an_interrupted_repair_is_removed():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    twin = net._rule("bioaf-ssh-recovery-iap-repair", priority=850, sources=["35.235.240.0/20"], allow=True)
+    fw.rules[twin.name] = twin
+    net.ensure_recovery()
+    assert set(fw.rules) == {"bioaf-ssh-recovery-iap"}
 
 
 def test_gcp_an_added_source_tag_on_the_filter_allow_rule_is_removed():

@@ -79,7 +79,8 @@ def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
     return False
 
 
-# Rule lists a patch cannot empty (an empty list is not sent), so removing them needs a full update.
+# Rule lists a patch cannot empty (an empty list is not sent) and GCP refuses a full update, so
+# removing one rebuilds the rule (see GcpHostNetwork._upsert).
 _CLEARED_BY_UPDATE_ONLY = (
     "source_tags",
     "source_service_accounts",
@@ -154,15 +155,29 @@ class GcpHostNetwork:
         )
 
     def _upsert(self, rule) -> None:
+        """Create or repair ``rule`` so its effect is exactly the intended one.
+
+        A patch repairs fields it can set. A list it would have to empty (an added source tag,
+        service account or range) cannot be patched away and GCP refuses a full update, so the rule
+        is rebuilt make-before-break: a correct twin first, then the rule is replaced, then the twin
+        goes, so the intended access is never missing. A twin an interrupted rebuild left is removed.
+        """
+        twin_name = f"{rule.name}-repair"
         current = self._existing(rule.name)
         if current is None:
             self.client.insert(project=self.project, firewall_resource=rule).result(timeout=120)
         elif self._effect(current) != self._effect(rule):
             if any(list(getattr(current, f)) and not list(getattr(rule, f)) for f in _CLEARED_BY_UPDATE_ONLY):
-                # A patch leaves a list it does not mention: replace the whole rule to remove it.
-                self.client.update(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
+                twin = type(rule)(rule)
+                twin.name = twin_name
+                if self._existing(twin_name) is None:
+                    self.client.insert(project=self.project, firewall_resource=twin).result(timeout=120)
+                self.client.delete(project=self.project, firewall=rule.name).result(timeout=120)
+                self.client.insert(project=self.project, firewall_resource=rule).result(timeout=120)
             else:
                 self.client.patch(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
+        if self._existing(twin_name) is not None:
+            self.client.delete(project=self.project, firewall=twin_name).result(timeout=120)
 
     def _delete(self, name) -> None:
         if self._existing(name) is not None:
