@@ -183,3 +183,26 @@ async def test_a_replaced_host_is_reconciled_by_immutable_id(session):
     second = await reconcile_host_identity(session, replacement)
     assert second.replaced is True
     assert second.identity.instance_id == "999"
+
+
+@pytest.mark.asyncio
+async def test_a_private_aws_server_links_to_its_prepared_endpoint(session):
+    from unittest.mock import MagicMock
+
+    from app.services.ssh_recovery import current_host_identity
+
+    discovered = HostIdentity(**{**AWS_PRIVATE.__dict__, "eic_endpoint_id": ""})
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = {"Reservations": [{"Instances": [{"VpcId": "vpc-app"}]}]}
+    ec2.describe_instance_connect_endpoints.return_value = {
+        "InstanceConnectEndpoints": [
+            {"InstanceConnectEndpointId": "eice-0123456789abcdef0", "State": "create-complete"}
+        ]
+    }
+    with (
+        patch("app.services.ssh_recovery._metadata_identity", AsyncMock(return_value=discovered)),
+        patch("app.config.settings.compute_mode", "kubernetes"),
+        patch("boto3.client", return_value=ec2),
+    ):
+        identity = await current_host_identity(session)
+    assert restore_access(identity)["endpoint_id"] == "eice-0123456789abcdef0"

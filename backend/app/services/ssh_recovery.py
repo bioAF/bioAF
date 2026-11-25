@@ -245,7 +245,34 @@ async def current_host_identity(session) -> HostIdentity:
 
     if is_simulated(settings.compute_mode):
         raise RecoveryError("a simulated installation has no cloud server")
-    return (await reconcile_host_identity(session, await _metadata_identity())).identity
+    discovered = await _metadata_identity()
+    if discovered.provider == "aws" and not discovered.public and not discovered.eic_endpoint_id:
+        discovered = replace(discovered, eic_endpoint_id=await _aws_endpoint(discovered))
+    return (await reconcile_host_identity(session, discovered)).identity
+
+
+async def _aws_endpoint(identity: HostIdentity) -> str:
+    """The prepared EC2 Instance Connect Endpoint in a private server's VPC, or "" (best effort)."""
+    import asyncio
+
+    try:
+        import boto3
+
+        ec2 = boto3.client("ec2", region_name=identity.region)
+        instance = (await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[identity.instance_id])))[
+            "Reservations"
+        ][0]["Instances"][0]
+        endpoints = (
+            await asyncio.to_thread(
+                lambda: ec2.describe_instance_connect_endpoints(
+                    Filters=[{"Name": "vpc-id", "Values": [instance["VpcId"]]}]
+                )
+            )
+        ).get("InstanceConnectEndpoints", [])
+    except Exception:
+        return ""
+    ready = [e for e in endpoints if e.get("State") in (None, "create-complete")]
+    return ready[0].get("InstanceConnectEndpointId", "") if ready else ""
 
 
 async def restore_view(session) -> dict:
