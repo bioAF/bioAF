@@ -437,6 +437,9 @@ case "$args" in
         fi
         exit 0 ;;
     *"health/ready"*) [ "${FAKE_READY:-yes}" = yes ] && exit 0 || exit 1 ;;
+    *" ps -a --format {{.Image}} "*)
+        # The backend container's image (review 4: the release a frozen backend runs).
+        echo "${FAKE_BACKEND_IMAGE-ghcr.io/example/bioaf-backend:v1.0.0}"; exit 0 ;;
     *" ps -a --format "*)
         # The backend container's state for stale-update recovery (default: frozen by the gate).
         echo "${FAKE_BACKEND_STATE-paused}"; exit 0 ;;
@@ -778,6 +781,39 @@ stale_recover() {
     grep -q '^unpause' "$tmp/log"
     grep -q '^BIOAF_IMAGE_TAG=v1.0.0$' "$tmp/.env"
     [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+}
+
+@test "after the agent records the killed update as failed, the frozen backend's own image is pinned again" {
+    # The agent replaces the status with a generic failure that has no from_version (review 4 item 2).
+    stale_gate_env
+    printf '{"status": "failed", "to_version": "2.0.0", "error": "Update process exited with code 137"}' > "$tmp/update-status/current.json"
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env FAKE_LOG="$tmp/log" BIOAF_READY_TIMEOUT_SECONDS=5 FAKE_BACKEND_IMAGE=ghcr.io/example/bioaf-backend:v1.4.2 bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'; sleep() { :; }
+        cmd_release_stale_update_gate"
+    [ "$status" -eq 0 ]
+    grep -q '^unpause' "$tmp/log"
+    grep -q '^BIOAF_IMAGE_TAG=v1.4.2$' "$tmp/.env"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+    grep -qF 'The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update.' "$tmp/update-status/current.json"
+    grep -q '"to_version": "2.0.0"' "$tmp/update-status/current.json"
+}
+
+@test "a frozen backend whose release cannot be read is resumed but launches stay paused" {
+    # Without its release the target pin would stay, and a later start could replace the backend
+    # holding older nodes' keys without the update gate; launches stay closed and the status says so.
+    stale_gate_env
+    printf '{"status": "failed", "to_version": "2.0.0"}' > "$tmp/update-status/current.json"
+    printf 'BIOAF_IMAGE_TAG=v2.0.0\n' > "$tmp/.env"
+    run env FAKE_LOG="$tmp/log" BIOAF_READY_TIMEOUT_SECONDS=5 FAKE_BACKEND_IMAGE=sha256:abc bash -c "
+        source '$BIOAF_SCRIPT' >/dev/null
+        DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'; sleep() { :; }
+        cmd_release_stale_update_gate"
+    [ "$status" -eq 0 ]
+    grep -q '^unpause' "$tmp/log"
+    [ -e "$tmp/update-gate/work-node-launch.closed" ]
+    grep -qF 'The update stopped before it finished. bioAF is running, but it could not tell which release to keep. Contact support before updating or restarting bioAF.' "$tmp/update-status/current.json"
 }
 
 @test "a backend stopped by a killed update is started again and confirmed ready before launches reopen" {
@@ -1232,6 +1268,15 @@ STUB
     [ "$status" -eq 0 ]
     [ "$(grep -E '^(unpause|up)' "$tmp/log" | head -1 | cut -d' ' -f1)" = unpause ]
     grep -q '^unpause args=\[.* unpause backend\]' "$tmp/log"
+}
+
+@test "start refuses while a resumed backend's release is unknown, so it cannot replace it without the gate" {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; mkdir -p "$tmp/host-state" "$tmp/update-gate"; : > "$tmp/update-gate/release-unknown"
+    stubs="DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'; ENV_FILE='$tmp/.env'; ensure_pinned_image_tag() { :; }; ensure_backups_dir() { :; }; wait_for_db() { :; }; cmd_status() { :; }; sleep() { :; }; ensure_cloud_logging() { :; }; ensure_update_agent() { :; }"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; $stubs; cmd_start"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"could not tell which release to keep"* ]]
+    absent '^up ' "$tmp/log"
 }
 
 @test "direct delivery on a GCE host without an agent installs and configures nothing" {

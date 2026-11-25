@@ -859,6 +859,13 @@ print(json.dumps(result))
 
 cmd_start() {
     host_python_require || exit 1
+    if [ -e "$(release_unknown_marker)" ]; then
+        # An interrupted update resumed a backend whose release could not be read; starting with the
+        # pinned release could replace it, and any older work node keys it holds, without the update gate.
+        red "ERROR: After an interrupted update bioAF could not tell which release to keep, so nothing was started."
+        red "Contact support. They remove $(release_unknown_marker) once the release is confirmed."
+        exit 1
+    fi
     bold "=== Starting Services ==="
     # Use whatever version is pinned in docker/.env. Never derive the image
     # tag from the worktree -- a `git pull` followed by `bioaf restart` must
@@ -1491,6 +1498,9 @@ stop_frozen_backend() {
 STALE_GATE_MESSAGE="The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update."
 STALE_GATE_RESTARTED="The update stopped before it finished. bioAF has been restarted. Retry the update."
 STALE_GATE_DOWN="The update stopped before it finished and bioAF did not start again. On the bioAF server run ./bioaf start, or contact support."
+STALE_GATE_RELEASE_UNKNOWN="The update stopped before it finished. bioAF is running, but it could not tell which release to keep. Contact support before updating or restarting bioAF."
+
+release_unknown_marker() { echo "$SCRIPT_DIR/update-gate/release-unknown"; }
 
 cmd_release_stale_update_gate() {
     # release-stale-update-gate: run by the update agent each polling round while a launch pause marker
@@ -1502,6 +1512,8 @@ cmd_release_stale_update_gate() {
     # Launches reopen and the status says bioAF is running only once the backend reports ready. Otherwise
     # the pause stays, the status says so plainly, and the next attempt waits (no restart every round).
     [ -e "$(launch_gate_marker)" ] || return 0
+    # A frozen backend was resumed without knowing its release: only support resolves that.
+    if [ -e "$(release_unknown_marker)" ]; then return 0; fi
     (
         DEPLOY_LOCK_WAIT=0
         deploy_lock >/dev/null 2>&1 || exit 0
@@ -1518,23 +1530,40 @@ try:
     d = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(0)
-if d.get("status") != "in_progress":
+# The record written by the updater, or the generic failure the agent wrote over it (no from_version).
+if d.get("status") not in ("in_progress", "failed"):
     sys.exit(0)
 ok = lambda v: v if isinstance(v, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v) else ""
-print(ok(d.get("from_version")), ok(d.get("to_version")))
+print(ok(d.get("from_version")) or "-", ok(d.get("to_version")) or "-")
 ' "$SCRIPT_DIR/update-status/current.json" 2>/dev/null)" || versions=""
         if [ -n "$versions" ]; then
             _update_from="${versions%% *}"; _update_to="${versions#* }"
+            if [ "$_update_from" = "-" ]; then _update_from=""; fi
+            if [ "$_update_to" = "-" ]; then _update_to=""; fi
         fi
 
         local state message
         state="$($DC ps -a --format '{{.State}}' backend 2>/dev/null | head -n 1)"
         case "$state" in
             paused)
-                # The old backend never stopped: it runs the release it had, so that is pinned again.
-                [ -n "${_update_from:-}" ] && pin_image_tag "v${_update_from}" >/dev/null 2>&1
-                $DC unpause backend >/dev/null 2>&1
-                message="$STALE_GATE_MESSAGE" ;;
+                # The old backend never stopped: the release it runs (its container's image tag, else the
+                # updater's record) is pinned again, so no later start replaces it without the gate.
+                local image keep=""
+                image="$($DC ps -a --format '{{.Image}}' backend 2>/dev/null | head -n 1)"
+                if [[ "${image##*:}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$image" == *:* ]]; then
+                    keep="${image##*:}"
+                elif [ -n "${_update_from:-}" ]; then
+                    keep="v${_update_from}"
+                fi
+                if [ -n "$keep" ]; then
+                    pin_image_tag "$keep" >/dev/null 2>&1
+                    _update_from="${keep#v}"
+                    message="$STALE_GATE_MESSAGE"
+                else
+                    : > "$(release_unknown_marker)"
+                    message="$STALE_GATE_RELEASE_UNKNOWN"
+                fi
+                $DC unpause backend >/dev/null 2>&1 ;;
             running)
                 message="$STALE_GATE_RESTARTED" ;;
             *)
@@ -1543,13 +1572,17 @@ print(ok(d.get("from_version")), ok(d.get("to_version")))
         esac
 
         if wait_for_backend_ready; then
-            reopen_work_node_launches
+            # Launches stay paused while the release to keep is unknown.
+            if [ ! -e "$(release_unknown_marker)" ]; then reopen_work_node_launches; fi
             rm -f "$stamp"
-            [ -n "$versions" ] && { write_update_status failed interrupted "$message" >/dev/null 2>&1 || true; }
         else
             echo "$now" > "$stamp"
-            [ -n "$versions" ] && { write_update_status failed interrupted "$STALE_GATE_DOWN" >/dev/null 2>&1 || true; }
+            message="$STALE_GATE_DOWN"
         fi
+        if [ -n "$versions" ]; then
+            write_update_status failed interrupted "$message" >/dev/null 2>&1 || true
+        fi
+        exit 0
     )
     return 0
 }

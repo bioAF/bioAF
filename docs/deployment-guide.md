@@ -422,7 +422,10 @@ finished. bioAF is running again and nothing was changed. Retry the update.**); 
 again (**... bioAF has been restarted. Retry the update.**). Launches reopen only once the backend reports
 ready. If it does not, the update page says **The update stopped before it finished and bioAF did not
 start again. On the bioAF server run ./bioaf start, or contact support.** and the agent tries again
-every five minutes.
+every five minutes. A resumed backend's release is read from its own container image. In the rare case
+it cannot be read, launches stay paused, the page says **... it could not tell which release to keep.
+Contact support before updating or restarting bioAF.**, and `./bioaf start` refuses until support
+confirms the release and removes `update-gate/release-unknown`.
 
 **One-time retry from an older release.** An updater from v0.13.0 through v2026.11.21 cannot run that
 check, so the first attempt only prepares the new update helper and stops without changing bioAF:
