@@ -92,7 +92,7 @@ function RangeEditor({
   const update = (index: number, field: "name" | "cidr", value: string) =>
     onChange({ ...draft, ranges: draft.ranges.map((r, i) => (i === index ? { ...r, [field]: value } : r)) });
 
-  const useThisComputer = async () => {
+  const suggestThisComputer = async () => {
     try {
       const observed = await api.get<{ address: string | null; message: string | null }>(`${BASE}/observed-address`);
       if (observed.address) {
@@ -142,7 +142,7 @@ function RangeEditor({
         <button type="button" className="underline" onClick={() => onChange({ ...draft, ranges: [...draft.ranges, { name: "", cidr: "" }] })}>
           Add a range
         </button>
-        <button type="button" className="underline" onClick={() => void useThisComputer()}>
+        <button type="button" className="underline" onClick={() => void suggestThisComputer()}>
           Use this computer&apos;s address
         </button>
       </div>
