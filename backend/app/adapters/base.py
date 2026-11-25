@@ -907,6 +907,16 @@ class WorkNodeProvider(ABC):
     async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
         """List active work node VMs."""
 
+    async def settle_launch(self, requests: list[dict], *, session_id: int):
+        """The settled outcome of a launch attempt from its recorded provider requests (LaunchOutcome).
+
+        An attempt that recorded no request never reached the provider. Providers that can read
+        their request history override this; the default cannot prove anything else.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome
+
+        return LaunchOutcome("none") if not requests else LaunchOutcome("unknown")
+
     async def inventory_instances(self) -> list:
         """Every existing bioAF Work Node instance in this installation, as ManagedInstance records.
 

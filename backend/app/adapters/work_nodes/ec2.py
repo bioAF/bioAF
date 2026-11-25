@@ -508,7 +508,37 @@ class Ec2VmInstance(VmInstance):
         if instance_profile:
             run_kwargs["IamInstanceProfile"] = {"Name": instance_profile}
 
-        result = await asyncio.to_thread(lambda: ec2.run_instances(**run_kwargs))
+        # The attempt id is the idempotency token: AWS returns this attempt's instance, never a second
+        # one, and the instance can be found by it. The request is recorded before it is sent.
+        client_token = str(vm_spec.get("launch_attempt_id") or "")
+        if client_token:
+            run_kwargs["ClientToken"] = client_token
+        record = vm_spec.get("record_launch_request")
+
+        async def journal(state: str) -> None:
+            if record is not None and client_token:
+                from app.platform.work_node_inventory import journal_entry
+
+                await record(
+                    journal_entry(
+                        client_token,
+                        state,
+                        client_token=client_token,
+                        region=str((self._aws_config or {}).get("aws_region") or ""),
+                    )
+                )
+
+        await journal("requested")
+        try:
+            result = await asyncio.to_thread(lambda: ec2.run_instances(**run_kwargs))
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                # AWS answered and refused: no instance. A timeout or lost connection is no answer.
+                await journal("failed")
+            raise
+        await journal("created")
         instance = result["Instances"][0]
         instance_id = instance["InstanceId"]
         az = instance.get("Placement", {}).get("AvailabilityZone", "")
@@ -794,6 +824,47 @@ class Ec2VmInstance(VmInstance):
         except Exception:
             logger.exception("Failed to list EC2 work nodes")
             return []
+
+    async def settle_launch(self, requests: list[dict], *, session_id: int):
+        """Settle a launch attempt from its recorded RunInstances request (see LaunchOutcome).
+
+        Refused by AWS: no instance. Otherwise the instance launched with the attempt's client token
+        is the answer. DescribeInstances is eventually consistent, so an unanswered request whose
+        instance is not listed stays unknown; an answered one whose instance is gone has none.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome, ManagedInstance
+
+        live = [r for r in requests if r.get("state") != "failed"]
+        if not live:
+            return LaunchOutcome("none")
+        if self.is_local:
+            return LaunchOutcome("unknown")
+        try:
+            await self.load_config()
+            ec2 = self._client("ec2")
+            filters = [{"Name": "client-token", "Values": [r.get("client_token", "") for r in live]}]
+            resp = await asyncio.to_thread(lambda: ec2.describe_instances(Filters=filters))
+        except Exception as exc:
+            logger.warning("Could not read the launch of work node %s: %s", session_id, type(exc).__name__)
+            return LaunchOutcome("unknown")
+        for reservation in resp.get("Reservations", []):
+            for inst in reservation.get("Instances", []):
+                if inst.get("State", {}).get("Name") == "terminated":
+                    continue
+                tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                return LaunchOutcome(
+                    "created",
+                    ManagedInstance(
+                        name=inst["InstanceId"],
+                        session_id=tags.get("bioaf-session"),
+                        zone=inst.get("Placement", {}).get("AvailabilityZone"),
+                        provider_instance_id=inst["InstanceId"],
+                        launch_attempt_id=tags.get("bioaf-launch"),
+                    ),
+                )
+        if any(r.get("state") == "requested" for r in live):
+            return LaunchOutcome("unknown")
+        return LaunchOutcome("none")
 
     async def inventory_instances(self) -> list:
         """Every existing (not terminated) bioAF Work Node instance in the Region, including stopped

@@ -296,32 +296,32 @@ async def test_launch_records_the_login_key_fingerprint(client, session, comp_bi
 async def test_a_failed_launch_without_a_recorded_instance_is_checked_before_replacement(
     client, session, comp_bio_token, comp_bio_user, keyed_user
 ):
-    """A launch attempt can have created a VM even when its result was never recorded."""
-    from datetime import datetime, timedelta, timezone
+    """A launch attempt can have created a VM even when its result was never recorded. Owner-approved
+    (2026-11-24, review 3 item 4): only its settled outcome (no VM made) lets the key change."""
+    from app.platform.work_node_inventory import LaunchOutcome
+    from app.services.work_node_service import launch_runner
 
-    from app.services.work_node_readiness import ManagedInstance
-
-    node = _node(comp_bio_user, "failed", launch_attempt_id="attempt-9")
+    requests = [{"key": "us-central1-b", "zone": "us-central1-b", "project": "proj", "state": "requested"}]
+    node = _node(
+        comp_bio_user,
+        "failed",
+        launch_attempt_id="attempt-9",
+        provider_metadata={"launch_journal": {"runner": launch_runner(), "requests": requests}},
+    )
     session.add(node)
     await session.commit()
     adapter = MagicMock()
     adapter.inventory_instances = AsyncMock(return_value=[])
 
-    async def generate():
-        with patch("app.services.session_credential_service.get_work_node_adapter", return_value=adapter):
+    async def generate(state):
+        adapter.settle_launch = AsyncMock(return_value=LaunchOutcome(state))
+        with (
+            patch("app.services.session_credential_service.get_work_node_adapter", return_value=adapter),
+            patch("app.services.work_node_service.get_work_node_adapter", return_value=adapter),
+        ):
             return await client.post("/api/auth/me/ssh-key/generate", headers=_bearer(comp_bio_token))
 
-    # Right after the attempt, not being listed is not proof: refused.
-    assert (await generate()).status_code == 409
-
-    node.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
-    await session.commit()
-    # Settled, but the provider still lists its VM: refused.
-    adapter.inventory_instances = AsyncMock(
-        return_value=[ManagedInstance(name="bioaf-worknode-9", session_id=str(node.id))]
-    )
-    assert (await generate()).status_code == 409
-    adapter.inventory_instances.assert_awaited_once()
-    # Settled and not listed: replaced.
-    adapter.inventory_instances = AsyncMock(return_value=[])
-    assert (await generate()).status_code == 200
+    assert (await generate("unknown")).status_code == 409
+    assert (await generate("created")).status_code == 409
+    assert adapter.settle_launch.await_args.args[0] == requests
+    assert (await generate("none")).status_code == 200

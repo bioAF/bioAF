@@ -49,6 +49,38 @@ STOP_CLAIM_TTL = timedelta(minutes=15)
 MAX_BACKGROUND_STOP_ATTEMPTS = 3
 
 
+# Work Node launches running in this process (session ids), so a Stop or key check never settles one
+# that is still talking to the provider.
+_LAUNCHING: set[int] = set()
+# Identifies this server process exactly (a pid can be reused; a container start cannot always be read).
+_PROCESS_TOKEN = uuid.uuid4().hex
+
+
+def launch_runner() -> dict:
+    """The process running a launch, as recorded in its journal."""
+    from app.services.runner_identity import current_runner
+
+    return {**current_runner(), "process": _PROCESS_TOKEN}
+
+
+def _launch_may_still_run(session_id: int, runner: dict | None) -> bool:
+    """True unless the process that ran this launch is shown to have finished or stopped."""
+    from app.services.runner_identity import container_restarted, current_runner, pid_alive, same_container
+
+    if session_id in _LAUNCHING:
+        return True
+    if not isinstance(runner, dict):
+        return True
+    if runner.get("process") == _PROCESS_TOKEN:
+        return False  # this process ran it, and it is no longer running
+    now = current_runner()
+    if same_container(runner, now):
+        pid = runner.get("pid")
+        return not isinstance(pid, int) or pid_alive(pid)
+    # A restarted container ended every process in it; any other container cannot be vouched for.
+    return not container_restarted(runner, now)
+
+
 class WorkNodeService:
     @staticmethod
     async def launch_work_node(
@@ -331,10 +363,32 @@ class WorkNodeService:
             vm_spec["host_public_key"] = identity.host_public_key
             vm_spec["launch_attempt_id"] = compute_session.launch_attempt_id
 
+            # Each provider request is journalled before it is sent (with the process running it), so
+            # a Stop or key replacement after a restart settles from the provider's record of it.
+            compute_session.provider_metadata = {
+                **(compute_session.provider_metadata or {}),
+                "launch_journal": {"runner": launch_runner(), "requests": []},
+            }
+
+            async def record_launch_request(entry: dict) -> None:
+                metadata = dict(compute_session.provider_metadata or {})
+                journal = dict(metadata.get("launch_journal") or {})
+                requests = [r for r in journal.get("requests") or [] if r.get("key") != entry.get("key")]
+                journal["requests"] = [*requests, entry]
+                metadata["launch_journal"] = journal
+                compute_session.provider_metadata = metadata
+                await session.commit()
+
+            vm_spec["record_launch_request"] = record_launch_request
+
             compute_session.status = "starting"
             await session.commit()
 
-            result = await adapter.launch_vm(vm_spec)
+            _LAUNCHING.add(compute_session.id)
+            try:
+                result = await adapter.launch_vm(vm_spec)
+            finally:
+                _LAUNCHING.discard(compute_session.id)
 
             compute_session.gce_instance_name = result.instance_name
             compute_session.gce_zone = result.zone
@@ -441,13 +495,34 @@ class WorkNodeService:
         return True
 
     @staticmethod
+    async def launch_outcome(node: ComputeSession):
+        """The settled outcome of a launch attempt whose instance was never recorded (LaunchOutcome).
+
+        Settled only from what the provider recorded for the attempt's requests (each one is
+        journalled before it is sent), never from elapsed time; while the launch may still be running
+        (here or in a process that cannot be shown to have stopped) the outcome is unknown.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome
+
+        journal = (node.provider_metadata or {}).get("launch_journal")
+        if not isinstance(journal, dict):
+            return LaunchOutcome("unknown")
+        if _launch_may_still_run(node.id, journal.get("runner")):
+            return LaunchOutcome("unknown")
+        try:
+            return await get_work_node_adapter().settle_launch(list(journal.get("requests") or []), session_id=node.id)
+        except Exception:
+            logger.exception("Settling the launch of work node %d raised", node.id)
+            return LaunchOutcome("unknown")
+
+    @staticmethod
     async def _bind_unrecorded_launch(session: AsyncSession, node: ComputeSession) -> str | None:
         """Find the VM of a launch whose provider result was never recorded and bind it to the row.
 
-        Returns None when the node is bound, or when the provider lists no VM for it and the launch
-        attempt has settled (``LAUNCH_SETTLE_WINDOW``); otherwise a stop failure reason, and the
-        node is kept: the provider cannot answer, its list may still lag the create, or what it
-        reports does not match this launch attempt.
+        Returns None when the node is bound, or when the launch attempt's settled outcome is that no
+        VM was made; otherwise a stop failure reason, and the node keeps its credentials: the provider
+        cannot answer, the launch has no settled outcome yet, or what the provider reports does not
+        match this launch attempt.
         """
         from app.services.work_node_readiness import InventoryUnavailable
 
@@ -461,12 +536,15 @@ class WorkNodeService:
             return STOP_STATE_UNKNOWN
         mine = [i for i in instances if i.session_id == str(node.id)]
         if not mine:
-            from app.services.work_node_readiness import launch_settled
-
-            if launch_settled(node.created_at):
+            # Not listed is not proof (lists lag creates; a launch may be in flight): ask what the
+            # recorded requests settled to.
+            outcome = await WorkNodeService.launch_outcome(node)
+            if outcome.state == "none":
                 return None
-            logger.info("Work node %d: launch not settled; an empty inventory is not yet proof", node.id)
-            return STOP_STATE_UNKNOWN
+            if outcome.state != "created" or outcome.instance is None:
+                logger.info("Work node %d: its launch has no settled outcome yet; keeping it", node.id)
+                return STOP_STATE_UNKNOWN
+            mine = [outcome.instance]
         if len(mine) != 1 or mine[0].launch_attempt_id != node.launch_attempt_id or not mine[0].zone:
             logger.warning("Work node %d: provider instances do not match its launch attempt", node.id)
             return STOP_STATE_UNKNOWN

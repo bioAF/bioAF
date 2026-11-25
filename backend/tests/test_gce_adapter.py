@@ -410,3 +410,117 @@ async def test_gce_launch_installs_host_key_labels_attempt_and_returns_instance_
     assert items["bioaf-host-public-key"] == identity.host_public_key
     assert instance.labels["bioaf-launch"] == "attempt-9"
     assert result["provider_instance_id"] == "4242"
+
+
+# -- Recorded launch requests and their settled outcome (review 3, item 4) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_gce_launch_records_each_zone_request_before_sending_it():
+    provider = _launch_provider()
+    events: list[tuple] = []
+
+    async def record(entry):
+        events.append(("record", entry["zone"], entry["state"]))
+
+    def insert_side_effect(**kwargs):
+        events.append(("insert", kwargs["zone"]))
+        op = MagicMock()
+        if kwargs["zone"].endswith("-b"):
+            op.result.side_effect = Exception("operation failed: ZONE_RESOURCE_POOL_EXHAUSTED")
+        return op
+
+    fake_client = MagicMock()
+    fake_client.insert.side_effect = insert_side_effect
+    spec = {**_launch_vm_spec(), "launch_attempt_id": "attempt-9", "record_launch_request": record}
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+    ):
+        await provider._gce_launch_vm(spec)
+
+    b, c = "us-central1-b", "us-central1-c"
+    assert events == [
+        ("record", b, "requested"),
+        ("insert", b),
+        ("record", b, "failed"),
+        ("record", c, "requested"),
+        ("insert", c),
+        ("record", c, "created"),
+    ]
+
+
+def _op(status="DONE", error=None, target_id=4242):
+    op = MagicMock()
+    op.status = status
+    op.error = error
+    op.target_id = target_id
+    return op
+
+
+async def _settle(requests, ops=None, instance=None, ops_error=None):
+    provider = _launch_provider()
+    zone_ops = MagicMock()
+    if ops_error:
+        zone_ops.list.side_effect = ops_error
+    else:
+        zone_ops.list.return_value = ops or []
+    instances = MagicMock()
+    if instance is None:
+        from google.api_core.exceptions import NotFound
+
+        instances.get.side_effect = NotFound("gone")
+    else:
+        instances.get.return_value = instance
+    with (
+        patch("google.cloud.compute_v1.ZoneOperationsClient", return_value=zone_ops),
+        patch("google.cloud.compute_v1.InstancesClient", return_value=instances),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+    ):
+        return await provider.settle_launch(requests, session_id=7), zone_ops
+
+
+REQ = {"key": "us-central1-b", "zone": "us-central1-b", "project": "proj", "state": "requested"}
+
+
+@pytest.mark.asyncio
+async def test_gce_an_attempt_that_sent_no_request_settles_as_no_vm():
+    outcome, _ = await _settle([])
+    assert outcome.state == "none"
+
+
+@pytest.mark.asyncio
+async def test_gce_a_request_the_zone_never_accepted_settles_as_no_vm():
+    outcome, zone_ops = await _settle([REQ], ops=[])
+    assert outcome.state == "none"
+    query = zone_ops.list.call_args.kwargs["request"].filter
+    assert 'operationType = "insert"' in query
+    assert "zones/us-central1-b/instances/bioaf-worknode-7" in query
+
+
+@pytest.mark.asyncio
+async def test_gce_a_failed_insert_operation_settles_as_no_vm():
+    outcome, _ = await _settle([REQ], ops=[_op(error=MagicMock(errors=[MagicMock()]))])
+    assert outcome.state == "none"
+
+
+@pytest.mark.asyncio
+async def test_gce_a_completed_insert_settles_as_its_vm():
+    outcome, _ = await _settle([REQ], ops=[_op(error=None)], instance=_gce_instance(instance_id=4242))
+    assert outcome.state == "created"
+    assert (outcome.instance.name, outcome.instance.zone, outcome.instance.provider_instance_id) == (
+        "bioaf-worknode-7",
+        "us-central1-b",
+        "4242",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["running", "unreadable"])
+async def test_gce_an_unfinished_or_unreadable_operation_is_unknown(case):
+    if case == "running":
+        outcome, _ = await _settle([REQ], ops=[_op(status="RUNNING")])
+    else:
+        outcome, _ = await _settle([REQ], ops_error=RuntimeError("denied"))
+    assert outcome.state == "unknown"

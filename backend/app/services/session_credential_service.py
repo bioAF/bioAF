@@ -221,7 +221,7 @@ class SessionCredentialService:
         Pending, live, stopping or kept nodes block. For other records with an instance, or with a
         launch attempt whose instance was never recorded, the provider inventory decides (a database
         "stopped" alone is not proof); an unavailable inventory blocks, and so does an unrecorded
-        attempt that has not settled (``LAUNCH_SETTLE_WINDOW``).
+        attempt whose recorded provider requests have not settled to "no VM".
         """
         from app.models.notebook_session import ComputeSession
 
@@ -232,7 +232,6 @@ class SessionCredentialService:
                     ComputeSession.status,
                     ComputeSession.gce_instance_name,
                     ComputeSession.launch_attempt_id,
-                    ComputeSession.created_at,
                 ).where(
                     ComputeSession.user_id == user_id,
                     ComputeSession.organization_id == org_id,
@@ -242,13 +241,21 @@ class SessionCredentialService:
         ).all()
         if any(r.status in _ACTIVE_NODE_STATUSES for r in rows):
             raise ConflictError(KEY_REPLACEMENT_REFUSAL)
-        from app.services.work_node_readiness import launch_settled
+        # A launch attempt with no recorded instance may still have created one: only its settled
+        # outcome (no VM made) lets the key change.
+        unresolved_ids = [r.id for r in rows if not r.gce_instance_name and r.launch_attempt_id]
+        if unresolved_ids:
+            from app.services.work_node_service import WorkNodeService
 
-        # A launch attempt with no recorded instance may still have created one.
-        unresolved = [r for r in rows if not r.gce_instance_name and r.launch_attempt_id]
-        if any(not launch_settled(r.created_at) for r in unresolved):
-            raise ConflictError(KEY_REPLACEMENT_REFUSAL)
-        with_instances = {str(r.id) for r in rows if r.gce_instance_name} | {str(r.id) for r in unresolved}
+            nodes = (
+                (await session.execute(select(ComputeSession).where(ComputeSession.id.in_(unresolved_ids))))
+                .scalars()
+                .all()
+            )
+            for node in nodes:
+                if (await WorkNodeService.launch_outcome(node)).state != "none":
+                    raise ConflictError(KEY_REPLACEMENT_REFUSAL)
+        with_instances = {str(r.id) for r in rows if r.gce_instance_name}
         if not with_instances:
             return
         try:

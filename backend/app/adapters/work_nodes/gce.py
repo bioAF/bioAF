@@ -543,7 +543,17 @@ class GceVmInstance(VmInstance):
         accelerator_count = vm_spec.get("accelerator_count", 1)
         zone = zones_to_try[0]  # default for error reporting
 
+        record = vm_spec.get("record_launch_request")
+
+        async def journal(zone_name: str, state: str) -> None:
+            # Each request is recorded before it is sent, then with GCE's answer (plan 03A review).
+            if record is not None:
+                from app.platform.work_node_inventory import journal_entry
+
+                await record(journal_entry(zone_name, state, zone=zone_name, project=project))
+
         for try_zone in zones_to_try:
+            await journal(try_zone, "requested")
             try:
                 instance = compute_v1.Instance()
                 instance.name = instance_name
@@ -619,10 +629,17 @@ class GceVmInstance(VmInstance):
                 # loop below can actually advance to the next zone.
                 operation.result()
                 zone = try_zone
+                await journal(try_zone, "created")
                 logger.info("Creating GCE instance %s in %s/%s", instance_name, project, zone)
                 break
             except Exception as e:
-                if "ZONE_RESOURCE_POOL_EXHAUSTED" in str(e) or "does not have enough resources" in str(e):
+                from google.api_core.exceptions import GoogleAPICallError
+
+                exhausted = "ZONE_RESOURCE_POOL_EXHAUSTED" in str(e) or "does not have enough resources" in str(e)
+                if exhausted or isinstance(e, GoogleAPICallError):
+                    # GCE answered: this request made no VM. A timeout or lost connection is no answer.
+                    await journal(try_zone, "failed")
+                if exhausted:
                     logger.warning("Zone %s exhausted for %s, trying next zone", try_zone, machine_type)
                     continue
                 raise
@@ -1030,6 +1047,70 @@ class GceVmInstance(VmInstance):
         except Exception:
             logger.exception("Failed to list GCE VMs")
             return []
+
+    async def settle_launch(self, requests: list[dict], *, session_id: int):
+        """Settle a launch attempt from its recorded zone requests (see LaunchOutcome).
+
+        Per zone: the VM under the attempt's fixed name is the answer when it exists; otherwise the
+        zone's insert operations for that name decide (none, or all finished: no VM from it; one still
+        running: unknown). Anything unreadable is unknown.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome, ManagedInstance
+
+        if not requests:
+            return LaunchOutcome("none")
+        if self.is_local:
+            return LaunchOutcome("unknown")
+
+        def check():
+            from google.api_core.exceptions import NotFound
+            from google.cloud import compute_v1
+
+            credentials = self._get_gcp_credentials()
+            instances = compute_v1.InstancesClient(credentials=credentials)
+            operations = compute_v1.ZoneOperationsClient(credentials=credentials)
+            name = f"bioaf-worknode-{session_id}"
+            unknown = False
+            for req in requests:
+                if req.get("state") == "failed":
+                    continue
+                project, zone = req.get("project", ""), req.get("zone", "")
+                try:
+                    found = instances.get(project=project, zone=zone, instance=name)
+                    labels = dict(found.labels or {})
+                    return LaunchOutcome(
+                        "created",
+                        ManagedInstance(
+                            name=name,
+                            session_id=labels.get("bioaf-session"),
+                            zone=zone,
+                            provider_instance_id=str(found.id),
+                            launch_attempt_id=labels.get("bioaf-launch"),
+                        ),
+                    )
+                except NotFound:
+                    pass
+                except Exception as exc:
+                    logger.warning("Could not read VM %s in %s: %s", name, zone, type(exc).__name__)
+                    unknown = True
+                    continue
+                target = f"https://www.googleapis.com/compute/v1/projects/{project}/zones/{zone}/instances/{name}"
+                query = f'(operationType = "insert") AND (targetLink = "{target}")'
+                try:
+                    found_ops = list(
+                        operations.list(
+                            request=compute_v1.ListZoneOperationsRequest(project=project, zone=zone, filter=query)
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning("Could not read insert operations in %s: %s", zone, type(exc).__name__)
+                    unknown = True
+                    continue
+                if any(str(getattr(op.status, "name", op.status)) != "DONE" for op in found_ops):
+                    unknown = True
+            return LaunchOutcome("unknown") if unknown else LaunchOutcome("none")
+
+        return await asyncio.to_thread(check)
 
     async def inventory_instances(self) -> list:
         """Every existing bioAF Work Node VM in the project, across all zones (launches fail over

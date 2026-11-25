@@ -393,3 +393,87 @@ def test_every_machine_type_has_an_ec2_instance_type():
 
     for mt in MACHINE_TYPES:
         assert mt.get("ec2_instance_type"), f"{mt['name']} is missing ec2_instance_type"
+
+
+# -- Recorded launch requests and their settled outcome (review 3, item 4) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_ec2_launch_records_the_request_before_sending_it_with_the_attempt_as_client_token():
+    p = _aws_provider()
+    events: list[tuple] = []
+
+    async def record(entry):
+        events.append(("record", entry["state"], entry["client_token"]))
+
+    ec2 = MagicMock()
+    ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-1", "CreationDate": "2026"}]}
+
+    def run(**kwargs):
+        events.append(("run", kwargs.get("ClientToken")))
+        return {
+            "OwnerId": "1",
+            "Instances": [{"InstanceId": "i-0new", "Placement": {"AvailabilityZone": "us-west-1b"}}],
+        }
+
+    ec2.run_instances.side_effect = run
+    spec = _vm_spec(launch_attempt_id="attempt9", record_launch_request=record)
+    with (
+        patch.object(p, "_client", return_value=ec2),
+        patch.object(p, "_poll_vm_ready", new=MagicMock()),
+        patch("app.adapters.work_nodes.ec2.runtime.spawn"),
+    ):
+        await p.provision(spec)
+    assert events == [("record", "requested", "attempt9"), ("run", "attempt9"), ("record", "created", "attempt9")]
+
+
+@pytest.mark.asyncio
+async def test_ec2_a_refused_request_is_recorded_as_failed():
+    from botocore.exceptions import ClientError
+
+    p = _aws_provider()
+    states: list[str] = []
+
+    async def record(entry):
+        states.append(entry["state"])
+
+    ec2 = MagicMock()
+    ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-1", "CreationDate": "2026"}]}
+    ec2.run_instances.side_effect = ClientError({"Error": {"Code": "InsufficientInstanceCapacity"}}, "RunInstances")
+    with (
+        patch.object(p, "_client", return_value=ec2),
+        pytest.raises(Exception),
+    ):
+        await p.provision(_vm_spec(launch_attempt_id="attempt9", record_launch_request=record))
+    assert states == ["requested", "failed"]
+
+
+async def _ec2_settle(requests, reservations=(), error=None):
+    p = _aws_provider()
+    ec2 = MagicMock()
+    if error:
+        ec2.describe_instances.side_effect = error
+    else:
+        ec2.describe_instances.return_value = {"Reservations": [{"Instances": list(reservations)}]}
+    with patch.object(p, "_client", return_value=ec2):
+        return await p.settle_launch(requests, session_id=7), ec2
+
+
+EC2_REQ = {"client_token": "attempt9", "region": "us-west-1", "state": "requested"}
+EC2_INSTANCE = {"InstanceId": "i-0new", "State": {"Name": "pending"}, "Placement": {"AvailabilityZone": "us-west-1b"}}
+
+
+@pytest.mark.asyncio
+async def test_ec2_settlement_follows_the_recorded_answer():
+    assert (await _ec2_settle([]))[0].state == "none"
+    assert (await _ec2_settle([{**EC2_REQ, "state": "failed"}]))[0].state == "none"
+    outcome, ec2 = await _ec2_settle([EC2_REQ], reservations=[EC2_INSTANCE])
+    assert outcome.state == "created" and outcome.instance.name == "i-0new"
+    assert {"Name": "client-token", "Values": ["attempt9"]} in ec2.describe_instances.call_args.kwargs["Filters"]
+
+
+@pytest.mark.asyncio
+async def test_ec2_an_unanswered_request_with_no_listed_instance_stays_unknown():
+    """DescribeInstances is eventually consistent, so absence after an unanswered request is not proof."""
+    assert (await _ec2_settle([EC2_REQ]))[0].state == "unknown"
+    assert (await _ec2_settle([EC2_REQ], error=RuntimeError("denied")))[0].state == "unknown"

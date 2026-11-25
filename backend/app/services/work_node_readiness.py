@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,21 +32,6 @@ _ACTIVE = ("pending", "starting", "running", "stopping", "stop_failed")
 
 # The inventory records live in app.platform so the provider adapters can build them.
 from app.platform.work_node_inventory import InventoryUnavailable, ManagedInstance  # noqa: E402,F401
-
-
-# How long after a launch attempt an empty provider inventory is taken as proof that it created no
-# VM. Until then the launch may still be in flight (a backend keeps running it after the browser's
-# request ends; nginx allows an hour) and provider lists can lag a create (AWS documents eventual
-# consistency for DescribeInstances). Only attempts with no recorded instance use this.
-LAUNCH_SETTLE_WINDOW = timedelta(hours=1)
-
-
-def launch_settled(created_at: datetime | None, now: datetime | None = None) -> bool:
-    if created_at is None:
-        return False
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    return (now or datetime.now(timezone.utc)) - created_at >= LAUNCH_SETTLE_WINDOW
 
 
 @dataclass(frozen=True)
