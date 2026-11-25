@@ -57,7 +57,7 @@ teardown() { rm -rf "$TEST_DIR"; }
     sheet="$HOME/.bioaf/access-bioaf.txt"
     ssh_access_write_sheet "$sheet" gcp lab-project us-central1 us-central1-b 4815162342 bioaf public ""
     [ -f "$sheet" ]
-    [ "$(stat -f %Lp "$sheet" 2>/dev/null || stat -c %a "$sheet")" = 600 ]
+    [ "$(stat -c %a "$sheet" 2>/dev/null || stat -f %Lp "$sheet")" = 600 ]
     grep -q "https://console.cloud.google.com/compute/instancesDetail/zones/us-central1-b/instances/bioaf?project=lab-project" "$sheet"
     grep -q "Open Cloud Shell on this server's page" "$sheet"
     grep -q "gcloud compute ssh bioaf --project=lab-project --zone=us-central1-b --tunnel-through-iap" "$sheet"
@@ -75,7 +75,7 @@ teardown() { rm -rf "$TEST_DIR"; }
     first="$(cat "$key.pub")"
     [ "$(ssh_access_admin_key)" = "$key" ]
     [ "$(cat "$key.pub")" = "$first" ]
-    [ "$(stat -f %Lp "$key" 2>/dev/null || stat -c %a "$key")" = 600 ]
+    [ "$(stat -c %a "$key" 2>/dev/null || stat -f %Lp "$key")" = 600 ]
 }
 
 @test "the administrator policy keeps required MFA, validates sshd and restores on failure" {
@@ -132,10 +132,13 @@ teardown() { rm -rf "$TEST_DIR"; }
     prefill="$TEST_DIR/prefill.yaml"
     ssh_access_prefill_probe "$prefill" 4815162342 gcp_iap succeeded
     grep -q '^ssh_recovery_probe: ' "$prefill"
+    # One flat line: ssh_recovery_probe: '<json>' (single-quoted YAML; the JSON holds no single quote).
     python3 -c "
-import json, yaml
-d = yaml.safe_load(open('$prefill'))
-p = json.loads(d['ssh_recovery_probe'])
+import json
+line = next(l for l in open('$prefill') if l.startswith('ssh_recovery_probe: '))
+value = line.split(': ', 1)[1].strip()
+assert value.startswith(\"'\") and value.endswith(\"'\"), value
+p = json.loads(value[1:-1])
 assert p['instance_id'] == '4815162342' and p['result'] == 'succeeded' and p['filter_revision'] == 0 and p['path'] == 'gcp_iap', p
 "
 }

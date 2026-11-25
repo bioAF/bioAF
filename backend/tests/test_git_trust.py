@@ -214,7 +214,10 @@ async def test_import_command_stores_approved_material_and_prints_fingerprints(t
     path.write_text(f"git.example.org {key}\n")
     assert await cli.run(str(path), source="vendor portal, checked by phone", engine=db_engine) == 0
     out = capsys.readouterr().out
-    assert "git.example.org" in out and "SHA256:" in out
+    # Exact fields of the printed row "  <host>  <fingerprint>", not a substring match on the host.
+    rows = [line.split() for line in out.splitlines()[1:]]
+    assert [row[0] for row in rows] == ["git.example.org"]
+    assert rows[0][1].startswith("SHA256:")
     assert key not in out
 
 

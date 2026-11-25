@@ -646,7 +646,7 @@ status_json() {
     run python3 -I "$HOST_IO" record-preparation "$REPO" 2026.12.1 2026.11.21 maybe
     [ "$status" -ne 0 ]
     python3 -I "$HOST_IO" record-preparation "$REPO" v2026.12.1 2026.11.21 prepared
-    [ "$(stat -f %Lp "$REPO/host-state/update-preparation.json" 2>/dev/null || stat -c %a "$REPO/host-state/update-preparation.json")" = 600 ]
+    [ "$(stat -c %a "$REPO/host-state/update-preparation.json" 2>/dev/null || stat -f %Lp "$REPO/host-state/update-preparation.json")" = 600 ]
     grep -q '"target": "2026.12.1"' "$REPO/host-state/update-preparation.json"
 }
 
