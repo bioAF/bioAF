@@ -697,3 +697,21 @@ status_json() {
     run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 'x;rm' provider gcp
     [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# A killed update (review of plan 03A): the updater's EXIT trap cannot run after SIGKILL, so the agent
+# (its own service) releases a launch pause, and resumes a frozen backend, once no update holds the lock.
+# ---------------------------------------------------------------------------
+
+@test "the agent asks ./bioaf to release a launch pause left by a killed update, before any trigger" {
+    stub_updater 0
+    mkdir -p "$REPO/update-gate"; echo update > "$REPO/update-gate/work-node-launch.closed"
+    agent_round
+    [ "$(head -1 "$REPO/updater-calls")" = "release-stale-update-gate" ]
+}
+
+@test "with no launch pause the agent never calls the release" {
+    stub_updater 0
+    agent_round
+    ! grep -q "release-stale-update-gate" "$REPO/updater-calls"
+}

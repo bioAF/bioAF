@@ -740,6 +740,48 @@ gate_steps() { grep -E '^(readiness|pause|unpause|kill|up )' "$tmp/log" | cut -d
     [ "$(grep -E '^(status in_progress warn|pause)' "$tmp/log" | cut -d' ' -f1)" = "$(printf 'status\npause')" ]
 }
 
+stale_gate_env() {
+    tmp="$(mktemp -d)"; make_fake_dc "$tmp"; mkdir -p "$tmp/host-state" "$tmp/update-gate" "$tmp/update-status"
+    echo update > "$tmp/update-gate/work-node-launch.closed"
+    printf '{"status": "in_progress", "step": "work_node_admission", "to_version": "2.0.0"}' > "$tmp/update-status/current.json"
+}
+
+@test "release-stale-update-gate resumes a frozen backend and reopens launches once no update holds the lock" {
+    stale_gate_env
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'
+        cmd_release_stale_update_gate"
+    [ "$status" -eq 0 ]
+    grep -q '^unpause args=\[.* unpause backend\]' "$tmp/log"
+    [ ! -e "$tmp/update-gate/work-node-launch.closed" ]
+    grep -q '"status": "failed"' "$tmp/update-status/current.json"
+    grep -qF 'The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update.' "$tmp/update-status/current.json"
+}
+
+@test "release-stale-update-gate leaves a running update alone" {
+    stale_gate_env
+    python3 -I -c '
+import fcntl, sys, time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(8)
+' "$tmp/host-state/deployment.lock" "$tmp/held" 9>&- &
+    holder=$!
+    until [ -e "$tmp/held" ]; do sleep 0.1; done
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'
+        cmd_release_stale_update_gate"
+    kill "$holder" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    ! grep -q '^unpause' "$tmp/log" 2>/dev/null
+    [ -e "$tmp/update-gate/work-node-launch.closed" ]
+    grep -q '"status": "in_progress"' "$tmp/update-status/current.json"
+}
+
+@test "release-stale-update-gate does nothing without a launch pause" {
+    stale_gate_env; rm "$tmp/update-gate/work-node-launch.closed"
+    run env FAKE_LOG="$tmp/log" bash -c "source '$BIOAF_SCRIPT' >/dev/null; DC='$tmp/fake-dc --env-file $tmp/.env'; SCRIPT_DIR='$tmp'
+        cmd_release_stale_update_gate"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/log" ]
+}
+
 @test "a successful update reopens launches once the new backend is ready" {
     tmp="$(mktemp -d)"; make_fake_dc "$tmp"; update_env "$tmp" v1.0.0
     printf 'BIOAF_IMAGE_TAG=v1.0.0\n' > "$tmp/.env"

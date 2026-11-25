@@ -1488,6 +1488,39 @@ stop_frozen_backend() {
     _update_backend_frozen=0
 }
 
+STALE_GATE_MESSAGE="The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update."
+
+cmd_release_stale_update_gate() {
+    # release-stale-update-gate: run by the update agent each polling round while a launch pause marker
+    # exists. An updater killed outright (SIGKILL, a lost session) cannot run its EXIT trap, so its pause,
+    # and a backend it froze, would otherwise stay until someone ran ./bioaf start. Once no update, build
+    # or setup holds the deployment lock, the backend resumes, launches reopen and the status says so.
+    [ -e "$(launch_gate_marker)" ] || return 0
+    (
+        DEPLOY_LOCK_WAIT=0
+        deploy_lock >/dev/null 2>&1 || exit 0
+        $DC unpause backend >/dev/null 2>&1 || true
+        reopen_work_node_launches
+        local versions
+        versions="$(python3 -I -c '
+import json, re, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+if d.get("status") != "in_progress":
+    sys.exit(0)
+ok = lambda v: v if isinstance(v, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v) else ""
+print(ok(d.get("from_version")), ok(d.get("to_version")))
+' "$SCRIPT_DIR/update-status/current.json" 2>/dev/null)" || versions=""
+        if [ -n "$versions" ]; then
+            _update_from="${versions%% *}"; _update_to="${versions#* }"
+            write_update_status failed interrupted "$STALE_GATE_MESSAGE" >/dev/null 2>&1 || true
+        fi
+    )
+    return 0
+}
+
 update_restart_warning() {
     # Warning window before restart: give the UI time to show a countdown so users know the app is
     # about to go offline briefly. Given while the backend still answers (before it is frozen).
@@ -2058,6 +2091,7 @@ case "$command" in
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
     import-git-known-hosts) cmd_import_git_known_hosts "$@" ;;
     ssh-recovery-diagnostics) cmd_ssh_recovery_diagnostics ;;
+    release-stale-update-gate) cmd_release_stale_update_gate ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
