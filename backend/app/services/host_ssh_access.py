@@ -75,15 +75,13 @@ async def _write(session, record: dict) -> None:
 
 async def network_for(session, identity):
     """The provider network driver for this host, with the backend's configured authority."""
-    from app.services.host_ssh_filter import AwsHostNetwork, GcpHostNetwork
+    from app.adapters.host_network.firewall import host_network
 
+    gcp_config = None
     if identity.provider == "gcp":
-        from google.cloud import compute_v1
-
-        from app.adapters.credentials.credential_injector import load_gcp_credentials
         from app.platform.platform_config_service import PlatformConfigService
 
-        cfg = await PlatformConfigService.get_many(
+        gcp_config = await PlatformConfigService.get_many(
             session,
             [
                 "gcp_project_id",
@@ -93,11 +91,7 @@ async def network_for(session, identity):
                 "gcp_bootstrap_sa_email",
             ],
         )
-        client = compute_v1.FirewallsClient(credentials=load_gcp_credentials(cfg))
-        return GcpHostNetwork(identity, client=client, target_tag="bioaf")
-    import boto3
-
-    return AwsHostNetwork(identity, client=boto3.client("ec2", region_name=identity.region))
+    return host_network(identity, gcp_config)
 
 
 # -- Guest diagnostics (fixed read-only report published by the host, plan 03B) ------------------

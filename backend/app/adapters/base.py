@@ -914,7 +914,7 @@ class WorkNodeProvider(ABC):
         raises ``InventoryUnavailable`` instead of returning an empty list when the provider cannot
         answer. The default raises: a backend that cannot inventory its nodes cannot prove safety.
         """
-        from app.services.work_node_readiness import InventoryUnavailable
+        from app.platform.work_node_inventory import InventoryUnavailable
 
         raise InventoryUnavailable(f"{type(self).__name__} cannot list its Work Node instances")
 

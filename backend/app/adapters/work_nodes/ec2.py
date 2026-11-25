@@ -798,7 +798,7 @@ class Ec2VmInstance(VmInstance):
     async def inventory_instances(self) -> list:
         """Every existing (not terminated) bioAF Work Node instance in the Region, including stopped
         ones whose volumes remain. Raises InventoryUnavailable."""
-        from app.services.work_node_readiness import InventoryUnavailable, ManagedInstance
+        from app.platform.work_node_inventory import InventoryUnavailable, ManagedInstance
 
         if self.is_local:
             return []

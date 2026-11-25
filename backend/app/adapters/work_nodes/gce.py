@@ -1034,7 +1034,7 @@ class GceVmInstance(VmInstance):
     async def inventory_instances(self) -> list:
         """Every existing bioAF Work Node VM in the project, across all zones (launches fail over
         between zones). A stopped VM still exists with its disks. Raises InventoryUnavailable."""
-        from app.services.work_node_readiness import InventoryUnavailable, ManagedInstance
+        from app.platform.work_node_inventory import InventoryUnavailable, ManagedInstance
 
         if self.is_local:
             return []

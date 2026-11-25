@@ -31,19 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 _ACTIVE = ("pending", "starting", "running", "stopping", "stop_failed")
 
 
-class InventoryUnavailable(Exception):
-    """The provider could not list this installation's Work Node instances."""
-
-
-@dataclass(frozen=True)
-class ManagedInstance:
-    """One existing (not terminated/deleted) instance labelled as a bioAF Work Node."""
-
-    name: str
-    session_id: str | None
-    zone: str | None = None
-    provider_instance_id: str | None = None
-    launch_attempt_id: str | None = None
+# The inventory records live in app.platform so the provider adapters can build them.
+from app.platform.work_node_inventory import InventoryUnavailable, ManagedInstance  # noqa: E402,F401
 
 
 # How long after a launch attempt an empty provider inventory is taken as proof that it created no

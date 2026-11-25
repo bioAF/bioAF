@@ -20,11 +20,15 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
+from app.adapters.host_network.firewall import (  # noqa: F401  (priorities re-exported for callers)
+    GCP_FILTER_ALLOW_PRIORITY,
+    GCP_FILTER_DENY_PRIORITY,
+    GCP_IAP_PRIORITY,
+    GCP_IAP_SOURCE,
+    gcp_recovery_command,
+)
+
 HOST_IDENTITY_KEY = "app_host_identity"
-GCP_IAP_SOURCE = "35.235.240.0/20"
-GCP_IAP_PRIORITY = 850
-GCP_FILTER_ALLOW_PRIORITY = 875
-GCP_FILTER_DENY_PRIORITY = 1000
 
 _GCP_NAME = re.compile(r"[a-z]([-a-z0-9]{0,61}[a-z0-9])?")
 _GCP_PROJECT = re.compile(r"[a-z][-a-z0-9]{4,28}[a-z0-9]|[a-z0-9.-]+:[a-z][-a-z0-9]{4,28}[a-z0-9]")
@@ -102,7 +106,7 @@ def restore_access(identity: HostIdentity) -> dict:
             return {
                 "url": url,
                 "instruction": GCP_PUBLIC_INSTRUCTION,
-                "command": f"gcloud compute ssh {name} --project={project} --zone={zone} --tunnel-through-iap",
+                "command": gcp_recovery_command(name, project, zone),
                 "os_username": identity.os_username or None,
                 "server": server,
             }
@@ -198,7 +202,8 @@ async def _metadata_identity() -> HostIdentity:
                 region=doc["region"],
                 zone=doc["availabilityZone"],
                 instance_id=doc["instanceId"],
-                instance_name="bioaf",
+                # EC2 has no instance name apart from tags; the id names it.
+                instance_name=doc["instanceId"],
                 public=public_ip.status_code == 200,
                 os_username="ubuntu",
                 partition=partition.strip() or "aws",
@@ -255,27 +260,9 @@ async def _aws_endpoint(identity: HostIdentity) -> str:
     """The prepared EC2 Instance Connect Endpoint in a private server's VPC, or "" (best effort)."""
     import asyncio
 
-    try:
-        import boto3
+    from app.adapters.host_network.firewall import find_eic_endpoint
 
-        ec2 = boto3.client("ec2", region_name=identity.region)
-        instance = (await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[identity.instance_id])))[
-            "Reservations"
-        ][0]["Instances"][0]
-        endpoints = (
-            await asyncio.to_thread(
-                lambda: ec2.describe_instance_connect_endpoints(
-                    Filters=[{"Name": "vpc-id", "Values": [instance["VpcId"]]}]
-                )
-            )
-        ).get("InstanceConnectEndpoints", [])
-    except Exception:
-        return ""
-    ready = [e for e in endpoints if e.get("State") in (None, "create-complete")]
-    # The recovery rule admits the endpoint's security group, which is the source only when the
-    # endpoint does not preserve client addresses.
-    ready.sort(key=lambda e: bool(e.get("PreserveClientIp")))
-    return ready[0].get("InstanceConnectEndpointId", "") if ready else ""
+    return await asyncio.to_thread(find_eic_endpoint, identity.region, identity.instance_id)
 
 
 async def restore_view(session) -> dict:
@@ -312,14 +299,12 @@ async def record_aws_app_network(session) -> None:
         return
     import asyncio
 
-    import boto3
+    from app.adapters.host_network.firewall import aws_app_network
 
-    ec2 = boto3.client("ec2", region_name=identity.region)
-    resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[identity.instance_id]))
-    instance = resp["Reservations"][0]["Instances"][0]
-    groups = [g for g in instance.get("SecurityGroups", []) if not g.get("GroupName", "").startswith("bioaf-ssh-")]
-    if not groups:
+    found = await asyncio.to_thread(aws_app_network, identity.region, identity.instance_id)
+    if not found:
         return
-    await PlatformConfigService.set(session, "aws_app_vpc_id", instance["VpcId"])
-    await PlatformConfigService.set(session, "aws_app_security_group_id", groups[0]["GroupId"])
+    vpc_id, group_id = found
+    await PlatformConfigService.set(session, "aws_app_vpc_id", vpc_id)
+    await PlatformConfigService.set(session, "aws_app_security_group_id", group_id)
     await session.commit()

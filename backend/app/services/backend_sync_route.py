@@ -16,7 +16,6 @@ A failed private route stops the launch with a plain message; it never switches 
 from __future__ import annotations
 
 import asyncio
-
 import logging
 
 from app.exceptions import ValidationError
@@ -42,9 +41,7 @@ def _simulated() -> bool:
 
 
 async def _gcp_firewalls(session):
-    from google.cloud import compute_v1
-
-    from app.adapters.credentials.credential_injector import load_gcp_credentials
+    from app.adapters.host_network.sync_route import gcp_firewalls_client
     from app.platform.platform_config_service import PlatformConfigService
 
     cfg = await PlatformConfigService.get_many(
@@ -57,27 +54,13 @@ async def _gcp_firewalls(session):
             "gcp_bootstrap_sa_email",
         ],
     )
-    return compute_v1.FirewallsClient(credentials=load_gcp_credentials(cfg))
+    return gcp_firewalls_client(cfg)
 
 
 def _gcp_rule(identity):
-    import ipaddress
+    from app.adapters.host_network.sync_route import gcp_sync_rule
 
-    from google.cloud import compute_v1
-
-    address = ipaddress.ip_address(identity.internal_ip)
-    if address.version != 4:
-        raise ValueError("the application VM has no internal IPv4 address")
-    return compute_v1.Firewall(
-        name=SYNC_RULE,
-        network=f"projects/{identity.account}/global/networks/{identity.network or 'default'}",
-        direction="INGRESS",
-        priority=SYNC_PRIORITY,
-        source_ranges=[f"{address}/32"],
-        target_tags=[SYNC_TAG],
-        allowed=[compute_v1.Allowed(I_p_protocol="tcp", ports=["22"])],
-        description="Managed by bioAF (plan 03B): backend output sync to Work Nodes over the private network.",
-    )
+    return gcp_sync_rule(identity, name=SYNC_RULE, tag=SYNC_TAG, priority=SYNC_PRIORITY)
 
 
 async def ensure_backend_sync_route(session) -> dict:
@@ -97,27 +80,11 @@ async def ensure_backend_sync_route(session) -> dict:
             return {"route": PRIVATE_ROUTE, "security_group": group}
         return {"route": PUBLIC_ROUTE}
     try:
-        from google.api_core.exceptions import NotFound
+        from app.adapters.host_network.sync_route import reconcile_gcp_sync_rule
 
         client = await _gcp_firewalls(session)
-        wanted = _gcp_rule(identity)
-
-        def reconcile() -> None:
-            # Runs in a worker thread: a firewall operation can wait up to two minutes.
-            try:
-                current = client.get(project=identity.account, firewall=SYNC_RULE)
-            except NotFound:
-                current = None
-            if current is None:
-                client.insert(project=identity.account, firewall_resource=wanted).result(timeout=120)
-            elif (
-                list(current.source_ranges) != list(wanted.source_ranges)
-                or current.priority != SYNC_PRIORITY
-                or list(current.target_tags) != [SYNC_TAG]
-            ):
-                client.patch(project=identity.account, firewall=SYNC_RULE, firewall_resource=wanted).result(timeout=120)
-
-        await asyncio.to_thread(reconcile)
+        # Runs in a worker thread: a firewall operation can wait up to two minutes.
+        await asyncio.to_thread(reconcile_gcp_sync_rule, client, identity.account, _gcp_rule(identity))
     except Exception as exc:
         logger.warning("Private backend sync route could not be prepared: %s", type(exc).__name__)
         raise ValidationError(ROUTE_FAILED) from None
