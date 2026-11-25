@@ -225,3 +225,14 @@ def test_the_sync_account_exists_before_the_policy_is_checked(builder, ranges):
     )
     first_check = script.index("user=bioaf-sync,")
     assert "useradd -r -m -s /bin/bash bioaf-sync" in script[:first_check]
+
+
+@pytest.mark.parametrize("ranges", [[], ["10.20.0.0/16"]])
+def test_no_match_block_sets_authentication_methods_any(ranges):
+    """OpenSSH 8.9 (Ubuntu 22.04) rejects the whole file with ""any" must appear alone in
+    AuthenticationMethods" when it evaluates such a block for another account, so every check of
+    bioaf-sync failed and each node fell back to key-only (found live, 2026-11-25)."""
+    policy = compile_account_policy("sci", ranges)
+    assert "AuthenticationMethods any" not in policy
+    if ranges:
+        assert "Match User sci Address 10.20.0.0/16\n    AuthenticationMethods publickey password\n" in policy

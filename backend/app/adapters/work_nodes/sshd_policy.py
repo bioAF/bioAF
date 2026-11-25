@@ -73,7 +73,9 @@ def compile_account_policy(username: str, ranges: list[str]) -> str:
     if networks:
         lines += [
             f"Match User {user} Address {','.join(networks)}",
-            "    AuthenticationMethods any",
+            # Key or password. Not "any": OpenSSH 8.9 rejects the whole file when it evaluates a
+            # Match block holding "AuthenticationMethods any" for another account.
+            "    AuthenticationMethods publickey password",
             "    PasswordAuthentication yes",
             "    KbdInteractiveAuthentication no",
             "    PubkeyAuthentication yes",
@@ -85,8 +87,8 @@ def compile_account_policy(username: str, ranges: list[str]) -> str:
         ]
     else:
         lines += [
+            # No AuthenticationMethods line: the image default (any) applies; see the note above.
             f"Match User {user}",
-            "    AuthenticationMethods any",
             "    PasswordAuthentication yes",
             "    KbdInteractiveAuthentication no",
             "    PubkeyAuthentication yes",
@@ -97,7 +99,7 @@ def compile_account_policy(username: str, ranges: list[str]) -> str:
 
 def _key_only_policy(username: str) -> str:
     return compile_account_policy(username, ["127.0.0.1/32"]).replace(
-        "    AuthenticationMethods any\n    PasswordAuthentication yes",
+        "    AuthenticationMethods publickey password\n    PasswordAuthentication yes",
         "    AuthenticationMethods publickey\n    PasswordAuthentication no",
     )
 
