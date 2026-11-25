@@ -14,6 +14,8 @@
 #   ssh_access_probe_gcp / ssh_access_probe_aws
 #       The automatic recovery probe: a throwaway key, the installing person's own cloud identity,
 #       no fallback to any other key or agent, strict host verification, cleanup on every outcome.
+#   ssh_access_gcp_host_keys_published
+#       Whether the server has published its SSH host keys, which every strict first connection needs.
 #   ssh_access_prefill_probe
 #       Hands the probe result (bound to the instance) to setup through the prefill file.
 #
@@ -22,6 +24,7 @@
 SSH_ACCESS_GCP_PRIVATE="Sign in to the Google Cloud account used for this server, then choose SSH."
 SSH_ACCESS_GCP_PUBLIC="Open Cloud Shell on this server's page, paste the recovery command below, and press Enter."
 SSH_ACCESS_AWS="Sign in to the AWS account used for this server, choose Connect, then EC2 Instance Connect and Connect."
+SSH_ACCESS_GCP_HOST_KEYS_MISSING="The server has not published its SSH host keys, so this computer cannot verify it and the SSH checks were skipped. Stop and start the VM in the Google Cloud console, then run the installer again."
 SSH_ACCESS_ADMIN_KEY_QUESTION="Require this computer's SSH key for administrator access?"
 SSH_ACCESS_ADMIN_KEY_HELP="Use an SSH key stored on this computer for direct administrator access to the bioAF server. bioAF installs the public key; the private key stays here. This does not limit which networks can reach SSH."
 
@@ -162,6 +165,21 @@ else
     exit 1
 fi
 SCRIPT
+}
+
+ssh_access_gcp_host_keys_published() {
+    # ssh_access_gcp_host_keys_published <instance> <zone> <project>: succeeds once the guest agent has
+    # published the server's SSH host keys as guest attributes (the VM is created with
+    # enable-guest-attributes=TRUE). gcloud's strict host-key checking reads them from there; without
+    # them no first connection can be verified. Waits up to BIOAF_HOST_KEY_WAIT_SECONDS (default 120).
+    local waited=0 limit="${BIOAF_HOST_KEY_WAIT_SECONDS:-120}" keys
+    while :; do
+        keys="$(gcloud compute instances get-guest-attributes "$1" --zone="$2" --project="$3" \
+            --query-path=hostkeys/ --format="value(key)" 2>/dev/null)" && [ -n "$keys" ] && return 0
+        [ "$waited" -ge "$limit" ] && return 1
+        sleep 10
+        waited=$((waited + 10))
+    done
 }
 
 _ssh_access_probe_key() {

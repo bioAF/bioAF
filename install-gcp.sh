@@ -1094,7 +1094,7 @@ BIOAF_STARTUP_EOF
             if step "Create VM '$VM_NAME' in $try_zone (~30s)" -- \
                 gcloud compute instances create "$VM_NAME" \
                     "${create_args[@]}" \
-                    --metadata="bioaf_bootstrap_sa_email=${BOOTSTRAP_SA_EMAIL}" \
+                    --metadata="bioaf_bootstrap_sa_email=${BOOTSTRAP_SA_EMAIL},enable-guest-attributes=TRUE" \
                     --metadata-from-file="startup-script=${STARTUP_TMP}" \
                     --quiet; then
                 ZONE="$try_zone"
@@ -1182,7 +1182,7 @@ ACCESS_SHEET=""
 ACCESS_URL=""
 if [ -n "$VM_IP" ] && bioaf_load_helper installer/ssh_access.sh optional ssh_access_console_url \
     ssh_access_write_sheet ssh_access_admin_key ssh_access_admin_policy_script ssh_access_probe_gcp \
-    ssh_access_prefill_probe; then
+    ssh_access_prefill_probe ssh_access_gcp_host_keys_published; then
     section "SSH recovery access"
     INSTANCE_ID=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
         --format="value(id)" 2>/dev/null || echo "")
@@ -1193,7 +1193,14 @@ if [ -n "$VM_IP" ] && bioaf_load_helper installer/ssh_access.sh optional ssh_acc
         read -rp "  $SSH_ACCESS_ADMIN_KEY_QUESTION [y/N] " admin_answer || true
         case "$admin_answer" in y|Y|yes|Yes) ADMIN_SSH_KEY=yes ;; *) ADMIN_SSH_KEY=no ;; esac
     fi
-    if [ "$ADMIN_SSH_KEY" = yes ]; then
+    # The VM publishes its SSH host keys as guest attributes (created with enable-guest-attributes);
+    # both checks below verify the server strictly against them, so without them neither can run.
+    HOST_KEYS=true
+    if ! ssh_access_gcp_host_keys_published "$VM_NAME" "$ZONE" "$PROJECT_ID"; then
+        HOST_KEYS=false
+        warn "$SSH_ACCESS_GCP_HOST_KEYS_MISSING"
+    fi
+    if [ "$ADMIN_SSH_KEY" = yes ] && [ "$HOST_KEYS" = true ]; then
         ADMIN_KEY=""; ADMIN_USER=""; ADMIN_OK=false
         if ADMIN_KEY="$(ssh_access_admin_key)"; then
             OSLOGIN=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
@@ -1237,9 +1244,11 @@ if [ -n "$VM_IP" ] && bioaf_load_helper installer/ssh_access.sh optional ssh_acc
         fi
     fi
 
-    PROBE="$(ssh_access_probe_gcp "$VM_NAME" "$ZONE" "$PROJECT_ID")"
+    PROBE=unavailable
+    [ "$HOST_KEYS" = true ] && PROBE="$(ssh_access_probe_gcp "$VM_NAME" "$ZONE" "$PROJECT_ID")"
     case "$PROBE" in
         succeeded) step "Recovery login check (temporary key through IAP)" -- true ;;
+        unavailable) [ "$HOST_KEYS" = true ] && warn "The recovery login check could not start on this computer. bioAF shows Needs attention in Settings until it is checked." ;;
         *) warn "The recovery login check through IAP did not succeed (your account needs IAP tunnel and SSH access). bioAF shows Needs attention in Settings until it is fixed." ;;
     esac
     [ -n "$INSTANCE_ID" ] && ssh_access_prefill_probe "$PREFILL_LOCAL" "$INSTANCE_ID" gcp_iap "$PROBE"

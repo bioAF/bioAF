@@ -139,3 +139,28 @@ p = json.loads(d['ssh_recovery_probe'])
 assert p['instance_id'] == '4815162342' and p['result'] == 'succeeded' and p['filter_revision'] == 0 and p['path'] == 'gcp_iap', p
 "
 }
+
+@test "the installer creates the GCP VM with guest attributes on, so gcloud can verify its host key" {
+    create="$(sed -n '/gcloud compute instances create "\$VM_NAME"/,/--quiet/p' "$BATS_TEST_DIRNAME/../../install-gcp.sh")"
+    [[ "$create" == *"enable-guest-attributes=TRUE"* ]]
+}
+
+@test "published GCP host keys are found through the instance's guest attributes" {
+    cat > "$STUBS/gcloud" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "gcloud $*" >> "$CALLS"
+case "$*" in *get-guest-attributes*) echo ssh-ed25519 ;; esac
+exit 0
+STUB
+    run env BIOAF_HOST_KEY_WAIT_SECONDS=0 bash -c "source '$HELPER'; ssh_access_gcp_host_keys_published bioaf us-central1-b lab-project"
+    [ "$status" -eq 0 ]
+    line="$(grep 'get-guest-attributes' "$CALLS")"
+    [[ "$line" == *"bioaf"* && "$line" == *"--zone=us-central1-b"* && "$line" == *"--project=lab-project"* ]]
+    [[ "$line" == *"--query-path=hostkeys/"* ]]
+}
+
+@test "unpublished GCP host keys are reported, not mistaken for a login failure" {
+    run env BIOAF_HOST_KEY_WAIT_SECONDS=0 FAIL_ON=get-guest-attributes bash -c "source '$HELPER'; ssh_access_gcp_host_keys_published bioaf us-central1-b lab-project"
+    [ "$status" -eq 1 ]
+    [[ "$SSH_ACCESS_GCP_HOST_KEYS_MISSING" == *"host key"* ]]
+}
