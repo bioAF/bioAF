@@ -128,6 +128,16 @@ export const navConfig: NavSection[] = [
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
       { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" } },
       { label: "System Settings", path: "/settings/system", permission: { resource: "infrastructure", action: "configure" } },
+      // Plan 03B: Work Node ranges need work_nodes:configure, the application server section
+      // infrastructure:configure; the page shows each section only to callers holding its grant.
+      {
+        label: "Security and SSH access",
+        path: "/settings/system/ssh-access",
+        anyPermissions: [
+          { resource: "work_nodes", action: "configure" },
+          { resource: "infrastructure", action: "configure" },
+        ],
+      },
       { label: "Platform Info", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

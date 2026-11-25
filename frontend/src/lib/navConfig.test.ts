@@ -116,3 +116,23 @@ describe("top-level nav order", () => {
     ]);
   });
 });
+
+describe("Security and SSH access (plan 03B)", () => {
+  const settings = () => navConfig.find((s) => s.label === "Settings")?.children ?? [];
+
+  it("is a System Settings page reachable by either SSH settings permission", () => {
+    const item = settings().find((c) => c.label === "Security and SSH access");
+    expect(item?.path).toBe("/settings/system/ssh-access");
+    expect(item?.permission).toBeUndefined();
+    expect(item?.anyPermissions).toEqual([
+      { resource: "work_nodes", action: "configure" },
+      { resource: "infrastructure", action: "configure" },
+    ]);
+  });
+
+  it("keeps System Settings itself highlighted only on its own page", () => {
+    const children = settings();
+    const system = children.find((c) => c.label === "System Settings")!;
+    expect(isChildActive("/settings/system/ssh-access", system, children)).toBe(false);
+  });
+});
