@@ -32,6 +32,7 @@ services:
       BIOAF_DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://bioaf:CHANGE_ME@db:5432/bioaf}
       BIOAF_JWT_SECRET_KEY: ${SECRET_KEY:-CHANGE_ME_TO_RANDOM_STRING}
       BIOAF_ENCRYPTION_KEYS: ${BIOAF_ENCRYPTION_KEYS:-}
+      BIOAF_EDGE_TOKEN: ${BIOAF_EDGE_TOKEN:-}
       BIOAF_ENVIRONMENT: ${BIOAF_ENVIRONMENT:-production}
       # Real backends unless the host env file sets a mode (an empty value also means kubernetes here).
       # The application has no default; it normalizes case/whitespace and rejects unknown values.
@@ -112,11 +113,16 @@ services:
 
   nginx:
     image: nginx:alpine
+    environment:
+      NGINX_ENVSUBST_FILTER: "^BIOAF_"
+      # Added to every API request nginx proxies, after X-Real-IP is overwritten with the peer nginx saw.
+      BIOAF_EDGE_TOKEN: ${BIOAF_EDGE_TOKEN:-}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Rendered by the nginx image at start, substituting only BIOAF_ variables (the edge token).
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
       # Update gate (plan 03A): ./bioaf update pauses Work Node launches here while it replaces the backend.
       - ../update-gate:/etc/nginx/update-gate:ro
       - ${SSL_CERT_DIR:-./certs}:/etc/nginx/certs:ro

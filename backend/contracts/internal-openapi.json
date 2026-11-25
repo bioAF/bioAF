@@ -51608,6 +51608,26 @@
         ]
       }
     },
+    "/api/v1/settings/ssh-access/observed-address": {
+      "get": {
+        "description": "The address the managed edge saw for this browser, as a draft suggestion only (plan 03B).\n\nTrusted only with the installation's edge token, which nginx adds after overwriting X-Real-IP\nwith its own observed peer. Custom upstream proxies are not inferred.",
+        "operationId": "get_observed_address_api_v1_settings_ssh_access_observed_address_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Observed Address",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
     "/api/v1/settings/ssh-access/restore": {
       "get": {
         "description": "Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).\n\nChanges no key, rule or session and uses no bioAF cloud credential.",

@@ -2292,3 +2292,14 @@ mark_unchanged() { sleep 1; touch "$1/marker"; sleep 1; }
     [ "$status" -eq 0 ]
     python3 -c "import json; d=json.load(open('$tmp/update-status/ssh-recovery-diagnostics.json')); assert d['provider']=='gcp' and d['instance_id']=='481516' and d['guest_agent'] is True and d['pubkey_auth'] is True and d['eic_package'] is False, d"
 }
+
+@test "the managed edge vouches for the address it saw with the installation's token" {
+    conf="$BATS_TEST_DIRNAME/../../docker/nginx.conf"
+    compose="$BATS_TEST_DIRNAME/../../docker/docker-compose.yml"
+    # Rendered by the nginx image from a template, substituting only BIOAF_ variables.
+    grep -q 'nginx.conf:/etc/nginx/templates/default.conf.template:ro' "$compose"
+    grep -q 'NGINX_ENVSUBST_FILTER: "\^BIOAF_"' "$compose"
+    grep -q 'BIOAF_EDGE_TOKEN: \${BIOAF_EDGE_TOKEN:-}' "$compose"
+    [ "$(grep -c 'proxy_set_header X-Bioaf-Edge-Token "\${BIOAF_EDGE_TOKEN}";' "$conf")" -ge 2 ]
+    [ "$(grep -c 'proxy_set_header X-Real-IP \$remote_addr;' "$conf")" -ge 2 ]
+}

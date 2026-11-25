@@ -325,6 +325,9 @@ SECRET_KEY=$secret_key
 # LOSING THIS VALUE LOSES THE DATA -- back it up alongside the DB dump.
 BIOAF_ENCRYPTION_KEYS=$encryption_keys
 
+# Edge token: nginx adds it to API requests so the backend can trust the address nginx saw.
+BIOAF_EDGE_TOKEN=$(openssl rand -hex 32)
+
 # Environment
 BIOAF_ENVIRONMENT=$environment
 ENVEOF
@@ -495,6 +498,26 @@ APPEND_EOF
     return 0
 }
 
+ensure_edge_token_in_env() {
+    # Plan 03B: the token nginx adds to API requests so the backend can trust the peer address nginx
+    # observed (Use this computer's address). Appended once, never rewritten; no token means the
+    # backend simply never trusts an address.
+    [ -f "$ENV_FILE" ] || return 0
+    [ -n "$(read_env_value "BIOAF_EDGE_TOKEN")" ] && return 0
+    command -v openssl >/dev/null 2>&1 || { yellow "openssl is not available; the edge token was not added."; return 0; }
+    local token
+    token=$(openssl rand -hex 32)
+    if grep -qE "^BIOAF_EDGE_TOKEN=" "$ENV_FILE"; then
+        sed -i.bak "s|^BIOAF_EDGE_TOKEN=.*$|BIOAF_EDGE_TOKEN=${token}|" "$ENV_FILE"
+        rm -f "${ENV_FILE}.bak"
+    else
+        if [ -s "$ENV_FILE" ] && [ "$(tail -c 1 "$ENV_FILE" | wc -l | tr -d ' ')" = "0" ]; then
+            printf '\n' >> "$ENV_FILE"
+        fi
+        printf '\n# Edge token (added by an update; plan 03B).\nBIOAF_EDGE_TOKEN=%s\n' "$token" >> "$ENV_FILE"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Let's Encrypt prerequisites (certbot + webroot dir)
 # ---------------------------------------------------------------------------
@@ -640,6 +663,8 @@ case "$command" in
             prepare_for_gated_update
         fi
         ensure_encryption_key_in_env "$@"
+        # This release's updater also brings an older env file the edge token (plan 03B).
+        [ "${BIOAF_UPDATE_GATE:-}" = caller ] && ensure_edge_token_in_env
         prepare_host_log_collection
         prepare_update_agent
         ;;

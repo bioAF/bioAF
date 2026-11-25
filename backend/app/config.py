@@ -182,6 +182,9 @@ class Settings(BaseSettings):
     # Update system
     update_requests_dir: str = "/app/update-requests"
     update_status_dir: str = "/app/update-status"
+    # Plan 03B: the token the managed nginx edge adds to every API request it proxies, so the backend
+    # can trust the peer address nginx wrote in X-Real-IP (BIOAF_EDGE_TOKEN; empty: never trusted).
+    edge_token: str = ""
 
     # Database upgrade lifecycle (app/schema_upgrade.py). Recovery dumps go to a host bind mount
     # (docker-compose.yml: ../backups:/app/backups) so they survive container replacement, made with

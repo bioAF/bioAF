@@ -158,3 +158,32 @@ async def rollback_host_filter(
     from app.services import host_ssh_access
 
     return {"applied": await host_ssh_access.rollback(session, actor_id=_actor(current_user))}
+
+
+@router.get("/observed-address")
+async def get_observed_address(
+    request: Request,
+    current_user: dict = require_any_permission(_SECTION_PERMISSIONS),
+):
+    """The address the managed edge saw for this browser, as a draft suggestion only (plan 03B).
+
+    Trusted only with the installation's edge token, which nginx adds after overwriting X-Real-IP
+    with its own observed peer. Custom upstream proxies are not inferred.
+    """
+    import hmac
+    import ipaddress
+
+    from app.config import settings
+
+    unavailable = {
+        "address": None,
+        "message": "bioAF cannot see this computer's address through this connection. Enter it yourself.",
+    }
+    token = request.headers.get("X-Bioaf-Edge-Token", "")
+    if not settings.edge_token or not hmac.compare_digest(token.encode(), settings.edge_token.encode()):
+        return unavailable
+    try:
+        address = ipaddress.ip_address(request.headers.get("X-Real-IP", "").strip())
+    except ValueError:
+        return unavailable
+    return {"address": f"{address}/{address.max_prefixlen}", "message": None}

@@ -462,3 +462,15 @@ with_python() {
         [[ "$output" == *"bioaf-update-agent"* ]]
     done
 }
+
+@test "generate-env writes a random edge token, and the gate-aware hook adds one to an older env file" {
+    command -v openssl >/dev/null 2>&1 || skip "openssl required"
+    cd "$BIOAF_ROOT"; gate_fixture
+    printf 'POSTGRES_USER=bioaf\nBIOAF_ENCRYPTION_KEYS=yQWeSjhut-D91YUcqvDUfQ62wQHNq1G3vUstCSJpk9U=\n' > docker/.env
+    run env BIOAF_UPDATE_GATE=caller BIOAF_HOST_LOG_COLLECTION=caller bash install.sh ensure-encryption-key
+    [ "$status" -eq 0 ]
+    token=$(grep '^BIOAF_EDGE_TOKEN=' docker/.env | cut -d= -f2-)
+    [ "${#token}" -ge 32 ]
+    run env BIOAF_UPDATE_GATE=caller BIOAF_HOST_LOG_COLLECTION=caller bash install.sh ensure-encryption-key
+    [ "$(grep '^BIOAF_EDGE_TOKEN=' docker/.env | cut -d= -f2-)" = "$token" ]
+}

@@ -8572,6 +8572,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ssh-access/observed-address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Observed Address
+         * @description The address the managed edge saw for this browser, as a draft suggestion only (plan 03B).
+         *
+         *     Trusted only with the installation's edge token, which nginx adds after overwriting X-Real-IP
+         *     with its own observed peer. Custom upstream proxies are not inferred.
+         */
+        get: operations["get_observed_address_api_v1_settings_ssh_access_observed_address_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/ssh-access/restore": {
         parameters: {
             query?: never;
@@ -34383,6 +34406,26 @@ export interface operations {
         };
     };
     rollback_host_filter_api_v1_settings_ssh_access_host_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_observed_address_api_v1_settings_ssh_access_observed_address_get: {
         parameters: {
             query?: never;
             header?: never;
