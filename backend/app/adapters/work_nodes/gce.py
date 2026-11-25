@@ -554,6 +554,7 @@ class GceVmInstance(VmInstance):
 
         for try_zone in zones_to_try:
             await journal(try_zone, "requested")
+            operation = None
             try:
                 instance = compute_v1.Instance()
                 instance.name = instance_name
@@ -633,11 +634,11 @@ class GceVmInstance(VmInstance):
                 logger.info("Creating GCE instance %s in %s/%s", instance_name, project, zone)
                 break
             except Exception as e:
-                from google.api_core.exceptions import GoogleAPICallError
-
                 exhausted = "ZONE_RESOURCE_POOL_EXHAUSTED" in str(e) or "does not have enough resources" in str(e)
-                if exhausted or isinstance(e, GoogleAPICallError):
-                    # GCE answered: this request made no VM. A timeout or lost connection is no answer.
+                if _finished_with_error(operation):
+                    # GCE finished this request's operation with an error: it made no VM. Anything else
+                    # (a polling deadline, a failed or lost insert call) stays "requested" and is settled
+                    # from the zone's own record (settle_launch).
                     await journal(try_zone, "failed")
                 if exhausted:
                     logger.warning("Zone %s exhausted for %s, trying next zone", try_zone, machine_type)
@@ -1184,6 +1185,18 @@ class GceVmInstance(VmInstance):
 
     def _local_list_vms(self, filters: dict | None = None) -> list[dict]:
         return list(_local_vms.values())
+
+
+def _finished_with_error(operation) -> bool:
+    """True only when GCE reports the insert operation done with an error."""
+    if operation is None:
+        return False
+    try:
+        return bool(operation.done()) and bool(
+            getattr(operation, "error_code", None) or getattr(operation, "error_message", None)
+        )
+    except Exception:
+        return False
 
 
 class GCEWorkNodeProvider(GceVmInstance, WorkNodeProvider):

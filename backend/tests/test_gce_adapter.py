@@ -524,3 +524,35 @@ async def test_gce_an_unfinished_or_unreadable_operation_is_unknown(case):
     else:
         outcome, _ = await _settle([REQ], ops_error=RuntimeError("denied"))
     assert outcome.state == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["deadline_while_polling", "insert_unavailable"])
+async def test_gce_an_ambiguous_error_is_not_recorded_as_a_failed_request(case):
+    """Review 4 item 1: only an operation GCE reports done with an error proves no VM; a polling
+    deadline on an accepted operation or a failed insert call stays "requested" for settlement."""
+    from google.api_core.exceptions import DeadlineExceeded, ServiceUnavailable
+
+    provider = _launch_provider()
+    states: list[str] = []
+
+    async def record(entry):
+        states.append(entry["state"])
+
+    fake_client = MagicMock()
+    if case == "deadline_while_polling":
+        op = MagicMock()
+        op.done.return_value = False
+        op.result.side_effect = DeadlineExceeded("still running")
+        fake_client.insert.return_value = op
+    else:
+        fake_client.insert.side_effect = ServiceUnavailable("try later")
+    spec = {**_launch_vm_spec(), "launch_attempt_id": "attempt-9", "record_launch_request": record}
+    with (
+        patch("google.cloud.compute_v1.InstancesClient", return_value=fake_client),
+        patch.object(provider, "_get_gcp_credentials", return_value=MagicMock()),
+        patch.object(provider, "_poll_vm_ready", new=AsyncMock()),
+        pytest.raises(Exception),
+    ):
+        await provider._gce_launch_vm(spec)
+    assert states == ["requested"]

@@ -477,3 +477,34 @@ async def test_ec2_an_unanswered_request_with_no_listed_instance_stays_unknown()
     """DescribeInstances is eventually consistent, so absence after an unanswered request is not proof."""
     assert (await _ec2_settle([EC2_REQ]))[0].state == "unknown"
     assert (await _ec2_settle([EC2_REQ], error=RuntimeError("denied")))[0].state == "unknown"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,status,recorded",
+    [
+        ("InternalError", 500, ["requested"]),
+        ("Unavailable", 503, ["requested"]),
+        ("InvalidParameterValue", 400, ["requested", "failed"]),
+        ("InsufficientInstanceCapacity", 500, ["requested", "failed"]),
+    ],
+)
+async def test_ec2_only_a_definite_refusal_is_recorded_as_failed(code, status, recorded):
+    """Review 4 item 1: a 5xx may have been processed, so it stays "requested" for settlement; a 4xx
+    refusal or a documented capacity error launched nothing."""
+    from botocore.exceptions import ClientError
+
+    p = _aws_provider()
+    states: list[str] = []
+
+    async def record(entry):
+        states.append(entry["state"])
+
+    ec2 = MagicMock()
+    ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-1", "CreationDate": "2026"}]}
+    ec2.run_instances.side_effect = ClientError(
+        {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}}, "RunInstances"
+    )
+    with patch.object(p, "_client", return_value=ec2), pytest.raises(Exception):
+        await p.provision(_vm_spec(launch_attempt_id="attempt9", record_launch_request=record))
+    assert states == recorded

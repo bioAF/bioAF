@@ -332,6 +332,23 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
     return "\n".join(lines)
 
 
+# Documented RunInstances capacity errors: AWS returns them as server errors, but nothing was launched.
+_CAPACITY_ERRORS = {
+    "InsufficientInstanceCapacity",
+    "InsufficientHostCapacity",
+    "InsufficientReservedInstanceCapacity",
+    "InsufficientCapacity",
+}
+
+
+def _definite_refusal(exc) -> bool:
+    """A RunInstances error that proves no instance was launched: a 4xx, or a capacity error."""
+    response = getattr(exc, "response", {}) or {}
+    code = (response.get("Error") or {}).get("Code", "")
+    status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    return code in _CAPACITY_ERRORS or (isinstance(status, int) and 400 <= status < 500)
+
+
 class Ec2VmInstance(VmInstance):
     """EC2 VM lifecycle backend (boto3), with local mode for development.
 
@@ -534,8 +551,9 @@ class Ec2VmInstance(VmInstance):
         except Exception as exc:
             from botocore.exceptions import ClientError
 
-            if isinstance(exc, ClientError):
-                # AWS answered and refused: no instance. A timeout or lost connection is no answer.
+            if isinstance(exc, ClientError) and _definite_refusal(exc):
+                # AWS refused the request: no instance. A 5xx may have been processed, and a timeout
+                # or lost connection is no answer; those stay "requested" and are settled later.
                 await journal("failed")
             raise
         await journal("created")
