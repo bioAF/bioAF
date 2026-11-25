@@ -15,6 +15,8 @@ A failed private route stops the launch with a plain message; it never switches 
 
 from __future__ import annotations
 
+import asyncio
+
 import logging
 
 from app.exceptions import ValidationError
@@ -99,18 +101,23 @@ async def ensure_backend_sync_route(session) -> dict:
 
         client = await _gcp_firewalls(session)
         wanted = _gcp_rule(identity)
-        try:
-            current = client.get(project=identity.account, firewall=SYNC_RULE)
-        except NotFound:
-            current = None
-        if current is None:
-            client.insert(project=identity.account, firewall_resource=wanted).result(timeout=120)
-        elif (
-            list(current.source_ranges) != list(wanted.source_ranges)
-            or current.priority != SYNC_PRIORITY
-            or list(current.target_tags) != [SYNC_TAG]
-        ):
-            client.patch(project=identity.account, firewall=SYNC_RULE, firewall_resource=wanted).result(timeout=120)
+
+        def reconcile() -> None:
+            # Runs in a worker thread: a firewall operation can wait up to two minutes.
+            try:
+                current = client.get(project=identity.account, firewall=SYNC_RULE)
+            except NotFound:
+                current = None
+            if current is None:
+                client.insert(project=identity.account, firewall_resource=wanted).result(timeout=120)
+            elif (
+                list(current.source_ranges) != list(wanted.source_ranges)
+                or current.priority != SYNC_PRIORITY
+                or list(current.target_tags) != [SYNC_TAG]
+            ):
+                client.patch(project=identity.account, firewall=SYNC_RULE, firewall_resource=wanted).result(timeout=120)
+
+        await asyncio.to_thread(reconcile)
     except Exception as exc:
         logger.warning("Private backend sync route could not be prepared: %s", type(exc).__name__)
         raise ValidationError(ROUTE_FAILED) from None

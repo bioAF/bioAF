@@ -48,6 +48,7 @@ def host(tmp_path, monkeypatch):
     driver.recovery_sources.return_value = driver.ensure_recovery.return_value
     driver.check_recovery.return_value = []
     driver.apply_filter.return_value = {"provider": "gcp", "rules": ["bioaf-ssh-filter-deny-v4"]}
+    driver.snapshot.return_value = {"provider": "gcp", "rules": {}}
     with (
         patch("app.services.ssh_recovery.current_host_identity", AsyncMock(return_value=IDENTITY)),
         patch("app.services.host_ssh_access.network_for", AsyncMock(return_value=driver)),
@@ -308,3 +309,87 @@ async def test_editing_the_aws_filter_keeps_the_original_revocations_so_turning_
     record = host.driver.remove_filter.call_args.args[0]
     assert record["revoked"] == [original]
     assert record["filter_group"] == "sg-f"
+
+
+# -- Review: durable, exclusive filter changes off the event loop ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_filter_provider_calls_run_off_the_event_loop(client, admin, host):
+    import threading
+
+    _diagnostics(host)
+    seen = {}
+
+    def record(name, value):
+        def call(*args, **kwargs):
+            seen[name] = threading.current_thread() is threading.main_thread()
+            return value
+
+        return call
+
+    host.driver.ensure_recovery.side_effect = record("ensure_recovery", host.driver.ensure_recovery.return_value)
+    host.driver.check_recovery.side_effect = record("check_recovery", [])
+    host.driver.apply_filter.side_effect = record("apply_filter", {"provider": "gcp", "rules": []})
+    assert (await _apply_ranges(client, admin, [{"name": "A", "cidr": "203.0.113.7"}])).status_code == 200
+    assert seen == {"ensure_recovery": False, "check_recovery": False, "apply_filter": False}
+
+
+@pytest.mark.asyncio
+async def test_a_filter_change_is_refused_while_another_infrastructure_operation_runs(client, admin, host):
+    from app.services import infrastructure_operations as ops
+
+    _diagnostics(host)
+    await _save_draft(client, admin, [{"name": "A", "cidr": "203.0.113.7"}])
+    v = (await client.get(BASE, headers=admin)).json()["application_host"]["filter"]["draft"]["version"]
+    busy, _ = await ops.accept(action="compute_deploy", principal=ops.Principal(user_id=None))
+    try:
+        response = await client.post(f"{BASE}/host/apply", json={"draft_version": v}, headers=admin)
+    finally:
+        await ops.finish(busy, ops.succeeded())
+    assert response.status_code == 409
+    host.driver.apply_filter.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_filter_change_is_one_settled_infrastructure_operation(client, session, admin, host):
+    from sqlalchemy import select
+
+    from app.models.infrastructure_operation import InfrastructureOperation
+
+    _diagnostics(host)
+    assert (await _apply_ranges(client, admin, [{"name": "A", "cidr": "203.0.113.7"}])).status_code == 200
+    session.expire_all()
+    ops_rows = (
+        (
+            await session.execute(
+                select(InfrastructureOperation).where(InfrastructureOperation.action == "host_ssh_filter")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(o.status, o.exclusive_slot) for o in ops_rows] == [("succeeded", None)]
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_filter_change_is_restored_from_its_saved_snapshot_before_the_next(client, admin, host):
+    """The pre-change state is committed before the cloud changes, so a crash mid-change (here an
+    unexpected error the driver could not roll back) leaves what is needed to put access back."""
+    _diagnostics(host)
+    host.driver.snapshot.return_value = {"provider": "gcp", "rules": {"bioaf-ssh-filter-deny-v4": None}}
+    host.driver.apply_filter.side_effect = RuntimeError("connection reset")
+    # An unexpected failure is a server error (the test client re-raises it); the operation is failed.
+    with pytest.raises(RuntimeError):
+        await _apply_ranges(client, admin, [{"name": "A", "cidr": "203.0.113.7"}])
+    host.driver.restore.assert_not_called()
+
+    check = (await client.post(f"{BASE}/host/check", headers=admin)).json()
+    assert any("did not finish" in p for p in check["recovery"]["problems"])
+
+    host.driver.apply_filter.side_effect = None
+    host.driver.apply_filter.return_value = {"provider": "gcp", "rules": []}
+    assert (await _apply_ranges(client, admin, [{"name": "B", "cidr": "198.51.100.9"}])).status_code == 200
+    host.driver.restore.assert_called_once_with({"provider": "gcp", "rules": {"bioaf-ssh-filter-deny-v4": None}})
+    check = (await client.post(f"{BASE}/host/check", headers=admin)).json()
+    assert not any("did not finish" in p for p in check["recovery"]["problems"])

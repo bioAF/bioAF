@@ -49,6 +49,7 @@ OperationAction = Literal[
     "terraform_apply",
     "config_sync",
     "component_change",
+    "host_ssh_filter",
 ]
 
 ADMIN_PERMISSIONS = [("infrastructure", "deploy"), ("infrastructure", "configure")]

@@ -48910,7 +48910,8 @@
                     "terraform_plan",
                     "terraform_apply",
                     "config_sync",
-                    "component_change"
+                    "component_change",
+                    "host_ssh_filter"
                   ],
                   "type": "string"
                 },

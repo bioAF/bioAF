@@ -158,20 +158,28 @@ class GcpHostNetwork:
                 problems.append(f"The firewall rule {rule.name} denies SSH from IAP ahead of bioAF's recovery rule.")
         return problems
 
-    def _snapshot(self) -> dict:
-        return {name: self._existing(name) for name in (*ALLOW_RULES.values(), *DENY_RULES.values())}
-
-    def _restore(self, snapshot: dict) -> None:
-        """Put the managed filter rules back exactly as they were before this apply."""
-        # Previous rules first (allows, then denies), then remove rules this apply added.
+    def snapshot(self) -> dict:
+        """The managed filter rules as they are now, as plain data that can be stored and restored."""
+        rules = {}
         for name in (*ALLOW_RULES.values(), *DENY_RULES.values()):
-            rule = snapshot.get(name)
+            rule = self._existing(name)
+            rules[name] = (
+                None
+                if rule is None
+                else {"priority": rule.priority, "sources": list(rule.source_ranges), "allow": bool(rule.allowed)}
+            )
+        return {"provider": "gcp", "rules": rules}
+
+    def restore(self, snapshot: dict) -> None:
+        """Put the managed filter rules back exactly as ``snapshot`` recorded them."""
+        rules = snapshot.get("rules") or {}
+        # Recorded rules first (allows, then denies), then remove rules that did not exist.
+        for name in (*ALLOW_RULES.values(), *DENY_RULES.values()):
+            rule = rules.get(name)
             if rule is not None:
-                self._upsert(
-                    self._rule(name, priority=rule.priority, sources=list(rule.source_ranges), allow=bool(rule.allowed))
-                )
+                self._upsert(self._rule(name, priority=rule["priority"], sources=rule["sources"], allow=rule["allow"]))
         for name in (*DENY_RULES.values(), *ALLOW_RULES.values()):
-            if snapshot.get(name) is None:
+            if rules.get(name) is None:
                 self._delete(name)
 
     def _outranking_allows(self) -> list[str]:
@@ -216,7 +224,7 @@ class GcpHostNetwork:
             )
         families = _by_family(ranges)
         written: list[str] = []
-        snapshot = self._snapshot()
+        snapshot = self.snapshot()
         try:
             for version in (4, 6):
                 if families[version]:
@@ -244,7 +252,7 @@ class GcpHostNetwork:
         except Exception as exc:
             logger.warning("Host SSH filter apply failed (%s); restoring the previous rules", type(exc).__name__)
             try:
-                self._restore(snapshot)
+                self.restore(snapshot)
             except Exception as restore_exc:
                 logger.error("Restoring the previous SSH filter rules failed (%s)", type(restore_exc).__name__)
                 raise FilterApplyError(RESTORE_FAILED) from exc
@@ -433,7 +441,50 @@ class AwsHostNetwork:
             }
         ]
 
+    def snapshot(self) -> dict:
+        """SSH access on this server as it is now, as plain data that can be stored and restored:
+        the filter group's ranges and attachment, and the other groups' tcp:22 rules."""
+        instance = self._instance()
+        recovery = self._find_group(AWS_RECOVERY_GROUP, instance["VpcId"])
+        filter_group = self._find_group(AWS_FILTER_GROUP, instance["VpcId"])
+        attached = [g["GroupId"] for g in instance["SecurityGroups"]]
+        v4, v6 = self._filter_ranges(filter_group) if filter_group else (set(), set())
+        others = [g for g in attached if g not in (recovery, filter_group)]
+        return {
+            "provider": "aws",
+            "filter_attached": bool(filter_group and filter_group in attached),
+            "filter_v4": sorted(v4),
+            "filter_v6": sorted(v6),
+            "other_ssh": self._ssh_rules(others) if others else [],
+        }
+
+    def restore(self, snapshot: dict) -> None:
+        """Put SSH access back as ``snapshot`` recorded it: other groups' rules first (access widens
+        before anything narrows), then the filter group's ranges and attachment."""
+        for rule in snapshot.get("other_ssh") or []:
+            present4, present6 = self._filter_ranges(rule["GroupId"])
+            perm = rule["IpPermissions"][0]
+            missing4 = {r["CidrIp"] for r in perm.get("IpRanges", [])} - present4
+            missing6 = {r["CidrIpv6"] for r in perm.get("Ipv6Ranges", [])} - present6
+            for missing in self._ssh_permission(missing4, missing6):
+                self._authorize(GroupId=rule["GroupId"], IpPermissions=[missing])
+        instance = self._instance()
+        filter_group = self._find_group(AWS_FILTER_GROUP, instance["VpcId"])
+        if not filter_group:
+            return
+        want4, want6 = set(snapshot.get("filter_v4") or []), set(snapshot.get("filter_v6") or [])
+        have4, have6 = self._filter_ranges(filter_group)
+        for perm in self._ssh_permission(want4 - have4, want6 - have6):
+            self._authorize(GroupId=filter_group, IpPermissions=[perm])
+        if snapshot.get("filter_attached"):
+            self._attach(filter_group)
+        else:
+            self._attach("", detach=filter_group)
+        for perm in self._ssh_permission(have4 - want4, have6 - want6):
+            self.client.revoke_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
+
     def apply_filter(self, ranges: list[str]) -> dict:
+        snapshot = self.snapshot()
         instance = self._instance()
         families = _by_family(ranges)
         recovery = self._group(AWS_RECOVERY_GROUP, instance["VpcId"])
@@ -449,32 +500,21 @@ class AwsHostNetwork:
             )
         old4, old6 = self._filter_ranges(filter_group)
         new4, new6 = set(families[4]), set(families[6])
-        added: list[dict] = []
-        removed: list[dict] = []
         revoked: list[dict] = []
         try:
             # Allow the new ranges first, attach, then narrow everything else.
             for perm in self._ssh_permission(new4 - old4, new6 - old6):
                 self.client.authorize_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
-                added.append(perm)
             self._attach(filter_group)
             for rule in self._ssh_rules(others):
                 self.client.revoke_security_group_ingress(**rule)
                 revoked.append(rule)
             for perm in self._ssh_permission(old4 - new4, old6 - new6):
                 self.client.revoke_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
-                removed.append(perm)
         except Exception as exc:
             logger.warning("Host SSH filter apply failed (%s); restoring previous access", type(exc).__name__)
             try:
-                for rule in revoked:
-                    self._authorize(**rule)
-                for perm in removed:
-                    self._authorize(GroupId=filter_group, IpPermissions=[perm])
-                for perm in added:
-                    self.client.revoke_security_group_ingress(GroupId=filter_group, IpPermissions=[perm])
-                if filter_group not in attached_before:
-                    self._attach("", detach=filter_group)
+                self.restore(snapshot)
             except Exception as restore_exc:
                 logger.error("Restoring previous SSH access failed (%s)", type(restore_exc).__name__)
                 raise FilterApplyError(RESTORE_FAILED) from exc

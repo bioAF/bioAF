@@ -417,3 +417,32 @@ def test_gcp_allows_the_deny_already_outranks_or_that_miss_this_host_are_left_al
         net.ensure_recovery()
         net.apply_filter(["203.0.113.7/32"])
         assert "bioaf-ssh-filter-deny-v4" in fw.rules
+
+
+def test_gcp_snapshot_and_restore_round_trip_the_managed_rules():
+    import json
+
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    before = {name: _rule_summary(rule) for name, rule in fw.rules.items()}
+    snapshot = json.loads(json.dumps(net.snapshot()))
+    net.apply_filter(["2001:db8::/32"])
+    net.restore(snapshot)
+    assert {name: _rule_summary(rule) for name, rule in fw.rules.items()} == before
+
+
+def test_aws_snapshot_and_restore_round_trip_ssh_access():
+    import json
+
+    ec2, state = _ec2()
+    net = AwsHostNetwork(AWS, client=ec2)
+    net.ensure_recovery()
+    snapshot = json.loads(json.dumps(net.snapshot()))
+    net.apply_filter(["203.0.113.7/32"])
+    net.restore(snapshot)
+    assert state["sgs"]["sg-base"]["ssh"] == ["0.0.0.0/0"]
+    assert "sg-bioaf-ssh-filter" not in state["attached"]
+    assert state["sgs"]["sg-bioaf-ssh-filter"]["ssh"] == []
+    assert "sg-bioaf-ssh-recovery" in state["attached"]

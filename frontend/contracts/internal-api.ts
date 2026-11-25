@@ -32392,7 +32392,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change") | null;
+                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change" | "host_ssh_filter") | null;
             };
             header?: never;
             path?: never;

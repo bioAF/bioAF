@@ -238,3 +238,23 @@ async def test_a_launch_whose_private_route_fails_is_refused_before_anything_is_
     assert response.json()["detail"] == ROUTE_FAILED
     assert (await session.execute(select(func.count()).select_from(ComputeSession))).scalar_one() == 0
     adapter.launch_vm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_gcp_route_waits_for_the_provider_off_the_event_loop(session):
+    """A firewall operation can wait up to two minutes; it must not block the serving loop."""
+    import threading
+
+    from app.services.backend_sync_route import ensure_backend_sync_route
+
+    fw = Firewalls()
+    seen = []
+    insert = fw.insert
+    fw.insert = lambda **kw: (seen.append(threading.current_thread() is threading.main_thread()), insert(**kw))[1]
+    with (
+        patch("app.services.backend_sync_route._simulated", return_value=False),
+        patch("app.services.ssh_recovery.current_host_identity", AsyncMock(return_value=GCP)),
+        patch("app.services.backend_sync_route._gcp_firewalls", AsyncMock(return_value=fw)),
+    ):
+        await ensure_backend_sync_route(session)
+    assert seen == [False]

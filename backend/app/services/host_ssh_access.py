@@ -12,18 +12,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.exceptions import ConflictError, ValidationError
 from app.services.ssh_access_policy import _validated_entries, normalize_range
 
+logger = logging.getLogger("bioaf.host_ssh_access")
+
 FILTER_KEY = "app_host_ssh_filter"
 PROBE_KEY = "ssh_recovery_probe"
 DIAGNOSTICS_FILE = "ssh-recovery-diagnostics.json"
 DIAGNOSTICS_MAX_AGE = timedelta(hours=1)
+UNFINISHED_CHANGE = (
+    "An earlier change to the SSH filter did not finish. Apply changes puts the previous rules back first."
+)
+UNFINISHED_RESTORE_FAILED = (
+    "An earlier change to the SSH filter did not finish, and bioAF could not put the previous rules back. "
+    "Cloud recovery access is unchanged. Try again shortly."
+)
 NEEDS_ATTENTION_REFUSAL = (
     "Cloud recovery access needs attention, so the SSH filter was not changed. Your current access is unchanged."
 )
@@ -166,8 +177,9 @@ async def preflight(session, *, reconcile: bool) -> dict:
     sources: list[dict] = []
     try:
         driver = await network_for(session, identity)
-        sources = driver.ensure_recovery() if reconcile else driver.recovery_sources()
-        problems += driver.check_recovery()
+        # Provider calls can wait minutes; they run off the serving event loop.
+        sources = await asyncio.to_thread(driver.ensure_recovery if reconcile else driver.recovery_sources)
+        problems += await asyncio.to_thread(driver.check_recovery)
     except Exception as exc:
         problems.append(f"bioAF could not read or change this server's firewall ({type(exc).__name__}).")
     problems += guest_problems(identity)
@@ -197,6 +209,8 @@ async def check_access(session) -> dict:
     request_guest_diagnostics()
     recovery = await preflight(session, reconcile=False)
     record = await _read(session)
+    if record.get("pending"):
+        recovery = {**recovery, "status": "needs_attention", "problems": [*recovery["problems"], UNFINISHED_CHANGE]}
     record["recovery"] = recovery
     await _write(session, record)
     await session.commit()
@@ -238,10 +252,46 @@ def _carry_forward(previous: dict | None, resources: dict | None) -> dict | None
     return {**resources, "revoked": merged}
 
 
-async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], actor_id: int, action: str) -> dict:
+async def _restore_unfinished(session, record: dict, driver, *, actor_id: int) -> None:
+    """Put back the access an interrupted change saved before it touched the cloud."""
     from app.services.audit_service import log_action
-    from app.services.host_ssh_filter import FilterApplyError
+
+    pending = record.get("pending")
+    if not pending:
+        return
+    try:
+        await asyncio.to_thread(driver.restore, pending["snapshot"])
+    except Exception as exc:
+        logger.error("Restoring an unfinished SSH filter change failed (%s)", type(exc).__name__)
+        raise ConflictError(UNFINISHED_RESTORE_FAILED) from None
+    record.pop("pending", None)
+    await _write(session, record)
+    await log_action(
+        session,
+        user_id=actor_id,
+        entity_type="ssh_access_policy",
+        entity_id=0,
+        action="restore_unfinished_host_ssh_filter",
+        details={"operation_id": pending.get("operation_id"), "revision": record["applied"]["revision"]},
+    )
+    await session.commit()
+
+
+async def _apply(
+    session, record: dict, *, enabled: bool, ranges: list[dict], actor_id: int, action: str, operation_id: int
+) -> dict:
+    """Change the cloud rules as the owner of one infrastructure operation.
+
+    The pre-change state is committed (``pending``) before any rule changes, so a crash or a database
+    failure mid-change leaves what is needed to put access back; the next change restores it first.
+    """
+    from app.services.audit_service import log_action
+    from app.services.host_ssh_filter import RESTORE_FAILED, FilterApplyError
     from app.services.ssh_recovery import current_host_identity
+
+    identity = await current_host_identity(session)
+    driver = await network_for(session, identity)
+    await _restore_unfinished(session, record, driver, actor_id=actor_id)
 
     recovery = await preflight(session, reconcile=True)
     record["recovery"] = recovery
@@ -249,20 +299,32 @@ async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], ac
         await _write(session, record)
         await session.commit()
         raise ConflictError(NEEDS_ATTENTION_REFUSAL)
-    identity = await current_host_identity(session)
-    driver = await network_for(session, identity)
     applied = record["applied"]
     cidrs = [normalize_range(r["cidr"]) for r in ranges]
+
+    record["pending"] = {
+        "operation_id": operation_id,
+        "snapshot": await asyncio.to_thread(driver.snapshot),
+        "enabled": enabled,
+        "ranges": cidrs,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await _write(session, record)
+    await session.commit()
     try:
         if enabled:
-            resources = _carry_forward(applied.get("resources"), driver.apply_filter(cidrs))
+            resources = _carry_forward(applied.get("resources"), await asyncio.to_thread(driver.apply_filter, cidrs))
         else:
-            driver.remove_filter(applied.get("resources"))
+            await asyncio.to_thread(driver.remove_filter, applied.get("resources"))
             resources = None
     except FilterApplyError as exc:
+        # The driver put the previous rules back, unless it says it could not (then keep the snapshot).
+        if str(exc) != RESTORE_FAILED:
+            record.pop("pending", None)
         await _write(session, record)
         await session.commit()
         raise ConflictError(str(exc)) from None
+    record.pop("pending", None)
     record["previous"] = applied
     record["applied"] = {
         "revision": applied["revision"] + 1,
@@ -285,6 +347,7 @@ async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], ac
             "enabled": enabled,
             "ranges": cidrs,
             "instance_id": identity.instance_id,
+            "operation_id": operation_id,
         },
         previous_value={"revision": applied["revision"], "enabled": applied.get("enabled")},
     )
@@ -292,36 +355,65 @@ async def _apply(session, record: dict, *, enabled: bool, ranges: list[dict], ac
     return record["applied"]
 
 
-async def apply_draft(session, *, draft_version: int, actor_id: int) -> dict:
-    record = await _read(session)
+async def _as_operation(session, *, actor_id: int, change) -> dict:
+    """Run one filter change as the single running infrastructure operation (409 while another runs)."""
+    from app.services import infrastructure_operations as ops
+
+    op_id, _ = await ops.accept(action="host_ssh_filter", principal=ops.Principal(user_id=actor_id))
+    async with ops.owned(op_id):
+        # Read the setting again inside the slot: a change that settled meanwhile is seen.
+        session.expire_all()
+        applied = await change(await _read(session), op_id)
+    await ops.finish(op_id, ops.succeeded("SSH filter changed."))
+    return applied
+
+
+def _check_draft(record: dict, draft_version: int) -> dict:
     draft = record["draft"]
     if draft_version != draft["version"]:
         raise ConflictError("These settings were changed by someone else. Reload them, then apply again.")
     if draft.get("enabled") and not draft.get("ranges"):
         raise ValidationError("Add at least one address or range, or turn the filter off.")
-    return await _apply(
-        session,
-        record,
-        enabled=bool(draft.get("enabled")),
-        ranges=draft.get("ranges", []),
-        actor_id=actor_id,
-        action="apply_host_ssh_filter",
-    )
+    return draft
+
+
+async def apply_draft(session, *, draft_version: int, actor_id: int) -> dict:
+    _check_draft(await _read(session), draft_version)
+
+    async def change(record: dict, op_id: int) -> dict:
+        draft = _check_draft(record, draft_version)
+        return await _apply(
+            session,
+            record,
+            enabled=bool(draft.get("enabled")),
+            ranges=draft.get("ranges", []),
+            actor_id=actor_id,
+            action="apply_host_ssh_filter",
+            operation_id=op_id,
+        )
+
+    return await _as_operation(session, actor_id=actor_id, change=change)
 
 
 async def rollback(session, *, actor_id: int) -> dict:
-    record = await _read(session)
-    previous = record.get("previous")
-    if not previous:
+    if not (await _read(session)).get("previous"):
         raise ValidationError("There is no earlier applied setting to return to.")
-    return await _apply(
-        session,
-        record,
-        enabled=bool(previous.get("enabled")),
-        ranges=previous.get("ranges", []),
-        actor_id=actor_id,
-        action="rollback_host_ssh_filter",
-    )
+
+    async def change(record: dict, op_id: int) -> dict:
+        previous = record.get("previous")
+        if not previous:
+            raise ValidationError("There is no earlier applied setting to return to.")
+        return await _apply(
+            session,
+            record,
+            enabled=bool(previous.get("enabled")),
+            ranges=previous.get("ranges", []),
+            actor_id=actor_id,
+            action="rollback_host_ssh_filter",
+            operation_id=op_id,
+        )
+
+    return await _as_operation(session, actor_id=actor_id, change=change)
 
 
 GIT_TRUST_MESSAGE = (
