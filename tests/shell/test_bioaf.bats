@@ -2279,3 +2279,16 @@ mark_unchanged() { sleep 1; touch "$1/marker"; sleep 1; }
     run bash "$BIOAF_SCRIPT" help
     [[ "$output" == *"import-git-known-hosts"* ]]
 }
+
+@test "ssh-recovery-diagnostics collects fixed facts and publishes them through the host program" {
+    tmp="$(mktemp -d)"; mkdir -p "$tmp/bin" "$tmp/scripts"
+    cp "$BATS_TEST_DIRNAME/../../scripts/update_host_io.py" "$tmp/scripts/"
+    printf '#!/bin/sh\ncase "$*" in *instance/id*) echo 481516;; *project/project-id*) echo lab;; *) exit 22;; esac\n' > "$tmp/bin/curl"
+    printf '#!/bin/sh\n[ "$1" = -n ] && shift; case "$*" in *"sshd -t"*) exit 0;; *"sshd -T"*) printf "pubkeyauthentication yes\\nauthorizedkeyscommand none\\n";; esac\n' > "$tmp/bin/sudo"
+    printf '#!/bin/sh\n[ "$2" = google-guest-agent ] && echo active || echo inactive\n' > "$tmp/bin/systemctl"
+    printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/dpkg"
+    chmod +x "$tmp/bin/"*
+    run env PATH="$tmp/bin:$PATH" bash -c "source '$BIOAF_SCRIPT' >/dev/null; SCRIPT_DIR='$tmp'; HOST_IO_PY=\"\$(cat '$tmp/scripts/update_host_io.py')\"; cmd_ssh_recovery_diagnostics"
+    [ "$status" -eq 0 ]
+    python3 -c "import json; d=json.load(open('$tmp/update-status/ssh-recovery-diagnostics.json')); assert d['provider']=='gcp' and d['instance_id']=='481516' and d['guest_agent'] is True and d['pubkey_auth'] is True and d['eic_package'] is False, d"
+}

@@ -18,6 +18,8 @@ arguments, never as generated code.
     normalize-prepared-failure <repo>   rewrite an older updater's fixed error after a matching,
                                         successful preparation to the plain retry instruction
     clear-preparation <repo>            forget any preparation record
+    write-diagnostics <repo> <key> <value>...
+                                        publish the fixed SSH recovery diagnostics report
 
 Writes are staged in host-state/: a directory outside every backend mount, owned by this user and
 closed to group and other. The temporary file is created exclusively there, completed, set to 0644,
@@ -43,6 +45,12 @@ AGENT_CODE = "agent-code"
 AGENT_SOURCES = ("scripts/update-agent.sh", "scripts/update_host_io.py", "installer/host_prereqs.sh")
 
 PREPARATION = "update-preparation.json"
+# Fixed host operations the backend may request (plan 03B), and their fixed-schema reports.
+OPERATIONS = {"ssh-recovery-diagnostics"}
+DIAGNOSTICS_FILE = "ssh-recovery-diagnostics.json"
+DIAGNOSTIC_BOOLEANS = ("sshd_ok", "pubkey_auth", "guest_agent", "oslogin", "eic_package")
+INSTANCE_ID = re.compile(r"[A-Za-z0-9-]{1,64}", re.ASCII)
+PRINTABLE = re.compile(r"[ -~]{0,200}", re.ASCII)
 # The plain instruction after a successful one-time preparation (plan 03A copy).
 PREPARED_MESSAGE = (
     "The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."
@@ -122,6 +130,12 @@ def parse_trigger(raw: bytes) -> tuple[str, str]:
         raise Refused("not JSON") from None
     if not isinstance(data, dict):
         raise Refused("not a JSON object")
+    if "operation" in data:
+        # A fixed host operation (plan 03B). Nothing but its name may travel with it.
+        operation = data.get("operation")
+        if set(data) - {"operation", "requested_at"} or not isinstance(operation, str) or operation not in OPERATIONS:
+            raise Refused("unsupported operation")
+        return "op", operation
     version = data.get("version")
     if not isinstance(version, str) or not VERSION.fullmatch(version):
         raise Refused("missing or invalid version")
@@ -148,6 +162,8 @@ def read_trigger(repo_fd: int, name: str) -> str:
             os.close(dir_fd)
     except Refused as reason:
         return f"rejected\t{reason}"
+    if version == "op":
+        return f"op\t{upgrade_id}\t-"
     return f"ok\t{version}\t{upgrade_id}"
 
 
@@ -312,6 +328,34 @@ def normalize_prepared_failure(repo_fd: int) -> bool:
     return True
 
 
+def write_diagnostics(repo_fd: int, pairs: list[str]) -> None:
+    """Publish the fixed SSH recovery diagnostics report; unknown keys or bad values are refused."""
+    from datetime import datetime, timezone
+
+    if len(pairs) % 2:
+        raise Refused("write-diagnostics takes key value pairs")
+    fields = dict(zip(pairs[0::2], pairs[1::2]))
+    allowed = {"instance_id", "provider", "authorized_keys_command", *DIAGNOSTIC_BOOLEANS}
+    if set(fields) - allowed:
+        raise Refused("unsupported diagnostics field")
+    if not INSTANCE_ID.fullmatch(fields.get("instance_id", "")):
+        raise Refused("invalid instance id")
+    if fields.get("provider") not in ("gcp", "aws", "unknown"):
+        raise Refused("invalid provider")
+    report: dict = {"schema": 1, "instance_id": fields["instance_id"], "provider": fields["provider"]}
+    for key in DIAGNOSTIC_BOOLEANS:
+        value = fields.get(key, "false")
+        if value not in ("true", "false"):
+            raise Refused("diagnostics flags are true or false")
+        report[key] = value == "true"
+    command = fields.get("authorized_keys_command", "")
+    if not PRINTABLE.fullmatch(command):
+        raise Refused("invalid authorized keys command")
+    report["authorized_keys_command"] = command
+    report["generated_at"] = datetime.now(timezone.utc).isoformat()
+    publish(repo_fd, STATUS_DIR, DIAGNOSTICS_FILE, (json.dumps(report) + "\n").encode("utf-8"))
+
+
 def agent_code(repo: str) -> str:
     digest = hashlib.sha256()
     for rel in AGENT_SOURCES:
@@ -344,6 +388,8 @@ def main(argv: list[str]) -> int:
         elif command == "normalize-prepared-failure":
             if normalize_prepared_failure(repo_fd):
                 print("normalized")
+        elif command == "write-diagnostics":
+            write_diagnostics(repo_fd, rest)
         elif command == "clear-preparation":
             clear_preparation(repo_fd)
         elif command == "record-agent-code":

@@ -664,3 +664,36 @@ status_json() {
     agent_round
     grep -qF "$PREPARED_TEXT" "$REPO/update-status/current.json"
 }
+
+# ---------------------------------------------------------------------------
+# Fixed read-only SSH recovery diagnostics (plan 03B). The backend may only request the one fixed
+# operation; no command, path or username travels in the trigger, and the report has a fixed schema.
+# ---------------------------------------------------------------------------
+
+@test "a diagnostics trigger runs only the fixed host operation" {
+    printf '{"operation": "ssh-recovery-diagnostics"}' > "$REPO/update-requests/ssh-recovery-diagnostics-1.json"
+    rm -f "$REPO/update-requests/update_7.json"
+    stub_updater 0
+    agent_round
+    [ "$(cat "$REPO/updater-calls")" = "ssh-recovery-diagnostics" ]
+    [ ! -e "$REPO/update-requests/ssh-recovery-diagnostics-1.json" ]
+}
+
+@test "an unknown operation or extra arguments are refused without running anything" {
+    for body in '{"operation": "shell"}' '{"operation": "ssh-recovery-diagnostics", "command": "id"}' '{"operation": ["x"]}'; do
+        printf '%s' "$body" > "$REPO/update-requests/op.json"
+        run python3 -I "$HOST_IO" read-trigger "$REPO" op.json
+        [[ "$output" == rejected* ]] || { echo "accepted: $body"; false; }
+    done
+}
+
+@test "write-diagnostics publishes only the fixed fields with checked types" {
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 481516 provider gcp sshd_ok true pubkey_auth true \
+        guest_agent true oslogin false eic_package false authorized_keys_command ""
+    [ "$status" -eq 0 ]
+    python3 -c "import json,sys; d=json.load(open('$REPO/update-status/ssh-recovery-diagnostics.json')); assert d['schema']==1 and d['sshd_ok'] is True and d['oslogin'] is False and d['instance_id']=='481516' and 'generated_at' in d, d"
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 481516 private_key secret
+    [ "$status" -ne 0 ]
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 'x;rm' provider gcp
+    [ "$status" -ne 0 ]
+}

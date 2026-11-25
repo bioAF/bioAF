@@ -117,6 +117,17 @@ process_trigger() {
         return 1
     fi
     IFS=$'\t' read -r kind version upgrade_id <<< "$parsed"
+    if [ "$kind" = op ]; then
+        # A fixed read-only host operation (plan 03B); the parser accepted its name only.
+        log "Running host operation: $version"
+        if [ "$AGENT_LOG_OPEN" = true ]; then
+            "$SCRIPT_DIR/bioaf" "$version" >&3 2>&3 3>&- || log "WARNING: host operation $version failed"
+        else
+            "$SCRIPT_DIR/bioaf" "$version" 3>&- || log "WARNING: host operation $version failed"
+        fi
+        rm -f -- "$TRIGGER_DIR/$name"
+        return 0
+    fi
     if [ "$kind" != ok ]; then
         # The reason is fixed text from the parser; the untrusted name is not logged.
         log "ERROR: Rejected an update trigger (${version:-invalid}); it was removed without running an update."

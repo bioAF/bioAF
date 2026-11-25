@@ -904,6 +904,9 @@ cmd_start() {
         ( deploy_lock >/dev/null 2>&1 && reopen_work_node_launches ) || true
     fi
 
+    # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks start.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 & )
+
     echo ""
     green "All services started."
     cmd_status
@@ -1717,6 +1720,8 @@ cmd_update() {
     fi
     # The new backend is serving: Work Node launches reopen.
     reopen_work_node_launches
+    # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks the update.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 & )
 
     local new_version
     new_version=$(get_running_version)
@@ -1862,6 +1867,37 @@ cmd_rotate_encryption_keys() {
     $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
 }
 
+cmd_ssh_recovery_diagnostics() {
+    # ssh-recovery-diagnostics: publish fixed, read-only facts the backend's recovery preflight needs
+    # (plan 03B) to update-status/ssh-recovery-diagnostics.json. No key, configuration file or command
+    # output beyond these fields is published. Needs passwordless sudo for sshd's own checks; without
+    # it the report says the checks did not pass rather than guessing.
+    local provider=unknown instance_id="" token="" eff="" akc=""
+    local sshd_ok=false pubkey=false eic=false agent=false oslogin=false
+    if instance_id=$(curl -sf --connect-timeout 1 -m 2 -H 'Metadata-Flavor: Google' \
+        http://metadata.google.internal/computeMetadata/v1/instance/id 2>/dev/null) && [ -n "$instance_id" ]; then
+        provider=gcp
+    elif token=$(curl -sf --connect-timeout 1 -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+        http://169.254.169.254/latest/api/token 2>/dev/null) \
+        && instance_id=$(curl -sf --connect-timeout 1 -m 2 -H "X-aws-ec2-metadata-token: $token" \
+        http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null) && [ -n "$instance_id" ]; then
+        provider=aws
+    else
+        instance_id=unknown
+    fi
+    sudo -n /usr/sbin/sshd -t >/dev/null 2>&1 && sshd_ok=true
+    eff="$(sudo -n /usr/sbin/sshd -T 2>/dev/null || true)"
+    grep -qx 'pubkeyauthentication yes' <<< "$eff" && pubkey=true
+    akc="$(awk '$1 == "authorizedkeyscommand" { $1 = ""; sub(/^ /, ""); print; exit }' <<< "$eff")"
+    [ "$akc" = none ] && akc=""
+    dpkg -s ec2-instance-connect >/dev/null 2>&1 && eic=true
+    [ "$(systemctl is-active google-guest-agent 2>/dev/null)" = active ] && agent=true
+    grep -q oslogin /etc/nsswitch.conf 2>/dev/null && oslogin=true
+    python3 -I -c "$HOST_IO_PY" write-diagnostics "$SCRIPT_DIR" \
+        instance_id "$instance_id" provider "$provider" sshd_ok "$sshd_ok" pubkey_auth "$pubkey" \
+        guest_agent "$agent" oslogin "$oslogin" eic_package "$eic" authorized_keys_command "${akc:0:200}"
+}
+
 cmd_import_git_known_hosts() {
     # import-git-known-hosts <file> <source>: approve custom Git server keys (plan 03C). The file holds
     # known_hosts lines obtained and checked independently of the connection (never ssh-keyscan output);
@@ -1979,6 +2015,7 @@ case "$command" in
     register-outputs) cmd_register_outputs "$@" ;;
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
     import-git-known-hosts) cmd_import_git_known_hosts "$@" ;;
+    ssh-recovery-diagnostics) cmd_ssh_recovery_diagnostics ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
