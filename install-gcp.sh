@@ -100,11 +100,15 @@ bioaf_load_helper() {
 # ---------------------------------------------------------------------------
 BIOAF_VERBOSE=0
 BIOAF_INSTALLER_REF="${BIOAF_INSTALLER_REF:-}"
+ADMIN_SSH_KEY=ask
 gcp_usage() {
     cat <<'USAGE'
-Usage: install-gcp.sh [--ref <ref>] [--verbose]
+Usage: install-gcp.sh [--admin-ssh-key] [--ref <ref>] [--verbose]
 
 Options:
+  --admin-ssh-key Require this computer's SSH key for administrator access to the
+                  bioAF server (asked interactively when not given). The private
+                  key stays here; this does not limit which networks reach SSH.
   --ref <ref>     The bioAF branch, tag or commit this script came from. Its
                   helpers are downloaded from the same ref when there is no
                   installer/ folder beside the script (e.g. run as curl | bash).
@@ -121,6 +125,7 @@ USAGE
 while [ $# -gt 0 ]; do
     case "$1" in
         --verbose|-v) BIOAF_VERBOSE=1 ;;
+        --admin-ssh-key) ADMIN_SSH_KEY=yes ;;
         --ref)
             if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then
                 printf 'install-gcp.sh: --ref needs a value (see --help)\n' >&2; exit 2
@@ -213,6 +218,8 @@ REQUIRED_APIS=(
     "artifactregistry.googleapis.com"
     "cloudbuild.googleapis.com"
     "secretmanager.googleapis.com"
+    # Cloud recovery SSH through Identity-Aware Proxy (plan 03B).
+    "iap.googleapis.com"
     "serviceusage.googleapis.com"
     "logging.googleapis.com"
     "cloudquotas.googleapis.com"
@@ -710,6 +717,26 @@ else
             --quiet
 fi
 
+# Cloud recovery access (plan 03B): SSH from Google's IAP range to this host only, at priority 850 so
+# an optional SSH filter's denies (priority 1000) never block it. bioAF keeps it in place afterwards;
+# your Google Cloud permissions are still required to use it.
+existing_iap=$(gcloud compute firewall-rules describe bioaf-ssh-recovery-iap --project="$PROJECT_ID" --format="value(name)" 2>/dev/null || echo "")
+if [ -n "$existing_iap" ]; then
+    step "Cloud recovery rule 'bioaf-ssh-recovery-iap' already exists" -- true
+else
+    step "Create cloud recovery rule 'bioaf-ssh-recovery-iap' (tcp:22 from IAP)" -- \
+        gcloud compute firewall-rules create bioaf-ssh-recovery-iap \
+            --project="$PROJECT_ID" \
+            --direction=INGRESS \
+            --priority=850 \
+            --action=ALLOW \
+            --rules=tcp:22 \
+            --source-ranges=35.235.240.0/20 \
+            --target-tags="$NETWORK_TAG" \
+            --description="Managed by bioAF (plan 03B): application-host SSH access." \
+            --quiet
+fi
+
 # ---------------------------------------------------------------------------
 # Step 7a: Service accounts (bioaf-bootstrap + bioaf-app) and tag
 # ---------------------------------------------------------------------------
@@ -1148,6 +1175,94 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
+# SSH recovery access (plan 03B): the optional administrator key, the automatic recovery probe under
+# your own Google Cloud identity, and the saved non-secret access sheet. Loaded only once a VM exists.
+# ---------------------------------------------------------------------------
+ACCESS_SHEET=""
+ACCESS_URL=""
+if [ -n "$VM_IP" ] && bioaf_load_helper installer/ssh_access.sh optional ssh_access_console_url \
+    ssh_access_write_sheet ssh_access_admin_key ssh_access_admin_policy_script ssh_access_probe_gcp \
+    ssh_access_prefill_probe; then
+    section "SSH recovery access"
+    INSTANCE_ID=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+        --format="value(id)" 2>/dev/null || echo "")
+    PLACEMENT=private; [ "$USE_PUBLIC_IP" = true ] && PLACEMENT=public
+
+    if [ "$ADMIN_SSH_KEY" = ask ]; then
+        say "  $SSH_ACCESS_ADMIN_KEY_HELP"
+        read -rp "  $SSH_ACCESS_ADMIN_KEY_QUESTION [y/N] " admin_answer || true
+        case "$admin_answer" in y|Y|yes|Yes) ADMIN_SSH_KEY=yes ;; *) ADMIN_SSH_KEY=no ;; esac
+    fi
+    if [ "$ADMIN_SSH_KEY" = yes ]; then
+        ADMIN_KEY=""; ADMIN_USER=""; ADMIN_OK=false
+        if ADMIN_KEY="$(ssh_access_admin_key)"; then
+            OSLOGIN=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+                --format="value(metadata.items.enable-oslogin)" 2>/dev/null || echo "")
+            [ -z "$OSLOGIN" ] && OSLOGIN=$(gcloud compute project-info describe --project="$PROJECT_ID" \
+                --format="value(commonInstanceMetadata.items.enable-oslogin)" 2>/dev/null || echo "")
+            if [ "$(printf '%s' "$OSLOGIN" | tr '[:upper:]' '[:lower:]')" = true ]; then
+                # Your own OS Login profile; nothing project-wide changes.
+                gcloud compute os-login ssh-keys add --key-file="${ADMIN_KEY}.pub" --quiet >/dev/null 2>&1 \
+                    && ADMIN_USER=$(gcloud compute os-login describe-profile --format="value(posixAccounts[0].username)" 2>/dev/null || echo "")
+            else
+                # This instance's own ssh-keys metadata, merged (other keys kept); never project-wide keys.
+                ADMIN_USER="$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+                KEYS_TMP="$(mktemp)"
+                gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+                    --format="value(metadata.items.ssh-keys)" 2>/dev/null > "$KEYS_TMP" || true
+                if ! grep -qF "$(awk '{print $2}' "${ADMIN_KEY}.pub")" "$KEYS_TMP"; then
+                    printf '%s:%s\n' "$ADMIN_USER" "$(cat "${ADMIN_KEY}.pub")" >> "$KEYS_TMP"
+                    gcloud compute instances add-metadata "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+                        --metadata-from-file=ssh-keys="$KEYS_TMP" --quiet >/dev/null 2>&1 || ADMIN_USER=""
+                fi
+                rm -f "$KEYS_TMP"
+            fi
+            if [ -n "$ADMIN_USER" ] && POLICY="$(ssh_access_admin_policy_script "$ADMIN_USER")" \
+                && gcloud compute ssh "${ADMIN_USER}@${VM_NAME}" --zone="$ZONE" --project="$PROJECT_ID" \
+                    --ssh-key-file="$ADMIN_KEY" --strict-host-key-checking=yes --command='sudo bash -s' \
+                    -- -o IdentitiesOnly=yes <<< "$POLICY" 2>/dev/null | grep -q BIOAF_ADMIN_POLICY=applied \
+                && gcloud compute ssh "${ADMIN_USER}@${VM_NAME}" --zone="$ZONE" --project="$PROJECT_ID" \
+                    --ssh-key-file="$ADMIN_KEY" --strict-host-key-checking=yes --command=true \
+                    -- -o IdentitiesOnly=yes -o PreferredAuthentications=publickey </dev/null >/dev/null 2>&1; then
+                ADMIN_OK=true
+            fi
+        fi
+        if [ "$ADMIN_OK" = true ]; then
+            ADMIN_FP="$(ssh-keygen -lf "${ADMIN_KEY}.pub" | awk '{print $2}')"
+            printf "admin_ssh_key: '{\"fingerprint\": \"%s\", \"account\": \"%s\", \"instance_id\": \"%s\"}'\n" \
+                "$ADMIN_FP" "$ADMIN_USER" "$INSTANCE_ID" >> "$PREFILL_LOCAL"
+            step "Administrator login as ${ADMIN_USER} now requires ${ADMIN_KEY} (${ADMIN_FP})" -- true
+        else
+            warn "The administrator key could not be required; the server's previous SSH login settings were kept."
+        fi
+    fi
+
+    PROBE="$(ssh_access_probe_gcp "$VM_NAME" "$ZONE" "$PROJECT_ID")"
+    case "$PROBE" in
+        succeeded) step "Recovery login check (temporary key through IAP)" -- true ;;
+        *) warn "The recovery login check through IAP did not succeed (your account needs IAP tunnel and SSH access). bioAF shows Needs attention in Settings until it is fixed." ;;
+    esac
+    [ -n "$INSTANCE_ID" ] && ssh_access_prefill_probe "$PREFILL_LOCAL" "$INSTANCE_ID" gcp_iap "$PROBE"
+
+    ACCESS_SHEET="${HOME}/.bioaf/access-gcp-${PROJECT_ID}-${VM_NAME}.txt"
+    if ssh_access_write_sheet "$ACCESS_SHEET" gcp "$PROJECT_ID" "$REGION" "$ZONE" "${INSTANCE_ID:-unknown}" "$VM_NAME" "$PLACEMENT" "${ADMIN_USER:-}"; then
+        ACCESS_URL="$(ssh_access_console_url gcp "$PROJECT_ID" "$ZONE" "$VM_NAME")"
+    else
+        ACCESS_SHEET=""
+    fi
+fi
+
+gcp_print_restore_access() {
+    [ -n "$ACCESS_URL" ] || return 0
+    echo ""
+    bold "  Restore SSH access (bookmark this; it works while bioAF is down):"
+    green "     ${ACCESS_URL}"
+    echo "     $(ssh_access_instruction gcp "$PLACEMENT")"
+    [ "$PLACEMENT" = public ] && echo "     $(ssh_access_gcp_command "$VM_NAME" "$PROJECT_ID" "$ZONE")"
+    echo "     Access sheet saved: ${ACCESS_SHEET}"
+}
+
+# ---------------------------------------------------------------------------
 # Offer to finish the setup automatically: SCP the prefill, SSH in, clone
 # bioAF, and run `./bioaf setup --prefill ...`. The user gets dropped into
 # the same setup wizard with values already populated.
@@ -1228,6 +1343,7 @@ if [ "$REMOTE_SETUP_SUCCEEDED" = true ]; then
     echo "  Use the setup code printed above to finish in the wizard. The wizard"
     echo "  will already have your project, region, and service account values"
     echo "  pre-populated from this installer run."
+    gcp_print_restore_access
     io_finish
     exit 0
 fi
@@ -1291,6 +1407,7 @@ sed 's/^/     /' "${PREFILL_LOCAL}"
 echo ""
 dim "  The setup wizard will detect the VM's attached identity and skip the"
 dim "  key-upload step. Pre-populated values come from the prefill file."
+gcp_print_restore_access
 
 io_finish
 exit

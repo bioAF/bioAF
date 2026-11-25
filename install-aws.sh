@@ -135,9 +135,10 @@ BIOAF_VERBOSE=0
 BIOAF_INSTALLER_REF="${BIOAF_INSTALLER_REF:-}"
 REGION_FLAG=""
 SSH_CIDR=""
+ADMIN_SSH_KEY=ask
 aws_usage() {
     cat <<'USAGE'
-Usage: install-aws.sh [--region <region>] [--ssh-cidr <cidr>] [--ref <ref>] [--verbose]
+Usage: install-aws.sh [--region <region>] [--ssh-cidr <cidr>] [--admin-ssh-key] [--ref <ref>] [--verbose]
 
 Options:
   --region <region>   AWS region to deploy into (e.g. us-east-1). Defaults to
@@ -148,6 +149,9 @@ Options:
                       this option. Pass 0.0.0.0/0 to allow SSH from anywhere
                       (e.g. to let a remote agent connect to the VM); only do
                       this on a disposable account.
+  --admin-ssh-key     Require this computer's SSH key for administrator access to the
+                      bioAF server (asked interactively when not given). The private
+                      key stays here; this does not limit which networks reach SSH.
   --ref <ref>         The bioAF branch, tag or commit this script came from.
                       Its helpers are downloaded from the same ref when there is
                       no installer/ folder beside the script (e.g. curl | bash).
@@ -170,6 +174,7 @@ aws_flag_error() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --verbose|-v) BIOAF_VERBOSE=1 ;;
+        --admin-ssh-key) ADMIN_SSH_KEY=yes ;;
         --region|--ssh-cidr|--ref)
             if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then aws_flag_error "$1 needs a value"; fi
             case "$1" in
@@ -211,6 +216,20 @@ io_init
 # loading as the output helper.
 # ---------------------------------------------------------------------------
 bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew || exit 1
+
+# SSH recovery access (plan 03B): the console link, access sheet, optional administrator key and the
+# automatic recovery probe. Loaded once a VM exists; optional: without it the install continues.
+ssh_access_ready() {
+    [ "${SSH_ACCESS_LOADED:-}" = yes ] && return 0
+    [ "${SSH_ACCESS_LOADED:-}" = no ] && return 1
+    if bioaf_load_helper installer/ssh_access.sh optional ssh_access_console_url ssh_access_write_sheet \
+        ssh_access_admin_key ssh_access_admin_policy_script ssh_access_probe_aws ssh_access_prefill_probe; then
+        SSH_ACCESS_LOADED=yes
+    else
+        SSH_ACCESS_LOADED=no
+        return 1
+    fi
+}
 # Prompts and interactive commands (sudo, ssh) all read from the terminal
 # from here on.
 attach_terminal || exit 1
@@ -431,6 +450,33 @@ if [ "${SG_REUSED:-false}" = true ]; then
         warn "Security group ${SECURITY_GROUP_NAME} also allows SSH from:${other_ssh}. Those rules were kept;"
         warn "remove any you no longer want (aws ec2 revoke-security-group-ingress --group-id ${SG_ID} ...)."
     fi
+fi
+
+# Cloud recovery access (plan 03B): a separate group allowing SSH only from the Region's AWS-managed
+# EC2 Instance Connect range, so the browser Connect route works even if the SSH range above
+# excludes you. The backend keeps it in place afterwards. Your AWS permissions are still required.
+RECOVERY_SG_ID="$(aws ec2 describe-security-groups \
+    --filters "Name=group-name,Values=bioaf-ssh-recovery" "Name=vpc-id,Values=${VPC_ID}" \
+    --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "None")"
+if [ "$RECOVERY_SG_ID" = "None" ] || [ -z "$RECOVERY_SG_ID" ]; then
+    RECOVERY_SG_ID="$(aws ec2 create-security-group --group-name bioaf-ssh-recovery \
+        --description "bioAF cloud recovery (EC2 Instance Connect)" --vpc-id "$VPC_ID" \
+        --query 'GroupId' --output text 2>/dev/null || echo "")"
+fi
+EIC_PREFIX_LIST="$(aws ec2 describe-managed-prefix-lists \
+    --filters "Name=prefix-list-name,Values=com.amazonaws.${REGION}.ec2-instance-connect" \
+    --query 'PrefixLists[0].PrefixListId' --output text 2>/dev/null || echo "")"
+if [ -n "$RECOVERY_SG_ID" ] && [[ "$EIC_PREFIX_LIST" == pl-* ]]; then
+    if aws ec2 authorize-security-group-ingress --group-id "$RECOVERY_SG_ID" \
+        --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,PrefixListIds=[{PrefixListId=${EIC_PREFIX_LIST}}]" \
+        >/dev/null 2>&1; then
+        step "Allow cloud recovery SSH (EC2 Instance Connect, ${EIC_PREFIX_LIST})" -- true
+    else
+        maybe_step "Cloud recovery SSH (EC2 Instance Connect) - already allowed" -- true
+    fi
+else
+    warn "Cloud recovery access could not be prepared here; bioAF checks it again in Settings."
+    RECOVERY_SG_ID=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -688,7 +734,7 @@ BIOAF_USERDATA_EOF
             --image-id "$AMI_ID" \
             --instance-type "$INSTANCE_TYPE" \
             --key-name "$KEY_NAME" \
-            --security-group-ids "$SG_ID" \
+            --security-group-ids "$SG_ID" ${RECOVERY_SG_ID:+"$RECOVERY_SG_ID"} \
             --subnet-id "$SUBNET_ID" \
             --associate-public-ip-address \
             --iam-instance-profile "Name=${APP_ROLE_NAME}" \
@@ -769,6 +815,61 @@ fi
 REMOTE_SETUP_SUCCEEDED=false
 SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes)
 
+# SSH recovery access (plan 03B), once the VM accepts SSH: the optional administrator key, the
+# automatic recovery probe under your own AWS identity, and the saved access sheet.
+ACCESS_SHEET=""
+aws_ssh_access_after_ready() {
+    ssh_access_ready || return 0
+    section "SSH recovery access"
+    if [ "$ADMIN_SSH_KEY" = ask ]; then
+        say "  $SSH_ACCESS_ADMIN_KEY_HELP"
+        read -rp "  $SSH_ACCESS_ADMIN_KEY_QUESTION [y/N] " admin_answer || true
+        case "$admin_answer" in y|Y|yes|Yes) ADMIN_SSH_KEY=yes ;; *) ADMIN_SSH_KEY=no ;; esac
+    fi
+    if [ "$ADMIN_SSH_KEY" = yes ]; then
+        local admin_key pub policy fp
+        if admin_key="$(ssh_access_admin_key)" && pub="$(cat "${admin_key}.pub")" \
+            && ssh "${SSH_OPTS[@]}" "ubuntu@${VM_IP}" \
+                "umask 077; mkdir -p ~/.ssh; grep -qxF '$pub' ~/.ssh/authorized_keys 2>/dev/null || printf '%s\n' '$pub' >> ~/.ssh/authorized_keys" \
+            && policy="$(ssh_access_admin_policy_script ubuntu)" \
+            && ssh -i "$admin_key" -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o BatchMode=yes \
+                "ubuntu@${VM_IP}" 'sudo bash -s' <<< "$policy" | grep -q BIOAF_ADMIN_POLICY=applied \
+            && ssh -i "$admin_key" -o IdentitiesOnly=yes -o IdentityAgent=none -o PreferredAuthentications=publickey \
+                -o StrictHostKeyChecking=yes -o BatchMode=yes "ubuntu@${VM_IP}" true; then
+            fp="$(ssh-keygen -lf "${admin_key}.pub" | awk '{print $2}')"
+            printf "admin_ssh_key: '{\"fingerprint\": \"%s\", \"account\": \"ubuntu\", \"instance_id\": \"%s\"}'\n" "$fp" "$INSTANCE_ID" >> "$PREFILL_LOCAL"
+            step "Administrator login now requires ${admin_key} (${fp})" -- true
+        else
+            warn "The administrator key could not be required; the server's previous SSH login settings were kept."
+        fi
+    fi
+    local probe
+    probe="$(ssh_access_probe_aws "$INSTANCE_ID" "$REGION" ubuntu "$VM_IP")"
+    case "$probe" in
+        succeeded) step "Recovery login check (temporary key through EC2 Instance Connect)" -- true ;;
+        denied) warn "Your AWS identity could not send a temporary key (ec2-instance-connect:SendSSHPublicKey). Browser recovery needs that permission." ;;
+        *) warn "The recovery login check did not succeed. bioAF shows Needs attention in Settings until it is fixed." ;;
+    esac
+    ssh_access_prefill_probe "$PREFILL_LOCAL" "$INSTANCE_ID" aws_eic "$probe"
+}
+
+aws_ssh_access_sheet() {
+    # The non-secret access sheet and the summary lines, whenever a VM exists.
+    [ -n "${INSTANCE_ID:-}" ] || return 0
+    ssh_access_ready || return 0
+    local partition=aws url
+    case "$REGION" in cn-*) partition=aws-cn ;; us-gov-*) partition=aws-us-gov ;; esac
+    ACCESS_SHEET="${HOME}/.bioaf/access-aws-${ACCOUNT_ID}-${INSTANCE_ID}.txt"
+    ssh_access_write_sheet "$ACCESS_SHEET" aws "$ACCOUNT_ID" "$REGION" "${AZ:-$REGION}" "$INSTANCE_ID" "$VM_NAME" public ubuntu "$partition" \
+        || { ACCESS_SHEET=""; return 0; }
+    url="$(ssh_access_console_url aws "$REGION" "$INSTANCE_ID" "$partition")"
+    echo ""
+    bold "  Restore SSH access (bookmark this; it works while bioAF is down):"
+    green "     ${url}"
+    echo "     $(ssh_access_instruction aws public) Choose Public IP and the username ubuntu."
+    echo "     Access sheet saved: ${ACCESS_SHEET}"
+}
+
 if [ "$finish_choice" = "1" ] && [ "$CAN_AUTO" = true ]; then
     section "Auto-handoff: copying prefill and starting setup on the VM"
 
@@ -781,6 +882,10 @@ if [ "$finish_choice" = "1" ] && [ "$CAN_AUTO" = true ]; then
         fi
         sleep 5
     done
+
+    if [ "$ssh_ready" = true ]; then
+        aws_ssh_access_after_ready
+    fi
 
     if [ "$ssh_ready" != true ]; then
         warn "VM not reachable over SSH yet; falling back to the worksheet."
@@ -818,6 +923,8 @@ git pull --ff-only origin main 2>/dev/null || true
         finish_choice=2
     fi
 fi
+
+aws_ssh_access_sheet
 
 if [ "$REMOTE_SETUP_SUCCEEDED" = true ]; then
     echo ""
