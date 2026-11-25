@@ -283,6 +283,64 @@ that has not chosen; later changes and withdrawal happen here. Nothing is sent u
 metrics** is chosen. See [Installation Metrics](installation-metrics.md) for exactly what is sent, to whom,
 and how to request deletion.
 
+## Security and SSH Access
+
+**Settings > Security and SSH access** holds optional SSH settings. Ordinary installation and work node
+launches need none of them. Each section appears only to roles with its permission (custom roles included).
+
+**Work node SSH login** (`work_nodes:configure`). Optional ranges (named addresses or networks). Inside a
+range, scientists log in with a password or their key; from anywhere else, key only. The backend's own sync
+account always needs its key. A change applies to work nodes launched after **Apply changes**; running work
+nodes keep their rule and are never restarted. This does not limit which networks can reach SSH: a work
+node with a public address is still reachable. **Save changes** keeps a draft, **Check access** explains the
+result, **Apply changes** puts it in force, and **Roll back** returns to the previous setting. **Use this
+computer's address** only suggests the address bioAF sees for your browser; your terminal may use another.
+
+**Application server SSH** (`infrastructure:configure`; applying the filter needs `infrastructure:deploy`).
+
+- *Restrict SSH by IP address* limits SSH to the server (never web or API access). bioAF writes the cloud
+  firewall itself; before it applies a filter it checks the cloud recovery route and keeps your current
+  access if anything needs attention.
+- *Cloud recovery access is always allowed. Your cloud-account permissions are still required.* On Google
+  Cloud, SSH from Identity-Aware Proxy (35.235.240.0/20, priority 850); on AWS, EC2 Instance Connect's
+  managed range (or a prepared endpoint for a private server). The filter, an empty list or a rollback never
+  removes it. bioAF's own cloud credentials (and anyone with the same cloud rights) could still delete it;
+  bioAF reports that and puts it back. **Configured (automatic checks)** means bioAF's machine checks
+  passed; **Login tested** means the installer's recovery login succeeded on this server. Neither proves a
+  particular person can sign in.
+- *Administrator SSH authentication* shows the key the installer required, if you chose it.
+- **Restore SSH access** opens this server's page in your cloud console. It changes nothing and uses no
+  bioAF credential.
+
+### Getting back in
+
+| Situation | What to do |
+| --- | --- |
+| SSH blocked, bioAF works | Add your address in Settings, or use **Restore SSH access**. |
+| Laptop or key lost | Sign in to the cloud account from another computer and follow the saved route. No old key is needed. |
+| bioAF is down | Use the bookmarked console link or the access sheet the installer saved (`~/.bioaf/access-*.txt`). |
+| Sheet and laptop lost | Sign in to the cloud account, open the project (Google Cloud) or Region (AWS), find the instance named `bioaf` (network tag `bioaf` on Google Cloud), then follow the steps below. |
+| Server OS or SSH broken, or cloud account lost | Use your cloud provider's own recovery; a link cannot fix these. |
+
+- **Google Cloud, private server:** Sign in to the Google Cloud account used for this server, then choose SSH.
+- **Google Cloud, public server:** Open Cloud Shell on this server's page, paste the recovery command below, and press Enter:
+  `gcloud compute ssh INSTANCE --project=PROJECT --zone=ZONE --tunnel-through-iap`
+  (the console's SSH button does not use IAP for a server with a public address).
+- **AWS:** Sign in to the AWS account used for this server, choose Connect, then EC2 Instance Connect and
+  Connect. Choose Public IP (Private IP and the prepared endpoint for a private server) and the username
+  `ubuntu`.
+
+If you add a temporary direct SSH rule by hand, give it priority 850 on Google Cloud (not the default 1000),
+one address family, and an exact `/32` or `/128`; remove it afterwards. Keep the bioAF recovery rules.
+
+### Approved Git servers
+
+Work nodes, RStudio and custom pipelines verify GitHub with keys shipped in each release. For another Git
+server, get its SSH host keys from that server's administrator (never from `ssh-keyscan`), save them in a
+file, and on the bioAF server run `./bioaf import-git-known-hosts <file> "<where the keys came from>"`. The
+file replaces the approved set. Until a used server has approved keys, Settings shows **A connected code
+repository needs a security setting before this update can finish. Existing work has been left running.**
+
 ## Audit and Operational Logs
 
 **Settings > Audit Log** shows explicitly audited actions and attribution, with filters for resource type,

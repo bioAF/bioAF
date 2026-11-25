@@ -394,6 +394,33 @@ what this installation last applied, the updater asks the backend to record a no
 checks at startup), and administrators apply the changes from the app. See
 [Infrastructure Changes After an Update](user-guide-admin.md#infrastructure-changes-after-an-update).
 
+### Running work nodes and the update
+
+Work nodes launched before this release keep the key the backend uses to save their outputs only in the
+running backend's memory. Before the updater replaces the backend, it checks (from the new release's image,
+against your cloud provider's list of work node VMs) that none of those older work nodes may still exist.
+If any might, the update waits and says:
+
+> Some older work nodes are still running. Finish saving your work and stop them when convenient, then
+> retry the update. bioAF will leave them running.
+
+Nothing is stopped for you, and the current installation keeps running. Use **View work nodes** and
+**Check again** on **Settings > Platform Info**. If the check cannot reach your cloud provider, the update
+says **bioAF could not check whether this update is safe. Your current installation is still running. Try
+again shortly.** While the backend is replaced, new work node launches are paused for a few minutes and
+then reopen; work nodes launched after this release keep running through later normal updates.
+
+**One-time retry from an older release.** An updater from v0.13.0 through v2026.11.21 cannot run that
+check, so the first attempt only prepares the new update helper and stops without changing bioAF:
+
+> The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue.
+
+An older update page may first show **Update failed: encryption key bootstrap failed** or **Update failed:
+Update process exited with code 1**. That is this preparation step, not a problem with your encryption key:
+do not change any keys. Retry the update (**Install Update** again, or `./bioaf update YYYY.M.N`); the retry
+runs the new updater and its work node check. Releases older than v0.13.0 need support before updating
+while work nodes are running.
+
 ### The update agent
 
 The agent is the `bioaf-update-agent` systemd service. It runs as the
