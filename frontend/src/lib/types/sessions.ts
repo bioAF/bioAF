@@ -323,6 +323,10 @@ export interface WorkNode {
   status: string;
   /** Set while status is "stop_failed": save_failed | delete_unconfirmed | state_unknown. */
   stop_failure?: string | null;
+  /** The Work Node SSH login rule revision this node was launched with (plan 03B). */
+  ssh_policy_revision?: number | null;
+  /** What the node reported applying: applied | failed | failed_closed. */
+  ssh_policy_status?: string | null;
   failure_reason: string | null;
   failure_message: string | null;
   access_url: string | null;

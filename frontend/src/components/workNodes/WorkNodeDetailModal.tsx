@@ -12,6 +12,7 @@ import {
   formatUptime,
   isConnectable,
   sshCommand,
+  sshLoginRuleText,
   stopFailedMessage,
   workNodeStatusLabel,
 } from "./workNodeDisplay";
@@ -135,6 +136,12 @@ export function WorkNodeDetailModal({
         <div className="flex justify-between">
           <span className="text-gray-500">Input Files</span>
           <span>{node.input_file_ids.length} file(s) in /data/</span>
+        </div>
+      )}
+      {sshLoginRuleText(node) && (
+        <div className="flex justify-between gap-4">
+          <span className="text-gray-500">SSH login rule</span>
+          <span className="text-right">{sshLoginRuleText(node)}</span>
         </div>
       )}
       <div className="flex justify-between">

@@ -52,3 +52,16 @@ export function sshCommand(accessUrl: string | null): string {
   const ip = accessUrl.replace("ssh://", "").replace(/:\d+$/, "");
   return `ssh ${ip}`;
 }
+
+/** The SSH login rule a node was launched with (plan 03B), or null for nodes from before rules existed. */
+export function sshLoginRuleText(node: WorkNode): string | null {
+  const revision = node.ssh_policy_revision;
+  if (revision === null || revision === undefined) return null;
+  if (node.ssh_policy_status === "failed_closed") {
+    return `Revision ${revision} could not be applied as set; this work node accepts key login only`;
+  }
+  if (revision === 0) return "No range: password or key from anywhere";
+  if (!node.ssh_policy_status) return `Revision ${revision} (not reported by the work node yet)`;
+  if (node.ssh_policy_status === "failed") return `Revision ${revision} could not be checked on this work node`;
+  return `Revision ${revision}, in force on this work node`;
+}
