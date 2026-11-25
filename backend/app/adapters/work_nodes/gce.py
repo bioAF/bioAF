@@ -54,6 +54,13 @@ _local_vms: dict[str, dict] = {}
 _UNKNOWN = object()
 
 
+def _internal_ip(instance) -> str | None:
+    for iface in instance.network_interfaces:
+        if getattr(iface, "network_i_p", None):
+            return iface.network_i_p
+    return None
+
+
 def _external_ip(instance) -> str | None:
     for iface in instance.network_interfaces:
         for ac in iface.access_configs:
@@ -553,7 +560,8 @@ class GceVmInstance(VmInstance):
                 instance.disks = [disk]
 
                 network_interface = compute_v1.NetworkInterface()
-                network_interface.name = "global/networks/default"
+                # The application VM's own network (plan 03B private sync); "default" otherwise.
+                network_interface.network = f"global/networks/{vm_spec.get('network') or 'default'}"
                 access_config = compute_v1.AccessConfig()
                 access_config.name = "External NAT"
                 access_config.type_ = "ONE_TO_ONE_NAT"
@@ -568,6 +576,8 @@ class GceVmInstance(VmInstance):
 
                 tags = compute_v1.Tags()
                 tags.items = ["bioaf-work-node"]
+                if vm_spec.get("sync_route") == "private-v1" and vm_spec.get("sync_tag"):
+                    tags.items.append(vm_spec["sync_tag"])
                 instance.tags = tags
 
                 instance.labels = {
@@ -812,6 +822,7 @@ class GceVmInstance(VmInstance):
         host_public_key: str | None = None,
         provider_instance_id: str | None = None,
         launch_attempt_id: str | None = None,
+        sync_route: str | None = None,
         **kwargs,
     ) -> dict:
         """Save the node's outputs over verified SSH, then delete the VM and confirm it is gone.
@@ -853,7 +864,9 @@ class GceVmInstance(VmInstance):
             if instance.status != "RUNNING":
                 return kept(STOP_STATE_UNKNOWN)
             if session_id:
-                address = _external_ip(instance)
+                # Private-route nodes are saved over the internal network (plan 03B); earlier
+                # generations keep the public route they were launched with.
+                address = _internal_ip(instance) if sync_route == "private-v1" else _external_ip(instance)
                 if not (working_bucket and address and sync_private_key and host_public_key):
                     return kept(STOP_SAVE_FAILED, "running")
                 command = sync_outputs_command(

@@ -181,6 +181,12 @@ class WorkNodeService:
                     }
                 )
 
+        # The private route backend sync will use (plan 03B). A failed private route refuses the
+        # launch before anything is recorded or provisioned; it never switches to public sync.
+        from app.services.backend_sync_route import ensure_backend_sync_route
+
+        route = await ensure_backend_sync_route(session)
+
         # Create session record
         compute_session = ComputeSession(
             user_id=user_id,
@@ -306,6 +312,15 @@ class WorkNodeService:
             # generated and committed with 'starting', before the provider call, so any worker
             # can save this node's outputs after a restart. Only public halves and the node's own
             # host key travel to the node; the sync private key stays encrypted on this row.
+            compute_session.sync_route = route["route"]
+            vm_spec["sync_route"] = route["route"]
+            if route.get("network"):
+                vm_spec["network"] = route["network"]
+            if route.get("tag"):
+                vm_spec["sync_tag"] = route["tag"]
+            if route.get("security_group"):
+                vm_spec["backend_sync_security_group"] = route["security_group"]
+
             identity = generate_node_identity()
             compute_session.sync_private_key = identity.sync_private_key
             compute_session.host_public_key = identity.host_public_key
@@ -460,6 +475,7 @@ class WorkNodeService:
                     host_public_key=node.host_public_key,
                     provider_instance_id=node.provider_instance_id,
                     launch_attempt_id=node.launch_attempt_id,
+                    sync_route=node.sync_route,
                 )
             except Exception:
                 logger.exception("Stopping work node %d raised; keeping it", node.id)

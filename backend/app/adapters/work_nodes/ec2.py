@@ -482,7 +482,12 @@ class Ec2VmInstance(VmInstance):
                 {
                     "DeviceIndex": 0,
                     "SubnetId": subnet_id,
-                    "Groups": [security_group_id],
+                    "Groups": [security_group_id]
+                    + (
+                        [vm_spec["backend_sync_security_group"]]
+                        if vm_spec.get("sync_route") == "private-v1" and vm_spec.get("backend_sync_security_group")
+                        else []
+                    ),
                     "AssociatePublicIpAddress": True,
                     "DeleteOnTermination": True,
                 }
@@ -620,6 +625,7 @@ class Ec2VmInstance(VmInstance):
         sync_private_key: str | None = None,
         host_public_key: str | None = None,
         launch_attempt_id: str | None = None,
+        sync_route: str | None = None,
         **kwargs,
     ) -> TerminationResult:
         """Save the node's outputs over verified SSH, then terminate it and confirm termination.
@@ -657,7 +663,10 @@ class Ec2VmInstance(VmInstance):
                 if state != "running":
                     return kept(STOP_STATE_UNKNOWN)
                 if session_id:
-                    public_ip = inst.get("PublicIpAddress")
+                    # Private-route nodes are saved over the peered network (plan 03B).
+                    public_ip = (
+                        inst.get("PrivateIpAddress") if sync_route == "private-v1" else inst.get("PublicIpAddress")
+                    )
                     if not (working_bucket and public_ip and sync_private_key and host_public_key):
                         return kept(STOP_SAVE_FAILED, "running")
                     command = sync_outputs_command(
