@@ -26,7 +26,7 @@ SSH_ACCESS_GCP_PUBLIC="Open Cloud Shell on this server's page, paste the recover
 SSH_ACCESS_AWS="Sign in to the AWS account used for this server, choose Connect, then EC2 Instance Connect and Connect."
 SSH_ACCESS_GCP_HOST_KEYS_MISSING="The server has not published its SSH host keys, so this computer cannot verify it and the SSH checks were skipped. Stop and start the VM in the Google Cloud console, then run the installer again."
 SSH_ACCESS_ADMIN_KEY_QUESTION="Require this computer's SSH key for administrator access?"
-SSH_ACCESS_ADMIN_KEY_HELP="Use an SSH key stored on this computer for direct administrator access to the bioAF server. bioAF installs the public key; the private key stays here. This does not limit which networks can reach SSH."
+SSH_ACCESS_ADMIN_KEY_HELP="Use an SSH key stored on this computer for direct administrator access to the bioAF server. bioAF installs the public key; the private key stays here. Other SSH keys already allowed for this account keep working. This does not limit which networks can reach SSH."
 
 _ssh_access_match() { [[ "$2" =~ $1 ]]; }
 

@@ -158,7 +158,12 @@ test("the installer administrator key is shown by fingerprint, separately from n
   serve({ application_host: { ...host, admin_key: { fingerprint: "SHA256:abc", account: "ubuntu", current: true }, git_trust: { hosts_needing_keys: [], message: null, procedure: null } } });
   render(<SshAccessPage />);
   const section = await screen.findByRole("region", { name: "Application server SSH" });
-  expect(within(section).getByText(/Administrator login as ubuntu requires the key SHA256:abc/)).toBeInTheDocument();
+  // Owner-approved wording (2026-11-25): an SSH key is required, not only this key.
+  expect(
+    within(section).getByText(
+      /Administrator login as ubuntu requires an SSH key; password login is off\. The installer added this computer's key \(SHA256:abc\)\. Other keys authorized for this account also work\./,
+    ),
+  ).toBeInTheDocument();
   expect(within(section).getByText(/does not limit which networks can reach SSH/)).toBeInTheDocument();
 });
 

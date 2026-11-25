@@ -338,7 +338,7 @@ function HostCard({ section, reload }: { section: HostSection; reload: () => voi
         <h3 className="mt-4 text-sm font-semibold">Administrator SSH authentication</h3>
         <p className="text-sm text-gray-700">
           {section.admin_key
-            ? `Administrator login as ${section.admin_key.account} requires the key ${section.admin_key.fingerprint}, set up by the installer${section.admin_key.current ? "" : " for an earlier server"}. This does not limit which networks can reach SSH.`
+            ? `Administrator login as ${section.admin_key.account} requires an SSH key; password login is off. The installer added this computer's key (${section.admin_key.fingerprint})${section.admin_key.current ? "" : " for an earlier server"}. Other keys authorized for this account also work. This does not limit which networks can reach SSH.`
             : "No installer key requirement is recorded; administrator login follows the server's own settings."}
         </p>
 

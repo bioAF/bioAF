@@ -164,3 +164,7 @@ STUB
     [ "$status" -eq 1 ]
     [[ "$SSH_ACCESS_GCP_HOST_KEYS_MISSING" == *"host key"* ]]
 }
+
+@test "the administrator key help says other keys for the account keep working" {
+    [[ "$SSH_ACCESS_ADMIN_KEY_HELP" == *"Other SSH keys already allowed for this account keep working."* ]]
+}

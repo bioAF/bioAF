@@ -45,7 +45,8 @@
   firewall or security group rule would let SSH bypass it. Only one filter change (or other
   infrastructure operation) runs at a time; one that is interrupted is undone before the next.
 - The installers prepare cloud recovery access, can **Require this computer's SSH key for administrator
-  access?**, check recovery login with a temporary key, and save a non-secret access sheet with the console
-  link in `~/.bioaf/`.
+  access?** (password login is turned off for the administrator; other SSH keys already allowed for that
+  account keep working), check recovery login with a temporary key, and save a non-secret access sheet with
+  the console link in `~/.bioaf/`.
 - After updating an AWS installation, re-apply the compute stack (Infrastructure) so new work nodes are
   saved over the private network; until then they keep the existing route.
