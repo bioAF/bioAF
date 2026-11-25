@@ -57,6 +57,11 @@ class FakeFirewalls:
         self.rules[firewall] = firewall_resource
         return self._op()
 
+    def update(self, project, firewall, firewall_resource):
+        self.calls.append(("update", firewall))
+        self.rules[firewall] = firewall_resource
+        return self._op()
+
     def delete(self, project, firewall):
         self.calls.append(("delete", firewall))
         self.rules.pop(firewall, None)
@@ -519,3 +524,36 @@ def test_gcp_a_recovery_rule_reported_with_a_full_network_url_is_still_ours():
     assert net.check_recovery() == []
     net.ensure_recovery()
     assert fw.calls == []
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("source_tags", ["internal-vm"]),
+        ("source_service_accounts", ["builder@lab-project.iam.gserviceaccount.com"]),
+        ("destination_ranges", ["10.0.0.0/8"]),
+    ],
+)
+def test_gcp_an_added_source_selector_is_reported_and_removed(field, value):
+    """Review 8: GCP admits a source tag OR a source range, so an added selector widens access.
+    A patch cannot clear a list, so the rule is replaced whole."""
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    setattr(fw.rules["bioaf-ssh-recovery-iap"], field, value)
+    assert net.check_recovery() == ["The IAP recovery rule was changed outside bioAF."]
+    net.ensure_recovery()
+    assert ("update", "bioaf-ssh-recovery-iap") in fw.calls
+    assert list(getattr(fw.rules["bioaf-ssh-recovery-iap"], field)) == []
+    assert net.check_recovery() == []
+
+
+def test_gcp_an_added_source_tag_on_the_filter_allow_rule_is_removed():
+    fw = FakeFirewalls()
+    net = GcpHostNetwork(GCP, client=fw, target_tag="bioaf")
+    net.ensure_recovery()
+    net.apply_filter(["203.0.113.7/32"])
+    allow = next(name for name in fw.rules if "allow" in name)
+    fw.rules[allow].source_tags = ["internal-vm"]
+    net.apply_filter(["203.0.113.7/32"])
+    assert list(fw.rules[allow].source_tags) == []

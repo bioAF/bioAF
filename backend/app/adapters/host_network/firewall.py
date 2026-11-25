@@ -79,6 +79,19 @@ def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
     return False
 
 
+# Rule lists a patch cannot empty (an empty list is not sent), so removing them needs a full update.
+_CLEARED_BY_UPDATE_ONLY = (
+    "source_tags",
+    "source_service_accounts",
+    "target_service_accounts",
+    "destination_ranges",
+    "source_ranges",
+    "target_tags",
+    "allowed",
+    "denied",
+)
+
+
 class GcpHostNetwork:
     def __init__(self, identity, *, client, target_tag: str = "bioaf"):
         self.identity = identity
@@ -132,6 +145,12 @@ class GcpHostNetwork:
             bool(rule.disabled),
             rule.direction or "INGRESS",
             self._network_path(rule.network),
+            # GCP admits a source tag or service account OR a source range, so extra selectors widen
+            # access; target service accounts and destination ranges change what the rule covers.
+            sorted(rule.source_tags),
+            sorted(rule.source_service_accounts),
+            sorted(rule.target_service_accounts),
+            sorted(rule.destination_ranges),
         )
 
     def _upsert(self, rule) -> None:
@@ -139,7 +158,11 @@ class GcpHostNetwork:
         if current is None:
             self.client.insert(project=self.project, firewall_resource=rule).result(timeout=120)
         elif self._effect(current) != self._effect(rule):
-            self.client.patch(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
+            if any(list(getattr(current, f)) and not list(getattr(rule, f)) for f in _CLEARED_BY_UPDATE_ONLY):
+                # A patch leaves a list it does not mention: replace the whole rule to remove it.
+                self.client.update(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
+            else:
+                self.client.patch(project=self.project, firewall=rule.name, firewall_resource=rule).result(timeout=120)
 
     def _delete(self, name) -> None:
         if self._existing(name) is not None:
