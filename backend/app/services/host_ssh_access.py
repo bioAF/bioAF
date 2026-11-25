@@ -53,7 +53,16 @@ def _empty() -> dict:
 async def _read(session) -> dict:
     from app.platform.platform_config_service import PlatformConfigService
 
-    raw = await PlatformConfigService.get(session, FILTER_KEY)
+    return _parse(await PlatformConfigService.get(session, FILTER_KEY))
+
+
+async def _write(session, record: dict) -> None:
+    from app.platform.platform_config_service import PlatformConfigService
+
+    await PlatformConfigService.set(session, FILTER_KEY, json.dumps(record))
+
+
+def _parse(raw: str | None) -> dict:
     if not raw:
         return _empty()
     try:
@@ -67,10 +76,51 @@ async def _read(session) -> dict:
         ) from None
 
 
-async def _write(session, record: dict) -> None:
+async def _update(session, change) -> dict:
+    """The one way to write the record: lock its row, read it fresh, apply ``change`` and write it back.
+
+    Every writer (draft saves, Check access, filter changes, recovery) changes only its own fields of
+    the current stored record, so none can erase another's (for example a committed recovery journal).
+    The lock is held until the caller's transaction ends.
+    """
+    from sqlalchemy import text
+
     from app.platform.platform_config_service import PlatformConfigService
 
-    await PlatformConfigService.set(session, FILTER_KEY, json.dumps(record))
+    await session.execute(
+        text("INSERT INTO platform_config (key, value) VALUES (:k, :v) ON CONFLICT (key) DO NOTHING"),
+        {"k": FILTER_KEY, "v": PlatformConfigService._maybe_encrypt(FILTER_KEY, json.dumps(_empty()))},
+    )
+    record = _parse(await PlatformConfigService.get_for_update(session, FILTER_KEY))
+    change(record)
+    await _write(session, record)
+    return record
+
+
+async def _provider(fn, *args):
+    """Run a blocking provider call in a worker thread.
+
+    A thread keeps running after its awaiting task is cancelled, so on cancellation this waits for
+    the call to return before re-raising: the infrastructure operation keeps its exclusive slot until
+    the cloud work has settled, and a retry cannot race it.
+    """
+    future = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    cancelled = False
+    while True:
+        try:
+            result = await asyncio.shield(future)
+            break
+        except asyncio.CancelledError:
+            if future.done():
+                raise
+            cancelled = True
+        except Exception:
+            if cancelled:
+                raise asyncio.CancelledError() from None
+            raise
+    if cancelled:
+        raise asyncio.CancelledError()
+    return result
 
 
 async def network_for(session, identity):
@@ -172,8 +222,8 @@ async def preflight(session, *, reconcile: bool) -> dict:
     try:
         driver = await network_for(session, identity)
         # Provider calls can wait minutes; they run off the serving event loop.
-        sources = await asyncio.to_thread(driver.ensure_recovery if reconcile else driver.recovery_sources)
-        problems += await asyncio.to_thread(driver.check_recovery)
+        sources = await _provider(driver.ensure_recovery if reconcile else driver.recovery_sources)
+        problems += await _provider(driver.check_recovery)
     except Exception as exc:
         problems.append(f"bioAF could not read or change this server's firewall ({type(exc).__name__}).")
     problems += guest_problems(identity)
@@ -202,11 +252,18 @@ async def preflight(session, *, reconcile: bool) -> dict:
 async def check_access(session) -> dict:
     request_guest_diagnostics()
     recovery = await preflight(session, reconcile=False)
-    record = await _read(session)
-    if record.get("pending"):
-        recovery = {**recovery, "status": "needs_attention", "problems": [*recovery["problems"], UNFINISHED_CHANGE]}
-    record["recovery"] = recovery
-    await _write(session, record)
+
+    def change(record: dict) -> None:
+        nonlocal recovery
+        if record.get("pending"):
+            recovery = {
+                **recovery,
+                "status": "needs_attention",
+                "problems": [*recovery["problems"], UNFINISHED_CHANGE],
+            }
+        record["recovery"] = recovery
+
+    await _update(session, change)
     await session.commit()
     return {"recovery": recovery}
 
@@ -217,15 +274,21 @@ async def check_access(session) -> dict:
 async def save_draft(session, *, enabled: bool, ranges: list[dict], base_version: int, actor_id: int) -> dict:
     from app.services.audit_service import log_action
 
-    record = await _read(session)
-    draft = record["draft"]
-    if base_version != draft["version"]:
-        raise ConflictError("These settings were changed by someone else. Reload them, then make your change again.")
-    validated = _validated_entries(ranges, draft.get("ranges", []) + record["applied"].get("ranges", []))
-    if enabled and not validated:
-        raise ValidationError("Add at least one address or range, or turn the filter off.")
-    record["draft"] = {"version": draft["version"] + 1, "enabled": bool(enabled), "ranges": validated}
-    await _write(session, record)
+    validated: list[dict] = []
+
+    def change(record: dict) -> None:
+        nonlocal validated
+        draft = record["draft"]
+        if base_version != draft["version"]:
+            raise ConflictError(
+                "These settings were changed by someone else. Reload them, then make your change again."
+            )
+        validated = _validated_entries(ranges, draft.get("ranges", []) + record["applied"].get("ranges", []))
+        if enabled and not validated:
+            raise ValidationError("Add at least one address or range, or turn the filter off.")
+        record["draft"] = {"version": draft["version"] + 1, "enabled": bool(enabled), "ranges": validated}
+
+    record = await _update(session, change)
     await log_action(
         session,
         user_id=actor_id,
@@ -246,20 +309,19 @@ def _carry_forward(previous: dict | None, resources: dict | None) -> dict | None
     return {**resources, "revoked": merged}
 
 
-async def _restore_unfinished(session, record: dict, driver, *, actor_id: int) -> None:
+async def _restore_unfinished(session, driver, *, actor_id: int) -> None:
     """Put back the access an interrupted change saved before it touched the cloud."""
     from app.services.audit_service import log_action
 
-    pending = record.get("pending")
+    pending = (await _read(session)).get("pending")
     if not pending:
         return
     try:
-        await asyncio.to_thread(driver.restore, pending["snapshot"])
+        await _provider(driver.restore, pending["snapshot"])
     except Exception as exc:
         logger.error("Restoring an unfinished SSH filter change failed (%s)", type(exc).__name__)
         raise ConflictError(UNFINISHED_RESTORE_FAILED) from None
-    record.pop("pending", None)
-    await _write(session, record)
+    record = await _update(session, lambda r: r.pop("pending", None))
     await log_action(
         session,
         user_id=actor_id,
@@ -285,42 +347,44 @@ async def _apply(
 
     identity = await current_host_identity(session)
     driver = await network_for(session, identity)
-    await _restore_unfinished(session, record, driver, actor_id=actor_id)
+    await _restore_unfinished(session, driver, actor_id=actor_id)
 
     recovery = await preflight(session, reconcile=True)
-    record["recovery"] = recovery
     if recovery["status"] == "needs_attention":
-        await _write(session, record)
+        await _update(session, lambda r: r.__setitem__("recovery", recovery))
         await session.commit()
         raise ConflictError(NEEDS_ATTENTION_REFUSAL)
-    applied = record["applied"]
+    # Only the operation that holds the exclusive slot changes "applied", so this read stays current.
+    applied = (await _read(session))["applied"]
     cidrs = [normalize_range(r["cidr"]) for r in ranges]
 
-    record["pending"] = {
+    pending = {
         "operation_id": operation_id,
-        "snapshot": await asyncio.to_thread(driver.snapshot),
+        "snapshot": await _provider(driver.snapshot),
         "enabled": enabled,
         "ranges": cidrs,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
-    await _write(session, record)
+
+    def journal(r: dict) -> None:
+        r["recovery"] = recovery
+        r["pending"] = pending
+
+    await _update(session, journal)
     await session.commit()
     try:
         if enabled:
-            resources = _carry_forward(applied.get("resources"), await asyncio.to_thread(driver.apply_filter, cidrs))
+            resources = _carry_forward(applied.get("resources"), await _provider(driver.apply_filter, cidrs))
         else:
-            await asyncio.to_thread(driver.remove_filter, applied.get("resources"))
+            await _provider(driver.remove_filter, applied.get("resources"))
             resources = None
     except FilterApplyError as exc:
-        # The driver put the previous rules back, unless it says it could not (then keep the snapshot).
+        # The driver put the previous rules back, unless it says it could not (then keep the journal).
         if str(exc) != RESTORE_FAILED:
-            record.pop("pending", None)
-        await _write(session, record)
-        await session.commit()
+            await _update(session, lambda r: r.pop("pending", None))
+            await session.commit()
         raise ConflictError(str(exc)) from None
-    record.pop("pending", None)
-    record["previous"] = applied
-    record["applied"] = {
+    new_applied = {
         "revision": applied["revision"] + 1,
         "enabled": enabled,
         "ranges": ranges,
@@ -329,7 +393,13 @@ async def _apply(
         "applied_by": actor_id,
         "instance_id": identity.instance_id,
     }
-    await _write(session, record)
+
+    def settle(r: dict) -> None:
+        r.pop("pending", None)
+        r["previous"] = applied
+        r["applied"] = new_applied
+
+    await _update(session, settle)
     await log_action(
         session,
         user_id=actor_id,
@@ -337,7 +407,7 @@ async def _apply(
         entity_id=0,
         action=action,
         details={
-            "revision": record["applied"]["revision"],
+            "revision": new_applied["revision"],
             "enabled": enabled,
             "ranges": cidrs,
             "instance_id": identity.instance_id,
@@ -346,7 +416,7 @@ async def _apply(
         previous_value={"revision": applied["revision"], "enabled": applied.get("enabled")},
     )
     await session.commit()
-    return record["applied"]
+    return new_applied
 
 
 async def _as_operation(session, *, actor_id: int, change) -> dict:

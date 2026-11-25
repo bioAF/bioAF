@@ -393,3 +393,111 @@ async def test_an_interrupted_filter_change_is_restored_from_its_saved_snapshot_
     host.driver.restore.assert_called_once_with({"provider": "gcp", "rules": {"bioaf-ssh-filter-deny-v4": None}})
     check = (await client.post(f"{BASE}/host/check", headers=admin)).json()
     assert not any("did not finish" in p for p in check["recovery"]["problems"])
+
+
+# -- Review 3: one writer at a time for the filter record; cancellation keeps ownership -------------
+
+
+async def _hold_record_with_pending(other):
+    """In ``other``'s open transaction: lock the filter record and add a recovery journal (not committed)."""
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services import host_ssh_access
+
+    await PlatformConfigService.set(other, host_ssh_access.FILTER_KEY, json.dumps(host_ssh_access._empty()))
+    await other.commit()
+    record = json.loads(await PlatformConfigService.get_for_update(other, host_ssh_access.FILTER_KEY))
+    record["pending"] = {"operation_id": 7, "snapshot": {"provider": "gcp", "rules": {}}}
+    await PlatformConfigService.set(other, host_ssh_access.FILTER_KEY, json.dumps(record))
+
+
+async def _stored(session) -> dict:
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services import host_ssh_access
+
+    session.expire_all()
+    return json.loads(await PlatformConfigService.get(session, host_ssh_access.FILTER_KEY))
+
+
+@pytest.mark.asyncio
+async def test_a_draft_save_keeps_a_recovery_journal_committed_while_it_ran(session, admin_user, host):
+    import asyncio
+
+    import app.database as database
+    from app.services import host_ssh_access
+
+    async with database.async_session_factory() as other:
+        await _hold_record_with_pending(other)
+        save = asyncio.create_task(
+            host_ssh_access.save_draft(
+                session,
+                enabled=True,
+                ranges=[{"name": "A", "cidr": "203.0.113.7"}],
+                base_version=0,
+                actor_id=admin_user.id,
+            )
+        )
+        await asyncio.sleep(0.5)
+        await other.commit()
+    await save
+    await session.commit()
+    stored = await _stored(session)
+    assert stored["pending"]["operation_id"] == 7
+    assert stored["draft"]["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_check_access_keeps_a_recovery_journal_committed_while_it_ran(session, admin_user, host):
+    import asyncio
+
+    import app.database as database
+    from app.services import host_ssh_access
+
+    _diagnostics(host)
+    async with database.async_session_factory() as other:
+        await _hold_record_with_pending(other)
+        check = asyncio.create_task(host_ssh_access.check_access(session))
+        await asyncio.sleep(0.5)
+        await other.commit()
+    await check
+    stored = await _stored(session)
+    assert stored["pending"]["operation_id"] == 7
+    assert any("did not finish" in p for p in stored["recovery"]["problems"])
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_filter_change_keeps_the_operation_until_the_cloud_call_returns(session, admin_user, host):
+    """A worker thread keeps running after its awaiting task is cancelled, so the operation's exclusive
+    slot is held until the provider call returns; a retry cannot start meanwhile."""
+    import asyncio
+    import threading
+
+    import app.database as database
+    from app.services import host_ssh_access
+    from app.services import infrastructure_operations as ops
+
+    _diagnostics(host)
+    started, release = threading.Event(), threading.Event()
+
+    def slow_apply(cidrs):
+        started.set()
+        release.wait(10)
+        return {"provider": "gcp", "rules": []}
+
+    host.driver.apply_filter.side_effect = slow_apply
+    draft = await host_ssh_access.save_draft(
+        session, enabled=True, ranges=[{"name": "A", "cidr": "203.0.113.7"}], base_version=0, actor_id=admin_user.id
+    )
+    await session.commit()
+    change = asyncio.create_task(
+        host_ssh_access.apply_draft(session, draft_version=draft["version"], actor_id=admin_user.id)
+    )
+    assert await asyncio.to_thread(started.wait, 10)
+    change.cancel()
+    await asyncio.sleep(0.3)
+    async with database.async_session_factory() as s:
+        assert await ops.active_operation(s) is not None
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await change
+    async with database.async_session_factory() as s:
+        assert await ops.active_operation(s) is None
