@@ -10268,6 +10268,16 @@ export interface components {
         CertificateStatusResponse: {
             /** Fqdn */
             fqdn: string;
+            /** Issuer */
+            issuer?: string | null;
+            /** Last Renewal At */
+            last_renewal_at?: string | null;
+            /** Last Renewal Result */
+            last_renewal_result?: string | null;
+            /** Not After */
+            not_after?: string | null;
+            /** Renewed By Bioaf */
+            renewed_by_bioaf?: boolean | null;
             /** Status */
             status: string;
         };

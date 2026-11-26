@@ -67,7 +67,11 @@ async def create_schema(
         await conn.exec_driver_sql(f"CREATE SCHEMA {quoted}")
     for batch in create_batches(metadata):
         async with engine.begin() as conn:
-            await conn.run_sync(lambda sync, tables=batch: metadata.create_all(sync, tables=tables))
+
+            def create(sync, tables: list[Table] = batch) -> None:
+                metadata.create_all(sync, tables=tables)
+
+            await conn.run_sync(create)
             if on_batch is not None:
                 await on_batch(conn)
 

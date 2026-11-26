@@ -17,6 +17,7 @@ import pytest
 import pytest_asyncio
 import uvicorn
 import websockets
+from websockets.typing import Subprotocol
 from sqlalchemy import text
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -390,7 +391,7 @@ def _ws_headers(stack, nb, origin=None, cookies=None):
 async def test_the_owner_gets_a_websocket_with_the_ide_secret_and_without_gateway_cookies(nb, stack):
     url = f"ws://127.0.0.1:{stack['port']}/s/41/ws?session_id=abc"
     async with websockets.connect(
-        url, additional_headers=_ws_headers(stack, nb), subprotocols=["v1.kernel.websocket.jupyter.org"]
+        url, additional_headers=_ws_headers(stack, nb), subprotocols=[Subprotocol("v1.kernel.websocket.jupyter.org")]
     ) as ws:
         hello = json.loads(await ws.recv())
         assert ws.subprotocol == "v1.kernel.websocket.jupyter.org"
@@ -477,6 +478,7 @@ async def test_an_open_websocket_closes_when_its_credential_expires(nb, slow_rec
 def test_a_read_credential_carries_when_it_was_issued_and_when_it_expires(nb):
     token = _cookie_for(nb, now=datetime.now(timezone.utc))[f"{COOKIE_PREFIX}41"]
     grant = grants.read_access_credential(token, session_id=41)
+    assert grant is not None and grant.expires_at is not None and grant.issued_at is not None
     assert abs((grant.expires_at - grant.issued_at) - grants.ACCESS_LIFETIME) < timedelta(seconds=1)
     assert grant.expires_at > datetime.now(timezone.utc)
 

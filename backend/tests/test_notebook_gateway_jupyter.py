@@ -43,6 +43,7 @@ async def jupyter(tmp_path):
     (config_dir / "jupyter_server_config.py").write_text(JUPYTER_GATEWAY_CONFIG)
     root = tmp_path / "root"
     root.mkdir()
+    assert JUPYTER is not None
     proc = subprocess.Popen(
         [
             JUPYTER,

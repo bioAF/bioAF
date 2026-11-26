@@ -70,8 +70,9 @@ def read_report(directory: str) -> CertificateReport | None:
     not_after = _openssl_time(certificate.get("not_after"))
     if not_after is None:
         return None
-    renewal = data.get("last_renewal") if isinstance(data.get("last_renewal"), dict) else {}
-    result = renewal.get("result") if renewal.get("result") in RENEWAL_RESULTS else None
+    renewal: dict = data["last_renewal"] if isinstance(data.get("last_renewal"), dict) else {}
+    raw_result = renewal.get("result")
+    result = raw_result if isinstance(raw_result, str) and raw_result in RENEWAL_RESULTS else None
     return CertificateReport(
         not_after=not_after,
         subject=str(certificate.get("subject") or ""),

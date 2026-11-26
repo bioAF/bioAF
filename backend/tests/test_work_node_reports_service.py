@@ -100,6 +100,7 @@ async def test_an_authenticated_report_is_the_heartbeat_and_carries_the_policy(n
     assert row.heartbeat_at is not None and row.heartbeat_at >= before
     assert row.report_attempted_at is not None
     assert row.report_failure is None
+    assert row.provider_metadata is not None
     assert row.provider_metadata["ssh_policy_status"] == "failed_closed"
     # Unrelated provider metadata is preserved.
     assert row.provider_metadata["launch_journal"] == {"requests": []}
@@ -131,6 +132,7 @@ async def test_an_unknown_policy_in_a_report_does_not_erase_the_known_one(sessio
     await _round(_adapter(NodeReportResult(outcome="reported", ssh_policy_status=None)))
     row = await _row(node.id)
     assert row.heartbeat_at is not None
+    assert row.provider_metadata is not None
     assert row.provider_metadata["ssh_policy_status"] == "applied"
 
 
@@ -310,6 +312,7 @@ async def test_a_metadata_change_during_the_report_is_kept(node):
 
     await _round(_adapter(side_effect=report))
     meta = (await _row(node.id)).provider_metadata
+    assert meta is not None
     assert meta["written_meanwhile"] is True
     assert meta["ssh_policy_status"] == "applied"
 

@@ -122,7 +122,7 @@ def test_the_check_passes_when_jupyter_runs_a_python_cell(tmp_path):
     script.chmod(0o755)
     env = {
         **os.environ,
-        "PATH": os.path.dirname(JUPYTER) + ":" + os.environ["PATH"],
+        "PATH": os.path.dirname(str(JUPYTER)) + ":" + os.environ["PATH"],
         "BIOAF_EXPECTED_UID": str(os.getuid()),
         "BIOAF_REQUIRE_RSTUDIO": "0",
         "BIOAF_CAPABILITY_FILE": str(tmp_path / "capability.json"),
@@ -144,7 +144,7 @@ def test_the_check_fails_as_the_wrong_user(tmp_path):
     script.chmod(0o755)
     env = {
         **os.environ,
-        "PATH": os.path.dirname(JUPYTER) + ":" + os.environ["PATH"],
+        "PATH": os.path.dirname(str(JUPYTER)) + ":" + os.environ["PATH"],
         "BIOAF_EXPECTED_UID": "4242",
         "HOME": str(tmp_path),
     }
