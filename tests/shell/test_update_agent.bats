@@ -719,3 +719,43 @@ status_json() {
     agent_round
     absent "release-stale-update-gate" "$REPO/updater-calls"
 }
+
+# ---------------------------------------------------------------------------
+# Certificate renewal (plan 03.5A): Let's Encrypt IP certificates last about six days, so the agent
+# (always running) asks ./bioaf to renew a bioAF-issued certificate every six hours; certbot decides
+# whether one is due.
+# ---------------------------------------------------------------------------
+
+@test "with a bioAF-issued certificate the agent renews it, then not again within the interval" {
+    stub_updater 0
+    rm -f "$REPO/update-requests/update_7.json"
+    mkdir -p "$REPO/host-state/tls/letsencrypt/config/live/bioaf"
+    agent_round
+    [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
+    agent_round
+    [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
+}
+
+@test "the renewal runs again once the interval has passed" {
+    stub_updater 0
+    rm -f "$REPO/update-requests/update_7.json"
+    mkdir -p "$REPO/host-state/tls/letsencrypt/config/live/bioaf" "$REPO/host-only"
+    echo $(( $(date +%s) - 6 * 3600 - 5 )) > "$REPO/host-only/tls-renew.last"
+    agent_round
+    [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
+}
+
+@test "without a bioAF-issued certificate the agent never renews" {
+    stub_updater 0
+    agent_round
+    absent "tls-renew" "$REPO/updater-calls"
+}
+
+@test "the agent installs an uploaded organization certificate only as the fixed operation" {
+    stub_updater 0
+    printf '{"operation": "tls-install-uploaded"}' > "$REPO/update-requests/tls-install-uploaded-1.json"
+    rm -f "$REPO/update-requests/update_7.json"
+    agent_round
+    [ "$(cat "$REPO/updater-calls")" = "tls-install-uploaded" ]
+    [ ! -e "$REPO/update-requests/tls-install-uploaded-1.json" ]
+}

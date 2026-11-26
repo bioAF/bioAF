@@ -23,6 +23,9 @@ STATUS_DIR="$SCRIPT_DIR/update-status"
 LOG_DIR="$SCRIPT_DIR/host-only"
 LOG_FILE="$LOG_DIR/agent.log"
 POLL_INTERVAL=2
+# A bioAF-issued certificate (Let's Encrypt IP certificates last about six days) is offered for renewal
+# this often; certbot decides whether it is due (plan 03.5A).
+TLS_RENEW_INTERVAL="${TLS_RENEW_INTERVAL:-21600}"
 # The private log is rotated past this size, keeping two old files (owner-approved budget, issue #110).
 AGENT_LOG_MAX_BYTES="${AGENT_LOG_MAX_BYTES:-$((10 * 1024 * 1024))}"
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
@@ -181,10 +184,27 @@ rotate_agent_log() {
     open_agent_log
 }
 
+maybe_renew_certificate() {
+    # Only for a certificate bioAF issued (./bioaf tls-issue-ip); never more than once per interval.
+    [ -d "$SCRIPT_DIR/host-state/tls/letsencrypt/config/live/bioaf" ] || return 0
+    local stamp="$LOG_DIR/tls-renew.last" now last
+    now=$(date +%s)
+    last=$(cat "$stamp" 2>/dev/null || echo 0)
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    [ $((now - last)) -ge "$TLS_RENEW_INTERVAL" ] || return 0
+    mkdir -p "$LOG_DIR" && printf '%s\n' "$now" > "$stamp"
+    if [ "$AGENT_LOG_OPEN" = true ]; then
+        "$SCRIPT_DIR/bioaf" tls-renew >&3 2>&3 3>&- || log "WARNING: certificate renewal failed; the current certificate is unchanged"
+    else
+        "$SCRIPT_DIR/bioaf" tls-renew 3>&- || log "WARNING: certificate renewal failed; the current certificate is unchanged"
+    fi
+}
+
 process_pending() {
     # One polling round: every trigger present now, in name order.
     local trigger_file
     rotate_agent_log
+    maybe_renew_certificate
     # A launch pause (and possibly a frozen backend) left by an update that was killed outright; ./bioaf
     # releases it only when no update holds the deployment lock (plan 03A review).
     if [ -e "$SCRIPT_DIR/update-gate/work-node-launch.closed" ]; then

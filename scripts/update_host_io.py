@@ -46,7 +46,7 @@ AGENT_SOURCES = ("scripts/update-agent.sh", "scripts/update_host_io.py", "instal
 
 PREPARATION = "update-preparation.json"
 # Fixed host operations the backend may request (plan 03B), and their fixed-schema reports.
-OPERATIONS = {"ssh-recovery-diagnostics"}
+OPERATIONS = {"ssh-recovery-diagnostics", "tls-install-uploaded"}
 DIAGNOSTICS_FILE = "ssh-recovery-diagnostics.json"
 DIAGNOSTIC_BOOLEANS = ("sshd_ok", "pubkey_auth", "guest_agent", "oslogin", "eic_package")
 INSTANCE_ID = re.compile(r"[A-Za-z0-9-]{1,64}", re.ASCII)

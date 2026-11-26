@@ -51,6 +51,11 @@ if [ -f "$SCRIPT_DIR/installer/host_prereqs.sh" ]; then
     # shellcheck source=installer/host_prereqs.sh
     source "$SCRIPT_DIR/installer/host_prereqs.sh"
 fi
+# HTTPS certificates (plan 03.5A): Let's Encrypt IP certificates and organization-CA uploads.
+if [ -f "$SCRIPT_DIR/installer/tls.sh" ]; then
+    # shellcheck source=installer/tls.sh
+    TLS_COMPOSE="$DC" source "$SCRIPT_DIR/installer/tls.sh"
+fi
 # The host I/O program shared with the update agent, read now so an update that checks out another
 # release keeps using the code this process started with.
 HOST_IO_PY="$(cat "$SCRIPT_DIR/scripts/update_host_io.py" 2>/dev/null || true)"
@@ -2052,6 +2057,44 @@ cmd_import_git_known_hosts() {
     $DC exec -T backend python -m app.cli.import_git_known_hosts /dev/stdin --source "$source" < "$file"
 }
 
+public_ipv4_from_metadata() {
+    # This VM's public IPv4 address from its cloud metadata (GCP, then AWS IMDSv2); empty if none.
+    local ip token
+    ip=$(curl -sf --connect-timeout 1 -m 2 -H 'Metadata-Flavor: Google' \
+        http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null) \
+        && [ -n "$ip" ] && { printf '%s' "$ip"; return 0; }
+    token=$(curl -sf --connect-timeout 1 -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+        http://169.254.169.254/latest/api/token 2>/dev/null) || return 0
+    curl -sf --connect-timeout 1 -m 2 -H "X-aws-ec2-metadata-token: $token" \
+        http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true
+}
+
+cmd_tls_issue_ip() {
+    # tls-issue-ip [address]: a Let's Encrypt certificate for this server's public IP address (defaults to
+    # the address in the VM's metadata). Renewed automatically by the update agent.
+    local ip="${1:-$(public_ipv4_from_metadata)}"
+    if [ -z "$ip" ]; then
+        red "This server has no public IPv4 address. Private installations use a certificate from your"
+        red "organization's own certificate authority: Settings > Networking > Upload certificate."
+        exit 1
+    fi
+    bold "Requesting a certificate for $ip..."
+    if tls_issue_ip "$ip"; then
+        green "HTTPS now uses a trusted certificate for $ip (notebooks on port 8443 too)."
+    else
+        exit 1
+    fi
+}
+
+cmd_tls_renew() {
+    tls_renew || exit 1
+}
+
+cmd_tls_install_uploaded() {
+    tls_install_uploaded || exit 1
+    green "The uploaded certificate is installed."
+}
+
 cmd_help() {
     bold "bioAF Management"
     echo ""
@@ -2094,6 +2137,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  tls-issue-ip [address]"
+    echo "                      Get a trusted Let's Encrypt certificate for this server's public IP"
+    echo "                      address (renewed automatically)."
     echo "  import-git-known-hosts <file> \"<source>\""
     echo "                      Approve SSH host keys for a custom Git server (checked"
     echo "                      independently, never ssh-keyscan output)."
@@ -2158,6 +2204,9 @@ case "$command" in
     import-git-known-hosts) cmd_import_git_known_hosts "$@" ;;
     ssh-recovery-diagnostics) cmd_ssh_recovery_diagnostics ;;
     release-stale-update-gate) cmd_release_stale_update_gate ;;
+    tls-issue-ip) cmd_tls_issue_ip "$@" ;;
+    tls-renew) cmd_tls_renew ;;
+    tls-install-uploaded) cmd_tls_install_uploaded ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)
