@@ -213,6 +213,16 @@ async def launch_session(
                 f"Environment version must be in ready status (current: {env_version.status}). "
                 "Build the environment first.",
             )
+        # A tool this environment's build proved it does not have is refused now, not after a
+        # launch that could only fail (plan 03.5C). Unverified environments are not refused.
+        proven = (env_version.notebook_capability or {}).get(body.session_type)
+        if proven in ("unsupported", "failed"):
+            tool = "RStudio" if body.session_type == "rstudio" else "Jupyter"
+            raise HTTPException(
+                400,
+                f"This environment does not include {tool}. Choose an environment built for {tool}, "
+                "or add it to this environment and build a new version.",
+            )
         image = env_version.image_uri
     else:
         scrna_image = await _get_config_value(session, "bioaf_scrna_image")
