@@ -89,6 +89,27 @@ tls_install_pair() {
     fi
 }
 
+# Renewal ownership: the SHA-256 of the certificate bioAF's certbot last installed, in host-owned
+# state. Renewal runs only while that is still the installed certificate, so an uploaded or otherwise
+# installed certificate is never replaced, and certbot's own state (root-only, as its container
+# writes it) never has to be readable from the host.
+_tls_marker() { printf '%s' "$TLS_STATE_DIR/acme-installed"; }
+
+_tls_digest() { openssl dgst -sha256 < "$1" 2>/dev/null | awk '{print $NF}'; }
+
+_tls_record_acme_install() {
+    # After an install attempt: record ownership if the staged certbot certificate is now in place.
+    cmp -s "$TLS_STATE_DIR/stage/tls.crt" "$TLS_CERTS_DIR/tls.crt" || return 0
+    local marker; marker="$(_tls_marker)"
+    (umask 077 && _tls_digest "$TLS_CERTS_DIR/tls.crt" > "$marker.new") && mv -f "$marker.new" "$marker"
+}
+
+_tls_acme_owns_installed() {
+    local marker; marker="$(_tls_marker)"
+    [ -f "$marker" ] && [ -f "$TLS_CERTS_DIR/tls.crt" ] || return 1
+    [ "$(cat "$marker")" = "$(_tls_digest "$TLS_CERTS_DIR/tls.crt")" ]
+}
+
 _tls_certbot() {
     # _tls_certbot <certbot args...>: the pinned certbot with bioAF's own state directory.
     mkdir -p "$TLS_STATE_DIR/letsencrypt"
@@ -126,13 +147,14 @@ tls_issue_ip() {
     _tls_copy_out || { _tls_err "The issued certificate could not be read."; return 1; }
     tls_install_pair "$TLS_STATE_DIR/stage/tls.crt" "$TLS_STATE_DIR/stage/tls.key"
     local rc=$?
+    _tls_record_acme_install
     rm -rf "$TLS_STATE_DIR/stage"
     return $rc
 }
 
 tls_renew() {
     # Renew a bioAF-issued certificate when certbot judges it due; install only a changed one.
-    [ -d "$TLS_STATE_DIR/letsencrypt/config/live/$TLS_CERT_NAME" ] || return 0
+    _tls_acme_owns_installed || return 0
     if ! _tls_certbot renew --cert-name "$TLS_CERT_NAME"; then
         _tls_err "Certificate renewal failed; the current certificate is unchanged."
         return 1
@@ -141,6 +163,7 @@ tls_renew() {
     local rc=0
     if ! cmp -s "$TLS_STATE_DIR/stage/tls.crt" "$TLS_CERTS_DIR/tls.crt"; then
         tls_install_pair "$TLS_STATE_DIR/stage/tls.crt" "$TLS_STATE_DIR/stage/tls.key" || rc=$?
+        _tls_record_acme_install
     fi
     rm -rf "$TLS_STATE_DIR/stage"
     return $rc
@@ -151,6 +174,8 @@ tls_install_uploaded() {
     # the staging directory is backend-writable. The staged copy is removed either way.
     local dir="$TLS_UPLOAD_DIR" rc=0
     tls_install_pair "$dir/tls.crt" "$dir/tls.key" || rc=$?
+    # An installed upload ends bioAF's renewal of any earlier Let's Encrypt certificate.
+    [ "$rc" -eq 0 ] && rm -f "$(_tls_marker)"
     rm -f "$dir/tls.crt" "$dir/tls.key"
     return $rc
 }

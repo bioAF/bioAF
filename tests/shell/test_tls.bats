@@ -33,6 +33,11 @@ setup() {
 #!/usr/bin/env bash
 printf '%s\n' "docker $*" >> "$CALLS"
 args="$*"
+# ROOT_ONLY: certbot's live/ directory is unreadable to the host user except inside the container,
+# as with the real root-run certbot image.
+live="$TLS_STATE_DIR/letsencrypt/config/live"
+inside() { [ -z "${ROOT_ONLY:-}" ] || chmod 700 "$live" 2>/dev/null; }
+outside() { [ -z "${ROOT_ONLY:-}" ] || chmod 000 "$live" 2>/dev/null; }
 case "$args" in
     *"nginx -t"*) [ -z "${NGINX_REFUSES:-}" ] || exit 1; exit 0 ;;
     *"nginx -s reload"*) exit 0 ;;
@@ -42,13 +47,15 @@ case "$args" in
         script="${script//\/le\//$TLS_STATE_DIR/letsencrypt/}"
         script="${script//\/stage\//$TLS_STATE_DIR/stage/}"
         script="$(printf '%s' "$script" | sed -E 's/chown [0-9]+:[0-9]+ [^&;]*(&&|;)?//')"
-        sh -c "$script"; exit $? ;;
+        inside; sh -c "$script"; rc=$?; outside; exit $rc ;;
     *" certonly "*|*" renew "*)
         [ -z "${CERTBOT_FAILS:-}" ] || exit 1
         [ -d "$ISSUED" ] || exit 0
+        inside
         mkdir -p "$TLS_STATE_DIR/letsencrypt/config/live/bioaf"
         cp "$ISSUED/cert.pem" "$TLS_STATE_DIR/letsencrypt/config/live/bioaf/fullchain.pem"
         cp "$ISSUED/key.pem" "$TLS_STATE_DIR/letsencrypt/config/live/bioaf/privkey.pem"
+        outside
         exit 0 ;;
 esac
 exit 0
@@ -59,7 +66,7 @@ STUB
     source "$HELPER"
 }
 
-teardown() { rm -rf "$TEST_DIR"; }
+teardown() { chmod -R u+rwx "$TEST_DIR" 2>/dev/null; rm -rf "$TEST_DIR"; }
 
 @test "certbot is pinned to a reviewed version by digest" {
     [[ "$TLS_CERTBOT_IMAGE" =~ ^certbot/certbot:v5\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
@@ -151,6 +158,47 @@ teardown() { rm -rf "$TEST_DIR"; }
     [ "$status" -eq 0 ]
     cmp "$ISSUED/cert.pem" "$TLS_CERTS_DIR/tls.crt"
     grep -q "nginx -s reload" "$CALLS"
+}
+
+@test "renewal runs although certbot's state is readable only inside its container" {
+    export ROOT_ONLY=1
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    [ ! -r "$TLS_STATE_DIR/letsencrypt/config/live" ]
+    make_pair "$ISSUED" 203.0.113.7
+    : > "$CALLS"
+    run tls_renew
+    [ "$status" -eq 0 ]
+    grep -q -- " renew " "$CALLS"
+    cmp "$ISSUED/cert.pem" "$TLS_CERTS_DIR/tls.crt"
+}
+
+@test "renewal never replaces an uploaded organization certificate" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    make_pair "$TEST_DIR/org" bioaf.lab.internal
+    mkdir -p "$TEST_DIR/upload"
+    cp "$TEST_DIR/org/cert.pem" "$TEST_DIR/upload/tls.crt"; cp "$TEST_DIR/org/key.pem" "$TEST_DIR/upload/tls.key"
+    export TLS_UPLOAD_DIR="$TEST_DIR/upload"
+    tls_install_uploaded
+    make_pair "$ISSUED" 203.0.113.7
+    : > "$CALLS"
+    run tls_renew
+    [ "$status" -eq 0 ]
+    absent " renew " "$CALLS"
+    cmp "$TEST_DIR/org/cert.pem" "$TLS_CERTS_DIR/tls.crt"
+}
+
+@test "renewal never replaces a certificate installed by other means" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    make_pair "$TEST_DIR/domain" bioaf.example.org
+    cp "$TEST_DIR/domain/cert.pem" "$TLS_CERTS_DIR/tls.crt"; cp "$TEST_DIR/domain/key.pem" "$TLS_CERTS_DIR/tls.key"
+    : > "$CALLS"
+    run tls_renew
+    [ "$status" -eq 0 ]
+    absent " renew " "$CALLS"
+    cmp "$TEST_DIR/domain/cert.pem" "$TLS_CERTS_DIR/tls.crt"
 }
 
 @test "renewal without a bioAF-issued certificate does nothing" {
