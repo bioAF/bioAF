@@ -4,6 +4,8 @@ Provides launch, stop, list, detail, heartbeat, and machine type endpoints
 under /api/v1/work-nodes/.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +25,7 @@ from app.schemas.work_node import (
 )
 from app.schemas.entity_reference import ExperimentReference
 from app.services.audit_service import log_action
+from app.services.work_node_reports import report_status
 
 router = APIRouter(prefix="/api/v1/work-nodes", tags=["work-nodes"])
 settings_router = APIRouter(prefix="/api/v1/settings", tags=["work-node-settings"])
@@ -75,6 +78,7 @@ def _work_node_response(cs) -> WorkNodeResponse:
         gce_zone=cs.gce_zone,
         github_repo_ids=cs.github_repo_ids,
         heartbeat_at=cs.heartbeat_at,
+        report_status=report_status(cs, datetime.now(timezone.utc)),
         started_at=cs.started_at,
         stopped_at=cs.stopped_at,
         created_at=cs.created_at,

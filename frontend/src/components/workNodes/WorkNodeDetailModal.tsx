@@ -11,6 +11,7 @@ import {
   canRequestStop,
   formatUptime,
   isConnectable,
+  reportingText,
   sshCommand,
   sshLoginRuleText,
   stopFailedMessage,
@@ -158,6 +159,12 @@ export function WorkNodeDetailModal({
         <span className="text-gray-500">Last Heartbeat</span>
         <span>{node.heartbeat_at ? formatRecordedTime(node.heartbeat_at, "datetime", { missing: "-" }) : "-"}</span>
       </div>
+      {reportingText(node) && (
+        <div className="flex justify-between gap-4">
+          <span className="text-gray-500">Reporting</span>
+          <span className="text-right">{reportingText(node)}</span>
+        </div>
+      )}
       {node.stopped_at && (
         <div className="flex justify-between">
           <span className="text-gray-500">Stopped</span>

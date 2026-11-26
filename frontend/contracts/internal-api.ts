@@ -17998,6 +17998,8 @@ export interface components {
             project?: components["schemas"]["ProjectSummary"] | null;
             /** Project Id */
             project_id?: number | null;
+            /** Report Status */
+            report_status?: string | null;
             /** Requested Disk Gb */
             requested_disk_gb?: number | null;
             /** Resource Profile */

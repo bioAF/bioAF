@@ -27544,6 +27544,17 @@
             ],
             "title": "Project Id"
           },
+          "report_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Status"
+          },
           "requested_disk_gb": {
             "anyOf": [
               {

@@ -51,7 +51,11 @@ class WorkNodeResponse(BaseModel):
     gce_instance_name: str | None = None
     gce_zone: str | None = None
     github_repo_ids: list[int] | None = None
+    # Last Heartbeat: the last successful report from the node (plan 03.5D), not the last attempt.
     heartbeat_at: datetime | None = None
+    # How reporting stands: current | stale | unreachable | awaiting | unavailable; null unless running
+    # (or kept running by a failed Stop). Never a reason to stop the node.
+    report_status: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None
     created_at: datetime
