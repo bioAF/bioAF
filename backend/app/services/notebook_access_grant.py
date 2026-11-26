@@ -41,6 +41,10 @@ class AccessGrant:
     pod_uid: str
     pod_name: str
     namespace: str
+    # When the ticket or credential carrying this grant was issued, and when the credential expires
+    # (None for a grant fresh from a ticket, whose own expiry was checked when it was used).
+    issued_at: datetime | None = None
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,7 @@ async def consume_ticket(session: AsyncSession, ticket: str) -> AccessGrant | No
                 NotebookAccessTicket.pod_uid,
                 NotebookAccessTicket.pod_name,
                 NotebookAccessTicket.namespace,
+                NotebookAccessTicket.expires_at,
             )
         )
     ).first()
@@ -127,6 +132,7 @@ async def consume_ticket(session: AsyncSession, ticket: str) -> AccessGrant | No
         pod_uid=row.pod_uid,
         pod_name=row.pod_name,
         namespace=row.namespace,
+        issued_at=row.expires_at - TICKET_LIFETIME,
     )
 
 
@@ -142,7 +148,9 @@ def access_credential(grant: AccessGrant, *, now: datetime | None = None) -> str
         "pod": grant.pod_name,
         "ns": grant.namespace,
         "jti": uuid.uuid4().hex,
-        "iat": issued,
+        # Fractional (RFC 7519 allows it), so a credential issued just before signing out is told
+        # apart from one issued just after.
+        "iat": issued.timestamp(),
         "exp": issued + ACCESS_LIFETIME,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
@@ -171,6 +179,17 @@ def read_access_credential(token: str | None, *, session_id: int) -> AccessGrant
             pod_uid=str(payload["pod_uid"]),
             pod_name=str(payload["pod"]),
             namespace=str(payload["ns"]),
+            issued_at=datetime.fromtimestamp(float(payload["iat"]), timezone.utc),
+            expires_at=datetime.fromtimestamp(int(payload["exp"]), timezone.utc),
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
         return None
+
+
+async def revoke_user_access(session: AsyncSession, user_id: int) -> None:
+    """End every notebook gateway credential ``user_id`` holds (signing out of bioAF)."""
+    from app.models.user import User
+
+    await session.execute(
+        update(User).where(User.id == user_id).values(notebook_access_revoked_at=datetime.now(timezone.utc))
+    )

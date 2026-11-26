@@ -1,7 +1,8 @@
 """The check every notebook gateway request and WebSocket passes (plan 03.5A).
 
-A valid access credential is necessary but not sufficient: the database must still show the same
-owner, Organization, an active user and a running session with the recorded Pod, and the cluster must
+A valid access credential is necessary but not sufficient: it must be unexpired and issued after the
+user last signed out, and the database must still show the same owner, Organization, an active user
+and a running session with the recorded Pod, and the cluster must
 still show the Pod UID the grant was issued for. Anything else refuses; nothing here stops a session
 or touches its files.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -44,6 +46,10 @@ class PodConfirmations:
         return uid
 
 
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 async def current_access(factory, adapter, grant: AccessGrant, confirmations: PodConfirmations) -> SessionAccess | None:
     async with factory() as session:
         row = (
@@ -56,6 +62,11 @@ async def current_access(factory, adapter, grant: AccessGrant, confirmations: Po
     if row is None:
         return None
     nb, user = row
+    if grant.expires_at is not None and grant.expires_at <= datetime.now(timezone.utc):
+        return None
+    revoked = user.notebook_access_revoked_at
+    if revoked is not None and (grant.issued_at is None or grant.issued_at <= _aware(revoked)):
+        return None
     if (
         nb.organization_id != grant.organization_id
         or nb.user_id != grant.user_id

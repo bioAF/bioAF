@@ -19,6 +19,7 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlencode
 
 import httpx
@@ -41,6 +42,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 MAX_WEBSOCKETS_PER_SESSION = 32
 RECHECK_SECONDS = 60.0
 MAX_REWRITTEN_BODY = 10 * 1024 * 1024
+MAX_TICKET_BODY = 4096
 CONNECT_TIMEOUT = 30.0
 
 _FORWARD_REQUEST_HEADERS = {
@@ -169,9 +171,13 @@ class Gateway:
         host = request.headers.get("host", "")
         if request.headers.get("origin") != self._app_origin(host):
             return PlainTextResponse(REFUSED_SIGN_IN, status_code=403)
-        body = await request.body()
-        if len(body) > 4096:
-            return PlainTextResponse(REFUSED_SIGN_IN, status_code=400)
+        # Read as it arrives and stop at the limit: this route is unauthenticated, so a large body must
+        # never be buffered first.
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > MAX_TICKET_BODY:
+                return PlainTextResponse(REFUSED_SIGN_IN, status_code=413)
         ticket = (parse_qs(body.decode("utf-8", "replace")).get("ticket") or [""])[0]
         async with self._factory() as session:
             grant = await grants.consume_ticket(session, ticket)
@@ -334,8 +340,14 @@ class Gateway:
                     await ws.send_text(message)
 
         async def still_allowed():
+            # Rechecked periodically (sign-out, a stopped session, a replaced Pod) and always at the
+            # credential's own expiry.
             while True:
-                await asyncio.sleep(self._recheck)
+                wait = self._recheck
+                if grant.expires_at is not None:
+                    remaining = (grant.expires_at - datetime.now(timezone.utc)).total_seconds()
+                    wait = min(wait, max(remaining, 0.0))
+                await asyncio.sleep(wait)
                 access = await current_access(self._factory, self._adapter_provider(), grant, self._confirmations)
                 if access is None:
                     return

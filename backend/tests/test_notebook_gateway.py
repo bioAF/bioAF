@@ -6,7 +6,9 @@ Server proof is in tests/integration/test_notebook_gateway_jupyter.py.
 """
 
 import asyncio
+import contextlib
 import json
+from datetime import datetime, timedelta, timezone
 import socket
 from unittest.mock import MagicMock
 
@@ -140,8 +142,8 @@ class _RewritingTransport(DirectTransport):
         return Upstream(http_base=base.http_base, ws_base=base.ws_base, rewrite_prefix=APISERVER_PREFIX)
 
 
-@pytest_asyncio.fixture
-async def stack(nb):
+@contextlib.asynccontextmanager
+async def _stack(recheck_seconds: float):
     from app.database import async_session_factory
 
     up_server, up_task, up_port = await _serve(upstream_app)
@@ -151,22 +153,38 @@ async def stack(nb):
         adapter_provider=lambda: adapter,
         transport=_RewritingTransport(f"http://127.0.0.1:{up_port}"),
         scheme="http",
-        recheck_seconds=0.2,
+        recheck_seconds=recheck_seconds,
         max_websockets=2,
     )
     gw_server, gw_task, gw_port = await _serve(gateway.app)
-    yield {
-        "port": gw_port,
-        "adapter": adapter,
-        "origin": f"http://127.0.0.1:{gw_port}",
-        "app_origin": "http://127.0.0.1",
-    }
-    for server, task in ((gw_server, gw_task), (up_server, up_task)):
-        server.should_exit = True
-        await task
+    try:
+        yield {
+            "port": gw_port,
+            "adapter": adapter,
+            "origin": f"http://127.0.0.1:{gw_port}",
+            "app_origin": "http://127.0.0.1",
+            "gateway": gateway,
+        }
+    finally:
+        for server, task in ((gw_server, gw_task), (up_server, up_task)):
+            server.should_exit = True
+            await task
 
 
-def _cookie_for(nb, **over):
+@pytest_asyncio.fixture
+async def stack(nb):
+    async with _stack(recheck_seconds=0.2) as s:
+        yield s
+
+
+@pytest_asyncio.fixture
+async def slow_recheck_stack(nb):
+    # Access is rechecked only hourly here, so anything that ends a connection sooner is not the recheck.
+    async with _stack(recheck_seconds=3600) as s:
+        yield s
+
+
+def _cookie_for(nb, now=None, **over):
     values = dict(
         user_id=nb.user_id,
         organization_id=nb.organization_id,
@@ -176,7 +194,7 @@ def _cookie_for(nb, **over):
         namespace="bioaf-notebooks",
     )
     values.update(over)
-    return {f"{COOKIE_PREFIX}41": grants.access_credential(grants.AccessGrant(**values))}
+    return {f"{COOKIE_PREFIX}41": grants.access_credential(grants.AccessGrant(**values), now=now)}
 
 
 def _client(stack, cookies=None):
@@ -421,3 +439,91 @@ async def test_gateway_pages_cut_the_link_to_the_bioaf_tab_that_opened_them(sess
         page = await c.get("/s/41/page")
     for response in (entered, page):
         assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+async def _closes_within(ws, seconds: float) -> None:
+    with pytest.raises(websockets.exceptions.ConnectionClosed):
+        async with asyncio.timeout(seconds):
+            while True:
+                await ws.recv()
+
+
+@pytest.mark.asyncio
+async def test_an_open_websocket_closes_when_its_credential_expires(nb, slow_recheck_stack):
+    stack = slow_recheck_stack
+    # Issued so that it expires two seconds from now.
+    issued = datetime.now(timezone.utc) - grants.ACCESS_LIFETIME + timedelta(seconds=2)
+    url = f"ws://127.0.0.1:{stack['port']}/s/41/ws"
+    headers = _ws_headers(stack, nb, cookies=_cookie_for(nb, now=issued))
+    async with websockets.connect(url, additional_headers=headers) as ws:
+        await ws.recv()
+        await _closes_within(ws, 6)
+
+
+def test_a_read_credential_carries_when_it_was_issued_and_when_it_expires(nb):
+    token = _cookie_for(nb, now=datetime.now(timezone.utc))[f"{COOKIE_PREFIX}41"]
+    grant = grants.read_access_credential(token, session_id=41)
+    assert abs((grant.expires_at - grant.issued_at) - grants.ACCESS_LIFETIME) < timedelta(seconds=1)
+    assert grant.expires_at > datetime.now(timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_signing_out_of_bioaf_ends_gateway_access(nb, stack, client, comp_bio_token):
+    cookies = _cookie_for(nb, now=datetime.now(timezone.utc) - timedelta(seconds=5))
+    url = f"ws://127.0.0.1:{stack['port']}/s/41/ws"
+    async with websockets.connect(url, additional_headers=_ws_headers(stack, nb, cookies=cookies)) as ws:
+        await ws.recv()
+        out = await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {comp_bio_token}"})
+        assert out.status_code == 200
+        await _closes_within(ws, 5)
+    async with _client(stack, cookies) as c:
+        assert (await c.get("/s/41/lab")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_credential_issued_after_signing_out_works(session, nb, stack):
+    await session.execute(
+        text("UPDATE users SET notebook_access_revoked_at = now() - interval '1 minute' WHERE id = :u"),
+        {"u": nb.user_id},
+    )
+    await session.commit()
+    async with _client(stack, _cookie_for(nb)) as c:
+        assert (await c.get("/s/41/lab")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_ticket_body_is_refused_before_it_is_read(nb, stack):
+    chunk = b"x" * 1024
+    sent = {"n": 0}
+
+    async def receive():
+        sent["n"] += 1
+        return {"type": "http.request", "body": chunk, "more_body": sent["n"] < 32}
+
+    messages = []
+
+    async def send(message):
+        messages.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/_bioaf/enter",
+        "raw_path": b"/_bioaf/enter",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"127.0.0.1"),
+            (b"origin", b"http://127.0.0.1"),
+            (b"content-type", b"application/x-www-form-urlencoded"),
+        ],
+        "client": ("127.0.0.1", 1),
+        "server": ("127.0.0.1", 80),
+    }
+    await stack["gateway"].app(scope, receive, send)
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    assert start["status"] in (400, 413)
+    assert sent["n"] * len(chunk) <= 5 * 1024
