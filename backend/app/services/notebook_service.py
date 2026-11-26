@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -130,6 +131,9 @@ class NotebookService:
             requested_disk_gb=100,
             status="pending",
             started_at=datetime.now(timezone.utc),
+            # Jupyter's own token (plan 03.5A): encrypted here, given to the Pod through its Secret,
+            # added upstream by the notebook gateway only. Committed with the reservation.
+            notebook_access_secret=secrets.token_urlsafe(32) if session_type == "jupyter" else None,
         )
         session.add(notebook_session)
         await session.flush()
@@ -153,6 +157,8 @@ class NotebookService:
                 # The session's organization, so the readiness poller can scope its update to it.
                 "organization_id": notebook_session.organization_id,
             }
+            if notebook_session.notebook_access_secret:
+                spec["ide_secret"] = notebook_session.notebook_access_secret
             if image:
                 spec["image"] = image
 
