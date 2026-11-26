@@ -187,6 +187,16 @@ REPORT_MAX_BYTES = 4096
 REPORTED_POLICY_STATES = ("applied", "failed", "failed_closed")
 
 
+# Outcomes of one report attempt (NodeReportResult.outcome).
+REPORT_REPORTED = "reported"
+REPORT_UNREACHABLE = "unreachable"
+REPORT_UNTRUSTED = "untrusted"
+REPORT_MALFORMED = "malformed"
+REPORT_MISMATCH = "mismatch"
+REPORT_UNAVAILABLE = "unavailable"
+REPORT_FAILURES = (REPORT_UNREACHABLE, REPORT_UNTRUSTED, REPORT_MALFORMED, REPORT_MISMATCH, REPORT_UNAVAILABLE)
+
+
 class NodeReportMalformed(NodeSyncError):
     """The node answered, but not with a well-formed report. Nothing it said is used."""
 
@@ -264,3 +274,12 @@ async def read_node_report(
     if len(received) > REPORT_MAX_BYTES:
         raise NodeReportMalformed("report exceeds its size bound")
     return parse_node_report(received.decode("utf-8", "replace"))
+
+
+def report_error_outcome(exc: NodeSyncError) -> str:
+    """The bounded outcome for a failed report exchange."""
+    if isinstance(exc, NodeReportMalformed):
+        return REPORT_MALFORMED
+    if isinstance(exc, NodeTrustError):
+        return REPORT_UNTRUSTED
+    return REPORT_UNREACHABLE

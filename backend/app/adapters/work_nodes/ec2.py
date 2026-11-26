@@ -30,6 +30,7 @@ from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import VmInstance, WorkNodeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
+    NodeReportResult,
     StoredObject,
     TerminationResult,
     VmInfo,
@@ -42,8 +43,14 @@ from app.adapters.work_nodes.node_ssh import (
     STOP_DELETE_UNCONFIRMED,
     STOP_SAVE_FAILED,
     STOP_STATE_UNKNOWN,
+    REPORT_MISMATCH,
+    REPORT_REPORTED,
+    REPORT_UNAVAILABLE,
+    REPORT_UNREACHABLE,
     NodeSyncError,
     host_key_install_lines,
+    read_node_report,
+    report_error_outcome,
     run_sync_command,
     sync_outputs_command,
 )
@@ -743,6 +750,56 @@ class Ec2VmInstance(VmInstance):
             output_prefix=s3_output_prefix,
             provider_details={"instance_name": instance_name, "stopped_at": datetime.now(timezone.utc).isoformat()},
         )
+
+    async def report_vm(
+        self,
+        instance_name: str,
+        zone: str,
+        *,
+        session_id: int = 0,
+        sync_private_key: str | None = None,
+        host_public_key: str | None = None,
+        launch_attempt_id: str | None = None,
+        sync_route: str | None = None,
+        timeout: float = 15,
+        **kwargs,
+    ) -> NodeReportResult:
+        """Read the node's report from the instance it was launched as, over its recorded route only.
+
+        ``instance_name`` is the EC2 instance id. A private-route node is read over its peered
+        address; an older node keeps its explicitly recorded public route. No fallback is tried.
+        """
+        if self.is_local:
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        try:
+            await self.load_config()
+            ec2 = self._client("ec2")
+        except Exception as exc:
+            logger.warning("Work node report for %s: provider unavailable (%s)", instance_name, type(exc).__name__)
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        inst = await self._describe_instance(ec2, instance_name)
+        if inst is _UNKNOWN:
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        if inst is None:
+            return NodeReportResult(outcome=REPORT_MISMATCH)
+        tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+        if (session_id and tags.get("bioaf-session") != str(session_id)) or (
+            launch_attempt_id and tags.get("bioaf-launch") != launch_attempt_id
+        ):
+            return NodeReportResult(outcome=REPORT_MISMATCH)
+        if inst.get("State", {}).get("Name") != "running":
+            return NodeReportResult(outcome=REPORT_UNREACHABLE)
+        address = inst.get("PrivateIpAddress") if sync_route == "private-v1" else inst.get("PublicIpAddress")
+        if not address:
+            return NodeReportResult(outcome=REPORT_UNREACHABLE)
+        try:
+            report = await read_node_report(
+                address, sync_private_key=sync_private_key, host_public_key=host_public_key, timeout=timeout
+            )
+        except NodeSyncError as exc:
+            logger.info("Work node report for %s failed: %s", instance_name, type(exc).__name__)
+            return NodeReportResult(outcome=report_error_outcome(exc))
+        return NodeReportResult(outcome=REPORT_REPORTED, ssh_policy_status=report.ssh_policy_status)
 
     async def _describe_instance(self, ec2, instance_id: str):
         """The instance dict, None when AWS confirms it does not exist, or _UNKNOWN."""

@@ -917,6 +917,15 @@ class WorkNodeProvider(ABC):
 
         return LaunchOutcome("none") if not requests else LaunchOutcome("unknown")
 
+    async def report_vm(self, instance_name: str, zone: str, **kwargs):
+        """Read the node's liveness/policy report over its recorded verified route (NodeReportResult).
+
+        The default cannot reach a node and says so; it never reports liveness it did not observe.
+        """
+        from app.adapters.models import NodeReportResult
+
+        return NodeReportResult(outcome="unavailable")
+
     async def inventory_instances(self) -> list:
         """Every existing bioAF Work Node instance in this installation, as ManagedInstance records.
 
