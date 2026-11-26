@@ -25,6 +25,8 @@ class EnvironmentVersion(Base):
     # Plan 03.5B: what this version's successful build proved under the notebook runtime contract
     # (notebook_runtime.capability_after_build). Null: built before the contract, or not a notebook.
     notebook_capability: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The template revision this version's definition is, unmodified; null when user-managed.
+    template_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True
