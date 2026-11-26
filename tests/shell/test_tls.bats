@@ -41,7 +41,7 @@ inside() { [ -z "${ROOT_ONLY:-}" ] || chmod 700 "$live" 2>/dev/null; }
 outside() { [ -z "${ROOT_ONLY:-}" ] || chmod 000 "$live" 2>/dev/null; }
 case "$args" in
     *"nginx -t"*) [ -z "${NGINX_REFUSES:-}" ] || exit 1; exit 0 ;;
-    *"nginx -s reload"*) exit 0 ;;
+    *"nginx -s reload"*) [ -z "${NGINX_RELOAD_FAILS:-}" ] || exit 1; exit 0 ;;
     *"--entrypoint sh"*)
         # Copy-out: the last argument is the sh -c script; run it with the mounts mapped to local paths.
         script="${@: -1}"
@@ -284,4 +284,24 @@ report() { python3 -c "import json,sys; d=json.load(open('$TLS_REPORT_DIR/status
     [ -r "$TLS_REPORT_DIR/status.json" ]
     [ -z "$(find "$TLS_REPORT_DIR" -name '*.new')" ]
     [ "$(stat -f %Lp "$TLS_REPORT_DIR/status.json" 2>/dev/null || stat -c %a "$TLS_REPORT_DIR/status.json")" = 644 ]
+}
+
+@test "a failed reload keeps the serving certificate on disk and the next renewal retries" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    cp "$TLS_CERTS_DIR/tls.crt" "$TEST_DIR/serving.crt"
+    make_pair "$ISSUED" 203.0.113.7
+    export NGINX_RELOAD_FAILS=1
+    run tls_renew
+    [ "$status" -ne 0 ]
+    # nginx still serves the previous certificate, so that is what stays installed.
+    cmp "$TEST_DIR/serving.crt" "$TLS_CERTS_DIR/tls.crt"
+    [ "$(report 'd["last_renewal"]["result"]')" = failed ]
+    unset NGINX_RELOAD_FAILS
+    : > "$CALLS"
+    run tls_renew
+    [ "$status" -eq 0 ]
+    cmp "$ISSUED/cert.pem" "$TLS_CERTS_DIR/tls.crt"
+    grep -q "nginx -s reload" "$CALLS"
+    [ "$(report 'd["last_renewal"]["result"]')" = succeeded ]
 }

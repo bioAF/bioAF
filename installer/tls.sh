@@ -84,11 +84,18 @@ tls_install_pair() {
         fi
         return 1
     fi
-    rm -f "$dir/.tls.key.prev" "$dir/.tls.crt.prev"
     if ! $TLS_COMPOSE exec -T nginx nginx -s reload >/dev/null 2>&1; then
-        _tls_err "The certificate was installed but nginx did not reload; it will be used at the next restart."
+        # nginx still serves the previous pair: put it back so the files match what is served, and the
+        # next renewal check sees the new certificate as not yet installed and tries again.
+        if [ "$had_previous" = true ]; then
+            mv -f "$dir/.tls.key.prev" "$dir/tls.key"; mv -f "$dir/.tls.crt.prev" "$dir/tls.crt"
+            _tls_err "nginx did not reload; the previous certificate is still in use and the change will be retried."
+        else
+            _tls_err "The certificate was installed but nginx did not reload; it will be used at the next restart."
+        fi
         return 1
     fi
+    rm -f "$dir/.tls.key.prev" "$dir/.tls.crt.prev"
 }
 
 # Renewal ownership: the SHA-256 of the certificate bioAF's certbot last installed, in host-owned
