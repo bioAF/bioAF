@@ -113,9 +113,7 @@ class NotebookExecutionService:
             "parameters": params,
         }
 
-        config_map = await PlatformConfigService.get_many(
-            session, ["working_bucket_name", "notebook_runner_sa_email", "bioaf_scrna_image"]
-        )
+        config_map = await PlatformConfigService.get_many(session, ["working_bucket_name", "notebook_runner_sa_email"])
         bucket_name = (config_map.get("working_bucket_name") or "").strip()
         if bucket_name and bucket_name != "null":
             spec["working_bucket"] = bucket_name
@@ -124,8 +122,10 @@ class NotebookExecutionService:
             spec["notebook_runner_sa_email"] = sa_email
         # Run on the built notebook image (the same default the interactive launch resolves). Without
         # it the adapter falls back to a bare "bioaf-scrna:latest" that the cluster cannot pull.
-        image = (config_map.get("bioaf_scrna_image") or "").strip()
-        if image and image != "null":
+        from app.services.notebook_image_service import scientific_image
+
+        image = await scientific_image(session)
+        if image:
             spec["image"] = image
 
         if input_file_ids:

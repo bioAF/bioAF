@@ -4839,6 +4839,16 @@
    ],
    "route": "dedicated_schema"
   },
+  "test_scientific_image_pinning.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_sdr_api.py": {
    "category": "real_commit",
    "evidence": [

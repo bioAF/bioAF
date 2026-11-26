@@ -349,11 +349,35 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
     return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
+SCIENTIFIC_IMAGE_DIGEST_KEY = "bioaf_scrna_image_digest"
+
+
+async def scientific_image(session: AsyncSession) -> str | None:
+    """The built-in scientific image a session without an EnvironmentVersion runs, or None.
+
+    Pinned to the digest its build pushed when one was recorded; an administrator's own image (which
+    clears the digest) is used as given.
+    """
+    image = (await _read_config(session, "bioaf_scrna_image") or "").strip()
+    if not image or image == "null":
+        return None
+    digest = (await _read_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY) or "").strip()
+    return notebook_runtime.launch_image(image, {"image_digest": digest} if digest != "null" else None)
+
+
 async def check_build_result(session: AsyncSession, build_id: str) -> BuildResult:
-    """The build's status with its pushed image digest and the runtime check's evidence (plan 03.5B)."""
-    platform = await resolve_image_platform(session)
-    credentials = await resolve_image_credentials(session, platform)
-    return get_image_build_provider().build_result(credentials, platform.config, build_id)
+    """The build's status with its pushed image digest and the runtime check's evidence (plan 03.5B).
+
+    Unreadable evidence is no evidence: the version is recorded unverified and launched by its tag,
+    and the build poll that asked carries on.
+    """
+    try:
+        platform = await resolve_image_platform(session)
+        credentials = await resolve_image_credentials(session, platform)
+        return get_image_build_provider().build_result(credentials, platform.config, build_id)
+    except Exception as exc:
+        logger.warning("Could not read the result of build %s: %s", build_id, type(exc).__name__)
+        return BuildResult("UNKNOWN", None, None)
 
 
 async def request_provider_cancel(session: AsyncSession, build_id: str) -> None:
@@ -404,8 +428,9 @@ async def build_notebook_image(session: AsyncSession, user_id: int | None = None
     platform.require_target()
     platform.require_build_service()
 
-    # Clear any stale image URI from a previous failed build attempt
+    # Clear any stale image URI (and its digest) from a previous failed build attempt
     await _set_config(session, "bioaf_scrna_image", "null")
+    await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
     # Reset build tracking so poll_image_build picks up the new build
     await _set_config(session, "notebook_image_build_status", "null")
     await _set_config(session, "notebook_image_build_id", "null")
@@ -533,9 +558,12 @@ async def poll_image_build(session: AsyncSession) -> str | None:
 
     if status == "SUCCESS":
         logger.info("Notebook image build %s completed successfully", build_id)
-        # Now that the build succeeded, write the image URI
+        # Now that the build succeeded, write the image URI and the digest it pushed; launches pin to
+        # the digest (scientific_image), so a moved tag never changes what runs.
         image_uri = get_image_uri(platform.config)
+        result = await check_build_result(session, build_id)
         await _set_config(session, "bioaf_scrna_image", image_uri)
+        await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, result.image_digest or "null")
         # Drain the wizard's queue: any rstudio/jupyterhub queued before the
         # image existed can now flip to enabled (or stay provisioning if
         # compute is not up yet). Local import to avoid a cycle through
@@ -552,11 +580,12 @@ async def poll_image_build(session: AsyncSession) -> str | None:
             """)
         )
         # Create default environment if none exists yet, with what this build proved.
-        await _ensure_default_environment(session, image_uri, await check_build_result(session, build_id), build_id)
+        await _ensure_default_environment(session, image_uri, result, build_id)
     elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
         logger.error("Notebook image build %s failed with status %s", build_id, status)
         # Clear the image URI since the build failed
         await _set_config(session, "bioaf_scrna_image", "null")
+        await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
         # Mark notebook components as build_failed so the UI shows retry
         await session.execute(
             text("""

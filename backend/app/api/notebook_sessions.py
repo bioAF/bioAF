@@ -228,8 +228,10 @@ async def launch_session(
         # By digest when the build recorded one, so the version runs exactly what was verified.
         image = launch_image(env_version.image_uri, env_version.notebook_capability)
     else:
-        scrna_image = await _get_config_value(session, "bioaf_scrna_image")
-        if not scrna_image or scrna_image == "null":
+        from app.services.notebook_image_service import scientific_image
+
+        scrna_image = await scientific_image(session)
+        if not scrna_image:
             build_status = await _get_config_value(session, "notebook_image_build_status")
             if build_status in ("QUEUED", "WORKING"):
                 raise HTTPException(
@@ -619,6 +621,10 @@ async def update_container_registry(
     current_user: dict = require_permission("notebooks", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.services.notebook_image_service import SCIENTIFIC_IMAGE_DIGEST_KEY
+
     await PlatformConfigService.set(session, "bioaf_scrna_image", body.bioaf_scrna_image)
+    # An administrator's own image is used as given: the built image's digest no longer applies.
+    await PlatformConfigService.set(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
     await session.commit()
     return {"status": "ok"}
