@@ -801,6 +801,44 @@ your team needs. Prerequisites can include provisioned compute/storage and a rea
 not always start an independent Terraform apply. SLURM compute is a stub, not an activatable HPC stack.
 See [Compute Stack Setup](guides/compute-stack-setup.md) for the supported paths.
 
+### HTTPS certificates and notebook access
+
+bioAF serves the application on 443 and notebooks on 8443, on the same server and certificate. Notebooks
+open on their own port so notebook pages cannot read the bioAF sign-in.
+
+- **Public installations with only an IP address:** the installers keep the server's public address static
+  (a GCP static address, an AWS Elastic IP) and request a Let's Encrypt certificate for it at the end of
+  setup. These certificates last about six days; the update agent renews them automatically. To request one
+  by hand or after the address changes: `./bioaf tls-issue-ip` on the server. Port 80 must stay reachable
+  from the internet for renewal.
+- **Public installations with a domain:** use Settings > Networking as before.
+- **Private installations:** no public certificate authority issues certificates for private addresses.
+  Upload a server certificate from your organization's own certificate authority in **Settings >
+  Networking > Certificate from your organization** (needs permission to configure infrastructure). It
+  must name the address people use for bioAF, and their devices must already trust that authority. bioAF
+  does not renew an uploaded certificate: upload its replacement before it expires.
+
+Every certificate is installed the same way: checked, swapped into place, checked by nginx, and the previous
+one restored if nginx refuses it.
+
+The installers open tcp:8443 like 443. For an installation created before this release, rerun the GCP
+installer (it updates the existing firewall rule) or add tcp:8443 to the AWS security group.
+
+### Notebook sessions started before protected access
+
+Sessions started before this release were reachable at a public address with no notebook sign-in. After
+updating, run on the server:
+
+```
+./bioaf contain-notebook-exposure          # list them
+./bioaf contain-notebook-exposure --apply  # remove their public address
+```
+
+`--apply` removes only the public address: the sessions keep running and nothing is deleted. Those sessions
+cannot be opened from bioAF afterwards; their owners should **Stop** them (outputs in `/outputs` are saved)
+and start a new session. Until every listed session is contained or stopped, the installation still has an
+exposed notebook.
+
 ### Backup Configuration
 
 Review [Backup & Recovery](user-guide-admin.md#backup--recovery), including creation-time checksums,

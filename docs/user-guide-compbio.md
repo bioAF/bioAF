@@ -50,11 +50,23 @@ resources and inputs before confirming. Project scope does not by itself mount e
 
 A launch can take several minutes when the interactive node pool is scaling up from zero or the node is
 downloading the notebook image for the first time; a later launch on the same node is usually ready in about a
-minute. The session shows as starting throughout. It becomes running only once its notebook container is ready
-and it has an address you can open. A launch fails early only for a definite error, such as an image that
-cannot be downloaded or a container that exits. Otherwise it fails after 30 minutes from launch, with
-"did not become ready" and the last cause bioAF observed. bioAF then deletes the session's pod and its
-LoadBalancer automatically. Stopping a session always wins over a launch result that arrives later.
+minute. The session shows as starting throughout. It becomes running only once Jupyter or RStudio itself
+answers inside the container. A launch fails early only for a definite error, such as an image that cannot be
+downloaded, an environment that does not include the tool you chose, or a container that exits. Otherwise it
+fails after 30 minutes from launch, with "did not become ready" and the last cause bioAF observed. bioAF then
+deletes the session's pod automatically. Stopping a session always wins over a launch result that arrives
+later.
+
+### Opening a session
+
+Choose **Open**. bioAF opens the session in a new tab on its own protected address (the same server, port
+8443), signed in as you. Only the person who started a session can open it; permission to stop other people's
+sessions does not include reading their files or running code in them. Closing the tab or losing the
+connection does not stop the analysis. If the tab later says to open the session from bioAF again, choose
+**Open** in bioAF. Jupyter runs as an unprivileged user. RStudio asks for your session credentials, as before.
+
+Environments built for notebooks record which tools their build proved: Jupyter always, RStudio when the
+environment includes R. Launching a tool an environment was proven not to have is refused with the reason.
 
 Use the session's storage-sync and output-registration actions to preserve work and its provenance. Session
 credentials support RStudio login. Idle-timeout behavior follows Workbench settings and session status;
@@ -65,6 +77,14 @@ check the page rather than assuming a browser tab keeps a session alive.
 Open **Workbench > Work Nodes** for a standalone GCE VM (with an EC2 implementation on AWS). Choose a ready
 Work Node environment version, resources and scope. Work Nodes are separate from notebook/pipeline pods.
 Use the displayed connection details and preserve outputs before stopping the node.
+
+A Work Node launched for an Experiment shows that Experiment under **Linked to**, in the list and its
+details, and files saved from `/outputs` at Stop are linked to the same Experiment and Project. A node
+launched for a Project only shows the Project.
+
+bioAF checks each running Work Node about every five minutes over the same verified connection it uses to
+save outputs. **Last Heartbeat** is the last time a check succeeded, and **Reporting** says whether checks
+are succeeding. A node that stops reporting keeps running: missing reports never stop a Work Node.
 See [SSH and Exec Access](guides/ssh-access.md) for access prerequisites and the audit boundary.
 
 ## Files, Projects and Provenance

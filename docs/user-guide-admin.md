@@ -283,6 +283,13 @@ that has not chosen; later changes and withdrawal happen here. Nothing is sent u
 metrics** is chosen. See [Installation Metrics](installation-metrics.md) for exactly what is sent, to whom,
 and how to request deletion.
 
+## Notebook Access
+
+Notebook sessions open on the server's own address on port 8443 with a one-time sign-in from bioAF; only
+the person who started a session can open it. HTTPS for both ports, the organization certificate upload and
+containing sessions started before protected access are described in the
+[deployment guide](deployment-guide.md#https-certificates-and-notebook-access).
+
 ## Security and SSH Access
 
 **Settings > Security and SSH access** holds optional SSH settings. Ordinary installation and work node
