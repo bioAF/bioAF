@@ -20,7 +20,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import websockets
@@ -102,6 +102,21 @@ def _scoped_set_cookie(value: str, session_id: int, secure: bool) -> str:
 
 def _rewrite(text: str, prefix: str) -> str:
     return text.replace(prefix, "") if prefix else text
+
+
+def _session_location(location: str, prefix: str, session_id: int) -> str:
+    """A redirect the browser can follow on this gateway, inside this session.
+
+    An IDE behind the Pod proxy may build an absolute redirect from the host it sees (RStudio uses
+    the API server's address, over http). Only the path and query are kept, and only inside the
+    session; anything else goes to the session's root.
+    """
+    root = f"/s/{session_id}/"
+    parts = urlsplit(_rewrite(location, prefix))
+    path = _rewrite(parts.path, prefix) or "/"
+    if not path.startswith(root):
+        return root
+    return path + (f"?{parts.query}" if parts.query else "")
 
 
 class Gateway:
@@ -249,7 +264,7 @@ class Gateway:
             out_headers.append(("set-cookie", _scoped_set_cookie(value, sid, self._scheme == "https")))
         location = reply.headers.get("location")
         if location:
-            out_headers.append(("location", _rewrite(location, upstream.rewrite_prefix)))
+            out_headers.append(("location", _session_location(location, upstream.rewrite_prefix, sid)))
         out_headers.append(("referrer-policy", "same-origin"))
         out_headers.append(("x-content-type-options", "nosniff"))
         # The bioAF tab that opened this one keeps no handle on it, and it none on bioAF.

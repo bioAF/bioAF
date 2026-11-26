@@ -58,6 +58,11 @@ async def _redirect(request: Request):
     return Response(status_code=302, headers={"location": f"{APISERVER_PREFIX}/s/41/lab"})
 
 
+async def _absolute_redirect(request: Request):
+    # RStudio builds absolute redirects from the Host it sees: behind the Pod proxy, the API server's.
+    return Response(status_code=302, headers={"location": request.query_params["to"]})
+
+
 async def _cookie(request: Request):
     response = PlainTextResponse("ok")
     response.headers.append("set-cookie", "rs-csrf=abc; Domain=evil.example; Path=/; HttpOnly")
@@ -88,6 +93,7 @@ upstream_app = Starlette(
     routes=[
         Route("/s/41/page", _page),
         Route("/s/41/redirect", _redirect),
+        Route("/s/41/absolute-redirect", _absolute_redirect),
         Route("/s/41/cookie", _cookie),
         Route("/{path:path}", _echo, methods=["GET", "POST", "PUT", "DELETE"]),
         WebSocketRoute("/s/41/ws", _ws),
@@ -543,3 +549,23 @@ async def test_an_oversized_ticket_body_is_refused_before_it_is_read(nb, stack):
     start = next(m for m in messages if m["type"] == "http.response.start")
     assert start["status"] in (400, 413)
     assert sent["n"] * len(chunk) <= 5 * 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "upstream_location, expected",
+    [
+        # RStudio behind the Pod proxy (seen live on GKE, 2026-11-26): the API server's address, over http.
+        ("http://35.231.12.25/s/41/auth-sign-in?appUri=%2F", "/s/41/auth-sign-in?appUri=%2F"),
+        ("https://10.0.0.1" + APISERVER_PREFIX + "/s/41/lab", "/s/41/lab"),
+        # Never off the gateway, and never into another session.
+        ("https://evil.example/steal", "/s/41/"),
+        ("http://35.231.12.25/s/42/lab", "/s/41/"),
+        ("//evil.example/x", "/s/41/"),
+    ],
+)
+async def test_redirects_stay_on_the_gateway_inside_the_session(nb, stack, upstream_location, expected):
+    async with _client(stack, _cookie_for(nb)) as c:
+        moved = await c.get("/s/41/absolute-redirect", params={"to": upstream_location})
+    assert moved.status_code == 302
+    assert moved.headers["location"] == expected
