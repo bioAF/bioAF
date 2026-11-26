@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
-from app.services.notebook_jupyter_auth import (
+from app.platform.notebook_jupyter_auth import (
     GATEWAY_TOKEN_HEADER,
     JUPYTER_CONFIG_DIR,
     JUPYTER_CONFIG_KEY,

@@ -24,7 +24,7 @@ from app.models.notebook_session import ComputeSession
 from app.notebook_gateway.app import Gateway
 from app.notebook_gateway.transport import DirectTransport
 from app.services import notebook_access_grant as grants
-from app.services.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER, JUPYTER_GATEWAY_CONFIG
+from app.platform.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER, JUPYTER_GATEWAY_CONFIG
 from tests.test_notebook_gateway import _Adapter, _free_port, _serve
 
 JUPYTER = os.environ.get("BIOAF_TEST_JUPYTER_BIN")

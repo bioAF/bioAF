@@ -34,7 +34,7 @@ from app import runtime
 from app.notebook_gateway.access import PodConfirmations, current_access
 from app.notebook_gateway.transport import NotebookTransport, Upstream, ide_path
 from app.services import notebook_access_grant as grants
-from app.services.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER
+from app.platform.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER
 
 logger = logging.getLogger("bioaf.notebook_gateway")
 

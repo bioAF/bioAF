@@ -23,7 +23,7 @@ from kubernetes import client
 from app.config import compute_mode_for
 from app.settings_contract import ComputeMode, is_simulated
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_word
-from app.services.notebook_jupyter_auth import JUPYTER_CONFIG_DIR, JUPYTER_CONFIG_KEY, JUPYTER_GATEWAY_CONFIG
+from app.platform.notebook_jupyter_auth import JUPYTER_CONFIG_DIR, JUPYTER_CONFIG_KEY, JUPYTER_GATEWAY_CONFIG
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
