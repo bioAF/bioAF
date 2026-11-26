@@ -8,6 +8,8 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 interface UploadResult {
   status: string;
@@ -43,8 +45,7 @@ export function OrganizationCertificateUpload() {
   }
 
   return (
-    <section data-testid="networking-org-certificate-card" className="border rounded-lg p-4 bg-white">
-      <h2 className="font-semibold mb-2">Certificate from your organization</h2>
+    <Card title="Certificate from your organization" padding="sm">
       <p className="text-sm text-gray-600 mb-3">
         For a private installation, upload a server certificate from your organization&apos;s certificate
         authority. It must name the address you use for bioAF. It is used for bioAF and for notebooks.
@@ -71,19 +72,21 @@ export function OrganizationCertificateUpload() {
         value={privateKey}
         onChange={(e) => setPrivateKey(e.target.value)}
       />
-      <button
+      <Button
+        size="sm"
         onClick={upload}
-        disabled={!certificate.trim() || !privateKey.trim() || uploading}
-        className="px-3 py-1.5 bg-bioaf-700 text-white rounded disabled:bg-gray-300"
+        disabled={!certificate.trim() || !privateKey.trim()}
+        busy={uploading}
+        busyLabel="Uploading..."
       >
-        {uploading ? "Uploading..." : "Upload certificate"}
-      </button>
+        Upload certificate
+      </Button>
       {error && <p className="text-sm text-red-700 mt-2">{error}</p>}
       {result && (
         <p className="text-sm text-gray-700 mt-2">
           Installing the certificate for {result.names.join(", ")}. Reload this page in a minute to use it.
         </p>
       )}
-    </section>
+    </Card>
   );
 }
