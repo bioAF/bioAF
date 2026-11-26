@@ -16,6 +16,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials.credential_injector import load_gcp_credentials
+from app.services import notebook_runtime
+from app.services.notebook_runtime import add_check_script
 from app.adapters.image_build import get_image_build_provider
 from app.adapters.image_registry import get_image_registry_provider
 from app.adapters.image_registry.gcp import AR_REPO_ID
@@ -34,7 +36,7 @@ DOCKERFILE_CONTENT = """\
 # Pinned for reproducibility (postmortem of build 28b547ac: floating :latest left
 # R 4.1.2 too old for current packages). Bump these ARGs deliberately; never float
 # to :latest. After changing a pin, validate with a Cloud Build, then lock results.
-FROM jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33
+FROM __NOTEBOOK_BASE_IMAGE__
 
 USER root
 
@@ -43,7 +45,6 @@ ARG R_VERSION=4.4.3
 ARG BIOC_VERSION=3.20
 ARG CRAN_SNAPSHOT=2024-12-02
 ARG PRESTO_REF=a24772a135c7895a8183b007376050556c60a05b
-ARG RSTUDIO_DEB=rstudio-server-2024.04.2-764-amd64.deb
 
 # System libraries. Several of these are the reason R/Python packages fail to
 # build or load if absent: libglpk (igraph), libopenblas (igraph.so links
@@ -159,17 +160,12 @@ RUN jupyter kernelspec list | grep -qi '\\bir\\b' || (echo 'ERROR: IRkernel spec
 # Verify the key Python imports resolve too
 RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"
 
-# RStudio Server (pinned jammy build)
-RUN apt-get update && apt-get install -y --no-install-recommends gdebi-core wget \\
-    && wget -q https://download2.rstudio.org/server/jammy/amd64/${RSTUDIO_DEB} \\
-    && gdebi -n ${RSTUDIO_DEB} \\
-    && rm rstudio-server-*.deb \\
-    && rm -rf /var/lib/apt/lists/*
-
-USER ${NB_UID}
-
-WORKDIR /home/jovyan
 """
+
+# RStudio Server, the notebook user and the capability check come from the shared runtime contract
+# (plan 03.5B), so this image and notebook EnvironmentVersions are held to the same proof.
+DOCKERFILE_CONTENT = DOCKERFILE_CONTENT.replace("__NOTEBOOK_BASE_IMAGE__", notebook_runtime.NOTEBOOK_BASE_IMAGE)
+DOCKERFILE_CONTENT += notebook_runtime.runtime_layer(r_home=None) + notebook_runtime.check_step(require_rstudio=True)
 
 
 def _render_dockerfile() -> str:
@@ -277,6 +273,7 @@ async def _upload_build_context(session: AsyncSession, working_bucket: str) -> s
         info.size = len(dockerfile_bytes)
         info.mtime = int(time.time())
         tar.addfile(info, io.BytesIO(dockerfile_bytes))
+        add_check_script(tar)
 
     buf.seek(0)
     object_path = "builds/bioaf-scrna/source.tar.gz"

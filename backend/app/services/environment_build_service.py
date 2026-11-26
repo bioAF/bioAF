@@ -390,18 +390,48 @@ def _image_tag(version_number: int, build_number: int = 1) -> str:
     return f"v{version_number}.{build_number}"
 
 
-def _build_conda_dockerfile(definition_content: str, env_name: str) -> tuple[str, str]:
+# Notebook environments (plan 03.5B): the shared notebook base and runtime contract, so a notebook
+# EnvironmentVersion and the built-in scientific image are held to the same proof.
+NOTEBOOK_CONDA_DOCKERFILE_TEMPLATE = """\
+FROM {base_image}
+
+USER root
+COPY environment.yml /tmp/environment.yml
+RUN mamba env create -f /tmp/environment.yml && \\
+    mamba clean -afy && \\
+    fix-permissions /opt/conda/envs/{env_name}
+
+ENV PATH=/opt/conda/envs/{env_name}/bin:$PATH
+"""
+
+
+def _build_conda_dockerfile(
+    definition_content: str, env_name: str, environment_type: str = "pipeline"
+) -> tuple[str, str]:
     """Generate a Dockerfile from a conda environment.yml.
 
+    Notebook environments use the notebook runtime contract; pipelines keep the generic builder.
     Returns (dockerfile_content, environment_yml_content).
     """
     import yaml
+
+    from app.services import notebook_runtime
 
     # Parse to extract the conda env name
     data = yaml.safe_load(definition_content)
     conda_env_name = data.get("name", "base") if data else "base"
 
-    dockerfile = CONDA_DOCKERFILE_TEMPLATE.format(env_name=conda_env_name)
+    if environment_type != "notebook":
+        return CONDA_DOCKERFILE_TEMPLATE.format(env_name=conda_env_name), definition_content
+    has_r = notebook_runtime.conda_has_r(definition_content)
+    prefix = f"/opt/conda/envs/{conda_env_name}"
+    dockerfile = (
+        NOTEBOOK_CONDA_DOCKERFILE_TEMPLATE.format(
+            base_image=notebook_runtime.NOTEBOOK_BASE_IMAGE, env_name=conda_env_name
+        )
+        + notebook_runtime.runtime_layer(r_home=prefix if has_r else None)
+        + notebook_runtime.check_step(require_rstudio=has_r)
+    )
     return dockerfile, definition_content
 
 
@@ -410,14 +440,21 @@ async def _upload_version_build_context(
     working_bucket: str,
     version: EnvironmentVersion,
     env_name: str,
+    environment_type: str = "pipeline",
 ) -> str:
     """Create a tar.gz with the build context and upload to storage."""
     from app.adapters.registry import get_storage_adapter
 
+    from app.services.notebook_runtime import add_check_script
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        # The notebook capability check (plan 03.5B), used by notebook images and harmless elsewhere.
+        add_check_script(tar)
         if version.definition_format == "conda":
-            dockerfile_content, env_yml = _build_conda_dockerfile(version.definition_content, env_name)
+            dockerfile_content, env_yml = _build_conda_dockerfile(
+                version.definition_content, env_name, environment_type
+            )
             # Add Dockerfile
             df_bytes = dockerfile_content.encode()
             info = tarfile.TarInfo(name="Dockerfile")
@@ -596,7 +633,9 @@ class EnvironmentBuildService:
         get_image_registry_provider().ensure_repository(credentials, platform.config, image_name)
 
         # Upload build context (cloud-neutral: build_uri + upload_file)
-        object_path = await _upload_version_build_context(session, working_bucket, version, env.name)
+        object_path = await _upload_version_build_context(
+            session, working_bucket, version, env.name, env.environment_type
+        )
         context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
         image_uri = get_image_registry_provider().image_uri(platform.config, image_name, tag)
