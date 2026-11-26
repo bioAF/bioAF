@@ -23,6 +23,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 import app.platform.cloud_provider as cp
+from app.adapters.image_build.base import BuildResult
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.environment_build_service import EnvironmentBuildService
@@ -210,10 +211,17 @@ async def test_poll_in_progress_builds_on_aws_uses_has_target_gate(session, admi
         version.build_id = "bioaf-image-build:run-9"
         await session.flush()
 
-        with patch(
-            "app.services.notebook_image_service.check_build_status",
-            new=AsyncMock(return_value="SUCCESS"),
-        ) as mock_cbs:
+        with (
+            patch(
+                "app.services.notebook_image_service.check_build_status",
+                new=AsyncMock(return_value="SUCCESS"),
+            ) as mock_cbs,
+            # The build's result is readable (an unreadable one keeps the version building).
+            patch(
+                "app.services.notebook_image_service.check_build_result",
+                new=AsyncMock(return_value=BuildResult("SUCCESS", None, None)),
+            ),
+        ):
             changed = await EnvironmentBuildService.poll_in_progress_builds(session)
 
         mock_cbs.assert_awaited_once_with(session, "bioaf-image-build:run-9")

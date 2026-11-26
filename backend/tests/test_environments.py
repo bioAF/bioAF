@@ -767,10 +767,19 @@ async def test_poll_in_progress_builds_calls_check_build_status_with_two_args(se
     session.add(ver)
     await session.flush()
 
-    with patch(
-        "app.services.notebook_image_service.check_build_status",
-        new=AsyncMock(return_value="SUCCESS"),
-    ) as mock_cbs:
+    from app.adapters.image_build.base import BuildResult
+
+    with (
+        patch(
+            "app.services.notebook_image_service.check_build_status",
+            new=AsyncMock(return_value="SUCCESS"),
+        ) as mock_cbs,
+        # The build's result is readable (an unreadable one keeps the version building).
+        patch(
+            "app.services.notebook_image_service.check_build_result",
+            new=AsyncMock(return_value=BuildResult("SUCCESS", None, None)),
+        ),
+    ):
         changed = await EnvironmentBuildService.poll_in_progress_builds(session)
 
     # The crux: two positional args (session, build_id), not three.

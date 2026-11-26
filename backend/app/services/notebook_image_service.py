@@ -350,6 +350,22 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
 
 
 SCIENTIFIC_IMAGE_DIGEST_KEY = "bioaf_scrna_image_digest"
+# How many times a successful build's unreadable result has been read; publishing waits meanwhile.
+SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY = "notebook_image_evidence_attempts"
+MAX_EVIDENCE_ATTEMPTS = 10
+
+
+def _attempts(value: str | None) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except ValueError:
+        return 0
+
+
+async def _reset_scientific_image(session: AsyncSession) -> None:
+    """Before a new build: no image, digest or pending evidence read from an earlier one."""
+    for key in ("bioaf_scrna_image", SCIENTIFIC_IMAGE_DIGEST_KEY, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY):
+        await _set_config(session, key, "null")
 
 
 async def scientific_image(session: AsyncSession) -> str | None:
@@ -429,8 +445,7 @@ async def build_notebook_image(session: AsyncSession, user_id: int | None = None
     platform.require_build_service()
 
     # Clear any stale image URI (and its digest) from a previous failed build attempt
-    await _set_config(session, "bioaf_scrna_image", "null")
-    await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
+    await _reset_scientific_image(session)
     # Reset build tracking so poll_image_build picks up the new build
     await _set_config(session, "notebook_image_build_status", "null")
     await _set_config(session, "notebook_image_build_id", "null")
@@ -530,6 +545,45 @@ async def _ensure_default_environment(
     logger.info("Created default environment '%s' (id=%d) with image %s", env.name, env.id, image_uri)
 
 
+async def _publish_scientific_image(session: AsyncSession, build_id: str, platform) -> None:
+    """Publish a successful build: its image, the digest it pushed, and the default environment.
+
+    Deferred while the build's result cannot be read (see ``MAX_EVIDENCE_ATTEMPTS``).
+    """
+    # Now that the build succeeded, write the image URI and the digest it pushed; launches pin to
+    # the digest (scientific_image), so a moved tag never changes what runs.
+    image_uri = get_image_uri(platform.config)
+    result = await check_build_result(session, build_id)
+    if result.status == "UNKNOWN":
+        # The result could not be read (a transient failure), which is not "no evidence": read it
+        # again on the next poll, and publish by tag, unverified, only after the last attempt.
+        attempts = _attempts(await _read_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY)) + 1
+        if attempts < MAX_EVIDENCE_ATTEMPTS:
+            await _set_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY, str(attempts))
+            logger.warning("Build %s result unreadable (attempt %d); retrying", build_id, attempts)
+            return
+    await _set_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY, "null")
+    await _set_config(session, "bioaf_scrna_image", image_uri)
+    await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, result.image_digest or "null")
+    # Drain the wizard's queue: any rstudio/jupyterhub queued before the
+    # image existed can now flip to enabled (or stay provisioning if
+    # compute is not up yet). Local import to avoid a cycle through
+    # component_queue -> notebook_image_service.build_notebook_image.
+    from app.services.component_queue import process_queued_components
+
+    await process_queued_components(session)
+    # Update component states for notebook components
+    await session.execute(
+        text("""
+        UPDATE component_states SET status = 'enabled'
+        WHERE component_key IN ('rstudio', 'jupyterhub')
+        AND enabled = true AND status = 'provisioning'
+        """)
+    )
+    # Create default environment if none exists yet, with what this build proved.
+    await _ensure_default_environment(session, image_uri, result, build_id)
+
+
 async def poll_image_build(session: AsyncSession) -> str | None:
     """Check if there is an active image build and update its status.
 
@@ -541,6 +595,13 @@ async def poll_image_build(session: AsyncSession) -> str | None:
         return None
 
     current_status = await _read_config(session, "notebook_image_build_status")
+    if current_status == "SUCCESS" and _attempts(await _read_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY)):
+        # Succeeded, but its result could not be read yet: try again before publishing.
+        platform = await resolve_image_platform(session)
+        if platform.has_target:
+            await _publish_scientific_image(session, build_id, platform)
+            await session.flush()
+        return current_status
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         return current_status
 
@@ -558,29 +619,7 @@ async def poll_image_build(session: AsyncSession) -> str | None:
 
     if status == "SUCCESS":
         logger.info("Notebook image build %s completed successfully", build_id)
-        # Now that the build succeeded, write the image URI and the digest it pushed; launches pin to
-        # the digest (scientific_image), so a moved tag never changes what runs.
-        image_uri = get_image_uri(platform.config)
-        result = await check_build_result(session, build_id)
-        await _set_config(session, "bioaf_scrna_image", image_uri)
-        await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, result.image_digest or "null")
-        # Drain the wizard's queue: any rstudio/jupyterhub queued before the
-        # image existed can now flip to enabled (or stay provisioning if
-        # compute is not up yet). Local import to avoid a cycle through
-        # component_queue -> notebook_image_service.build_notebook_image.
-        from app.services.component_queue import process_queued_components
-
-        await process_queued_components(session)
-        # Update component states for notebook components
-        await session.execute(
-            text("""
-            UPDATE component_states SET status = 'enabled'
-            WHERE component_key IN ('rstudio', 'jupyterhub')
-            AND enabled = true AND status = 'provisioning'
-            """)
-        )
-        # Create default environment if none exists yet, with what this build proved.
-        await _ensure_default_environment(session, image_uri, result, build_id)
+        await _publish_scientific_image(session, build_id, platform)
     elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
         logger.error("Notebook image build %s failed with status %s", build_id, status)
         # Clear the image URI since the build failed

@@ -567,6 +567,15 @@
    "evidence": [],
    "route": "none"
   },
+  "test_build_evidence_retry.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_build_status_endpoint.py": {
    "category": "real_commit",
    "evidence": [

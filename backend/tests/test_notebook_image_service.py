@@ -287,9 +287,18 @@ async def test_poll_image_build_writes_uri_on_success(session, seed_build_config
         )
     await session.commit()
 
-    with patch(
-        "app.services.notebook_image_service.check_build_status",
-        return_value="SUCCESS",
+    from app.adapters.image_build.base import BuildResult
+
+    with (
+        patch(
+            "app.services.notebook_image_service.check_build_status",
+            return_value="SUCCESS",
+        ),
+        # The build's result is readable (an unreadable one defers publishing).
+        patch(
+            "app.services.notebook_image_service.check_build_result",
+            return_value=BuildResult("SUCCESS", None, None),
+        ),
     ):
         result = await poll_image_build(session)
 

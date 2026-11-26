@@ -123,7 +123,8 @@ async def test_a_session_without_an_environment_launches_the_pinned_image(client
 
 
 @pytest.mark.asyncio
-async def test_unreadable_evidence_records_no_digest_and_does_not_break_the_poll(session, building):
+async def test_unreadable_evidence_defers_publishing_and_does_not_break_the_poll(session, building):
+    # Unreadable is not "no evidence": the image waits for a later read (tests/test_build_evidence_retry.py).
     with (
         patch.object(notebook_image_service, "check_build_status", AsyncMock(return_value="SUCCESS")),
         patch.object(notebook_image_service, "resolve_image_credentials", AsyncMock(side_effect=RuntimeError("x"))),
@@ -134,4 +135,4 @@ async def test_unreadable_evidence_records_no_digest_and_does_not_break_the_poll
     ):
         assert await notebook_image_service.poll_image_build(session) == "SUCCESS"
     await session.commit()
-    assert await scientific_image(session) == TAG
+    assert await scientific_image(session) is None

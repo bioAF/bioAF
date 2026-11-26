@@ -915,7 +915,8 @@ class EnvironmentBuildService:
     async def poll_in_progress_builds(session: AsyncSession) -> int:
         """Poll all in-progress environment builds and update statuses.
 
-        Returns the number of builds that changed status.
+        Returns the number of builds changed: a new status, or a recorded attempt to read a successful
+        build's unreadable result (the polling job commits only when this is nonzero).
         """
         from app.services.notebook_image_service import check_build_status
 
@@ -942,19 +943,29 @@ class EnvironmentBuildService:
             status = await check_build_status(session, version.build_id)
 
             if status == "SUCCESS":
-                version.status = "ready"
                 if await _is_notebook_environment(session, version.environment_id):
-                    from app.services.notebook_image_service import check_build_result
+                    from app.services.notebook_image_service import MAX_EVIDENCE_ATTEMPTS, check_build_result
                     from app.services.notebook_runtime import capability_from_build
 
+                    result = await check_build_result(session, version.build_id)
+                    if result.status == "UNKNOWN":
+                        # Unreadable (transient), not "no evidence": stay building and read it again,
+                        # going ahead unverified only after the last attempt.
+                        attempts = int((version.notebook_capability or {}).get("evidence_attempts", 0)) + 1
+                        if attempts < MAX_EVIDENCE_ATTEMPTS:
+                            version.notebook_capability = {"evidence_attempts": attempts}
+                            # A change to persist: the polling job commits only when one is reported.
+                            changed += 1
+                            continue
                     # Record what the build's own evidence proved, bound to its digest (plan 03.5B).
                     version.notebook_capability = capability_from_build(
                         version.definition_format,
                         version.definition_content,
-                        await check_build_result(session, version.build_id),
+                        result,
                         image_uri=version.image_uri or "",
                         build_id=version.build_id,
                     )
+                version.status = "ready"
                 changed += 1
                 completed_versions.append(version)
                 logger.info(
