@@ -4818,6 +4818,13 @@
    "evidence": [],
    "route": "none"
   },
+  "test_schema_lock_budget.py": {
+   "category": "schema",
+   "evidence": [
+    "ddl"
+   ],
+   "route": "dedicated_schema"
+  },
   "test_schema_upgrade.py": {
    "category": "schema",
    "evidence": [

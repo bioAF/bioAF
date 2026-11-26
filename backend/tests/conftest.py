@@ -32,7 +32,6 @@ import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
-from sqlalchemy import text as sa_text  # noqa: E402
 
 from app.adapters import registry as adapter_registry  # noqa: E402
 from app.services.auth_service import AuthService  # noqa: E402
@@ -113,24 +112,25 @@ async def db_engine(worker_id, request):
     import app.models  # noqa: F401 -- register all models with Base.metadata
     from app.database import Base
     from tests.plugins import invocation  # imported here so pytest registers the plugin first
-    from tests.support import fixture_routes, worker_schema
+    from tests.support import fixture_routes, schema_ddl, worker_schema
 
     route = fixture_routes.route_for(request.node.path.name)
     cleanup: list = []
 
     if route == "existing":
         schema = invocation.claim_schema("test", worker_id)
-        quoted = invocation.quote(schema)
         engine = _engine_for(schema)
-        async with engine.begin() as conn:
-            # A schema left by an interrupted test in this same invocation is stale.
-            await conn.execute(sa_text(f"DROP SCHEMA IF EXISTS {quoted} CASCADE"))
-            await conn.execute(sa_text(f"CREATE SCHEMA {quoted}"))
-            await conn.run_sync(Base.metadata.create_all)
 
         async def _drop_schema():
-            async with engine.begin() as conn:
-                await conn.execute(sa_text(f"DROP SCHEMA {quoted} CASCADE"))
+            # A batch of tables per transaction (tests/support/schema_ddl.py), so concurrent workers
+            # never exhaust Postgres's shared lock table.
+            async with engine.connect() as conn:
+                raw = await conn.get_raw_connection()
+                await schema_ddl.drop_schema(raw.driver_connection, schema)
+
+        # A schema left by an interrupted test in this same invocation is stale.
+        await _drop_schema()
+        await schema_ddl.create_schema(engine, schema, Base.metadata)
 
         test_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         cleanup.append(_drop_schema)
