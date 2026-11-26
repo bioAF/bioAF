@@ -34,6 +34,7 @@ import { useToast } from "@/components/shared/Toast";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { isProtectedAccess, openProtectedSession } from "@/lib/notebookAccess";
 import { isPermissionDenied, loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -317,6 +318,15 @@ export default function NotebooksPage() {
     });
   }
 
+  async function handleOpen(sessionId: number) {
+    try {
+      await openProtectedSession(sessionId);
+    } catch (e) {
+      logError("Open notebook session", e);
+      toast.error(e instanceof Error ? e.message : "Could not open the session. Try again.");
+    }
+  }
+
   async function handleStop(sessionId: number) {
     const ok = await confirm({
       title: "Stop this notebook session?",
@@ -488,7 +498,7 @@ export default function NotebooksPage() {
                     {s.started_at ? new Date(s.started_at).toLocaleString() : NOT_SET}
                   </td>
                   <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
-                    {s.proxy_url && s.status === "running" ? (
+                    {s.proxy_url && s.status === "running" && !isProtectedAccess(s.proxy_url) ? (
                       <a href={s.proxy_url} target="_blank" rel="noopener noreferrer" className="text-bioaf-600 hover:underline">
                         {s.proxy_url.replace("http://", "")}
                       </a>
@@ -496,11 +506,15 @@ export default function NotebooksPage() {
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-2">
-                      {s.proxy_url && s.status === "running" && (
+                      {s.proxy_url && s.status === "running" && (isProtectedAccess(s.proxy_url) ? (
+                        <button onClick={() => handleOpen(s.id)} className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50">
+                          Open
+                        </button>
+                      ) : (
                         <a href={s.proxy_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-1 border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50">
                           Open
                         </a>
-                      )}
+                      ))}
                       {["pending", "starting", "running", "idle"].includes(s.status) && (
                         <button onClick={() => handleStop(s.id)} className="text-xs px-2 py-1 border border-red-600 text-red-600 rounded hover:bg-red-50">
                           Stop
@@ -563,11 +577,15 @@ export default function NotebooksPage() {
           size="md"
           footer={
             <>
-            {viewingSession.proxy_url && viewingSession.status === "running" && (
+            {viewingSession.proxy_url && viewingSession.status === "running" && (isProtectedAccess(viewingSession.proxy_url) ? (
+              <button onClick={() => handleOpen(viewingSession.id)} className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
+                Open
+              </button>
+            ) : (
               <a href={viewingSession.proxy_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
                 Open
               </a>
-            )}
+            ))}
             {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
               <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); setProvenance(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">
                 Stop
@@ -621,7 +639,7 @@ export default function NotebooksPage() {
                 { label: "Linked to", value: formatLinkedTo({ experiment: viewingSession.experiment, project: viewingSession.project }) },
                 { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
                 { label: "Uptime", value: uptimeLabel },
-                { label: "Access URL", value: viewingSession.proxy_url || null },
+                { label: "Access URL", value: isProtectedAccess(viewingSession.proxy_url) ? null : viewingSession.proxy_url || null },
                 { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
                 { label: "Git Branch", value: viewingSession.git_branch_name || null },
                 { label: "Git Commit", value: viewingSession.git_commit_hash || null },

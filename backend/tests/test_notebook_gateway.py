@@ -410,3 +410,14 @@ async def test_websockets_per_session_are_bounded(nb, stack):
             with pytest.raises((websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)):
                 async with websockets.connect(url, additional_headers=_ws_headers(stack, nb)) as c:
                     await c.recv()
+
+
+@pytest.mark.asyncio
+async def test_gateway_pages_cut_the_link_to_the_bioaf_tab_that_opened_them(session, nb, stack):
+    ticket = await _ticket(session, nb)
+    async with _client(stack) as c:
+        entered = await c.post("/_bioaf/enter", data={"ticket": ticket}, headers={"origin": stack["app_origin"]})
+    async with _client(stack, _cookie_for(nb)) as c:
+        page = await c.get("/s/41/page")
+    for response in (entered, page):
+        assert response.headers["cross-origin-opener-policy"] == "same-origin"

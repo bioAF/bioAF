@@ -193,6 +193,7 @@ class Gateway:
         )
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         return response
 
     # -- HTTP --------------------------------------------------------------------------------
@@ -236,6 +237,9 @@ class Gateway:
             out_headers.append(("location", _rewrite(location, upstream.rewrite_prefix)))
         out_headers.append(("referrer-policy", "same-origin"))
         out_headers.append(("x-content-type-options", "nosniff"))
+        # The bioAF tab that opened this one keeps no handle on it, and it none on bioAF.
+        out_headers = [(k, v) for k, v in out_headers if k.lower() != "cross-origin-opener-policy"]
+        out_headers.append(("cross-origin-opener-policy", "same-origin"))
 
         if upstream.rewrite_prefix and reply.headers.get("content-type", "").startswith("text/html"):
             body = b""
