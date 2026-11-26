@@ -784,6 +784,19 @@
         "title": "ApiKeyOut",
         "type": "object"
       },
+      "ApplyRequest": {
+        "properties": {
+          "draft_version": {
+            "title": "Draft Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_version"
+        ],
+        "title": "ApplyRequest",
+        "type": "object"
+      },
       "ApplyUpdatesRequest": {
         "properties": {
           "modules": {
@@ -16911,6 +16924,37 @@
         "title": "QuotaVerdictResponse",
         "type": "object"
       },
+      "RangeEntry": {
+        "properties": {
+          "cidr": {
+            "maxLength": 64,
+            "title": "Cidr",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cidr"
+        ],
+        "title": "RangeEntry",
+        "type": "object"
+      },
       "ReachabilityTestResult": {
         "properties": {
           "checked_at": {
@@ -27207,6 +27251,32 @@
         "title": "WebhookSubscriptionUpdate",
         "type": "object"
       },
+      "WorkNodeDraftRequest": {
+        "properties": {
+          "base_version": {
+            "title": "Base Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/RangeEntry"
+            },
+            "maxItems": 50,
+            "title": "Ranges",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "base_version"
+        ],
+        "title": "WorkNodeDraftRequest",
+        "type": "object"
+      },
       "WorkNodeLaunchRequest": {
         "properties": {
           "environment_version_id": {
@@ -27472,6 +27542,28 @@
             "title": "Session Type",
             "type": "string"
           },
+          "ssh_policy_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Policy Revision"
+          },
+          "ssh_policy_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Policy Status"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -27487,6 +27579,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "stop_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Failure"
           },
           "stopped_at": {
             "anyOf": [
@@ -29938,7 +30041,7 @@
     },
     "/api/auth/me/ssh-key/generate": {
       "post": {
-        "description": "Generate an RSA key pair for the user. Stores the private key, returns the public key.",
+        "description": "Generate the user's SSH key (Git and Work Node login). Stores the private key, returns the public key.\n\nA replacement waits until none of the user's Work Nodes may still need the current key\n(plan 03B, D03-10); the current key stays unchanged and downloadable meanwhile.",
         "operationId": "generate_ssh_key_api_auth_me_ssh_key_generate_post",
         "responses": {
           "200": {
@@ -29951,6 +30054,26 @@
           }
         },
         "summary": "Generate Ssh Key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me/ssh-key/private": {
+      "get": {
+        "description": "The caller's own current private key as a file (plan 03B, D03-6). No other user's key, ever.\n\nUncached; the audit records actor, fingerprint and time, never key material.",
+        "operationId": "download_ssh_key_api_auth_me_ssh_key_private_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Download Ssh Key",
         "tags": [
           "auth"
         ]
@@ -48787,7 +48910,9 @@
                     "terraform_plan",
                     "terraform_apply",
                     "config_sync",
-                    "component_change"
+                    "component_change",
+                    "host_ssh_filter",
+                    "host_recovery_setup"
                   ],
                   "type": "string"
                 },
@@ -51345,6 +51470,319 @@
         "summary": "Update Notebook Settings",
         "tags": [
           "notebook-settings"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access": {
+      "get": {
+        "operationId": "get_ssh_access_api_v1_settings_ssh_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ssh Access",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/apply": {
+      "post": {
+        "description": "Reconcile protected recovery, re-check, then apply the filter (a cloud change: infrastructure:deploy).",
+        "operationId": "apply_host_filter_api_v1_settings_ssh_access_host_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Host Filter",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/check": {
+      "post": {
+        "description": "Read-only automatic preflight; also asks the host for fresh fixed guest diagnostics.",
+        "operationId": "check_host_access_api_v1_settings_ssh_access_host_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Host Access",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/draft": {
+      "put": {
+        "operationId": "save_host_filter_draft_api_v1_settings_ssh_access_host_draft_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkNodeDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Host Filter Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/recovery": {
+      "post": {
+        "description": "Create or repair protected cloud recovery access (a cloud change: infrastructure:deploy).\n\nFor installs from before recovery access existed; no SSH filter or installer rerun is needed.",
+        "operationId": "set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Set Up Host Recovery",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/host/rollback": {
+      "post": {
+        "operationId": "rollback_host_filter_api_v1_settings_ssh_access_host_rollback_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollback Host Filter",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/observed-address": {
+      "get": {
+        "description": "The address the managed edge saw for this browser, as a draft suggestion only (plan 03B).\n\nTrusted only with the installation's edge token, which nginx adds after overwriting X-Real-IP\nwith its own observed peer. Custom upstream proxies are not inferred.",
+        "operationId": "get_observed_address_api_v1_settings_ssh_access_observed_address_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Observed Address",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/restore": {
+      "get": {
+        "description": "Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).\n\nChanges no key, rule or session and uses no bioAF cloud credential.",
+        "operationId": "get_restore_link_api_v1_settings_ssh_access_restore_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Restore Link",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/apply": {
+      "post": {
+        "operationId": "apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/check": {
+      "post": {
+        "operationId": "check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/draft": {
+      "put": {
+        "operationId": "save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkNodeDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Work Node Draft",
+        "tags": [
+          "ssh-access"
+        ]
+      }
+    },
+    "/api/v1/settings/ssh-access/work-nodes/rollback": {
+      "post": {
+        "operationId": "rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollback Work Node Policy",
+        "tags": [
+          "ssh-access"
         ]
       }
     },

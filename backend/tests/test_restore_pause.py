@@ -174,7 +174,6 @@ def _boundaries():
     from app.services.notebook_service import NotebookService
     from app.services.pipeline_run_service import PipelineRunService
     from app.services.reference_data_service import ReferenceDataService
-    from app.services.slurm_service import SlurmService
     from app.services.terraform_executor import TerraformExecutor
     from app.services.work_node_service import WorkNodeService
 
@@ -188,7 +187,6 @@ def _boundaries():
         "work node launch": WorkNodeService.launch_work_node,
         "notebook image build": notebook_image_service.submit_image_build,
         "cellxgene image build": cellxgene_image_service.submit_image_build,
-        "slurm submit": SlurmService.submit_job,
         "reference import": ReferenceDataService.start_import,
     }
 

@@ -35,70 +35,19 @@ def test_compute_mode_reads_from_env():
         assert s.compute_mode == "slurm"
 
 
-async def _run_status_sync_job(monkeypatch) -> list[bool]:
-    """Start the job-status-sync worker as the scheduler does; return the SSH syncs it attempted."""
-    import asyncio
+# Plan 03C (owner-approved 2026-11-24): SLURM is unsupported and its SSH connector, which connected with
+# known_hosts=None, is retired with its periodic status poll. The SLURM status-poll tests were removed
+# with it; stored SlurmJob history stays.
+def test_no_slurm_ssh_connector_or_status_poll_remains():
+    import importlib.util
 
-    from app.services import slurm_service
     from app.tasks.jobs import PERIODIC_JOBS
-    from app.tasks.periodic import run_periodic
 
-    synced: list[bool] = []
-
-    async def fake_sync(session):
-        synced.append(True)
-
-    monkeypatch.setattr(slurm_service.SlurmService, "sync_job_statuses", fake_sync)
-
-    async def no_wait(delay, stopping):
-        await asyncio.sleep(0)
-        return False
-
-    job = next(j for j in PERIODIC_JOBS if j.role == "job-status-sync")
-    task = asyncio.create_task(run_periodic(job, wait=no_wait))
-    await asyncio.sleep(0.05)
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-    return synced
+    assert importlib.util.find_spec("app.services.slurm_service") is None
+    assert "job-status-sync" not in {j.role for j in PERIODIC_JOBS}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["kubernetes", "slurm", "local"])
-async def test_job_status_sync_skipped_when_not_slurm(monkeypatch, mode):
-    """On a Kubernetes stack the SLURM status sync never runs, whatever BIOAF_COMPUTE_MODE says."""
-    from app.adapters.registry import initialize_adapters_sync
-    from app.config import settings
-    from app.settings_contract import parse_compute_mode
+def test_slurm_job_history_is_kept():
+    from app.models.slurm_job import SlurmJob
 
-    monkeypatch.setattr(settings, "compute_mode", parse_compute_mode(mode))
-    initialize_adapters_sync("kubernetes")
-
-    synced = await _run_status_sync_job(monkeypatch)
-    assert synced == [], "SlurmService.sync_job_statuses should not be called on non-SLURM deployments"
-
-
-@pytest.mark.asyncio
-async def test_job_status_sync_skipped_for_a_simulated_slurm_stack(monkeypatch):
-    from app.adapters.registry import initialize_adapters_sync
-    from app.config import settings
-    from app.settings_contract import ComputeMode
-
-    monkeypatch.setattr(settings, "compute_mode", ComputeMode.LOCAL)
-    initialize_adapters_sync("slurm")
-
-    assert await _run_status_sync_job(monkeypatch) == []
-
-
-@pytest.mark.asyncio
-async def test_job_status_sync_runs_for_a_real_slurm_stack(monkeypatch):
-    from app.adapters.registry import initialize_adapters_sync
-    from app.config import settings
-    from app.settings_contract import ComputeMode
-
-    monkeypatch.setattr(settings, "compute_mode", ComputeMode.KUBERNETES)
-    initialize_adapters_sync("slurm")
-
-    assert await _run_status_sync_job(monkeypatch) != []
+    assert SlurmJob.__tablename__ == "slurm_jobs"

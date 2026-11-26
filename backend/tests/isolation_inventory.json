@@ -298,6 +298,14 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_aws_backend_sync_terraform.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_aws_config_api.py": {
    "category": "real_commit",
    "evidence": [
@@ -317,6 +325,16 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_backend_sync_route.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_backfill_costs_cli.py": {
    "category": "real_commit",
@@ -1849,6 +1867,15 @@
    "evidence": [],
    "route": "none"
   },
+  "test_git_trust.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_github_db_columns.py": {
    "category": "single_connection",
    "evidence": [
@@ -1921,6 +1948,23 @@
     "ddl"
    ],
    "route": "dedicated_schema"
+  },
+  "test_host_ssh_access.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "create_task",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_host_ssh_filter.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_http_policy.py": {
    "category": "real_commit",
@@ -4880,11 +4924,9 @@
    "route": "committed_reset_candidate"
   },
   "test_slurm_guard.py": {
-   "category": "real_commit",
-   "evidence": [
-    "create_task"
-   ],
-   "route": "committed_reset_candidate"
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
   },
   "test_smtp_settings.py": {
    "category": "real_commit",
@@ -4908,6 +4950,17 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_ssh_access_settings.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_ssh_connect.py": {
    "category": "real_commit",
    "evidence": [
@@ -4916,6 +4969,26 @@
     "fixture:session",
     "http requests use their own sessions",
     "uses db_engine directly"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_ssh_observed_address.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_ssh_recovery_link.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
    ],
    "route": "committed_reset_candidate"
   },
@@ -5684,6 +5757,55 @@
    "category": "no_database",
    "evidence": [],
    "route": "none"
+  },
+  "test_work_node_login_key.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_work_node_readiness.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_work_node_ssh_trust.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_work_node_sshd_policy.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_work_node_sync_command.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_work_node_trust.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_work_nodes.py": {
    "category": "real_commit",

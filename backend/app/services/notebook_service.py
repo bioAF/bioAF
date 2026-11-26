@@ -187,6 +187,10 @@ class NotebookService:
                 # Include SSH key if the user has one configured
                 if cred.ssh_private_key:
                     spec["ssh_private_key"] = cred.ssh_private_key
+                    # Git server trust (plan 03C): shipped GitHub keys plus operator-approved hosts.
+                    from app.platform.git_trust import trust_for_repositories
+
+                    spec["git_known_hosts"] = (await trust_for_repositories(session, [])).known_hosts
 
             # Validate and build input file list with hierarchical paths
             input_files_spec: list[dict] = []

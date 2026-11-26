@@ -4,6 +4,10 @@
 AGENT="$BATS_TEST_DIRNAME/../../scripts/update-agent.sh"
 HOST_IO="$BATS_TEST_DIRNAME/../../scripts/update_host_io.py"
 
+
+# absent <grep args>: fails the test when the pattern is found (a bare "! grep" mid-test never fails it).
+absent() { if grep -q "$@"; then return 1; fi; }
+
 setup() {
     REPO="$(mktemp -d)"
     mkdir -p "$REPO/scripts" "$REPO/update-requests" "$REPO/update-status"
@@ -581,4 +585,137 @@ start_agent() {
     echo '# policy change' >> "$REPO/installer/host_prereqs.sh"
     run python3 -I "$HOST_IO" agent-code-current "$REPO"
     [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# One-time updater preparation (plan 03A). An older updater runs the target's install.sh hook, which
+# prepares only the host update helper and refuses; the older updater then records its own fixed
+# error. The prepared agent rewrites that one failure to the plain retry instruction, but only when
+# the host-owned preparation record (host-state/, outside every backend mount) matches it.
+# ---------------------------------------------------------------------------
+
+PREPARED_TEXT="The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."
+
+status_json() {
+    printf '%s\n' "$1" > "$REPO/update-status/current.json"
+}
+
+@test "a matching preparation record turns the older updater's fixed error into the retry instruction" {
+    python3 -I "$HOST_IO" record-preparation "$REPO" 2026.12.1 2026.11.21 prepared
+    for legacy in "encryption key bootstrap failed" "Update process exited with code 1"; do
+        python3 -I "$HOST_IO" record-preparation "$REPO" 2026.12.1 2026.11.21 prepared
+        status_json "{\"status\": \"failed\", \"from_version\": \"2026.11.21\", \"to_version\": \"2026.12.1\", \"step\": \"ensure_encryption_key\", \"error\": \"$legacy\"}"
+        run python3 -I "$HOST_IO" normalize-prepared-failure "$REPO"
+        [ "$status" -eq 0 ]
+        grep -qF "$PREPARED_TEXT" "$REPO/update-status/current.json"
+        grep -q '"status": "failed"' "$REPO/update-status/current.json"
+        grep -q '"to_version": "2026.12.1"' "$REPO/update-status/current.json"
+        # The record is used once.
+        [ ! -e "$REPO/host-state/update-preparation.json" ]
+    done
+}
+
+@test "the same fixed error without a preparation record is left as it is" {
+    status_json '{"status": "failed", "from_version": "2026.11.21", "to_version": "2026.12.1", "error": "encryption key bootstrap failed"}'
+    cp "$REPO/update-status/current.json" "$REPO/before.json"
+    run python3 -I "$HOST_IO" normalize-prepared-failure "$REPO"
+    cmp -s "$REPO/update-status/current.json" "$REPO/before.json"
+}
+
+@test "a failed preparation, another target or a real failure is never rewritten" {
+    for case in failed-outcome other-target other-error other-source; do
+        rm -rf "$REPO/host-state"
+        target=2026.12.1; from=2026.11.21; outcome=prepared; error="encryption key bootstrap failed"
+        case "$case" in
+            failed-outcome) outcome=failed ;;
+            other-target)   target=2026.12.2 ;;
+            other-error)    error="Database backup failed, so the update was stopped before changing anything." ;;
+            other-source)   from=2026.11.20 ;;
+        esac
+        python3 -I "$HOST_IO" record-preparation "$REPO" "$target" "$from" "$outcome"
+        status_json "{\"status\": \"failed\", \"from_version\": \"2026.11.21\", \"to_version\": \"2026.12.1\", \"error\": \"$error\"}"
+        cp "$REPO/update-status/current.json" "$REPO/before.json"
+        run python3 -I "$HOST_IO" normalize-prepared-failure "$REPO"
+        cmp -s "$REPO/update-status/current.json" "$REPO/before.json"
+    done
+}
+
+@test "the preparation record is private host state and refuses malformed versions" {
+    run python3 -I "$HOST_IO" record-preparation "$REPO" 'x; rm -rf /' 2026.11.21 prepared
+    [ "$status" -ne 0 ]
+    run python3 -I "$HOST_IO" record-preparation "$REPO" 2026.12.1 2026.11.21 maybe
+    [ "$status" -ne 0 ]
+    python3 -I "$HOST_IO" record-preparation "$REPO" v2026.12.1 2026.11.21 prepared
+    [ "$(stat -c %a "$REPO/host-state/update-preparation.json" 2>/dev/null || stat -f %Lp "$REPO/host-state/update-preparation.json")" = 600 ]
+    grep -q '"target": "2026.12.1"' "$REPO/host-state/update-preparation.json"
+}
+
+@test "read-status-fields reports the published status and step, nothing for an unsafe entry" {
+    status_json '{"status": "in_progress", "step": "ensure_encryption_key", "from_version": "2026.11.21", "to_version": "2026.12.1"}'
+    run python3 -I "$HOST_IO" read-status-fields "$REPO"
+    [ "$output" = "$(printf 'in_progress\tensure_encryption_key\t2026.11.21\t2026.12.1')" ]
+    rm "$REPO/update-status/current.json"
+    ln -s /etc/passwd "$REPO/update-status/current.json"
+    run python3 -I "$HOST_IO" read-status-fields "$REPO"
+    [ -z "$output" ]
+}
+
+@test "each agent polling round normalizes a prepared legacy failure" {
+    python3 -I "$HOST_IO" record-preparation "$REPO" 2026.12.1 2026.11.21 prepared
+    status_json '{"status": "failed", "from_version": "2026.11.21", "to_version": "2026.12.1", "error": "Update process exited with code 1"}'
+    rm -f "$REPO/update-requests/update_7.json"
+    stub_updater 0
+    agent_round
+    grep -qF "$PREPARED_TEXT" "$REPO/update-status/current.json"
+}
+
+# ---------------------------------------------------------------------------
+# Fixed read-only SSH recovery diagnostics (plan 03B). The backend may only request the one fixed
+# operation; no command, path or username travels in the trigger, and the report has a fixed schema.
+# ---------------------------------------------------------------------------
+
+@test "a diagnostics trigger runs only the fixed host operation" {
+    printf '{"operation": "ssh-recovery-diagnostics"}' > "$REPO/update-requests/ssh-recovery-diagnostics-1.json"
+    rm -f "$REPO/update-requests/update_7.json"
+    stub_updater 0
+    agent_round
+    [ "$(cat "$REPO/updater-calls")" = "ssh-recovery-diagnostics" ]
+    [ ! -e "$REPO/update-requests/ssh-recovery-diagnostics-1.json" ]
+}
+
+@test "an unknown operation or extra arguments are refused without running anything" {
+    for body in '{"operation": "shell"}' '{"operation": "ssh-recovery-diagnostics", "command": "id"}' '{"operation": ["x"]}'; do
+        printf '%s' "$body" > "$REPO/update-requests/op.json"
+        run python3 -I "$HOST_IO" read-trigger "$REPO" op.json
+        [[ "$output" == rejected* ]] || { echo "accepted: $body"; false; }
+    done
+}
+
+@test "write-diagnostics publishes only the fixed fields with checked types" {
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 481516 provider gcp sshd_ok true pubkey_auth true \
+        guest_agent true oslogin false eic_package false authorized_keys_command ""
+    [ "$status" -eq 0 ]
+    python3 -c "import json,sys; d=json.load(open('$REPO/update-status/ssh-recovery-diagnostics.json')); assert d['schema']==1 and d['sshd_ok'] is True and d['oslogin'] is False and d['instance_id']=='481516' and 'generated_at' in d, d"
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 481516 private_key secret
+    [ "$status" -ne 0 ]
+    run python3 -I "$HOST_IO" write-diagnostics "$REPO" instance_id 'x;rm' provider gcp
+    [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# A killed update (review of plan 03A): the updater's EXIT trap cannot run after SIGKILL, so the agent
+# (its own service) releases a launch pause, and resumes a frozen backend, once no update holds the lock.
+# ---------------------------------------------------------------------------
+
+@test "the agent asks ./bioaf to release a launch pause left by a killed update, before any trigger" {
+    stub_updater 0
+    mkdir -p "$REPO/update-gate"; echo update > "$REPO/update-gate/work-node-launch.closed"
+    agent_round
+    [ "$(head -1 "$REPO/updater-calls")" = "release-stale-update-gate" ]
+}
+
+@test "with no launch pause the agent never calls the release" {
+    stub_updater 0
+    agent_round
+    absent "release-stale-update-gate" "$REPO/updater-calls"
 }

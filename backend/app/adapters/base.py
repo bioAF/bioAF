@@ -907,6 +907,27 @@ class WorkNodeProvider(ABC):
     async def list_vms(self, filters: dict | None = None) -> list[VmStatus]:
         """List active work node VMs."""
 
+    async def settle_launch(self, requests: list[dict], *, session_id: int):
+        """The settled outcome of a launch attempt from its recorded provider requests (LaunchOutcome).
+
+        An attempt that recorded no request never reached the provider. Providers that can read
+        their request history override this; the default cannot prove anything else.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome
+
+        return LaunchOutcome("none") if not requests else LaunchOutcome("unknown")
+
+    async def inventory_instances(self) -> list:
+        """Every existing bioAF Work Node instance in this installation, as ManagedInstance records.
+
+        Used by the first-update gate (``app.services.work_node_readiness``). Unlike ``list_vms`` it
+        raises ``InventoryUnavailable`` instead of returning an empty list when the provider cannot
+        answer. The default raises: a backend that cannot inventory its nodes cannot prove safety.
+        """
+        from app.platform.work_node_inventory import InventoryUnavailable
+
+        raise InventoryUnavailable(f"{type(self).__name__} cannot list its Work Node instances")
+
     async def probe_zone_capacity(self, zones: list[str], machine_type: str = "e2-medium") -> str:
         """Return the first zone in ``zones`` with capacity for ``machine_type``.
 

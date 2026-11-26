@@ -325,6 +325,9 @@ SECRET_KEY=$secret_key
 # LOSING THIS VALUE LOSES THE DATA -- back it up alongside the DB dump.
 BIOAF_ENCRYPTION_KEYS=$encryption_keys
 
+# Edge token: nginx adds it to API requests so the backend can trust the address nginx saw.
+BIOAF_EDGE_TOKEN=$(openssl rand -hex 32)
+
 # Environment
 BIOAF_ENVIRONMENT=$environment
 ENVEOF
@@ -393,6 +396,55 @@ prepare_update_agent() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# One-time updater preparation (plan 03A first-update gate).
+#
+# Every supported updater since v0.13.0 checks out the target release, records step
+# ensure_encryption_key in update-status/current.json, and runs this release's
+# `install.sh ensure-encryption-key` before it pins or restarts anything. An older updater cannot
+# check whether Work Nodes launched by the running backend would lose their in-memory sync keys, so
+# it must not replace that backend. When the caller has not declared the gate-aware contract
+# (BIOAF_UPDATE_GATE=caller, set by this release's ./bioaf update), this hook prepares only the host
+# update agent, records the host-owned outcome in host-state/, and refuses before the environment
+# file, image pin or containers change. The operator retries; the retry runs the new updater.
+# ---------------------------------------------------------------------------
+PREPARED_UPDATE_MESSAGE="The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue."
+
+older_updater_in_progress() {
+    # True when an update that has not declared the gate-aware contract is running this hook.
+    [ "${BIOAF_UPDATE_GATE:-}" = caller ] && return 1
+    [ -f "$SCRIPT_DIR/bioaf" ] && [ -f "$SCRIPT_DIR/scripts/update_host_io.py" ] || return 1
+    local fields status step
+    fields=$(python3 -I "$SCRIPT_DIR/scripts/update_host_io.py" read-status-fields "$SCRIPT_DIR" 2>/dev/null) || return 1
+    IFS=$'\t' read -r status step _ _ <<< "$fields"
+    [ "$status" = in_progress ] && [ "$step" = ensure_encryption_key ]
+}
+
+prepare_for_gated_update() {
+    # Prepare only the host update agent, record the outcome, then refuse. Never returns success.
+    local fields from target host_io="$SCRIPT_DIR/scripts/update_host_io.py"
+    fields=$(python3 -I "$host_io" read-status-fields "$SCRIPT_DIR" 2>/dev/null) || fields=""
+    IFS=$'\t' read -r _ _ from target <<< "$fields"
+    [ "$from" = - ] && from=""
+    [ "$target" = - ] && target=""
+    yellow "This release checks running work nodes before it replaces bioAF. Preparing the update helper first;"
+    yellow "nothing else is changed on this pass."
+    if bash "$SCRIPT_DIR/bioaf" ensure-update-agent; then
+        if [ -n "$from" ] && [ -n "$target" ]; then
+            python3 -I "$host_io" record-preparation "$SCRIPT_DIR" "$target" "$from" prepared \
+                || yellow "The preparation could not be recorded; the update page may show the older updater's message."
+        fi
+        green "$PREPARED_UPDATE_MESSAGE"
+        exit 3
+    fi
+    if [ -n "$from" ] && [ -n "$target" ]; then
+        python3 -I "$host_io" record-preparation "$SCRIPT_DIR" "$target" "$from" failed || true
+    fi
+    red "The update helper could not be prepared. bioAF and your work nodes are still running unchanged."
+    red "Run ./bioaf start on the host to see why, then retry the update."
+    exit 1
+}
+
 ensure_encryption_key_in_env() {
     if [ ! -f "$ENV_FILE" ]; then
         # Nothing to amend; generate-env hasn't been run. Not an error.
@@ -444,6 +496,26 @@ APPEND_EOF
     yellow "unrecoverable. Back it up SEPARATELY from your DB backup."
     yellow ""
     return 0
+}
+
+ensure_edge_token_in_env() {
+    # Plan 03B: the token nginx adds to API requests so the backend can trust the peer address nginx
+    # observed (Use this computer's address). Appended once, never rewritten; no token means the
+    # backend simply never trusts an address.
+    [ -f "$ENV_FILE" ] || return 0
+    [ -n "$(read_env_value "BIOAF_EDGE_TOKEN")" ] && return 0
+    command -v openssl >/dev/null 2>&1 || { yellow "openssl is not available; the edge token was not added."; return 0; }
+    local token
+    token=$(openssl rand -hex 32)
+    if grep -qE "^BIOAF_EDGE_TOKEN=" "$ENV_FILE"; then
+        sed -i.bak "s|^BIOAF_EDGE_TOKEN=.*$|BIOAF_EDGE_TOKEN=${token}|" "$ENV_FILE"
+        rm -f "${ENV_FILE}.bak"
+    else
+        if [ -s "$ENV_FILE" ] && [ "$(tail -c 1 "$ENV_FILE" | wc -l | tr -d ' ')" = "0" ]; then
+            printf '\n' >> "$ENV_FILE"
+        fi
+        printf '\n# Edge token (added by an update; plan 03B).\nBIOAF_EDGE_TOKEN=%s\n' "$token" >> "$ENV_FILE"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -585,7 +657,14 @@ case "$command" in
         if [ -f "$SCRIPT_DIR/bioaf" ]; then
             host_python_require || exit 1
         fi
+        # An older, ungated updater gets the one-time preparation pass and stops here, before the
+        # environment file changes (see prepare_for_gated_update).
+        if older_updater_in_progress; then
+            prepare_for_gated_update
+        fi
         ensure_encryption_key_in_env "$@"
+        # This release's updater also brings an older env file the edge token (plan 03B).
+        [ "${BIOAF_UPDATE_GATE:-}" = caller ] && ensure_edge_token_in_env
         prepare_host_log_collection
         prepare_update_agent
         ;;

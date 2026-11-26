@@ -1235,8 +1235,19 @@ class TerraformExecutor:
         from app.platform.platform_config_service import PlatformConfigService
         from app.services.terraform_cloud import get_terraform_cloud
 
-        cloud = get_terraform_cloud(await get_cloud_provider(session))
+        provider = await get_cloud_provider(session)
+        cloud = get_terraform_cloud(provider)
         config = await PlatformConfigService.get_many(session, cloud.config_keys())
+        if provider == "aws" and not config.get("aws_app_vpc_id"):
+            # Private backend sync (plan 03B): record the application network so the compute module
+            # can peer with it. Best effort; without it Work Nodes keep the existing public route.
+            try:
+                from app.services.ssh_recovery import record_aws_app_network
+
+                await record_aws_app_network(session)
+                config = await PlatformConfigService.get_many(session, cloud.config_keys())
+            except Exception:
+                logger.warning("The application network could not be recorded; private backend sync stays off")
         return cloud, cloud.postprocess_config(config)
 
     @staticmethod

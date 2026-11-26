@@ -104,3 +104,15 @@ variable "system_max_nodes" {
   default     = 2
   description = "Max nodes in the system node group (min is 1 so addons always have a home)."
 }
+
+variable "app_vpc_id" {
+  type        = string
+  default     = ""
+  description = "The application VM's VPC, recorded by the backend; peered for private backend sync (plan 03B). Empty: no peering."
+}
+
+variable "app_security_group_id" {
+  type        = string
+  default     = ""
+  description = "The application VM's security group, the only source the backend-sync group admits on tcp:22."
+}

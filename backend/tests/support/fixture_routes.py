@@ -227,7 +227,6 @@ MIGRATED_RESET_PILOT: frozenset[str] = frozenset(
         "test_session_failure_taxonomy.py",
         "test_sheets_import_api.py",
         "test_slack_oauth.py",
-        "test_slurm_guard.py",
         "test_smtp_settings.py",
         "test_snapshots.py",
         "test_ssh_connect.py",

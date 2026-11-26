@@ -737,6 +737,7 @@ for v in cfg.get('volumes', {}).values():
     pin_image_tag "${BIOAF_IMAGE_TAG:-v$(get_current_version)}"
     deploy_mark_candidate setup "$BIOAF_IMAGE_TAG" || yellow "WARNING: The deployment record (host-state/deployments.json) could not be updated."
     ensure_backups_dir
+    ensure_update_gate_dir
     step "Start services (docker compose up -d)" -- $DC up -d
 
     # Wait for DB
@@ -858,6 +859,13 @@ print(json.dumps(result))
 
 cmd_start() {
     host_python_require || exit 1
+    if [ -e "$(release_unknown_marker)" ]; then
+        # An interrupted update resumed a backend whose release could not be read; starting with the
+        # pinned release could replace it, and any older work node keys it holds, without the update gate.
+        red "ERROR: After an interrupted update bioAF could not tell which release to keep, so nothing was started."
+        red "Contact support. They remove $(release_unknown_marker) once the release is confirmed."
+        exit 1
+    fi
     bold "=== Starting Services ==="
     # Use whatever version is pinned in docker/.env. Never derive the image
     # tag from the worktree -- a `git pull` followed by `bioaf restart` must
@@ -865,6 +873,7 @@ cmd_start() {
     # container (or disk, as a last resort) for legacy installs.
     ensure_pinned_image_tag
     ensure_backups_dir
+    ensure_update_gate_dir
 
     # The agent must parse the backend's JSON lines before they are collected (GCE only).
     if ! ensure_cloud_logging; then
@@ -875,6 +884,11 @@ cmd_start() {
     # The update agent is not needed to serve, so a problem with it is reported and start continues.
     if ! ensure_update_agent; then
         yellow "WARNING: The update agent could not be configured; in-app updates will not run until this is fixed."
+    fi
+
+    # A backend frozen by an update that was killed mid-gate resumes (never while an update holds the lock).
+    if [ -d "$(deploy_state_dir)" ]; then
+        ( deploy_lock >/dev/null 2>&1 && $DC unpause backend >/dev/null 2>&1 ) || true
     fi
 
     for svc in db backend frontend nginx; do
@@ -898,7 +912,13 @@ cmd_start() {
     pinned="$(grep '^BIOAF_IMAGE_TAG=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2-)" || pinned=""
     if [ -d "$(deploy_state_dir)" ]; then
         ( deploy_lock >/dev/null 2>&1 && deploy_finish "${pinned:-unpinned}" ) || true
+        # No update holds the lock, so a Work Node launch gate marker left by an interrupted one is stale.
+        ( deploy_lock >/dev/null 2>&1 && reopen_work_node_launches ) || true
     fi
+
+    # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks start.
+    # Fd 9 (the deployment lock) is closed so the background refresh never holds it.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 9>&- & )
 
     echo ""
     green "All services started."
@@ -1432,6 +1452,208 @@ update_settings_preflight() {
     esac
 }
 
+# ---------------------------------------------------------------------------
+# Work Node first-update gate (plan 03A). Work Nodes launched before durable credentials keep their
+# backend sync key only in the running backend's memory, so that backend is not replaced while such
+# a node may still exist. The check runs from the target image (backend/app/cli/
+# check_work_node_readiness.py, schema-tolerant, authenticated provider inventory). New launch POSTs
+# are refused at nginx while the update gate marker exists, so no launch can slip in between the
+# final check and the restart. Nodes are never stopped to pass the check.
+# ---------------------------------------------------------------------------
+UPDATE_GATE_DIR="$SCRIPT_DIR/update-gate"
+OLDER_NODES_MESSAGE="Some older work nodes are still running. Finish saving your work and stop them when convenient, then retry the update. bioAF will leave them running."
+READINESS_UNAVAILABLE_MESSAGE="bioAF could not check whether this update is safe. Your current installation is still running. Try again shortly."
+
+launch_gate_marker() { echo "$SCRIPT_DIR/update-gate/work-node-launch.closed"; }
+
+ensure_update_gate_dir() {
+    # The nginx bind mount's source; created here so Docker never creates it owned by root.
+    mkdir -p "$SCRIPT_DIR/update-gate"
+}
+
+reopen_work_node_launches() {
+    rm -f "$(launch_gate_marker)"
+}
+
+_update_backend_frozen=0
+
+release_update_gate() {
+    # EXIT trap of an update that closed launches: the old backend resumes unless this update stopped it
+    # for the restart, and launches reopen.
+    if [ "$_update_backend_frozen" = 1 ]; then
+        $DC unpause backend >/dev/null 2>&1 || true
+        _update_backend_frozen=0
+    fi
+    reopen_work_node_launches
+}
+
+stop_frozen_backend() {
+    # Stop the frozen old backend without resuming it: a launch it accepted before launches closed must
+    # not reach the provider after the final check (docker kill delivers the signal to a paused container).
+    [ "$_update_backend_frozen" = 1 ] || return 0
+    $DC kill backend || update_failed restart "The previous backend could not be stopped for the restart. It has been resumed. Try again shortly."
+    _update_backend_frozen=0
+}
+
+STALE_GATE_MESSAGE="The update stopped before it finished. bioAF is running again and nothing was changed. Retry the update."
+STALE_GATE_RESTARTED="The update stopped before it finished. bioAF has been restarted. Retry the update."
+STALE_GATE_DOWN="The update stopped before it finished and bioAF did not start again. On the bioAF server run ./bioaf start, or contact support."
+STALE_GATE_RELEASE_UNKNOWN="The update stopped before it finished. bioAF is running, but it could not tell which release to keep. Contact support before updating or restarting bioAF."
+
+release_unknown_marker() { echo "$SCRIPT_DIR/update-gate/release-unknown"; }
+
+cmd_release_stale_update_gate() {
+    # release-stale-update-gate: run by the update agent each polling round while a launch pause marker
+    # exists. An updater killed outright (SIGKILL, a lost session) cannot run its EXIT trap. Once no update,
+    # build or setup holds the deployment lock, the backend is brought back by its actual state:
+    #   paused  (frozen by the gate)          -> resumed, and the release it was running pinned again;
+    #   exited / not created (stopped by it)  -> started on the pinned release;
+    #   running (its replacement had started) -> left as it is.
+    # Launches reopen and the status says bioAF is running only once the backend reports ready. Otherwise
+    # the pause stays, the status says so plainly, and the next attempt waits (no restart every round).
+    [ -e "$(launch_gate_marker)" ] || return 0
+    # A frozen backend was resumed without knowing its release: only support resolves that.
+    if [ -e "$(release_unknown_marker)" ]; then return 0; fi
+    (
+        DEPLOY_LOCK_WAIT=0
+        deploy_lock >/dev/null 2>&1 || exit 0
+        local stamp="$SCRIPT_DIR/update-gate/stale-recovery-attempted" now last
+        now="$(date +%s)"
+        last="$(cat "$stamp" 2>/dev/null)" || last=0
+        case "$last" in ''|*[!0-9]*) last=0 ;; esac
+        [ $((now - last)) -ge "${BIOAF_STALE_GATE_RETRY_SECONDS:-300}" ] || exit 0
+
+        local versions=""
+        versions="$(python3 -I -c '
+import json, re, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+# The record written by the updater, or the generic failure the agent wrote over it (no from_version).
+if d.get("status") not in ("in_progress", "failed"):
+    sys.exit(0)
+ok = lambda v: v if isinstance(v, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v) else ""
+print(ok(d.get("from_version")) or "-", ok(d.get("to_version")) or "-")
+' "$SCRIPT_DIR/update-status/current.json" 2>/dev/null)" || versions=""
+        if [ -n "$versions" ]; then
+            _update_from="${versions%% *}"; _update_to="${versions#* }"
+            if [ "$_update_from" = "-" ]; then _update_from=""; fi
+            if [ "$_update_to" = "-" ]; then _update_to=""; fi
+        fi
+
+        local state message
+        state="$($DC ps -a --format '{{.State}}' backend 2>/dev/null | head -n 1)"
+        case "$state" in
+            paused)
+                # The old backend never stopped: the release it runs (its container's image tag, else the
+                # updater's record) is pinned again, so no later start replaces it without the gate.
+                local image keep=""
+                image="$($DC ps -a --format '{{.Image}}' backend 2>/dev/null | head -n 1)"
+                if [[ "${image##*:}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$image" == *:* ]]; then
+                    keep="${image##*:}"
+                elif [ -n "${_update_from:-}" ]; then
+                    keep="v${_update_from}"
+                fi
+                if [ -n "$keep" ]; then
+                    pin_image_tag "$keep" >/dev/null 2>&1
+                    _update_from="${keep#v}"
+                    message="$STALE_GATE_MESSAGE"
+                else
+                    : > "$(release_unknown_marker)"
+                    message="$STALE_GATE_RELEASE_UNKNOWN"
+                fi
+                $DC unpause backend >/dev/null 2>&1 ;;
+            running)
+                message="$STALE_GATE_RESTARTED" ;;
+            *)
+                $DC up -d backend >/dev/null 2>&1
+                message="$STALE_GATE_RESTARTED" ;;
+        esac
+
+        if wait_for_backend_ready; then
+            # Launches stay paused while the release to keep is unknown.
+            if [ ! -e "$(release_unknown_marker)" ]; then reopen_work_node_launches; fi
+            rm -f "$stamp"
+        else
+            echo "$now" > "$stamp"
+            message="$STALE_GATE_DOWN"
+        fi
+        if [ -n "$versions" ]; then
+            write_update_status failed interrupted "$message" >/dev/null 2>&1 || true
+        fi
+        exit 0
+    )
+    return 0
+}
+
+update_restart_warning() {
+    # Warning window before restart: give the UI time to show a countdown so users know the app is
+    # about to go offline briefly. Given while the backend still answers (before it is frozen).
+    # Skipped when BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
+    local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
+    if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
+        write_update_status in_progress warn
+        echo ""
+        yellow "Restarting in ${warn_seconds}s (notifying active users)..."
+        sleep "$warn_seconds"
+    fi
+}
+
+check_work_node_readiness() {
+    # check_work_node_readiness <target> <step>: the target's checker in a one-off container (no server,
+    # no database upgrade), under a tag scoped to this call. 0 ready, 3 older nodes, other: unchecked.
+    write_update_status in_progress "$2"
+    BIOAF_IMAGE_TAG="v$1" $DC run --rm --no-deps -T backend python -m app.cli.check_work_node_readiness
+}
+
+work_node_readiness_outcome() {
+    # work_node_readiness_outcome <status>: stop the update unless the check said ready.
+    case "$1" in
+        0) green "No older work nodes need the running backend." ;;
+        3) reopen_work_node_launches; update_failed work_node_readiness "$OLDER_NODES_MESSAGE" ;;
+        *) reopen_work_node_launches; update_failed work_node_readiness "$READINESS_UNAVAILABLE_MESSAGE" ;;
+    esac
+}
+
+update_work_node_gate() {
+    # update_work_node_gate <target>: check, close launch admission at the proxy, warn, freeze the old
+    # backend, let the provider settle, check again. The old backend's code predates the gate, so a
+    # launch it accepted before admission closed cannot be tracked; freezing it (docker pause keeps its
+    # memory, and older nodes' keys) means the final provider inventory sees every VM it could create.
+    # Ready: the frozen backend is later stopped, never resumed. Otherwise it resumes and the update stops.
+    local target="$1" rc=0
+    echo ""
+    bold "Checking running work nodes..."
+    check_work_node_readiness "$target" work_node_readiness || rc=$?
+    work_node_readiness_outcome "$rc"
+
+    # nginx alone is recreated with the target's config and the update-gate mount (it carries no
+    # application state); the backend holding any older keys keeps running.
+    write_update_status in_progress work_node_admission
+    ensure_update_gate_dir
+    if ! $DC up -d --no-deps nginx; then
+        update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    fi
+    printf '%s\n' "${_update_operation:-update}" > "$(launch_gate_marker)" \
+        || update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    trap release_update_gate EXIT
+
+    update_restart_warning
+
+    write_update_status in_progress work_node_admission
+    _update_backend_frozen=1
+    if ! $DC pause backend; then
+        update_failed work_node_admission "Work node launches could not be paused for the update. The running services were not changed. Try again shortly."
+    fi
+    # A provider request the backend sent before it froze becomes visible in the inventory.
+    sleep "${BIOAF_LAUNCH_DRAIN_SECONDS:-30}"
+
+    rc=0
+    check_work_node_readiness "$target" work_node_recheck || rc=$?
+    work_node_readiness_outcome "$rc"
+}
+
 cmd_update() {
     host_python_require || exit 1
     local target_version="${1:-}"
@@ -1474,6 +1696,11 @@ cmd_update() {
     local lock_status=0
     deploy_begin update "v${target_version}" || lock_status=$?
     [ "$lock_status" = 0 ] || exit "$lock_status"
+
+    # This update holds the deployment lock, so a launch gate marker or a one-time preparation record
+    # left by an interrupted or older update is stale: reopen launches and forget the record.
+    reopen_work_node_launches
+    [ -n "$HOST_IO_PY" ] && python3 -I -c "$HOST_IO_PY" clear-preparation "$SCRIPT_DIR" 2>/dev/null || true
 
     bold "=== bioAF Update ==="
     echo ""
@@ -1577,7 +1804,9 @@ cmd_update() {
         write_update_status in_progress ensure_encryption_key
         # This updater reconciles the Ops Agent itself (cloud_logging step below), so the install.sh
         # hook that does it for older updaters is skipped here.
-        BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
+        # BIOAF_UPDATE_GATE=caller declares this updater's Work Node safety gate (below), so the hook does not
+        # stop it for the one-time preparation an older updater gets.
+        BIOAF_UPDATE_GATE=caller BIOAF_HOST_LOG_COLLECTION=caller bash "$SCRIPT_DIR/install.sh" ensure-encryption-key || \
             update_failed ensure_encryption_key "encryption key bootstrap failed"
 
         # Pull pre-built images while old containers are still running,
@@ -1589,25 +1818,16 @@ cmd_update() {
         BIOAF_IMAGE_TAG="v${target_version}" $DC_PULL backend frontend || update_failed pull "Could not pull the v${target_version} images."
 
         update_settings_preflight "$target_version"
+
+        # The Work Node gate, before the pin: nothing below runs while older nodes may need this backend.
+        update_work_node_gate "$target_version"
     fi
 
     # Pin the target in docker/.env (and this process) only now that its settings passed, so this
     # version sticks for any future start/restart and the up below uses it.
     pin_image_tag "v${target_version}"
 
-    if [ "$retry_only" = false ]; then
-
-        # Warning window before restart: give the UI time to show a countdown
-        # so users know the app is about to go offline briefly. Skipped when
-        # BIOAF_SKIP_RESTART_WARN=1 (useful for tests and dev overrides).
-        local warn_seconds="${BIOAF_RESTART_WARN_SECONDS:-60}"
-        if [ "${BIOAF_SKIP_RESTART_WARN:-0}" != "1" ] && [ "$warn_seconds" -gt 0 ]; then
-            write_update_status in_progress warn
-            echo ""
-            yellow "Restarting in ${warn_seconds}s (notifying active users)..."
-            sleep "$warn_seconds"
-        fi
-    fi
+    # (The restart warning is given inside the Work Node gate, before the old backend is frozen.)
 
     # Bring the services to the pinned target with the current env file, on a fresh update and on a
     # retry alike: a backend restarting on bad settings keeps its old environment until Compose
@@ -1621,6 +1841,7 @@ cmd_update() {
     ensure_cloud_logging || update_failed cloud_logging "Cloud Logging collection could not be configured for v${target_version}, so the services were not restarted. Run ./bioaf start on the host to see why, fix it, then run ./bioaf update ${target_version} again."
 
     write_update_status in_progress restart
+    stop_frozen_backend
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
 
@@ -1637,6 +1858,11 @@ cmd_update() {
     if ! wait_for_backend_ready; then
         update_failed ready "The backend did not report ready after the database upgrade. Check ./bioaf logs backend."
     fi
+    # The new backend is serving: Work Node launches reopen.
+    reopen_work_node_launches
+    # Fresh fixed SSH recovery diagnostics for the backend's preflight (plan 03B); never blocks the update.
+    # Fd 9 (the deployment lock) is closed so the background refresh never holds it.
+    ( cmd_ssh_recovery_diagnostics >/dev/null 2>&1 9>&- & )
 
     local new_version
     new_version=$(get_running_version)
@@ -1782,6 +2008,50 @@ cmd_rotate_encryption_keys() {
     $DC exec -T backend python -m app.cli.rotate_encryption_keys "$@"
 }
 
+cmd_ssh_recovery_diagnostics() {
+    # ssh-recovery-diagnostics: publish fixed, read-only facts the backend's recovery preflight needs
+    # (plan 03B) to update-status/ssh-recovery-diagnostics.json. No key, configuration file or command
+    # output beyond these fields is published. Needs passwordless sudo for sshd's own checks; without
+    # it the report says the checks did not pass rather than guessing.
+    local provider=unknown instance_id="" token="" eff="" akc=""
+    local sshd_ok=false pubkey=false eic=false agent=false oslogin=false
+    if instance_id=$(curl -sf --connect-timeout 1 -m 2 -H 'Metadata-Flavor: Google' \
+        http://metadata.google.internal/computeMetadata/v1/instance/id 2>/dev/null) && [ -n "$instance_id" ]; then
+        provider=gcp
+    elif token=$(curl -sf --connect-timeout 1 -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+        http://169.254.169.254/latest/api/token 2>/dev/null) \
+        && instance_id=$(curl -sf --connect-timeout 1 -m 2 -H "X-aws-ec2-metadata-token: $token" \
+        http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null) && [ -n "$instance_id" ]; then
+        provider=aws
+    else
+        instance_id=unknown
+    fi
+    sudo -n /usr/sbin/sshd -t >/dev/null 2>&1 && sshd_ok=true
+    eff="$(sudo -n /usr/sbin/sshd -T 2>/dev/null || true)"
+    grep -qx 'pubkeyauthentication yes' <<< "$eff" && pubkey=true
+    akc="$(awk '$1 == "authorizedkeyscommand" { $1 = ""; sub(/^ /, ""); print; exit }' <<< "$eff")"
+    [ "$akc" = none ] && akc=""
+    dpkg -s ec2-instance-connect >/dev/null 2>&1 && eic=true
+    [ "$(systemctl is-active google-guest-agent 2>/dev/null)" = active ] && agent=true
+    grep -q oslogin /etc/nsswitch.conf 2>/dev/null && oslogin=true
+    python3 -I -c "$HOST_IO_PY" write-diagnostics "$SCRIPT_DIR" \
+        instance_id "$instance_id" provider "$provider" sshd_ok "$sshd_ok" pubkey_auth "$pubkey" \
+        guest_agent "$agent" oslogin "$oslogin" eic_package "$eic" authorized_keys_command "${akc:0:200}"
+}
+
+cmd_import_git_known_hosts() {
+    # import-git-known-hosts <file> <source>: approve custom Git server keys (plan 03C). The file holds
+    # known_hosts lines obtained and checked independently of the connection (never ssh-keyscan output);
+    # <source> records where they came from. Replaces the previously approved set.
+    local file="${1:-}" source="${2:-}"
+    if [ -z "$file" ] || [ -z "$source" ] || [ ! -r "$file" ] || [ ! -f "$file" ]; then
+        red "Usage: ./bioaf import-git-known-hosts <known_hosts file> \"<where the keys came from>\""
+        return 2
+    fi
+    bold "=== Approve custom Git server keys ==="
+    $DC exec -T backend python -m app.cli.import_git_known_hosts /dev/stdin --source "$source" < "$file"
+}
+
 cmd_help() {
     bold "bioAF Management"
     echo ""
@@ -1824,6 +2094,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  import-git-known-hosts <file> \"<source>\""
+    echo "                      Approve SSH host keys for a custom Git server (checked"
+    echo "                      independently, never ssh-keyscan output)."
     echo "  reset-install-metrics-identity --confirm"
     echo "                      Give a deliberate copy of an installation its own"
     echo "                      installation metrics identity (clears queued reports)."
@@ -1882,6 +2155,9 @@ case "$command" in
     reset-db) cmd_reset_db ;;
     register-outputs) cmd_register_outputs "$@" ;;
     rotate-encryption-keys) cmd_rotate_encryption_keys "$@" ;;
+    import-git-known-hosts) cmd_import_git_known_hosts "$@" ;;
+    ssh-recovery-diagnostics) cmd_ssh_recovery_diagnostics ;;
+    release-stale-update-gate) cmd_release_stale_update_gate ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
     *)

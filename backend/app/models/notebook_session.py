@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -59,6 +59,30 @@ class ComputeSession(Base):
     failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(String, nullable=True)
     requested_disk_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Work node trust (plan 03A). The backend sync key is generated and committed before the
+    # provider launch call so any worker can save outputs after a restart; the host public key is
+    # the only server identity the backend accepts for this node. Both are bound to the immutable
+    # provider instance id and the launch attempt label written on the instance.
+    # node_trust_version is NULL for nodes launched before durable credentials existed.
+    sync_private_key: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    host_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_instance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    launch_attempt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    node_trust_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Truthful Stop: a bounded reason code when saving or deletion is still owed
+    # (save_failed | delete_unconfirmed | state_unknown), the attempts made, and when the current
+    # stop claimed the node so a concurrent Stop or cleanup does not run twice.
+    stop_failure: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    stop_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    stop_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Work Node login (plan 03B): the user's key fingerprint installed at launch (None: no key, so
+    # password login only), and the Work Node SSH policy revision the node was launched with. Running
+    # nodes keep their launch-time policy; a later range change applies to later launches.
+    login_key_fingerprint: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ssh_policy_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The backend sync route this node was provisioned for ("public" or "private-v1").
+    sync_route: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     user = relationship("User")
     organization = relationship("Organization")

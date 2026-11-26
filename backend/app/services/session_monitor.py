@@ -30,7 +30,14 @@ class SessionMonitorService:
     ) -> None:
         """Check running notebook sessions for idle timeout."""
         try:
-            result = await session.execute(select(NotebookSession).where(NotebookSession.status == "running"))
+            # Work Nodes ("ssh") are VMs with their own heartbeat cleanup that saves before deleting;
+            # the notebook adapter cannot stop one, so this monitor must never mark one stopped.
+            result = await session.execute(
+                select(NotebookSession).where(
+                    NotebookSession.status == "running",
+                    NotebookSession.session_type != "ssh",
+                )
+            )
             running_sessions = list(result.scalars().all())
 
             now = datetime.now(timezone.utc)

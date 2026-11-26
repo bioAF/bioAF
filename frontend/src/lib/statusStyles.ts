@@ -98,6 +98,7 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     running: { badge: "bg-green-100 text-green-800" },
     idle: { badge: "bg-yellow-100 text-yellow-800" },
     stopping: { badge: "bg-orange-100 text-orange-800" },
+    stop_failed: { badge: "bg-red-100 text-red-800" },
     stopped: { badge: "bg-gray-100 text-gray-600" },
     failed: { badge: "bg-red-100 text-red-800" },
   },

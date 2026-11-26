@@ -394,6 +394,50 @@ what this installation last applied, the updater asks the backend to record a no
 checks at startup), and administrators apply the changes from the app. See
 [Infrastructure Changes After an Update](user-guide-admin.md#infrastructure-changes-after-an-update).
 
+### Running work nodes and the update
+
+Work nodes launched before this release keep the key the backend uses to save their outputs only in the
+running backend's memory. Before the updater replaces the backend, it checks (from the new release's image,
+against your cloud provider's list of work node VMs) that none of those older work nodes may still exist.
+If any might, the update waits and says:
+
+> Some older work nodes are still running. Finish saving your work and stop them when convenient, then
+> retry the update. bioAF will leave them running.
+
+Nothing is stopped for you, and the current installation keeps running. Use **View work nodes** and
+**Check again** on **Settings > Platform Info**. If the check cannot reach your cloud provider, the update
+says **bioAF could not check whether this update is safe. Your current installation is still running. Try
+again shortly.** While the backend is replaced, new work node launches are paused for a few minutes and
+then reopen; work nodes launched after this release keep running through later normal updates.
+
+For the final check the updater freezes the old backend (`docker pause`, which keeps its memory and so
+those keys), waits about 30 seconds so any VM it had already requested shows in the provider's list, and
+checks again. If the check passes, the frozen backend is stopped and replaced, never resumed, so a launch
+it accepted just before launches paused cannot start a VM afterwards. If the check fails, or anything
+before the restart fails, the old backend resumes. The app does not answer during that window, so the
+restart warning is shown before it. If the updater itself is killed while the backend is frozen, the
+update agent notices within a few seconds that no update is running and brings the backend back by its
+state: a frozen backend is resumed on the release it was running (**The update stopped before it
+finished. bioAF is running again and nothing was changed. Retry the update.**); a stopped one is started
+again (**... bioAF has been restarted. Retry the update.**). Launches reopen only once the backend reports
+ready. If it does not, the update page says **The update stopped before it finished and bioAF did not
+start again. On the bioAF server run ./bioaf start, or contact support.** and the agent tries again
+every five minutes. A resumed backend's release is read from its own container image. In the rare case
+it cannot be read, launches stay paused, the page says **... it could not tell which release to keep.
+Contact support before updating or restarting bioAF.**, and `./bioaf start` refuses until support
+confirms the release and removes `update-gate/release-unknown`.
+
+**One-time retry from an older release.** An updater from v0.13.0 through v2026.11.21 cannot run that
+check, so the first attempt only prepares the new update helper and stops without changing bioAF:
+
+> The update helper is ready. bioAF and your work nodes are still running. Retry the update to continue.
+
+An older update page may first show **Update failed: encryption key bootstrap failed** or **Update failed:
+Update process exited with code 1**. That is this preparation step, not a problem with your encryption key:
+do not change any keys. Retry the update (**Install Update** again, or `./bioaf update YYYY.M.N`); the retry
+runs the new updater and its work node check. Releases older than v0.13.0 need support before updating
+while work nodes are running.
+
 ### The update agent
 
 The agent is the `bioaf-update-agent` systemd service. It runs as the

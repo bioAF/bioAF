@@ -117,6 +117,17 @@ process_trigger() {
         return 1
     fi
     IFS=$'\t' read -r kind version upgrade_id <<< "$parsed"
+    if [ "$kind" = op ]; then
+        # A fixed read-only host operation (plan 03B); the parser accepted its name only.
+        log "Running host operation: $version"
+        if [ "$AGENT_LOG_OPEN" = true ]; then
+            "$SCRIPT_DIR/bioaf" "$version" >&3 2>&3 3>&- || log "WARNING: host operation $version failed"
+        else
+            "$SCRIPT_DIR/bioaf" "$version" 3>&- || log "WARNING: host operation $version failed"
+        fi
+        rm -f -- "$TRIGGER_DIR/$name"
+        return 0
+    fi
     if [ "$kind" != ok ]; then
         # The reason is fixed text from the parser; the untrusted name is not logged.
         log "ERROR: Rejected an update trigger (${version:-invalid}); it was removed without running an update."
@@ -174,12 +185,23 @@ process_pending() {
     # One polling round: every trigger present now, in name order.
     local trigger_file
     rotate_agent_log
+    # A launch pause (and possibly a frozen backend) left by an update that was killed outright; ./bioaf
+    # releases it only when no update holds the deployment lock (plan 03A review).
+    if [ -e "$SCRIPT_DIR/update-gate/work-node-launch.closed" ]; then
+        "$SCRIPT_DIR/bioaf" release-stale-update-gate >/dev/null 2>&1 3>&- || true
+    fi
     for trigger_file in "$TRIGGER_DIR"/*.json; do
         # Skip an unmatched glob and plain directories; everything else is judged by the parser.
         [ -e "$trigger_file" ] || [ -L "$trigger_file" ] || continue
         [ -d "$trigger_file" ] && [ ! -L "$trigger_file" ] && continue
         process_trigger "$trigger_file" || true
     done
+    # An older updater that ran this release's install hook stopped after the one-time preparation of
+    # this agent and recorded its own fixed error; publish the plain retry instruction instead, when the
+    # host-owned preparation record matches (scripts/update_host_io.py).
+    if [ "$(host_io normalize-prepared-failure 2>/dev/null)" = normalized ]; then
+        log "The update helper is prepared; the previous update attempt now asks for a retry."
+    fi
 }
 
 # Sourcing the file (tests) defines the functions without starting the loop.

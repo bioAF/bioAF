@@ -745,7 +745,12 @@ class CustomPipelineService:
             if repo is None:
                 raise ValidationError("github_repo not found for version")
             ssh_private_key = await CustomPipelineService._fetch_ssh_private_key(session, user_id)
-            code_init_containers.append(CustomPipelineService._build_git_clone_init(repo))
+            from app.platform.git_trust import trust_for_repositories
+
+            git_trust = await trust_for_repositories(session, [repo.git_ssh_url])
+            code_init_containers.append(
+                CustomPipelineService._build_git_clone_init(repo, known_hosts=git_trust.known_hosts)
+            )
             working_dir = f"/code/{repo.display_name}"
         elif version.code_source_type == "code_blob":
             content = version.code_content or ""
@@ -1141,15 +1146,20 @@ class CustomPipelineService:
         )
 
     @staticmethod
-    def _build_git_clone_init(repo: GitHubRepo) -> InitStep:
+    def _build_git_clone_init(repo: GitHubRepo, *, known_hosts: str | None = None) -> InitStep:
+        """Clone over SSH verifying the server against shipped/approved keys (plan 03C), never a scan."""
+        from app.platform.git_trust import STRICT_OPTIONS, github_known_hosts
+
         ssh_url = repo.git_ssh_url
         target = f"/code/{repo.display_name}"
+        trusted = CustomPipelineService._shell_escape_single((known_hosts or github_known_hosts()).strip() + "\n")
+        ssh_command = f"ssh {STRICT_OPTIONS.format(path='/root/.ssh/known_hosts')} -i /root/.ssh/id_rsa"
         clone_script = (
             "mkdir -p /root/.ssh && "
             "cp /secrets/ssh/id_rsa /root/.ssh/id_rsa && "
             "chmod 600 /root/.ssh/id_rsa && "
-            "ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && "
-            f"git clone '{ssh_url}' '{target}'"
+            f"printf '%s' '{trusted}' > /root/.ssh/known_hosts && "
+            f"GIT_SSH_COMMAND='{ssh_command}' git clone '{ssh_url}' '{target}'"
         )
         return InitStep(
             name="clone-repo",

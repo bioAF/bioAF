@@ -168,7 +168,7 @@ export default function WorkbenchSettingsPage() {
               className="border rounded px-3 py-2 text-sm w-32"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Auto-stop nodes with no heartbeat after this many hours (1-720)
+              Paused: bioAF does not stop work nodes automatically until they can report activity (1-720).
             </p>
           </div>
 

@@ -101,6 +101,54 @@ Viewing Work Nodes requires `work_nodes:view`. Launching and stopping them requi
 `work_nodes:launch` and `work_nodes:stop`, respectively. Use the credentials and SSH instructions for
 the selected node.
 
+### Logging in with your key
+
+Your bioAF Git key (profile > **Git SSH Key**) is also your login key for your own work nodes. Select
+**Download key**, then on your computer:
+
+```bash
+mv ~/Downloads/bioaf_id_rsa ~/.ssh/bioaf_id_rsa
+chmod 600 ~/.ssh/bioaf_id_rsa
+ssh -i ~/.ssh/bioaf_id_rsa <username>@<work node address>
+```
+
+The same key also gives access to your GitHub repositories, so keep it private. Only you can download your
+key; administrators cannot. If you lose the file, download it again: the key does not change. bioAF will not
+replace your key while any of your work nodes may still need it (**Finish and stop your current work nodes
+before replacing this key. You can download your current key again.**). A new key cannot log in to a work
+node launched with the old one, and after replacing it you add the new public key to GitHub.
+
+Password login keeps working unless an administrator sets a work node range (below): then password or key
+works from inside the range, and only your key from anywhere else. If a range is in force and you have no
+key yet, bioAF creates one for you at launch.
+
+### When a stop cannot finish
+
+Stopping a work node first saves `/outputs/` and your notebooks and scripts, then deletes the VM. If saving
+does not succeed, bioAF keeps the VM and its disk and shows **Stop failed** with one of:
+
+- **Your files could not be saved. The work node has been kept, so you can keep working and try again.**
+  The node stays connectable and still counts toward your limit and costs.
+- **Your files were saved, but bioAF could not finish stopping this work node.**
+- **bioAF could not check this work node. Try again shortly.**
+
+Use **Retry stop**. There is no option to discard the VM or its files. bioAF retries a failed stop in the
+background a few times, then leaves the node for its owner. bioAF does not stop a running work node on its
+own because the node has not reported in.
+
+### How bioAF trusts a work node
+
+Each new work node gets its own server key, recorded before launch; bioAF only runs its save command on the
+server it launched and never trusts a key on first use. The server key also appears in the VM's cloud
+metadata (`bioaf-host-public-key` on Google Cloud), so you can check it with bioAF down. Anyone who can read
+that VM's cloud metadata can read the key as well; treat cloud read access to work node VMs as sensitive.
+New work nodes are saved over the private network (Google Cloud: a firewall rule allowing SSH only from the
+bioAF server's internal address; AWS: VPC peering after the compute stack is re-applied).
+
+Git cloning on work nodes, RStudio sessions and custom pipelines verifies GitHub with keys shipped in each
+release and never scans for keys. A repository on another Git server needs that server's keys approved first
+(see the [Admin Guide](../user-guide-admin.md#security-and-ssh-access)).
+
 ## Persistence and Auditing
 
 Preserve outputs through the workload's documented storage and registration flow. Container edits and VM

@@ -90,3 +90,8 @@ output "work_node_instance_profile" {
   value       = aws_iam_instance_profile.work_node.name
   description = "IAM instance profile (S3 access) attached to work-node EC2 instances."
 }
+
+output "backend_sync_security_group_id" {
+  value       = local.backend_sync_private ? aws_security_group.backend_sync[0].id : ""
+  description = "Security group Work Nodes join so the backend can save their outputs over VPC peering (empty: public sync)."
+}

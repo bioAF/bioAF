@@ -27,6 +27,7 @@ export function ExperimentPicker({
   projectId = null,
   noneLabel = "No experiment",
   disabled = false,
+  variant = "form",
   className = "border rounded px-3 py-2 text-sm w-full",
   optionLabel = (exp) => `${exp.name}${exp.code ? ` (${exp.code})` : ""}`,
 }: {
@@ -38,6 +39,8 @@ export function ExperimentPicker({
   projectId?: number | null;
   noneLabel?: string;
   disabled?: boolean;
+  /** Filter rows align the select with adjacent controls; search and paging sit below it. */
+  variant?: "form" | "filter";
   className?: string;
   optionLabel?: (experiment: ExperimentOption) => string;
 }) {
@@ -61,36 +64,46 @@ export function ExperimentPicker({
   const first = total === 0 ? 0 : (page - 1) * EXPERIMENT_PAGE_SIZE + 1;
   const last = Math.min(page * EXPERIMENT_PAGE_SIZE, total);
 
+  const searchInput = (
+    <input
+      type="search"
+      aria-label="Search names"
+      placeholder="Search by name"
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      disabled={disabled}
+      className="border rounded px-3 py-1.5 text-sm w-full"
+    />
+  );
+  const experimentSelect = (
+    <select
+      id={id}
+      aria-label={label}
+      value={value ?? ""}
+      disabled={disabled || list.denied}
+      onChange={(e) => {
+        const id = e.target.value ? Number(e.target.value) : null;
+        onChange(id, id == null ? null : (options.find((o) => o.id === id) ?? null));
+      }}
+      className={`${className} min-w-0 max-w-full`}
+    >
+      <option value="">{noneLabel}</option>
+      {options.map((exp) => (
+        <option key={exp.id} value={exp.id}>
+          {optionLabel(exp)}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
-    <div className="space-y-1.5">
-      <input
-        type="search"
-        aria-label="Search names"
-        placeholder="Search by name"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        disabled={disabled}
-        className="border rounded px-3 py-1.5 text-sm w-full"
-      />
-      <select
-        id={id}
-        aria-label={label}
-        value={value ?? ""}
-        disabled={disabled || list.denied}
-        onChange={(e) => {
-          const id = e.target.value ? Number(e.target.value) : null;
-          onChange(id, id == null ? null : (options.find((o) => o.id === id) ?? null));
-        }}
-        className={className}
-      >
-        <option value="">{noneLabel}</option>
-        {options.map((exp) => (
-          <option key={exp.id} value={exp.id}>
-            {optionLabel(exp)}
-          </option>
-        ))}
-      </select>
-      <div className="flex items-center justify-between text-xs text-gray-500">
+    <div className="min-w-0 space-y-1.5">
+      {variant === "filter" ? (
+        <>{experimentSelect}{searchInput}</>
+      ) : (
+        <>{searchInput}{experimentSelect}</>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-gray-500">
         {list.denied ? (
           <span>You do not have access to experiments.</span>
         ) : list.error && !list.data ? (

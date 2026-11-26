@@ -37,7 +37,24 @@ from app.adapters.models import (
     to_service_state,
 )
 from app.adapters.session_status import update_compute_session
+from app.adapters.work_nodes.sshd_policy import sshd_policy_install_lines
+from app.adapters.work_nodes.node_ssh import (
+    STOP_DELETE_UNCONFIRMED,
+    STOP_SAVE_FAILED,
+    STOP_STATE_UNKNOWN,
+    NodeSyncError,
+    host_key_install_lines,
+    run_sync_command,
+    sync_outputs_command,
+)
 from app.exceptions import ValidationError
+from app.platform.git_trust import (
+    LEGACY_UNVERIFIED_OPTIONS,
+    STRICT_OPTIONS,
+    github_known_hosts,
+    ssh_host,
+    write_known_hosts_lines,
+)
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_join, shell_word
 from app import runtime
 
@@ -45,6 +62,9 @@ logger = logging.getLogger("bioaf.adapters.work_nodes.ec2")
 
 # In-memory session store for local mode
 _local_vms: dict[str, dict] = {}
+
+# Sentinel: the provider could not say whether an instance exists.
+_UNKNOWN = object()
 
 # EC2 instance state -> the neutral status strings the work-node service expects
 # (the same vocabulary the GCE adapter emits).
@@ -65,7 +85,7 @@ _EACH_FILE = ShellExpr('"$f"')
 def _capture_each(scripts_prefix: str) -> str:
     """The per-file copy `find -exec sh -c` runs: each found name is an argument, never re-parsed."""
     copy = shell_join(["aws", "s3", "cp", _EACH_FILE, scripts_prefix])
-    return f"for f do {copy}; done"
+    return f"for f do {copy} || exit 1; done"
 
 
 def _build_ec2_startup_script(vm_spec: dict) -> str:
@@ -94,6 +114,12 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
         "#!/bin/bash",
         "# Log all output for debugging",
         "exec > >(tee -a /var/log/bioaf-startup.log) 2>&1",
+    ]
+    host_private_key = vm_spec.get("host_private_key", "")
+    host_public_key = vm_spec.get("host_public_key", "")
+    if host_private_key and host_public_key:
+        lines += host_key_install_lines(host_private_key, host_public_key)
+    lines += [
         "",
         "# 1. Create PAM user with session credentials",
         f"useradd -m -d {home_dir} -s /bin/bash {username} || true",
@@ -104,20 +130,12 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
     else:
         lines.append(f"echo '{username}:{password_hash}' | chpasswd")
 
-    # 1b. Enable SSH password auth so the PAM session credentials actually work.
-    # AWS Ubuntu AMIs ship PasswordAuthentication no in
-    # /etc/ssh/sshd_config.d/60-cloudimg-settings.conf, which sshd reads BEFORE our
-    # 99-bioaf drop-in and wins (first match). Flip the cloudimg setting, the main
-    # config, and add our own drop-in, then restart sshd. Done at boot (not just in
-    # the Packer image) so an already-built AMI works without a rebuild.
-    lines += [
-        "",
-        "# 1b. Enable SSH password authentication for PAM session credentials",
-        "sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true",
-        "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config",
-        "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-bioaf-password-auth.conf",
-        "systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true",
-    ]
+    # 1b. Account-scoped SSH login policy (plan 03B, D03-5): the scientist's password works from
+    # anywhere without a Work Node range, only inside it with one; bioaf-sync is key-only. Replaces
+    # the older global PasswordAuthentication override, which an AWS cloudimg default would beat and
+    # which cannot express a range.
+    ssh_policy = vm_spec.get("ssh_policy") or {}
+    lines += sshd_policy_install_lines(username, list(ssh_policy.get("ranges") or []))
 
     # 2. SSH keys for GitHub
     if ssh_private_key:
@@ -128,12 +146,30 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             f"mkdir -p {home_dir}/.ssh",
             f"printf '%s\\n' '{escaped_key}' > {home_dir}/.ssh/id_rsa",
             f"chmod 600 {home_dir}/.ssh/id_rsa",
-            f"ssh-keyscan github.com >> {home_dir}/.ssh/known_hosts 2>/dev/null",
         ]
+        # Git server trust: shipped GitHub keys plus operator-approved hosts, never a key scan.
+        lines += write_known_hosts_lines(
+            f"{home_dir}/.ssh/known_hosts", vm_spec.get("git_known_hosts") or github_known_hosts()
+        )
         if ssh_public_key:
             escaped_pub = ssh_public_key.replace("'", "'\\''")
             lines.append(f"printf '%s\\n' '{escaped_pub}' > {home_dir}/.ssh/id_rsa.pub")
         lines.append(f"chown -R {username}:{username} {home_dir}/.ssh")
+
+    # 2b. The user's own login key (plan 03B, D03-6): only this user's public key, in their own
+    # authorized_keys, with sshd's required ownership and permissions.
+    login_public_key = (vm_spec.get("login_public_key") or "").strip()
+    if login_public_key:
+        safe_login = login_public_key.replace("'", "")
+        lines += [
+            "",
+            "# 2b. The user's login key",
+            f"mkdir -p {home_dir}/.ssh",
+            f"printf '%s\\n' '{safe_login}' > {home_dir}/.ssh/authorized_keys",
+            f"chmod 700 {home_dir}/.ssh",
+            f"chmod 600 {home_dir}/.ssh/authorized_keys",
+            f"chown -R {username}:{username} {home_dir}/.ssh",
+        ]
 
     # 3. Clone GitHub repos
     if github_repos:
@@ -142,14 +178,20 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
             "# 3. Clone GitHub repos",
             f"mkdir -p {home_dir}/repos",
         ]
+        untrusted = set(vm_spec.get("git_untrusted_hosts") or [])
+        strict = STRICT_OPTIONS.format(path=f"{home_dir}/.ssh/known_hosts")
         for repo in github_repos:
             url = repo["git_ssh_url"]
             name = repo["display_name"]
             safe_name = name.replace("'", "'\\''")
             safe_url = url.replace("'", "'\\''")
+            host = ssh_host(url)
+            # A custom host with no approved key keeps its previous behavior for this repository only
+            # (plan 03C deferral; reported to operators). Everything else is verified.
+            options = LEGACY_UNVERIFIED_OPTIONS if host and f"{host[0]}:{host[1]}" in untrusted else strict
             lines.append(
                 f"cd {home_dir}/repos && "
-                f"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=no -i {home_dir}/.ssh/id_rsa' "
+                f"GIT_SSH_COMMAND='ssh {options} -i {home_dir}/.ssh/id_rsa' "
                 f"git clone '{safe_url}' '{safe_name}' || "
                 f"echo 'Warning: failed to clone {safe_name}'"
             )
@@ -276,7 +318,8 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
         if api_base:
             lines += [
                 f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" > /dev/null 2>&1\' | crontab -',
+                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
+                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
             ]
 
     # 11. Ownership
@@ -287,6 +330,23 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
     ]
 
     return "\n".join(lines)
+
+
+# Documented RunInstances capacity errors: AWS returns them as server errors, but nothing was launched.
+_CAPACITY_ERRORS = {
+    "InsufficientInstanceCapacity",
+    "InsufficientHostCapacity",
+    "InsufficientReservedInstanceCapacity",
+    "InsufficientCapacity",
+}
+
+
+def _definite_refusal(exc) -> bool:
+    """A RunInstances error that proves no instance was launched: a 4xx, or a capacity error."""
+    response = getattr(exc, "response", {}) or {}
+    code = (response.get("Error") or {}).get("Code", "")
+    status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    return code in _CAPACITY_ERRORS or (isinstance(status, int) and 400 <= status < 500)
 
 
 class Ec2VmInstance(VmInstance):
@@ -302,9 +362,9 @@ class Ec2VmInstance(VmInstance):
         self._mode = compute_mode_for(mode)
         self._session_factory = session_factory
         self._aws_config: dict | None = None
-        # Sync SSH private keys keyed by session_id (generated at launch, used at
-        # terminate to SSH in for output sync), mirroring the GCE adapter.
-        self._sync_keys: dict[int, str] = {}
+        # Deletion is confirmed by polling the instance state (seconds between polls, poll count).
+        self._delete_poll_interval: float = 5
+        self._delete_poll_attempts: int = 24
 
     @property
     def is_local(self) -> bool:
@@ -410,14 +470,8 @@ class Ec2VmInstance(VmInstance):
         boot_disk_gb = vm_spec.get("boot_disk_gb", 100)
         instance_label = f"bioaf-worknode-{session_id}"
 
-        # Generate an SSH key pair for the bioaf-sync user so the backend can SSH
-        # into the VM at terminate time to sync outputs (same as GCE).
-        import asyncssh
-
-        sync_key = asyncssh.generate_private_key("ssh-ed25519")
-        self._sync_keys[session_id] = sync_key.export_private_key().decode()
-        vm_spec["sync_public_key"] = sync_key.export_public_key().decode().strip()
-
+        # The service generated and committed the sync key and host identity before this call;
+        # only their public halves (and the node's own host key) are in the spec.
         startup_script = _build_ec2_startup_script(vm_spec)
 
         ec2 = self._client("ec2")
@@ -445,7 +499,12 @@ class Ec2VmInstance(VmInstance):
                 {
                     "DeviceIndex": 0,
                     "SubnetId": subnet_id,
-                    "Groups": [security_group_id],
+                    "Groups": [security_group_id]
+                    + (
+                        [vm_spec["backend_sync_security_group"]]
+                        if vm_spec.get("sync_route") == "private-v1" and vm_spec.get("backend_sync_security_group")
+                        else []
+                    ),
                     "AssociatePublicIpAddress": True,
                     "DeleteOnTermination": True,
                 }
@@ -458,6 +517,7 @@ class Ec2VmInstance(VmInstance):
                         {"Key": "bioaf-session", "Value": str(session_id)},
                         {"Key": "bioaf-user", "Value": str(user_id)},
                         {"Key": "bioaf-managed", "Value": "true"},
+                        {"Key": "bioaf-launch", "Value": str(vm_spec.get("launch_attempt_id") or "")},
                     ],
                 }
             ],
@@ -465,7 +525,38 @@ class Ec2VmInstance(VmInstance):
         if instance_profile:
             run_kwargs["IamInstanceProfile"] = {"Name": instance_profile}
 
-        result = await asyncio.to_thread(lambda: ec2.run_instances(**run_kwargs))
+        # The attempt id is the idempotency token: AWS returns this attempt's instance, never a second
+        # one, and the instance can be found by it. The request is recorded before it is sent.
+        client_token = str(vm_spec.get("launch_attempt_id") or "")
+        if client_token:
+            run_kwargs["ClientToken"] = client_token
+        record = vm_spec.get("record_launch_request")
+
+        async def journal(state: str) -> None:
+            if record is not None and client_token:
+                from app.platform.work_node_inventory import journal_entry
+
+                await record(
+                    journal_entry(
+                        client_token,
+                        state,
+                        client_token=client_token,
+                        region=str((self._aws_config or {}).get("aws_region") or ""),
+                    )
+                )
+
+        await journal("requested")
+        try:
+            result = await asyncio.to_thread(lambda: ec2.run_instances(**run_kwargs))
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError) and _definite_refusal(exc):
+                # AWS refused the request: no instance. A 5xx may have been processed, and a timeout
+                # or lost connection is no answer; those stay "requested" and are settled later.
+                await journal("failed")
+            raise
+        await journal("created")
         instance = result["Instances"][0]
         instance_id = instance["InstanceId"]
         az = instance.get("Placement", {}).get("AvailabilityZone", "")
@@ -484,7 +575,11 @@ class Ec2VmInstance(VmInstance):
             status=to_service_state("starting"),
             zone=az,
             access_url=None,
-            provider_details={"image_id": ami_id},
+            provider_details={
+                "image_id": ami_id,
+                "provider_instance_id": instance_id,
+                "aws_account_id": result.get("OwnerId", ""),
+            },
         )
 
     async def _poll_vm_ready(
@@ -575,101 +670,128 @@ class Ec2VmInstance(VmInstance):
         *,
         session_id: int = 0,
         working_bucket: str = "",
+        sync_private_key: str | None = None,
+        host_public_key: str | None = None,
+        launch_attempt_id: str | None = None,
+        sync_route: str | None = None,
         **kwargs,
     ) -> TerminationResult:
-        """Sync outputs from the instance over SSH, then terminate it."""
+        """Save the node's outputs over verified SSH, then terminate it and confirm termination.
+
+        The instance is terminated only after every required transfer succeeded. Unknown state,
+        a binding mismatch, missing credentials/bucket/address, an untrusted server or a failed
+        transfer keep the instance and report why (``TerminationResult.stop_failure``).
+        """
         await self.load_config()
         ec2 = self._client("ec2")
+        s3_output_prefix = f"s3://{working_bucket}/sessions/{session_id}/outputs/" if working_bucket else ""
 
-        output_files: list[StoredObject] = []
-        s3_output_prefix = ""
+        def kept(reason: str, state: str = "unknown") -> TerminationResult:
+            logger.warning("Kept EC2 work node %s (session %s): %s", instance_name, session_id, reason)
+            return TerminationResult(
+                status=to_service_state(state),
+                output_prefix=s3_output_prefix,
+                provider_details={"instance_name": instance_name},
+                stop_failure=reason,
+            )
 
-        # Sync outputs from the running instance before terminating it (SSH in as
-        # bioaf-sync, run aws s3 sync), mirroring the GCE flow.
-        if working_bucket and session_id:
-            s3_output_prefix = f"s3://{working_bucket}/sessions/{session_id}/outputs/"
-            s3_scripts_prefix = f"s3://{working_bucket}/sessions/{session_id}/scripts/"
-
-            public_ip = None
-            try:
-                resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[instance_name]))
-                public_ip = resp["Reservations"][0]["Instances"][0].get("PublicIpAddress")
-            except Exception as e:
-                logger.warning("Could not get public IP for EC2 work node %s: %s", instance_name, e)
-
-            if public_ip:
-                sync_cmd = (
-                    f'if [ -d /outputs ] && [ "$(ls -A /outputs)" ]; then '
-                    f"aws s3 sync /outputs {s3_output_prefix}; fi; "
-                    f"find /home -maxdepth 4 "
-                    r"\( -name '*.ipynb' -o -name '*.Rmd' -o -name '*.R' -o -name '*.py' \) "
-                    f"-type f "
-                    f"-exec sh -c {shell_word(_capture_each(s3_scripts_prefix))} sh {{}} +"
-                )
-                try:
-                    import asyncssh
-
-                    sync_key = self._sync_keys.get(session_id)
-                    if sync_key:
-                        key = asyncssh.import_private_key(sync_key)
-                        async with asyncssh.connect(
+        inst = await self._describe_instance(ec2, instance_name)
+        if inst is _UNKNOWN:
+            return kept(STOP_STATE_UNKNOWN)
+        if inst is not None:
+            state = inst.get("State", {}).get("Name", "")
+            if state != "terminated":
+                tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                if session_id and tags.get("bioaf-session") != str(session_id):
+                    return kept(STOP_STATE_UNKNOWN)
+                if launch_attempt_id and tags.get("bioaf-launch") != launch_attempt_id:
+                    return kept(STOP_STATE_UNKNOWN)
+                if state == "shutting-down":
+                    return kept(STOP_DELETE_UNCONFIRMED, "stopping")
+                if state != "running":
+                    return kept(STOP_STATE_UNKNOWN)
+                if session_id:
+                    # Private-route nodes are saved over the peered network (plan 03B).
+                    public_ip = (
+                        inst.get("PrivateIpAddress") if sync_route == "private-v1" else inst.get("PublicIpAddress")
+                    )
+                    if not (working_bucket and public_ip and sync_private_key and host_public_key):
+                        return kept(STOP_SAVE_FAILED, "running")
+                    command = sync_outputs_command(f"aws s3 sync /outputs {s3_output_prefix}")
+                    try:
+                        status = await run_sync_command(
                             public_ip,
-                            port=22,
-                            username="bioaf-sync",
-                            client_keys=[key],
-                            known_hosts=None,
-                        ) as conn:
-                            res = await asyncio.wait_for(conn.run(sync_cmd), timeout=300)
-                            if res.exit_status == 0:
-                                logger.info("Output sync complete for EC2 work node %s", instance_name)
-                            else:
-                                logger.warning(
-                                    "Output sync returned %s for %s: %s",
-                                    res.exit_status,
-                                    instance_name,
-                                    res.stderr,
-                                )
-                    else:
-                        logger.warning("No sync key for session %d, skipping output sync", session_id)
-                except Exception as e:
-                    logger.warning("SSH output sync failed for EC2 work node %s: %s", instance_name, e)
-
-        # Terminate the instance.
-        try:
-            await asyncio.to_thread(lambda: ec2.terminate_instances(InstanceIds=[instance_name]))
-            logger.info("Terminated EC2 work node %s", instance_name)
-        except Exception as e:
-            logger.warning("Failed to terminate EC2 work node %s: %s", instance_name, e)
-
-        self._sync_keys.pop(session_id, None)
-
-        # List the synced output objects from S3.
-        if working_bucket and session_id:
-            try:
-                s3 = self._client("s3")
-                prefix = f"sessions/{session_id}/"
-                paginator = s3.get_paginator("list_objects_v2")
-                for page in await asyncio.to_thread(
-                    lambda: list(paginator.paginate(Bucket=working_bucket, Prefix=prefix))
-                ):
-                    for obj in page.get("Contents", []):
-                        key = obj["Key"]
-                        output_files.append(
-                            StoredObject(
-                                filename=key.split("/")[-1],
-                                storage_uri=f"s3://{working_bucket}/{key}",
-                                size_bytes=obj.get("Size", 0),
-                            )
+                            sync_private_key=sync_private_key,
+                            host_public_key=host_public_key,
+                            command=command,
                         )
-            except Exception as e:
-                logger.warning("Failed to list output files for session %s: %s", session_id, e)
+                    except NodeSyncError as exc:
+                        logger.warning("Output sync for EC2 work node %s failed: %s", instance_name, exc)
+                        return kept(STOP_SAVE_FAILED, "running")
+                    if status != 0:
+                        logger.warning("Output sync for EC2 work node %s exited %s", instance_name, status)
+                        return kept(STOP_SAVE_FAILED, "running")
+                    logger.info("Output sync complete for EC2 work node %s", instance_name)
 
+                if not await self._terminate_and_confirm(ec2, instance_name):
+                    return kept(STOP_DELETE_UNCONFIRMED, "running")
+
+        output_files = await self._list_outputs(working_bucket, session_id) if working_bucket and session_id else []
         return TerminationResult(
             status=to_service_state("stopped"),
             output_files=output_files,
             output_prefix=s3_output_prefix,
             provider_details={"instance_name": instance_name, "stopped_at": datetime.now(timezone.utc).isoformat()},
         )
+
+    async def _describe_instance(self, ec2, instance_id: str):
+        """The instance dict, None when AWS confirms it does not exist, or _UNKNOWN."""
+        try:
+            resp = await asyncio.to_thread(lambda: ec2.describe_instances(InstanceIds=[instance_id]))
+        except Exception as exc:
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "") if hasattr(exc, "response") else ""
+            if code == "InvalidInstanceID.NotFound":
+                return None
+            logger.warning("Could not describe EC2 work node %s: %s", instance_id, exc)
+            return _UNKNOWN
+        reservations = resp.get("Reservations", [])
+        if not reservations or not reservations[0].get("Instances"):
+            return None
+        return reservations[0]["Instances"][0]
+
+    async def _terminate_and_confirm(self, ec2, instance_id: str) -> bool:
+        try:
+            await asyncio.to_thread(lambda: ec2.terminate_instances(InstanceIds=[instance_id]))
+        except Exception as exc:
+            logger.warning("Failed to terminate EC2 work node %s: %s", instance_id, exc)
+            return False
+        for _ in range(self._delete_poll_attempts):
+            inst = await self._describe_instance(ec2, instance_id)
+            if inst is None or (inst is not _UNKNOWN and inst.get("State", {}).get("Name") == "terminated"):
+                logger.info("Terminated EC2 work node %s", instance_id)
+                return True
+            await asyncio.sleep(self._delete_poll_interval)
+        return False
+
+    async def _list_outputs(self, working_bucket: str, session_id: int) -> list[StoredObject]:
+        output_files: list[StoredObject] = []
+        try:
+            s3 = self._client("s3")
+            prefix = f"sessions/{session_id}/"
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in await asyncio.to_thread(lambda: list(paginator.paginate(Bucket=working_bucket, Prefix=prefix))):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    output_files.append(
+                        StoredObject(
+                            filename=key.split("/")[-1],
+                            storage_uri=f"s3://{working_bucket}/{key}",
+                            size_bytes=obj.get("Size", 0),
+                        )
+                    )
+        except Exception as e:
+            logger.warning("Failed to list output files for session %s: %s", session_id, e)
+        return output_files
 
     async def _ec2_get_vm_status(self, instance_name: str, zone: str) -> VmStatus:
         ec2 = self._client("ec2")
@@ -717,6 +839,84 @@ class Ec2VmInstance(VmInstance):
         except Exception:
             logger.exception("Failed to list EC2 work nodes")
             return []
+
+    async def settle_launch(self, requests: list[dict], *, session_id: int):
+        """Settle a launch attempt from its recorded RunInstances request (see LaunchOutcome).
+
+        Refused by AWS: no instance. Otherwise the instance launched with the attempt's client token
+        is the answer. DescribeInstances is eventually consistent, so an unanswered request whose
+        instance is not listed stays unknown; an answered one whose instance is gone has none.
+        """
+        from app.platform.work_node_inventory import LaunchOutcome, ManagedInstance
+
+        live = [r for r in requests if r.get("state") != "failed"]
+        if not live:
+            return LaunchOutcome("none")
+        if self.is_local:
+            return LaunchOutcome("unknown")
+        try:
+            await self.load_config()
+            ec2 = self._client("ec2")
+            filters = [{"Name": "client-token", "Values": [r.get("client_token", "") for r in live]}]
+            resp = await asyncio.to_thread(lambda: ec2.describe_instances(Filters=filters))
+        except Exception as exc:
+            logger.warning("Could not read the launch of work node %s: %s", session_id, type(exc).__name__)
+            return LaunchOutcome("unknown")
+        for reservation in resp.get("Reservations", []):
+            for inst in reservation.get("Instances", []):
+                if inst.get("State", {}).get("Name") == "terminated":
+                    continue
+                tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                return LaunchOutcome(
+                    "created",
+                    ManagedInstance(
+                        name=inst["InstanceId"],
+                        session_id=tags.get("bioaf-session"),
+                        zone=inst.get("Placement", {}).get("AvailabilityZone"),
+                        provider_instance_id=inst["InstanceId"],
+                        launch_attempt_id=tags.get("bioaf-launch"),
+                    ),
+                )
+        if any(r.get("state") == "requested" for r in live):
+            return LaunchOutcome("unknown")
+        return LaunchOutcome("none")
+
+    async def inventory_instances(self) -> list:
+        """Every existing (not terminated) bioAF Work Node instance in the Region, including stopped
+        ones whose volumes remain. Raises InventoryUnavailable."""
+        from app.platform.work_node_inventory import InventoryUnavailable, ManagedInstance
+
+        if self.is_local:
+            return []
+        try:
+            await self.load_config()
+            ec2 = self._client("ec2")
+            paginator = ec2.get_paginator("describe_instances")
+            filters = [
+                {"Name": "tag:bioaf-managed", "Values": ["true"]},
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["pending", "running", "shutting-down", "stopping", "stopped"],
+                },
+            ]
+            pages = await asyncio.to_thread(lambda: list(paginator.paginate(Filters=filters)))
+        except Exception as exc:
+            raise InventoryUnavailable(type(exc).__name__) from exc
+        found = []
+        for page in pages:
+            for reservation in page.get("Reservations", []):
+                for inst in reservation.get("Instances", []):
+                    tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                    found.append(
+                        ManagedInstance(
+                            name=inst["InstanceId"],
+                            session_id=tags.get("bioaf-session"),
+                            zone=inst.get("Placement", {}).get("AvailabilityZone") or None,
+                            provider_instance_id=inst["InstanceId"],
+                            launch_attempt_id=tags.get("bioaf-launch"),
+                        )
+                    )
+        return found
 
     # -- Local mode implementations --
 

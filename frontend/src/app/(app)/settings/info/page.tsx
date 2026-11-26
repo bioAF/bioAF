@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,7 +45,14 @@ const STEP_LABELS: Record<string, string> = {
   warn: "Preparing to restart",
   restart: "Restarting services",
   migrate: "Running database migrations",
+  work_node_readiness: "Checking running work nodes",
+  work_node_admission: "Pausing work node launches",
+  work_node_recheck: "Checking running work nodes again",
 };
+
+// Steps at which the update waited for running work nodes rather than failing (plan 03A first-update
+// gate). The installation keeps running; the message is already plain, so it is shown as written.
+const WORK_NODE_GATE_STEPS = new Set(["work_node_readiness", "work_node_recheck"]);
 
 const WARN_DURATION_SECONDS = 60;
 
@@ -58,6 +66,7 @@ export default function SettingsInfoPage() {
   const [now, setNow] = useState(() => Date.now());
 
   const canDeploy = canAccess("infrastructure", "deploy");
+  const canViewWorkNodes = canAccess("work_nodes", "view");
 
   // The install workflow: idle, starting (/execute in flight, so no status is read yet), or
   // observing one upgrade (after /execute succeeded, or on re-attach to a running upgrade). Each
@@ -279,11 +288,29 @@ export default function SettingsInfoPage() {
               </div>
             )}
 
-            {/* Update error */}
-            {updateError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                Update failed: {updateError}
+            {/* Update waiting for running work nodes, or error */}
+            {updateError && observed?.status === "failed" && WORK_NODE_GATE_STEPS.has(observed.step ?? "") ? (
+              <div role="status" className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                <p>{updateError}</p>
+                <div className="flex gap-3 mt-2">
+                  {canViewWorkNodes && (
+                    <Link href="/workbench/work-nodes" className="underline">
+                      View work nodes
+                    </Link>
+                  )}
+                  {canDeploy && (
+                    <button onClick={handleInstallUpdate} className="underline">
+                      Check again
+                    </button>
+                  )}
+                </div>
               </div>
+            ) : (
+              updateError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                  Update failed: {updateError}
+                </div>
+              )
             )}
 
             {updateCheck.changelog && (

@@ -712,9 +712,34 @@ export interface paths {
         put?: never;
         /**
          * Generate Ssh Key
-         * @description Generate an RSA key pair for the user. Stores the private key, returns the public key.
+         * @description Generate the user's SSH key (Git and Work Node login). Stores the private key, returns the public key.
+         *
+         *     A replacement waits until none of the user's Work Nodes may still need the current key
+         *     (plan 03B, D03-10); the current key stays unchanged and downloadable meanwhile.
          */
         post: operations["generate_ssh_key_api_auth_me_ssh_key_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me/ssh-key/private": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Ssh Key
+         * @description The caller's own current private key as a file (plan 03B, D03-6). No other user's key, ever.
+         *
+         *     Uncached; the audit records actor, fingerprint and time, never key material.
+         */
+        get: operations["download_ssh_key_api_auth_me_ssh_key_private_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8456,6 +8481,232 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ssh-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ssh Access */
+        get: operations["get_ssh_access_api_v1_settings_ssh_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/host/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Host Filter
+         * @description Reconcile protected recovery, re-check, then apply the filter (a cloud change: infrastructure:deploy).
+         */
+        post: operations["apply_host_filter_api_v1_settings_ssh_access_host_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/host/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Host Access
+         * @description Read-only automatic preflight; also asks the host for fresh fixed guest diagnostics.
+         */
+        post: operations["check_host_access_api_v1_settings_ssh_access_host_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/host/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Host Filter Draft */
+        put: operations["save_host_filter_draft_api_v1_settings_ssh_access_host_draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/host/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Up Host Recovery
+         * @description Create or repair protected cloud recovery access (a cloud change: infrastructure:deploy).
+         *
+         *     For installs from before recovery access existed; no SSH filter or installer rerun is needed.
+         */
+        post: operations["set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/host/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Host Filter */
+        post: operations["rollback_host_filter_api_v1_settings_ssh_access_host_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/observed-address": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Observed Address
+         * @description The address the managed edge saw for this browser, as a draft suggestion only (plan 03B).
+         *
+         *     Trusted only with the installation's edge token, which nginx adds after overwriting X-Real-IP
+         *     with its own observed peer. Custom upstream proxies are not inferred.
+         */
+        get: operations["get_observed_address_api_v1_settings_ssh_access_observed_address_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Restore Link
+         * @description Restore SSH access: a read-only link to this server's console page (plan 03B, D03-9).
+         *
+         *     Changes no key, rule or session and uses no bioAF cloud credential.
+         */
+        get: operations["get_restore_link_api_v1_settings_ssh_access_restore_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Work Node Draft */
+        post: operations["apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Work Node Draft */
+        post: operations["check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Work Node Draft */
+        put: operations["save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/ssh-access/work-nodes/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Work Node Policy */
+        post: operations["rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/work-nodes": {
         parameters: {
             query?: never;
@@ -9309,6 +9560,11 @@ export interface components {
             scopes: string[];
             /** Service Account User Id */
             service_account_user_id: number;
+        };
+        /** ApplyRequest */
+        ApplyRequest: {
+            /** Draft Version */
+            draft_version: number;
         };
         /** ApplyUpdatesRequest */
         ApplyUpdatesRequest: {
@@ -14425,6 +14681,18 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** RangeEntry */
+        RangeEntry: {
+            /** Cidr */
+            cidr: string;
+            /** Id */
+            id?: string | null;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
         /** ReachabilityTestResult */
         ReachabilityTestResult: {
             /**
@@ -17660,6 +17928,15 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** WorkNodeDraftRequest */
+        WorkNodeDraftRequest: {
+            /** Base Version */
+            base_version: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Ranges */
+            ranges?: components["schemas"]["RangeEntry"][];
+        };
         /** WorkNodeLaunchRequest */
         WorkNodeLaunchRequest: {
             /** Environment Version Id */
@@ -17724,10 +18001,16 @@ export interface components {
             resource_profile: string;
             /** Session Type */
             session_type: string;
+            /** Ssh Policy Revision */
+            ssh_policy_revision?: number | null;
+            /** Ssh Policy Status */
+            ssh_policy_status?: string | null;
             /** Started At */
             started_at?: string | null;
             /** Status */
             status: string;
+            /** Stop Failure */
+            stop_failure?: string | null;
             /** Stopped At */
             stopped_at?: string | null;
             user?: components["schemas"]["UserSummary"] | null;
@@ -19211,6 +19494,26 @@ export interface operations {
         };
     };
     generate_ssh_key_api_auth_me_ssh_key_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    download_ssh_key_api_auth_me_ssh_key_private_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -32111,7 +32414,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change") | null;
+                action?: ("compute_deploy" | "compute_teardown" | "storage_deploy" | "storage_update" | "storage_destroy" | "infrastructure_update" | "cluster_config" | "image_build" | "notebook_image_build" | "cellxgene_image_build" | "foundation_bootstrap" | "billing_export_enable" | "billing_export_teardown" | "terraform_plan" | "terraform_apply" | "config_sync" | "component_change" | "host_ssh_filter" | "host_recovery_setup") | null;
             };
             header?: never;
             path?: never;
@@ -34014,6 +34317,298 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ssh_access_api_v1_settings_ssh_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    apply_host_filter_api_v1_settings_ssh_access_host_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_host_access_api_v1_settings_ssh_access_host_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    save_host_filter_draft_api_v1_settings_ssh_access_host_draft_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkNodeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_up_host_recovery_api_v1_settings_ssh_access_host_recovery_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    rollback_host_filter_api_v1_settings_ssh_access_host_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_observed_address_api_v1_settings_ssh_access_observed_address_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_restore_link_api_v1_settings_ssh_access_restore_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    apply_work_node_draft_api_v1_settings_ssh_access_work_nodes_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_work_node_draft_api_v1_settings_ssh_access_work_nodes_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    save_work_node_draft_api_v1_settings_ssh_access_work_nodes_draft_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkNodeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_work_node_policy_api_v1_settings_ssh_access_work_nodes_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

@@ -102,8 +102,8 @@ export default function PlotArchivePage() {
 
       <div className="space-y-4">
         {/* Filters */}
-        <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex-1 min-w-[200px]">
+        <div className="flex flex-wrap gap-3 items-start">
+          <div className="flex-1 basis-52 min-w-0">
             <label htmlFor="search" className="block text-xs text-gray-500 mb-1">
               Search
             </label>
@@ -118,13 +118,14 @@ export default function PlotArchivePage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             />
           </div>
-          <div className="min-w-[180px]">
+          <div className="w-full sm:w-64 min-w-0">
             <label htmlFor="experiment" className="block text-xs text-gray-500 mb-1">
               Experiment
             </label>
             <ExperimentPicker
               id="experiment"
               label="Experiment"
+              variant="filter"
               value={experimentId ? Number(experimentId) : null}
               onChange={(id) => {
                 setExperimentId(id == null ? "" : String(id));
@@ -134,7 +135,7 @@ export default function PlotArchivePage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
             />
           </div>
-          <div className="min-w-[180px]">
+          <div className="w-full sm:w-48 min-w-0">
             <label htmlFor="pipeline-run" className="block text-xs text-gray-500 mb-1">
               Pipeline Run
             </label>
@@ -154,7 +155,7 @@ export default function PlotArchivePage() {
               ))}
             </select>
           </div>
-          <div>
+          <div className="w-full sm:w-40 min-w-0">
             <label htmlFor="date-from" className="block text-xs text-gray-500 mb-1">
               Date from
             </label>
@@ -165,10 +166,10 @@ export default function PlotArchivePage() {
                 setDateFrom(e.target.value);
                 resetPage();
               }}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             />
           </div>
-          <div>
+          <div className="w-full sm:w-40 min-w-0">
             <label htmlFor="date-to" className="block text-xs text-gray-500 mb-1">
               Date to
             </label>
@@ -179,7 +180,7 @@ export default function PlotArchivePage() {
                 setDateTo(e.target.value);
                 resetPage();
               }}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             />
           </div>
         </div>

@@ -445,7 +445,7 @@ export function FileBrowser({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-3 items-center flex-wrap">
+      <div className="flex gap-3 items-start flex-wrap">
         {showSearch && (
           <form
             onSubmit={(e) => {
@@ -453,14 +453,14 @@ export function FileBrowser({
               setSearchQuery(searchInput);
               setPage(1);
             }}
-            className="flex gap-1"
+            className="flex max-w-full gap-1"
           >
             <input aria-label="Search by filename"
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search by filename..."
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm w-56"
+              className="min-w-0 px-3 py-2 border border-gray-300 rounded-md text-sm w-56"
             />
             <button
               type="submit"
@@ -494,7 +494,7 @@ export function FileBrowser({
             }}
             disabled={projectsDenied}
             title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
+            className="min-w-0 max-w-full sm:max-w-64 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
@@ -509,9 +509,10 @@ export function FileBrowser({
         )}
 
         {showExperimentFilter && (
-          <div className="w-64">
+          <div className="w-full sm:w-64 min-w-0">
             <ExperimentPicker
               label="Filter by experiment id"
+              variant="filter"
               value={filterExperimentId ? Number(filterExperimentId) : null}
               onChange={(id) => {
                 setFilterExperimentId(id == null ? "" : String(id));

@@ -30,8 +30,13 @@ mkdir -p "$work/certs"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
   -keyout "$work/certs/tls.key" -out "$work/certs/tls.crt" >/dev/null 2>&1
 chmod 0644 "$work/certs/tls.key"
+mkdir -p "$work/update-gate"
+# docker/nginx.conf is a template, rendered at start exactly as docker/docker-compose.yml does: only BIOAF_
+# variables (the edge token) are substituted, and the update-gate directory is mounted (empty: launches open).
 docker run -d --name "$run-nginx" --network "$run" -p 127.0.0.1::443 \
-  -v "$repo/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro" -v "$work/certs:/etc/nginx/certs:ro" \
+  -e NGINX_ENVSUBST_FILTER='^BIOAF_' -e BIOAF_EDGE_TOKEN=smoke-edge-token \
+  -v "$repo/docker/nginx.conf:/etc/nginx/templates/default.conf.template:ro" \
+  -v "$work/update-gate:/etc/nginx/update-gate:ro" -v "$work/certs:/etc/nginx/certs:ro" \
   nginx:alpine >/dev/null
 
 direct="http://$(docker port "$run-frontend" 3000/tcp | head -n 1)"

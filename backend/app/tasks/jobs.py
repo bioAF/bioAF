@@ -97,23 +97,6 @@ async def _environment_build_poll(session) -> None:
 # --- 60 s ------------------------------------------------------------------------------------------
 
 
-def _slurm_enabled() -> bool:
-    """SSH status polling only for an initialized SLURM stack that is not simulated.
-
-    The stack is the one the registry initialized (restart-bound), never BIOAF_COMPUTE_MODE alone."""
-    from app.adapters.registry import get_active_compute_stack
-    from app.config import settings
-    from app.settings_contract import is_simulated
-
-    return get_active_compute_stack() == "slurm" and not is_simulated(settings.compute_mode)
-
-
-async def _job_status_sync(session) -> None:
-    from app.services.slurm_service import SlurmService
-
-    await SlurmService.sync_job_statuses(session)
-
-
 def _plot_archive_watcher() -> Iteration:
     """Scan the results bucket for new images when due (11H); backfill metadata once per job lifetime."""
     from app.services.plot_archive_service import PlotArchiveService
@@ -479,14 +462,8 @@ def _job(role, prepare, first, interval, message, enabled=None) -> PeriodicJob:
 
 # In the order the lifespan has always started them.
 PERIODIC_JOBS: list[PeriodicJob] = [
-    _job(
-        "job-status-sync",
-        _with_session(_job_status_sync),
-        MINUTE,
-        MINUTE,
-        "Job status sync error: %s",
-        enabled=_slurm_enabled,
-    ),
+    # The SLURM job-status-sync poll (SSH with no server verification) was retired with the unsupported
+    # SLURM connector (plan 03C); stored SLURM job history is kept.
     _job(
         "idle-session-check", _with_session(_idle_session_check), 5 * MINUTE, 5 * MINUTE, "Idle session check error: %s"
     ),
