@@ -354,22 +354,14 @@ def _build_startup_script(vm_spec: dict) -> str:
         "MOTD_EOF",
     ]
 
-    # 8. Heartbeat agent
+    # 8. Heartbeat token
     if heartbeat_token:
         lines += [
             "",
-            "# 8. Heartbeat agent",
+            "# 8. Heartbeat token (kept for existing clients; the backend reads reports over SSH)",
             "mkdir -p /etc/bioaf",
             f"echo '{heartbeat_token}' > /etc/bioaf/token",
         ]
-        # Simple heartbeat cron: POST every 5 minutes
-        api_base = vm_spec.get("api_base_url", "")
-        if api_base:
-            lines += [
-                f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
-                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
-            ]
 
     # 9. Ownership
     lines += [

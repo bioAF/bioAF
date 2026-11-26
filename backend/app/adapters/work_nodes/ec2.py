@@ -313,21 +313,14 @@ def _build_ec2_startup_script(vm_spec: dict) -> str:
         "MOTD_EOF",
     ]
 
-    # 10. Heartbeat agent
+    # 10. Heartbeat token
     if heartbeat_token:
         lines += [
             "",
-            "# 10. Heartbeat agent",
+            "# 10. Heartbeat token (kept for existing clients; the backend reads reports over SSH)",
             "mkdir -p /etc/bioaf",
             f"echo '{heartbeat_token}' > /etc/bioaf/token",
         ]
-        api_base = vm_spec.get("api_base_url", "")
-        if api_base:
-            lines += [
-                f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
-                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
-            ]
 
     # 11. Ownership
     lines += [
