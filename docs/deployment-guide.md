@@ -829,7 +829,7 @@ installer (it updates the existing firewall rule) or add tcp:8443 to the AWS sec
 Sessions started before this release were reachable at a public address with no notebook sign-in. After
 updating, run on the server:
 
-```
+```bash
 ./bioaf contain-notebook-exposure          # list them
 ./bioaf contain-notebook-exposure --apply  # remove their public address
 ```
