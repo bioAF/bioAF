@@ -403,7 +403,7 @@ describe("Sidebar brand logo", () => {
   test("shows the tagline under the wordmark when expanded", () => {
     render(<Sidebar />);
 
-    expect(screen.getByText("Comp Bio Automation Framework")).toBeInTheDocument();
+    expect(screen.getByText("Biotech Automation Framework")).toBeInTheDocument();
   });
 
   test("does not show the tagline when collapsed", () => {
@@ -411,7 +411,7 @@ describe("Sidebar brand logo", () => {
 
     fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
 
-    expect(screen.queryByText("Comp Bio Automation Framework")).not.toBeInTheDocument();
+    expect(screen.queryByText("Biotech Automation Framework")).not.toBeInTheDocument();
   });
 
   test("renders a backdrop element behind the logo for contrast", () => {

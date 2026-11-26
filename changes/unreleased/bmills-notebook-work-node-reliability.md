@@ -35,6 +35,12 @@
   the last successful check, and a Reporting row says whether checks are succeeding. Missing reports never
   stop a Work Node.
 
+### Navigation
+
+- The sidebar under the bioAF logo now reads "Biotech Automation Framework", matching bioaf.co.
+
 ### Fixes
 
 - Refuse setup and invitation tokens wherever a signed-in session is required.
+- A failed nginx reload during certificate renewal keeps the certificate nginx is serving and retries at
+  the next renewal check.
