@@ -11634,6 +11634,13 @@ export interface components {
             id: number;
             /** Image Uri */
             image_uri?: string | null;
+            /**
+             * @default {
+             *       "jupyter": "unverified",
+             *       "rstudio": "unverified"
+             *     }
+             */
+            notebook_capability: components["schemas"]["NotebookCapability"];
             /** Status */
             status: string;
             /** Version Number */
@@ -13215,6 +13222,21 @@ export interface components {
             spot: boolean;
             /** Status */
             status: string;
+        };
+        /** NotebookCapability */
+        NotebookCapability: {
+            /** Contract */
+            contract?: number | null;
+            /**
+             * Jupyter
+             * @default unverified
+             */
+            jupyter: string;
+            /**
+             * Rstudio
+             * @default unverified
+             */
+            rstudio: string;
         };
         /** NotebookImageBuildStatus */
         NotebookImageBuildStatus: {

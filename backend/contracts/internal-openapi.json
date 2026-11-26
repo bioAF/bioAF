@@ -6844,6 +6844,13 @@
             ],
             "title": "Image Uri"
           },
+          "notebook_capability": {
+            "$ref": "#/components/schemas/NotebookCapability",
+            "default": {
+              "jupyter": "unverified",
+              "rstudio": "unverified"
+            }
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -11982,6 +11989,33 @@
           "status"
         ],
         "title": "NodePoolStatus",
+        "type": "object"
+      },
+      "NotebookCapability": {
+        "properties": {
+          "contract": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract"
+          },
+          "jupyter": {
+            "default": "unverified",
+            "title": "Jupyter",
+            "type": "string"
+          },
+          "rstudio": {
+            "default": "unverified",
+            "title": "Rstudio",
+            "type": "string"
+          }
+        },
+        "title": "NotebookCapability",
         "type": "object"
       },
       "NotebookImageBuildStatus": {

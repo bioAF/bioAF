@@ -385,6 +385,11 @@ def _safe_image_name(env_name: str) -> str:
     return env_name.lower().replace(" ", "-").replace("_", "-")
 
 
+async def _is_notebook_environment(session: AsyncSession, environment_id: int) -> bool:
+    env_type = await session.scalar(select(Environment.environment_type).where(Environment.id == environment_id))
+    return env_type == "notebook"
+
+
 def _image_tag(version_number: int, build_number: int = 1) -> str:
     """The ``v<version>.<build>`` tag used for an environment image."""
     return f"v{version_number}.{build_number}"
@@ -658,6 +663,8 @@ class EnvironmentBuildService:
 
         # Update version record
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_uri
         await session.flush()
@@ -792,6 +799,8 @@ class EnvironmentBuildService:
 
         # Update version record
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_uri
         await session.flush()
@@ -874,6 +883,8 @@ class EnvironmentBuildService:
         )
 
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_name
         await session.flush()
@@ -932,6 +943,16 @@ class EnvironmentBuildService:
 
             if status == "SUCCESS":
                 version.status = "ready"
+                if await _is_notebook_environment(session, version.environment_id):
+                    from app.services.notebook_runtime import capability_after_build
+
+                    # The build ran the runtime check and passed: record what it proved (plan 03.5B).
+                    version.notebook_capability = capability_after_build(
+                        version.definition_format,
+                        version.definition_content,
+                        image_uri=version.image_uri or "",
+                        build_id=version.build_id,
+                    )
                 changed += 1
                 completed_versions.append(version)
                 logger.info(

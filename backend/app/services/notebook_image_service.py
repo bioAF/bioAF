@@ -471,14 +471,19 @@ async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> 
     session.add(env)
     await session.flush()
 
+    definition = _render_dockerfile()
     version = EnvironmentVersion(
         environment_id=env.id,
         version_number=1,
         status="ready",
         definition_format="dockerfile",
-        definition_content=_render_dockerfile(),
+        definition_content=definition,
         image_uri=image_uri,
         created_by_user_id=user_id,
+        # Built from the system template, whose final step is the runtime check (plan 03.5B).
+        notebook_capability=notebook_runtime.capability_after_build(
+            "dockerfile", definition, image_uri=image_uri, build_id=""
+        ),
     )
     session.add(version)
     await session.flush()
