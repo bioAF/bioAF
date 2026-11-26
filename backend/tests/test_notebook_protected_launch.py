@@ -246,3 +246,13 @@ async def test_a_jupyter_launch_records_its_own_secret_and_hands_it_to_the_adapt
     for path in ("/api/v1/notebooks/sessions", f"/api/v1/notebooks/sessions/{sid}"):
         body = (await client.get(path, headers={"Authorization": f"Bearer {admin_token}"})).text
         assert spec["ide_secret"] not in body
+
+
+@pytest.mark.parametrize("session_type", ["jupyter", "rstudio", "headless"])
+def test_notebook_code_gets_no_kubernetes_api_credential(adapter, session_type):
+    """Plan 03.5A isolation: the runner account may act in the shared notebook namespace, so its token is
+    never mounted where user code runs; cloud identity does not use it (GKE Workload Identity, EKS IRSA)."""
+    extra = {"notebook_json": {"cells": []}} if session_type == "headless" else {}
+    manifest = adapter._build_pod_manifest(_spec(session_type, **extra))
+    assert manifest["spec"]["automountServiceAccountToken"] is False
+    assert manifest["spec"]["serviceAccountName"] == "bioaf-notebook-runner"

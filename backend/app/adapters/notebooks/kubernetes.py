@@ -1025,6 +1025,11 @@ class KubernetesNotebookProvider(NotebookProvider):
                     }
                 ],
                 "serviceAccountName": "bioaf-notebook-runner",
+                # The runner account can act in the shared notebook namespace (other sessions' Pods and
+                # Secrets), so its API token is never mounted where user code runs (plan 03.5A). Cloud
+                # identity does not use it: GKE Workload Identity and EKS IRSA/Pod Identity inject
+                # their own credentials.
+                "automountServiceAccountToken": False,
                 "initContainers": init_containers,
                 "containers": containers,
                 "volumes": volumes,
