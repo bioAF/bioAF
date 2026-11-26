@@ -216,8 +216,6 @@ io_init
 # loading as the output helper.
 # ---------------------------------------------------------------------------
 bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew || exit 1
-# A stable public address for the HTTPS certificate (plan 03.5A).
-bioaf_load_helper installer/static_ip.sh required aws_keep_public_ip || exit 1
 
 # SSH recovery access (plan 03B): the console link, access sheet, optional administrator key and the
 # automatic recovery probe. Loaded once a VM exists; optional: without it the install continues.
@@ -757,7 +755,9 @@ if [ -n "${INSTANCE_ID}" ]; then
     VM_IP="$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null || echo "")"
     # Keep the public address: the HTTPS certificate names it (plan 03.5A).
-    if static_ip="$(aws_keep_public_ip "$INSTANCE_ID" "$VM_NAME")" && [ -n "$static_ip" ]; then
+    # Loaded once a VM exists (like the SSH recovery helper); optional.
+    if bioaf_load_helper installer/static_ip.sh optional aws_keep_public_ip \
+        && static_ip="$(aws_keep_public_ip "$INSTANCE_ID" "$VM_NAME")" && [ -n "$static_ip" ]; then
         VM_IP="$static_ip"
         step "Keep this server's public address ${VM_IP} (Elastic IP)" -- true
     else

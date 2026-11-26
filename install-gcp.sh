@@ -160,8 +160,6 @@ io_init
 # ---------------------------------------------------------------------------
 bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew ensure_gcloud_python \
     use_cask_python_for_gcloud || exit 1
-# A stable public address for the HTTPS certificate (plan 03.5A).
-bioaf_load_helper installer/static_ip.sh required gcp_keep_public_ip || exit 1
 # Prompts and interactive commands (sudo, gcloud auth login, ssh) all read
 # from the terminal from here on.
 attach_terminal || exit 1
@@ -1115,7 +1113,9 @@ else
 fi
 
 # Keep the public address: the HTTPS certificate names it (plan 03.5A). Same address, no restart.
-if [ "$USE_PUBLIC_IP" = true ] && [ -n "$VM_IP" ]; then
+# Loaded once a VM exists (like the SSH recovery helper); optional: without it the address stays as it is.
+if [ "$USE_PUBLIC_IP" = true ] && [ -n "$VM_IP" ] \
+    && bioaf_load_helper installer/static_ip.sh optional gcp_keep_public_ip; then
     step "Keep this server's public address ${VM_IP} (static)" -- \
         gcp_keep_public_ip "$VM_NAME" "${ZONE%-*}" "$PROJECT_ID" "$VM_IP" \
         || warn "The address could not be made static; if it changes, run ./bioaf tls-issue-ip on the server."
