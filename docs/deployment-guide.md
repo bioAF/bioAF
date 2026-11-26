@@ -821,8 +821,12 @@ open on their own port so notebook pages cannot read the bioAF sign-in.
 Every certificate is installed the same way: checked, swapped into place, checked by nginx, and the previous
 one restored if nginx refuses it.
 
-The installers open tcp:8443 like 443. For an installation created before this release, rerun the GCP
-installer (it updates the existing firewall rule) or add tcp:8443 to the AWS security group.
+The installers open tcp:8443 like 443. An installation created before this release needs no manual step:
+within a minute of starting after the update (and every six hours after), bioAF opens tcp:8443 to exactly
+the sources that can reach its HTTPS port, using the same cloud access it uses for the server's SSH rules
+(GCP: a `bioaf-notebook-gateway` firewall rule; AWS: a rule beside each HTTPS rule on the server's
+security groups). It never opens the port wider than HTTPS. If it cannot, the backend log says so and
+only opening notebooks is affected.
 
 ### Notebook sessions started before protected access
 

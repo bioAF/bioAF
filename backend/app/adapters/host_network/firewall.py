@@ -46,6 +46,11 @@ ALLOW_RULES = {4: "bioaf-ssh-filter-allow-v4", 6: "bioaf-ssh-filter-allow-v6"}
 DENY_RULES = {4: "bioaf-ssh-filter-deny-v4", 6: "bioaf-ssh-filter-deny-v6"}
 EVERYWHERE = {4: "0.0.0.0/0", 6: "::/0"}
 AWS_RECOVERY_GROUP = "bioaf-ssh-recovery"
+# The notebook gateway (plan 03.5A) is reachable wherever the application's HTTPS is.
+GATEWAY_PORT = 8443
+HTTPS_PORT = 443
+GATEWAY_RULE = "bioaf-notebook-gateway"
+GATEWAY_PRIORITY = 1000
 AWS_FILTER_GROUP = "bioaf-ssh-filter"
 
 
@@ -67,16 +72,29 @@ def _by_family(ranges: list[str]) -> dict[int, list[str]]:
     return families
 
 
-def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
+def _reaches(port: int, protocol: str, ports: list[str]) -> bool:
     if str(protocol) not in ("tcp", "6", "all"):
         return False
     if not ports:
         return True
     for spec in ports:
         low, _, high = str(spec).partition("-")
-        if int(low) <= 22 <= int(high or low):
+        if int(low) <= port <= int(high or low):
             return True
     return False
+
+
+def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
+    return _reaches(22, protocol, ports)
+
+
+def _aws_reaches(permission: dict, port: int) -> bool:
+    protocol = str(permission.get("IpProtocol"))
+    if protocol == "-1":
+        return True
+    if protocol not in ("tcp", "6"):
+        return False
+    return int(permission.get("FromPort", 0)) <= port <= int(permission.get("ToPort", 65535))
 
 
 # Rule lists a patch cannot empty (an empty list is not sent) and GCP refuses a full update, so
@@ -182,6 +200,46 @@ class GcpHostNetwork:
     def _delete(self, name) -> None:
         if self._existing(name) is not None:
             self.client.delete(project=self.project, firewall=name).result(timeout=120)
+
+    def ensure_gateway_port(self) -> dict:
+        """Open the notebook gateway port to exactly the sources that reach HTTPS on this host.
+
+        Enabled ingress allows for tcp:443 targeting this host (its tag, or every instance) give the
+        sources; those whose rule already allows the gateway port need nothing. The managed rule
+        follows them, so narrowing HTTPS narrows the gateway too.
+        """
+        from google.cloud import compute_v1
+
+        sources: set[str] = set()
+        for rule in self.client.list(project=self.project):
+            if rule.name == GATEWAY_RULE or self._network_path(rule.network) != self.network:
+                continue
+            if getattr(rule, "disabled", False) or (rule.direction or "INGRESS") != "INGRESS" or not rule.allowed:
+                continue
+            tags = list(rule.target_tags or [])
+            if tags and self.target_tag not in tags:
+                continue
+            allowed = [(a.I_p_protocol, list(a.ports or [])) for a in rule.allowed]
+            if not any(_reaches(HTTPS_PORT, proto, ports) for proto, ports in allowed):
+                continue
+            if any(_reaches(GATEWAY_PORT, proto, ports) for proto, ports in allowed):
+                continue
+            sources.update(rule.source_ranges or [])
+        if not sources:
+            return {"opened": False, "sources": []}
+        rule = compute_v1.Firewall(
+            name=GATEWAY_RULE,
+            network=self.network,
+            disabled=False,
+            direction="INGRESS",
+            priority=GATEWAY_PRIORITY,
+            source_ranges=sorted(sources),
+            target_tags=[self.target_tag],
+            allowed=[compute_v1.Allowed(I_p_protocol="tcp", ports=[str(GATEWAY_PORT)])],
+            description="Managed by bioAF (plan 03.5A): the notebook gateway, open where HTTPS is.",
+        )
+        self._upsert(rule)
+        return {"opened": True, "sources": sorted(sources)}
 
     def recovery_sources(self) -> list[dict]:
         return [{"kind": "gcp_iap", "source": GCP_IAP_SOURCE, "priority": GCP_IAP_PRIORITY, "ports": "tcp:22"}]
@@ -584,6 +642,26 @@ class AwsHostNetwork:
                 raise FilterApplyError(RESTORE_FAILED) from exc
             raise FilterApplyError(KEPT) from exc
         return {"provider": "aws", "revoked": revoked, "filter_group": filter_group}
+
+    def ensure_gateway_port(self) -> dict:
+        """Beside each permission that opens HTTPS on this instance's groups, the same sources for the
+        notebook gateway port; a group that already reaches it needs nothing."""
+        group_ids = [g["GroupId"] for g in self._instance()["SecurityGroups"]]
+        groups = self.client.describe_security_groups(GroupIds=group_ids)["SecurityGroups"]
+        opened = False
+        source_keys = ("IpRanges", "Ipv6Ranges", "PrefixListIds", "UserIdGroupPairs")
+        for group in groups:
+            permissions = group.get("IpPermissions", [])
+            if any(_aws_reaches(p, GATEWAY_PORT) for p in permissions):
+                continue
+            for permission in permissions:
+                if not _aws_reaches(permission, HTTPS_PORT):
+                    continue
+                wanted = {"IpProtocol": "tcp", "FromPort": GATEWAY_PORT, "ToPort": GATEWAY_PORT}
+                wanted.update({k: permission[k] for k in source_keys if permission.get(k)})
+                self._authorize(GroupId=group["GroupId"], IpPermissions=[wanted])
+                opened = True
+        return {"opened": opened, "sources": []}
 
     def _authorize(self, **rule) -> None:
         try:

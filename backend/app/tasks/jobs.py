@@ -272,6 +272,13 @@ async def _export_cleanup(session) -> None:
     await retention.run(session)
 
 
+async def _notebook_gateway_port(session) -> None:
+    from app.services.notebook_gateway_network import ensure_gateway_port
+
+    await ensure_gateway_port(session)
+    await session.commit()
+
+
 def _idempotency_cleanup() -> Iteration:
     """Sweep expired idempotency_keys rows (ADR-050); the factory is resolved per pass."""
     from app import database as database_module
@@ -567,4 +574,12 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         "Installation metrics sender error: %s",
     ),
     _job("idempotency-cleanup", _idempotency_cleanup, HOUR, HOUR, "Idempotency cleanup error: %s"),
+    # Soon after every start (so right after an update) and every six hours (plan 03.5A).
+    _job(
+        "notebook-gateway-port",
+        _with_session(_notebook_gateway_port),
+        MINUTE,
+        6 * HOUR,
+        "Notebook gateway port reconciliation error: %s",
+    ),
 ]

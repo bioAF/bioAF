@@ -197,6 +197,8 @@ TIMINGS = {
     "review-reminder": (21600, 21600),
     "cost-billing-sync": (60, 86400),
     "nf-core-registry-refresh": (60, 86400),
+    # The notebook gateway port, opened where HTTPS is (plan 03.5A, owner-approved 2026-11-26).
+    "notebook-gateway-port": (60, 21600),
 }
 
 # Each job's existing error message (the logger.error lines its loop had in app/main.py).
@@ -232,6 +234,7 @@ MESSAGES = {
     "upload-session-reconcile": "Upload settlement check error: %s",
     "storage-cleanup": "Storage cleanup error: %s",
     "nf-core-registry-refresh": "nf-core registry refresh loop error: %s",
+    "notebook-gateway-port": "Notebook gateway port reconciliation error: %s",
 }
 
 
@@ -239,8 +242,9 @@ def test_every_job_keeps_its_timing_and_its_error_message():
     by_role = {job.role: job for job in jobs.PERIODIC_JOBS}
     assert {r: (j.first_delay, j.interval) for r, j in by_role.items()} == TIMINGS
     assert {r: j.error_message for r, j in by_role.items()} == MESSAGES
-    # 31 since the SLURM job-status-sync poll was retired (plan 03C, owner-approved 2026-11-24).
-    assert len(jobs.PERIODIC_JOBS) == 31
+    # 31 since the SLURM job-status-sync poll was retired (plan 03C, owner-approved 2026-11-24); 32 with
+    # the notebook gateway port reconciliation (plan 03.5A, owner-approved 2026-11-26).
+    assert len(jobs.PERIODIC_JOBS) == 32
 
 
 async def test_the_plot_archive_backfill_runs_once_per_job_lifetime(monkeypatch, session):

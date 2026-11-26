@@ -3308,6 +3308,14 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_notebook_gateway_port.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_notebook_gcs_bucket.py": {
    "category": "single_connection",
    "evidence": [
