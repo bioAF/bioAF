@@ -372,5 +372,5 @@ async def test_k8s_pod_manifest_no_gcs_secret_without_flag():
     )
 
     volumes = manifest["spec"]["volumes"]
-    secret_vols = [v for v in volumes if "secret" in v]
-    assert len(secret_vols) == 0
+    gcs_key_vols = [v for v in volumes if v.get("secret", {}).get("secretName") == "bioaf-gcs-sa-key"]
+    assert len(gcs_key_vols) == 0

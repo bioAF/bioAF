@@ -24,6 +24,7 @@ from app.models.notebook_session import ComputeSession
 from app.notebook_gateway.app import Gateway
 from app.notebook_gateway.transport import DirectTransport
 from app.services import notebook_access_grant as grants
+from app.services.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER, JUPYTER_GATEWAY_CONFIG
 from tests.test_notebook_gateway import _Adapter, _free_port, _serve
 
 JUPYTER = os.environ.get("BIOAF_TEST_JUPYTER_BIN")
@@ -35,6 +36,13 @@ SECRET = "ide-secret-" + uuid.uuid4().hex
 @pytest_asyncio.fixture
 async def jupyter(tmp_path):
     port = _free_port()
+    # As the protected launch configures it: the token from JUPYTER_TOKEN and the gateway config from
+    # the session Secret on JUPYTER_CONFIG_PATH.
+    config_dir = tmp_path / "bioaf-jupyter"
+    config_dir.mkdir()
+    (config_dir / "jupyter_server_config.py").write_text(JUPYTER_GATEWAY_CONFIG)
+    root = tmp_path / "root"
+    root.mkdir()
     proc = subprocess.Popen(
         [
             JUPYTER,
@@ -43,9 +51,9 @@ async def jupyter(tmp_path):
             "--ServerApp.ip=127.0.0.1",
             f"--ServerApp.port={port}",
             "--ServerApp.base_url=/s/41/",
-            f"--IdentityProvider.token={SECRET}",
-            f"--ServerApp.root_dir={tmp_path}",
+            f"--ServerApp.root_dir={root}",
         ],
+        env={**os.environ, "JUPYTER_TOKEN": SECRET, "JUPYTER_CONFIG_PATH": str(config_dir)},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -160,3 +168,19 @@ async def test_a_scientist_opens_jupyter_runs_python_saves_and_reopens(session, 
     # Defense in depth: the IDE refuses anyone without its own secret, even on its own address.
     async with httpx.AsyncClient() as direct:
         assert (await direct.get(f"http://127.0.0.1:{jupyter}/s/41/api/contents")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_jupyter_accepts_its_token_from_the_gateway_header_and_nothing_less(jupyter):
+    base = f"http://127.0.0.1:{jupyter}/s/41/api/contents"
+
+    async def get(headers):
+        # A fresh client each time: Jupyter sets a login cookie after a good token.
+        async with httpx.AsyncClient() as c:
+            return await c.get(base, headers=headers)
+
+    with_header = await get({GATEWAY_TOKEN_HEADER: SECRET})
+    wrong = await get({GATEWAY_TOKEN_HEADER: "not-the-token"})
+    none = await get({})
+    assert with_header.status_code == 200
+    assert wrong.status_code == 403 and none.status_code == 403

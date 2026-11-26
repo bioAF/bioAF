@@ -12,6 +12,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+from app.services.notebook_jupyter_auth import (
+    GATEWAY_TOKEN_HEADER,
+    JUPYTER_CONFIG_DIR,
+    JUPYTER_CONFIG_KEY,
+    JUPYTER_GATEWAY_CONFIG,
+)
 from app.settings_contract import ComputeMode
 from tests.support.notebook_k8s_fakes import FakeCore, notebook_pod
 
@@ -151,7 +157,8 @@ async def test_launch_creates_the_secret_first_and_binds_it_to_the_pod(adapter, 
     kinds = [c[0] for c in core.calls]
     assert kinds.index("create_secret") < kinds.index("create_pod") < kinds.index("patch_secret")
     secret = core.secrets["bioaf-notebook-access-42"]
-    assert secret["stringData"] == {"token": "s3cret-token"}
+    assert secret["stringData"]["token"] == "s3cret-token"
+    assert secret["stringData"][JUPYTER_CONFIG_KEY] == JUPYTER_GATEWAY_CONFIG
     assert secret["metadata"]["labels"]["bioaf.io/session"] == "42"
     patch = next(body for kind, body in core.calls if kind == "patch_secret")
     owner = patch["metadata"]["ownerReferences"][0]
@@ -256,3 +263,30 @@ def test_notebook_code_gets_no_kubernetes_api_credential(adapter, session_type):
     manifest = adapter._build_pod_manifest(_spec(session_type, **extra))
     assert manifest["spec"]["automountServiceAccountToken"] is False
     assert manifest["spec"]["serviceAccountName"] == "bioaf-notebook-runner"
+
+
+def test_jupyter_reads_its_token_from_the_gateway_header_through_config_from_its_secret(adapter):
+    manifest = adapter._build_pod_manifest(_spec())
+    container = _container(manifest)
+    env = {e["name"]: e for e in container["env"]}
+    assert env["JUPYTER_CONFIG_PATH"]["value"] == JUPYTER_CONFIG_DIR
+    mount = next(m for m in container["volumeMounts"] if m["mountPath"] == JUPYTER_CONFIG_DIR)
+    assert mount["readOnly"] is True
+    volume = next(v for v in manifest["spec"]["volumes"] if v["name"] == mount["name"])
+    # Only the config key, not the token, is mounted from the session's Secret.
+    assert volume["secret"] == {
+        "secretName": "bioaf-notebook-access-42",
+        "items": [{"key": JUPYTER_CONFIG_KEY, "path": "jupyter_server_config.py"}],
+    }
+
+
+def test_the_gateway_config_reads_only_the_gateway_header():
+    assert GATEWAY_TOKEN_HEADER in JUPYTER_GATEWAY_CONFIG
+    assert "identity_provider_class" in JUPYTER_GATEWAY_CONFIG
+    compile(JUPYTER_GATEWAY_CONFIG, "jupyter_server_config.py", "exec")
+
+
+def test_rstudio_gets_no_jupyter_config(adapter):
+    container = _container(adapter._build_pod_manifest(_spec("rstudio")))
+    assert "JUPYTER_CONFIG_PATH" not in str(container.get("env", []))
+    assert all(m["mountPath"] != JUPYTER_CONFIG_DIR for m in container["volumeMounts"])

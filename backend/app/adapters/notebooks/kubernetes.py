@@ -23,6 +23,7 @@ from kubernetes import client
 from app.config import compute_mode_for
 from app.settings_contract import ComputeMode, is_simulated
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_word
+from app.services.notebook_jupyter_auth import JUPYTER_CONFIG_DIR, JUPYTER_CONFIG_KEY, JUPYTER_GATEWAY_CONFIG
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
@@ -892,11 +893,27 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "runAsNonRoot": True,
                 "allowPrivilegeEscalation": False,
             }
-            notebook_container.setdefault("env", []).append(
+            notebook_container.setdefault("env", []).extend(
+                [
+                    {
+                        "name": "JUPYTER_TOKEN",
+                        "valueFrom": {"secretKeyRef": {"name": access_secret_name(session_id), "key": "token"}},
+                    },
+                    # Merged with the image's own config: accept the token from the gateway's header.
+                    {"name": "JUPYTER_CONFIG_PATH", "value": JUPYTER_CONFIG_DIR},
+                ]
+            )
+            volumes.append(
                 {
-                    "name": "JUPYTER_TOKEN",
-                    "valueFrom": {"secretKeyRef": {"name": access_secret_name(session_id), "key": "token"}},
+                    "name": "bioaf-jupyter-config",
+                    "secret": {
+                        "secretName": access_secret_name(session_id),
+                        "items": [{"key": JUPYTER_CONFIG_KEY, "path": "jupyter_server_config.py"}],
+                    },
                 }
+            )
+            notebook_container["volumeMounts"].append(
+                {"name": "bioaf-jupyter-config", "mountPath": JUPYTER_CONFIG_DIR, "readOnly": True}
             )
         if session_type in INTERACTIVE_SESSION_TYPES:
             # Readiness from the IDE itself (plan 03.5C): Jupyter's API root and RStudio's sign-in page
@@ -1082,7 +1099,10 @@ class KubernetesNotebookProvider(NotebookProvider):
                     "kind": "Secret",
                     "metadata": {"name": secret_name, "namespace": namespace, "labels": ownership_labels(session_spec)},
                     "type": "Opaque",
-                    "stringData": {"token": session_spec.get("ide_secret") or secrets.token_urlsafe(32)},
+                    "stringData": {
+                        "token": session_spec.get("ide_secret") or secrets.token_urlsafe(32),
+                        JUPYTER_CONFIG_KEY: JUPYTER_GATEWAY_CONFIG,
+                    },
                 },
             )
         try:

@@ -66,7 +66,14 @@ async def _cookie(request: Request):
 async def _ws(ws):
     await ws.accept(subprotocol=(ws.scope.get("subprotocols") or [None])[0])
     await ws.send_text(
-        json.dumps({"path": ws.url.path, "query": dict(ws.query_params), "cookie": ws.headers.get("cookie")})
+        json.dumps(
+            {
+                "path": ws.url.path,
+                "query": dict(ws.query_params),
+                "cookie": ws.headers.get("cookie"),
+                "ide_token": ws.headers.get("x-bioaf-notebook-token"),
+            }
+        )
     )
     while True:
         try:
@@ -259,13 +266,19 @@ async def test_the_owner_reaches_the_ide_with_its_secret_added_and_browser_crede
     async with _client(stack, cookies) as c:
         response = await c.get(
             "/s/41/api/contents?type=directory&token=attacker",
-            headers={"authorization": "Bearer app-jwt", "x-forwarded-for": "1.2.3.4"},
+            headers={
+                "authorization": "Bearer app-jwt",
+                "x-forwarded-for": "1.2.3.4",
+                "x-bioaf-notebook-token": "attacker",
+            },
         )
     assert response.status_code == 200
     seen = response.json()
     assert seen["path"] == "/s/41/api/contents"
-    assert seen["query"] == {"type": "directory", "token": "ide-secret-41"}
+    # The IDE's secret travels in a request header, never in the URL (plan 03.5A credential handling).
+    assert seen["query"] == {"type": "directory"}
     forwarded = seen["headers"]
+    assert forwarded["x-bioaf-notebook-token"] == "ide-secret-41"
     assert "authorization" not in forwarded and "x-forwarded-for" not in forwarded and "origin" not in forwarded
     assert forwarded.get("cookie") == "_xsrf=x1"
     assert COOKIE_PREFIX not in json.dumps(forwarded)
@@ -384,7 +397,8 @@ async def test_the_owner_gets_a_websocket_with_the_ide_secret_and_without_gatewa
         await ws.send("run")
         assert await ws.recv() == "echo:run"
     assert hello["path"] == "/s/41/ws"
-    assert hello["query"] == {"session_id": "abc", "token": "ide-secret-41"}
+    assert hello["query"] == {"session_id": "abc"}
+    assert hello["ide_token"] == "ide-secret-41"
     assert hello["cookie"] == "_xsrf=x1"
 
 

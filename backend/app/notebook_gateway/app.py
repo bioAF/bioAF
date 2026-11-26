@@ -34,6 +34,7 @@ from app import runtime
 from app.notebook_gateway.access import PodConfirmations, current_access
 from app.notebook_gateway.transport import NotebookTransport, Upstream, ide_path
 from app.services import notebook_access_grant as grants
+from app.services.notebook_jupyter_auth import GATEWAY_TOKEN_HEADER
 
 logger = logging.getLogger("bioaf.notebook_gateway")
 
@@ -157,13 +158,19 @@ class Gateway:
         return (grant, access), None
 
     @staticmethod
-    def _query(access, query_string: str) -> str:
+    def _query(query_string: str) -> str:
+        # A browser-supplied token never reaches the IDE.
         params = [
             (k, v) for k, vs in parse_qs(query_string, keep_blank_values=True).items() for v in vs if k != "token"
         ]
-        if access.session_type == "jupyter" and access.ide_secret:
-            params.append(("token", access.ide_secret))
         return urlencode(params)
+
+    @staticmethod
+    def _ide_headers(access) -> dict:
+        """The IDE's own secret, as a header (never in the upstream URL; see notebook_jupyter_auth)."""
+        if access.session_type == "jupyter" and access.ide_secret:
+            return {GATEWAY_TOKEN_HEADER: access.ide_secret}
+        return {}
 
     # -- Enter -------------------------------------------------------------------------------
 
@@ -216,11 +223,12 @@ class Gateway:
         grant, access = ok
         upstream: Upstream = await self._transport.upstream(grant, access.session_type)
         path = ide_path(access.session_type, sid, request.path_params["rest"])
-        query = self._query(access, request.url.query)
+        query = self._query(request.url.query)
         headers = {k: v for k, v in request.headers.items() if k.lower() in _FORWARD_REQUEST_HEADERS}
         cookie = _upstream_cookies(request.headers.get("cookie"))
         if cookie:
             headers["cookie"] = cookie
+        headers.update(self._ide_headers(access))
         headers.update(upstream.headers)
         client = httpx.AsyncClient(verify=upstream.verify, timeout=httpx.Timeout(CONNECT_TIMEOUT, read=None))
         try:
@@ -292,9 +300,9 @@ class Gateway:
             return
         upstream = await self._transport.upstream(grant, access.session_type)
         path = ide_path(access.session_type, sid, ws.path_params["rest"])
-        query = self._query(access, ws.url.query)
+        query = self._query(ws.url.query)
         url = upstream.ws_base + path + (f"?{query}" if query else "")
-        headers = dict(upstream.headers)
+        headers = {**self._ide_headers(access), **upstream.headers}
         cookie = _upstream_cookies(ws.headers.get("cookie"))
         if cookie:
             headers["Cookie"] = cookie
