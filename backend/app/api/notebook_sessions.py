@@ -8,7 +8,7 @@ from typing import Literal
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -285,6 +285,53 @@ async def stop_session(
 ):
     notebook_session = await stop_owned_session(session, session_id, current_user)
     return _session_response(notebook_session)
+
+
+class SessionAccessResponse(BaseModel):
+    # Where the browser posts the ticket (the notebook gateway's own origin) and the single-use ticket.
+    entry_url: str
+    ticket: str
+    expires_in: int
+
+
+def _gateway_entry_url(request: Request) -> str:
+    """The gateway entry on this installation's own host, on the notebook port (a separate origin)."""
+    from app.config import settings
+
+    host = (request.headers.get("host") or request.url.hostname or "").strip()
+    if host.startswith("["):
+        hostname = host.split("]")[0] + "]"
+    else:
+        hostname = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return f"https://{hostname}:{settings.notebook_gateway_port}/_bioaf/enter"
+
+
+@router.post("/sessions/{session_id}/access", response_model=SessionAccessResponse)
+async def open_session_access(
+    session_id: int,
+    request: Request,
+    current_user: dict = require_permission("notebooks", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """A single-use ticket that opens the caller's own running session in the notebook gateway."""
+    from app.services import notebook_access_grant
+    from app.services.audit_service import log_action
+
+    issued = await notebook_access_grant.issue_ticket(
+        session, session_id=session_id, user_id=int(current_user["sub"]), org_id=int(current_user["org_id"])
+    )
+    await log_action(
+        session,
+        user_id=int(current_user["sub"]),
+        entity_type="notebook_session",
+        entity_id=session_id,
+        action="open_access",
+        details={"expires_in": issued.expires_in},
+    )
+    await session.commit()
+    return SessionAccessResponse(
+        entry_url=_gateway_entry_url(request), ticket=issued.ticket, expires_in=issued.expires_in
+    )
 
 
 @router.post("/sessions/{session_id}/sync")

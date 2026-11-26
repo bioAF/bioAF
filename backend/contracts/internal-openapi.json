@@ -22693,6 +22693,29 @@
         "title": "ServiceAccountUpdate",
         "type": "object"
       },
+      "SessionAccessResponse": {
+        "properties": {
+          "entry_url": {
+            "title": "Entry Url",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_url",
+          "ticket",
+          "expires_in"
+        ],
+        "title": "SessionAccessResponse",
+        "type": "object"
+      },
       "SessionCredentialRequest": {
         "properties": {
           "password": {
@@ -50796,6 +50819,49 @@
           }
         },
         "summary": "Get Session Detail",
+        "tags": [
+          "notebook-sessions"
+        ]
+      }
+    },
+    "/api/v1/notebooks/sessions/{session_id}/access": {
+      "post": {
+        "description": "A single-use ticket that opens the caller's own running session in the notebook gateway.",
+        "operationId": "open_session_access_api_v1_notebooks_sessions__session_id__access_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Session Access",
         "tags": [
           "notebook-sessions"
         ]

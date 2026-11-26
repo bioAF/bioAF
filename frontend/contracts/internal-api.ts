@@ -8128,6 +8128,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notebooks/sessions/{session_id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Session Access
+         * @description A single-use ticket that opens the caller's own running session in the notebook gateway.
+         */
+        post: operations["open_session_access_api_v1_notebooks_sessions__session_id__access_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notebooks/sessions/{session_id}/provenance": {
         parameters: {
             query?: never;
@@ -16464,6 +16484,15 @@ export interface components {
             display_name?: string | null;
             /** Role Id */
             role_id?: number | null;
+        };
+        /** SessionAccessResponse */
+        SessionAccessResponse: {
+            /** Entry Url */
+            entry_url: string;
+            /** Expires In */
+            expires_in: number;
+            /** Ticket */
+            ticket: string;
         };
         /** SessionCredentialRequest */
         SessionCredentialRequest: {
@@ -33730,6 +33759,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_session_access_api_v1_notebooks_sessions__session_id__access_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAccessResponse"];
                 };
             };
             /** @description Validation Error */

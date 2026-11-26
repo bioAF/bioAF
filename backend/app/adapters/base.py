@@ -770,6 +770,16 @@ class NotebookProvider(ABC):
         """The workload a recorded session owns, or None when this backend manages none."""
         return self.resolve_workload(ns)[0]
 
+    async def live_pod_uid(self, workload: NotebookWorkload) -> str:
+        """The UID of the running Pod that carries this workload's identity (plan 03.5A).
+
+        Raises ConnectionUnavailableError when no such Pod can be confirmed. The default manages no
+        Pods and confirms none.
+        """
+        from app.exceptions import ConnectionUnavailableError
+
+        raise ConnectionUnavailableError("This session's workload cannot be confirmed.", reason="unconfirmed")
+
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> names of the session-labelled resources that exist (empty when not managed)."""
         return {}

@@ -1124,6 +1124,43 @@ class KubernetesNotebookProvider(NotebookProvider):
     def recorded_workload(self, ns) -> NotebookWorkload | None:
         return self.resolve_workload(ns)[0]
 
+    async def live_pod_uid(self, workload: NotebookWorkload) -> str:
+        """The UID of the running, not-deleting Pod carrying this workload's ownership labels (plan 03.5A).
+
+        Any other Pod, a read failure or a timeout is ConnectionUnavailableError: no access is granted
+        to something bioAF cannot confirm.
+        """
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, _pod_belongs
+        from app.exceptions import ConnectionUnavailableError
+
+        refused = ConnectionUnavailableError("bioAF could not confirm this session's workload.", reason="unconfirmed")
+        if self.is_local:
+            raise refused
+        try:
+            core = self._get_k8s_core_client()
+            pod = await asyncio.to_thread(
+                core.read_namespaced_pod,
+                workload.pod_name,
+                workload.namespace,
+                _request_timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Notebook session %s: Pod read for access failed (%s)", workload.session_id, type(exc).__name__
+            )
+            raise refused from None
+        meta = getattr(pod, "metadata", None)
+        phase = getattr(getattr(pod, "status", None), "phase", None)
+        if (
+            meta is None
+            or not _pod_belongs(pod, workload)
+            or meta.deletion_timestamp
+            or phase != "Running"
+            or not meta.uid
+        ):
+            raise refused
+        return str(meta.uid)
+
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> pod and Service names carrying a ``bioaf.io/session`` label (raises on read errors)."""
         from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS
