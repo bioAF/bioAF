@@ -25,7 +25,8 @@ import re
 from app.adapters.image_build import base as image_build_base
 from app.adapters.image_build.base import BuildResult
 
-CONTRACT_VERSION = 1
+# 2: RStudio must start an R session during the build (1 only proved its sign-in page served).
+CONTRACT_VERSION = 2
 
 # Shared with plan 05A's image-input pinning: one notebook base for both build paths.
 NOTEBOOK_BASE_IMAGE = "jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33"
@@ -33,10 +34,11 @@ NOTEBOOK_UID = 1000
 NOTEBOOK_GID = 100
 
 # RStudio Server Open Source for Ubuntu 22.04 (jammy), amd64. SHA-256 computed from the package
-# downloaded over HTTPS from download2.rstudio.org on 2026-11-25.
-RSTUDIO_DEB = "rstudio-server-2024.04.2-764-amd64.deb"
+# downloaded over HTTPS from download2.rstudio.org on 2026-11-26. It must support the R conda installs
+# (4.5 today): 2024.04 could not start an R 4.5 session.
+RSTUDIO_DEB = "rstudio-server-2026.11.1-204-amd64.deb"
 RSTUDIO_URL = f"https://download2.rstudio.org/server/jammy/amd64/{RSTUDIO_DEB}"
-RSTUDIO_SHA256 = "d8ffb8e5c2dadb1c74df037c291a5585e595d978b3aec48a4a94a970e04a947d"
+RSTUDIO_SHA256 = "9119d8a833dc3ffb12c27f66d9f42e35159fdf57da18c640608c82dfa3e8c1d2"
 
 CHECK_PATH = "/usr/local/bin/bioaf-notebook-check"
 # Read back out of the built image by the build provider as the build's evidence.
@@ -74,9 +76,19 @@ if [ "$require_rstudio" = 1 ]; then
     [ "$(R --slave -e 'cat(1 + 1)' 2>/dev/null)" = 2 ] || fail "R could not evaluate an expression"
     [ -x /usr/lib/rstudio-server/bin/rserver ] || fail "RStudio Server is not installed"
     [ -f /etc/bioaf/rstudio-serves ] || fail "RStudio Server did not serve its sign-in page during the build"
+    # RStudio must start an R session itself, with the R and libraries rserver gives it: running R on
+    # the command line does not prove that (an rsession can fail to load the R a conda env installs).
+    conf=/etc/rstudio/rserver.conf
+    which_r="$(sed -n 's/^rsession-which-r=//p' "$conf" 2>/dev/null)"
+    which_r="${which_r:-$(command -v R)}"
+    r_home="$("$which_r" RHOME 2>/dev/null)"
+    ld_extra="$(sed -n 's/^rsession-ld-library-path=//p' "$conf" 2>/dev/null)"
+    R_HOME="$r_home" LD_LIBRARY_PATH="$r_home/lib${ld_extra:+:$ld_extra}" \
+        timeout 120 /usr/lib/rstudio-server/bin/rsession --verify-installation 1 >"$work/rsession.log" 2>&1 \
+        || fail "RStudio could not start an R session: $(tail -c 300 "$work/rsession.log")"
     rstudio=verified
 fi
-printf '{"contract": 1, "jupyter": "verified", "rstudio": "%s"}\n' "$rstudio" > "$capability_file" \
+printf '{"contract": 2, "jupyter": "verified", "rstudio": "%s"}\n' "$rstudio" > "$capability_file" \
     || fail "could not record the result"
 echo "bioAF notebook check passed (jupyter verified, rstudio $rstudio)"
 """
@@ -89,6 +101,7 @@ def runtime_layer(*, r_home: str | None) -> str:
     system R on PATH. The build starts rserver once, as root, to prove it serves its sign-in page.
     """
     which_r = f"{r_home}/bin/R" if r_home else "$(command -v R)"
+    ld_line = f' && echo "rsession-ld-library-path={r_home}/lib" >> /etc/rstudio/rserver.conf' if r_home else ""
     lines = [
         "",
         "# ---- bioAF notebook runtime contract (plan 03.5B) ----",
@@ -100,7 +113,8 @@ def runtime_layer(*, r_home: str | None) -> str:
         f"    && rm {RSTUDIO_DEB} \\",
         "    && rm -rf /var/lib/apt/lists/*",
         "RUN mkdir -p /etc/bioaf /etc/rstudio \\",
-        f'    && if [ -x "{which_r}" ]; then echo "rsession-which-r={which_r}" > /etc/rstudio/rserver.conf; fi \\',
+        # A conda R also needs its environment's own libraries (libstdc++) loaded into the R session.
+        f'    && if [ -x "{which_r}" ]; then echo "rsession-which-r={which_r}" > /etc/rstudio/rserver.conf{ld_line}; fi \\',
         "    && if command -v R >/dev/null 2>&1 || [ -s /etc/rstudio/rserver.conf ]; then \\",
         "         (/usr/lib/rstudio-server/bin/rserver --server-daemonize=0 --www-port=8787 &) \\",
         "         && for i in $(seq 1 30); do curl -sf http://127.0.0.1:8787/auth-sign-in >/dev/null && break; sleep 1; done \\",

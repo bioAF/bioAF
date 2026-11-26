@@ -83,6 +83,28 @@ def test_rstudio_is_pinned_and_verified_before_install():
     assert verify < install
 
 
+def test_rstudio_supports_the_r_conda_installs():
+    # Conda installs current R (4.5.3 on 2026-11-26); RStudio 2024.04 could not start an R session
+    # with it (undefined symbol Rf_countContexts, seen live on GKE).
+    assert notebook_runtime.RSTUDIO_DEB == "rstudio-server-2026.11.1-204-amd64.deb"
+    assert notebook_runtime.RSTUDIO_SHA256 == "9119d8a833dc3ffb12c27f66d9f42e35159fdf57da18c640608c82dfa3e8c1d2"
+
+
+def test_a_conda_r_session_loads_the_environments_own_libraries():
+    # Conda's R needs conda's libstdc++ (CXXABI_1.3.15), which rsession does not load by default.
+    dockerfile, _ = _build_conda_dockerfile(DEFAULT_NOTEBOOK_CONDA_YML, "Default Notebook", environment_type="notebook")
+    assert "rsession-ld-library-path=/opt/conda/envs/bioaf-notebook/lib" in dockerfile
+
+
+def test_the_check_proves_rstudio_can_start_an_r_session():
+    # Serving the sign-in page and running R on the command line are not enough: the build must fail
+    # unless RStudio itself starts an R session with the configured R and libraries.
+    script = notebook_runtime.CHECK_SCRIPT
+    assert "--verify-installation 1" in script
+    assert "rsession-ld-library-path" in script
+    assert "RStudio could not start an R session" in script
+
+
 def test_a_conda_environment_with_r_wires_rstudio_to_that_r():
     dockerfile, _ = _build_conda_dockerfile(DEFAULT_NOTEBOOK_CONDA_YML, "Default Notebook", environment_type="notebook")
     assert "rsession-which-r=/opt/conda/envs/bioaf-notebook/bin/R" in dockerfile
@@ -106,7 +128,7 @@ DIGEST = "sha256:" + "b" * 64
 @pytest.mark.parametrize("rstudio", ["verified", "unsupported"])
 def test_a_successful_build_records_what_its_check_reported(rstudio):
     # The check's own result, read out of the built image and bound to the pushed digest.
-    result = BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": rstudio})
+    result = BuildResult("SUCCESS", DIGEST, {"contract": 2, "jupyter": "verified", "rstudio": rstudio})
     capability = notebook_runtime.capability_from_build(
         "conda", DEFAULT_NOTEBOOK_CONDA_YML, result, image_uri="reg/img:v1.1", build_id="b-1"
     )
@@ -117,7 +139,7 @@ def test_a_successful_build_records_what_its_check_reported(rstudio):
 
 def test_a_definition_without_the_check_is_never_claimed_compatible():
     # A raw Dockerfile definition is the user's own; the runtime check is not part of it.
-    result = BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": "verified"})
+    result = BuildResult("SUCCESS", DIGEST, {"contract": 2, "jupyter": "verified", "rstudio": "verified"})
     capability = notebook_runtime.capability_from_build(
         "dockerfile", "FROM python:3.11\n", result, image_uri="x", build_id="b"
     )
@@ -145,7 +167,7 @@ def test_the_check_passes_when_jupyter_runs_a_python_cell(tmp_path):
     result = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads((tmp_path / "capability.json").read_text()) == {
-        "contract": 1,
+        "contract": 2,
         "jupyter": "verified",
         "rstudio": "unsupported",
     }
@@ -175,3 +197,20 @@ def test_the_check_fails_without_jupyter(tmp_path):
     result = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode != 0
     assert "Jupyter" in result.stdout + result.stderr
+
+
+def test_the_check_records_the_current_contract():
+    assert notebook_runtime.CONTRACT_VERSION == 2
+    assert f'"contract": {notebook_runtime.CONTRACT_VERSION},' in notebook_runtime.CHECK_SCRIPT
+
+
+def test_rstudio_proven_under_an_older_contract_is_no_longer_claimed():
+    # Contract 1 never proved RStudio could start an R session; Jupyter's check is unchanged.
+    from app.schemas.environment import notebook_capability
+
+    shown = notebook_capability({"contract": 1, "jupyter": "verified", "rstudio": "verified"})
+    assert (shown.jupyter, shown.rstudio) == ("verified", "unverified")
+    current = notebook_capability({"contract": 2, "jupyter": "verified", "rstudio": "verified"})
+    assert current.rstudio == "verified"
+    unsupported = notebook_capability({"contract": 1, "jupyter": "verified", "rstudio": "unsupported"})
+    assert unsupported.rstudio == "unsupported"

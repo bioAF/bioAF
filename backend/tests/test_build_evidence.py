@@ -20,7 +20,7 @@ from app.services import notebook_runtime
 CONFIG = {"project_id": "my-project", "region": "us-central1"}
 IMAGE = "us-central1-docker.pkg.dev/my-project/bioaf-images/env-7:v1.2"
 DIGEST = "sha256:" + "a" * 64
-EVIDENCE = {"contract": 1, "jupyter": "verified", "rstudio": "unsupported"}
+EVIDENCE = {"contract": 2, "jupyter": "verified", "rstudio": "unsupported"}
 
 
 # -- Cloud Build --------------------------------------------------------------------------------
@@ -128,7 +128,7 @@ def test_evidence_with_a_digest_is_recorded_as_verified():
         "conda", CONDA, BuildResult("SUCCESS", DIGEST, EVIDENCE), image_uri=IMAGE, build_id="b-1"
     )
     assert capability == {
-        "contract": 1,
+        "contract": 2,
         "jupyter": "verified",
         "rstudio": "unsupported",
         "image_uri": IMAGE,
@@ -144,7 +144,7 @@ def test_evidence_with_a_digest_is_recorded_as_verified():
         BuildResult("SUCCESS", DIGEST, None),  # a build that predates the evidence step
         BuildResult("SUCCESS", DIGEST, {**EVIDENCE, "contract": 0}),  # another contract
         BuildResult("SUCCESS", "latest", EVIDENCE),  # not a digest
-        BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "yes", "rstudio": "maybe"}),
+        BuildResult("SUCCESS", DIGEST, {"contract": 2, "jupyter": "yes", "rstudio": "maybe"}),
     ],
 )
 def test_anything_less_is_unverified(result):

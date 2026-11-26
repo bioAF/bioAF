@@ -22,7 +22,7 @@ from app.services.notebook_image_service import MAX_EVIDENCE_ATTEMPTS, scientifi
 TAG = "us-central1-docker.pkg.dev/test/repo/bioaf-scrna:latest"
 DIGEST = "sha256:" + "e" * 64
 UNREADABLE = BuildResult("UNKNOWN", None, None)
-EVIDENCE = BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": "verified"})
+EVIDENCE = BuildResult("SUCCESS", DIGEST, {"contract": 2, "jupyter": "verified", "rstudio": "verified"})
 
 
 async def _set(session, **values):

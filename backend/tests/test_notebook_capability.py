@@ -55,7 +55,7 @@ DIGEST = "sha256:" + "c" * 64
 
 
 def _evidence(rstudio="verified"):
-    return BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": rstudio})
+    return BuildResult("SUCCESS", DIGEST, {"contract": 2, "jupyter": "verified", "rstudio": rstudio})
 
 
 async def _poll(session, outcome, result=None):
@@ -78,7 +78,7 @@ async def test_a_successful_notebook_build_records_its_proven_capabilities(sessi
     await _poll(session, "SUCCESS", _evidence(rstudio))
     session.expire_all()
     row = await session.get(EnvironmentVersion, vid)
-    assert row.notebook_capability["contract"] == 1
+    assert row.notebook_capability["contract"] == 2
     assert (row.notebook_capability["jupyter"], row.notebook_capability["rstudio"]) == ("verified", rstudio)
     assert row.notebook_capability["image_uri"] == "us-docker.pkg.dev/p/r/env:v1.1"
     assert row.notebook_capability["image_digest"] == DIGEST

@@ -29,12 +29,18 @@ class NotebookCapability(BaseModel):
     rstudio: str = "unverified"
 
 
+# Contract 1 proved only that RStudio served its sign-in page, not that it could start an R session.
+RSTUDIO_SESSION_CONTRACT = 2
+
+
 def notebook_capability(raw: dict | None) -> NotebookCapability:
     if not raw:
         return NotebookCapability()
-    return NotebookCapability(
-        contract=raw.get("contract"), jupyter=raw.get("jupyter", "unverified"), rstudio=raw.get("rstudio", "unverified")
-    )
+    rstudio = raw.get("rstudio", "unverified")
+    contract = raw.get("contract")
+    if rstudio == "verified" and (not isinstance(contract, int) or contract < RSTUDIO_SESSION_CONTRACT):
+        rstudio = "unverified"
+    return NotebookCapability(contract=contract, jupyter=raw.get("jupyter", "unverified"), rstudio=rstudio)
 
 
 class EnvironmentVersionSummary(BaseModel):
