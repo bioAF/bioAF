@@ -8419,6 +8419,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/networking/certificate/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Certificate
+         * @description Install a certificate from the organization's own CA (private installations, plan 03.5A).
+         *
+         *     Checked here, staged privately, and installed by the host's fixed operation, which checks it again.
+         */
+        post: operations["upload_certificate_api_v1_settings_networking_certificate_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/networking/enforce-https": {
         parameters: {
             query?: never;
@@ -10246,6 +10268,27 @@ export interface components {
         CertificateStatusResponse: {
             /** Fqdn */
             fqdn: string;
+            /** Status */
+            status: string;
+        };
+        /** CertificateUpload */
+        CertificateUpload: {
+            /** Certificate Pem */
+            certificate_pem: string;
+            /** Private Key Pem */
+            private_key_pem: string;
+        };
+        /** CertificateUploadResponse */
+        CertificateUploadResponse: {
+            /** Issuer */
+            issuer: string;
+            /** Names */
+            names: string[];
+            /**
+             * Not After
+             * Format: date-time
+             */
+            not_after: string;
             /** Status */
             status: string;
         };
@@ -34254,6 +34297,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CertificateStatusResponse"];
+                };
+            };
+        };
+    };
+    upload_certificate_api_v1_settings_networking_certificate_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateUploadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

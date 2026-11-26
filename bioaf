@@ -514,6 +514,8 @@ ensure_update_agent() {
     fi
     host_python_require || return 1
     mkdir -p "$SCRIPT_DIR/update-requests"
+    # Private: an uploaded certificate's key passes through here (plan 03.5A).
+    [ -d "$SCRIPT_DIR/tls-upload" ] || mkdir -m 700 "$SCRIPT_DIR/tls-upload"
     [ -d "$SCRIPT_DIR/update-status" ] || mkdir -m 755 "$SCRIPT_DIR/update-status"
     update_agent_identity || return 1
 

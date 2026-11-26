@@ -142,3 +142,10 @@ async def test_the_kubernetes_transport_addresses_only_the_granted_pod(tmp_path)
     # The cluster CA is verified; never an unverified connection.
     assert jupyter.verify is not True and jupyter.verify is not False
     assert jupyter.verify.verify_mode.name == "CERT_REQUIRED"
+
+
+def test_the_backend_stages_uploaded_certificates_in_a_private_host_directory(compose):
+    assert "../tls-upload:/app/tls-upload" in compose["services"]["backend"]["volumes"]
+    bioaf = (ROOT / "bioaf").read_text()
+    assert 'mkdir -m 700 "$SCRIPT_DIR/tls-upload"' in bioaf
+    assert "/tls-upload/" in (ROOT / ".gitignore").read_text()

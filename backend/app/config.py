@@ -171,6 +171,8 @@ class Settings(BaseSettings):
 
     # Plan 03.5A: the notebook gateway's port on the installation's own host (separate browser origin).
     notebook_gateway_port: int = 8443
+    # Where an uploaded organization-CA certificate is staged for the host to install (plan 03.5A).
+    tls_upload_dir: str = "/app/tls-upload"
 
     # SSL / TLS
     ssl_enabled: bool = False

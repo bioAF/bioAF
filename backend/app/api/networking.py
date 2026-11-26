@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -365,6 +366,49 @@ async def request_certificate(
     )
     await session.commit()
     return CertificateStatusResponse(fqdn=fqdn, status=CERT_STATUS_PROVISIONING)
+
+
+class CertificateUpload(BaseModel):
+    certificate_pem: str = Field(min_length=1, max_length=65536)
+    private_key_pem: str = Field(min_length=1, max_length=65536)
+
+
+class CertificateUploadResponse(BaseModel):
+    status: str
+    names: list[str]
+    not_after: datetime
+    issuer: str
+
+
+@router.post("/certificate/upload", response_model=CertificateUploadResponse, status_code=202)
+async def upload_certificate(
+    body: CertificateUpload,
+    request: Request,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+) -> CertificateUploadResponse:
+    """Install a certificate from the organization's own CA (private installations, plan 03.5A).
+
+    Checked here, staged privately, and installed by the host's fixed operation, which checks it again.
+    """
+    from app.services import certificate_upload
+
+    summary = certificate_upload.check_pair(
+        body.certificate_pem, body.private_key_pem, host=request.headers.get("host", "")
+    )
+    certificate_upload.stage_and_request_install(body.certificate_pem, body.private_key_pem)
+    await audit_service.log_action(
+        session,
+        user_id=int(current_user["sub"]),
+        entity_type="platform_config",
+        entity_id=0,
+        action="upload_certificate",
+        details={"names": summary.names, "not_after": summary.not_after.isoformat(), "issuer": summary.issuer},
+    )
+    await session.commit()
+    return CertificateUploadResponse(
+        status="installing", names=summary.names, not_after=summary.not_after, issuer=summary.issuer
+    )
 
 
 @router.get("/certificate/status", response_model=CertificateStatusResponse)

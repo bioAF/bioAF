@@ -2916,6 +2916,60 @@
         "title": "CertificateStatusResponse",
         "type": "object"
       },
+      "CertificateUpload": {
+        "properties": {
+          "certificate_pem": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Certificate Pem",
+            "type": "string"
+          },
+          "private_key_pem": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Private Key Pem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "certificate_pem",
+          "private_key_pem"
+        ],
+        "title": "CertificateUpload",
+        "type": "object"
+      },
+      "CertificateUploadResponse": {
+        "properties": {
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "not_after": {
+            "format": "date-time",
+            "title": "Not After",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "names",
+          "not_after",
+          "issuer"
+        ],
+        "title": "CertificateUploadResponse",
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "current_password": {
@@ -51413,6 +51467,48 @@
           }
         },
         "summary": "Certificate Status",
+        "tags": [
+          "networking"
+        ]
+      }
+    },
+    "/api/v1/settings/networking/certificate/upload": {
+      "post": {
+        "description": "Install a certificate from the organization's own CA (private installations, plan 03.5A).\n\nChecked here, staged privately, and installed by the host's fixed operation, which checks it again.",
+        "operationId": "upload_certificate_api_v1_settings_networking_certificate_upload_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Certificate",
         "tags": [
           "networking"
         ]
