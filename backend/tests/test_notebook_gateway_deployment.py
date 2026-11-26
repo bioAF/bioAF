@@ -155,3 +155,11 @@ def test_the_backend_stages_uploaded_certificates_in_a_private_host_directory(co
     bioaf = (ROOT / "bioaf").read_text()
     assert 'mkdir -m 700 "$SCRIPT_DIR/tls-upload"' in bioaf
     assert "/tls-upload/" in (ROOT / ".gitignore").read_text()
+
+
+def test_the_backend_reads_the_host_certificate_report_read_only(compose):
+    assert "../tls-report:/app/tls-report:ro" in compose["services"]["backend"]["volumes"]
+    bioaf = (ROOT / "bioaf").read_text()
+    # Created by the host user before Compose would create it as root, at every place uploads are.
+    assert bioaf.count('mkdir -m 755 "$SCRIPT_DIR/tls-report"') == bioaf.count('mkdir -m 700 "$SCRIPT_DIR/tls-upload"')
+    assert "/tls-report/" in (ROOT / ".gitignore").read_text()

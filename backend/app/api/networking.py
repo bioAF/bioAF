@@ -411,6 +411,27 @@ async def upload_certificate(
     )
 
 
+def _reported_certificate_status() -> CertificateStatusResponse:
+    """Without a hostname: the certificate the host reports as installed, or "not requested"."""
+    from datetime import datetime, timezone
+
+    from app.config import settings
+    from app.services.certificate_report import read_report
+
+    report = read_report(settings.tls_report_dir)
+    if report is None:
+        return CertificateStatusResponse(fqdn="", status=CERT_STATUS_NOT_REQUESTED)
+    return CertificateStatusResponse(
+        fqdn="",
+        status="active" if report.not_after > datetime.now(timezone.utc) else "failed",
+        not_after=report.not_after,
+        issuer=report.issuer,
+        renewed_by_bioaf=report.renewed_by_bioaf,
+        last_renewal_at=report.last_renewal_at,
+        last_renewal_result=report.last_renewal_result,
+    )
+
+
 @router.get("/certificate/status", response_model=CertificateStatusResponse)
 async def certificate_status(
     current_user: dict = require_permission("infrastructure", "view"),
@@ -423,7 +444,7 @@ async def certificate_status(
     domain = config.get("networking_domain", "")
     fqdn = _compute_fqdn(hostname, domain)
     if not hostname or not domain:
-        return CertificateStatusResponse(fqdn="", status=CERT_STATUS_NOT_REQUESTED)
+        return _reported_certificate_status()
 
     status_str = await applier.get_certificate_status(fqdn)
     await _upsert(session, "networking_cert_status", status_str)

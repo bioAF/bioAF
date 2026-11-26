@@ -24,6 +24,7 @@ setup() {
     export TLS_CERTS_DIR="$TEST_DIR/certs"; mkdir -p "$TLS_CERTS_DIR"
     export TLS_STATE_DIR="$TEST_DIR/state"
     export TLS_WEBROOT="$TEST_DIR/webroot"; mkdir -p "$TLS_WEBROOT"
+    export TLS_REPORT_DIR="$TEST_DIR/report"; mkdir -p "$TLS_REPORT_DIR"
     export ISSUED="$TEST_DIR/issued"
     make_pair "$TEST_DIR/old" old
     cp "$TEST_DIR/old/cert.pem" "$TLS_CERTS_DIR/tls.crt"; cp "$TEST_DIR/old/key.pem" "$TLS_CERTS_DIR/tls.key"
@@ -236,4 +237,51 @@ teardown() { chmod -R u+rwx "$TEST_DIR" 2>/dev/null; rm -rf "$TEST_DIR"; }
     run tls_install_uploaded
     [ "$status" -ne 0 ]
     cmp "$TEST_DIR/old/cert.pem" "$TLS_CERTS_DIR/tls.crt"
+}
+
+# ---------------------------------------------------------------------------
+# The certificate report: what Settings shows for the installed certificate (expiry, who renews it, the
+# last renewal attempt), written by the host for the backend to read.
+# ---------------------------------------------------------------------------
+
+report() { python3 -c "import json,sys; d=json.load(open('$TLS_REPORT_DIR/status.json')); print(eval(sys.argv[1]))" "$1"; }
+
+@test "an issued IP certificate is reported with its expiry, as renewed by bioAF" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    [ "$(report 'd["renewed_by_bioaf"]')" = True ]
+    [ "$(report 'd["certificate"]["not_after"]')" = "$(openssl x509 -in "$ISSUED/cert.pem" -noout -enddate | cut -d= -f2)" ]
+    [[ "$(report 'd["certificate"]["subject"]')" == *203.0.113.7* ]]
+    [ "$(report 'd["last_renewal"]["result"]')" = succeeded ]
+    [[ "$(report 'd["last_renewal"]["at"]')" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]]
+}
+
+@test "a failed renewal is reported and the certificate it kept is still shown" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    export CERTBOT_FAILS=1
+    run tls_renew
+    [ "$(report 'd["last_renewal"]["result"]')" = failed ]
+    [ "$(report 'd["certificate"]["not_after"]')" = "$(openssl x509 -in "$ISSUED/cert.pem" -noout -enddate | cut -d= -f2)" ]
+}
+
+@test "an uploaded certificate is reported as not renewed by bioAF" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    make_pair "$TEST_DIR/org" bioaf.lab.internal
+    mkdir -p "$TEST_DIR/upload"
+    cp "$TEST_DIR/org/cert.pem" "$TEST_DIR/upload/tls.crt"; cp "$TEST_DIR/org/key.pem" "$TEST_DIR/upload/tls.key"
+    export TLS_UPLOAD_DIR="$TEST_DIR/upload"
+    tls_install_uploaded
+    [ "$(report 'd["renewed_by_bioaf"]')" = False ]
+    [ "$(report 'd["last_renewal"]')" = None ]
+    [[ "$(report 'd["certificate"]["subject"]')" == *bioaf.lab.internal* ]]
+}
+
+@test "the report is replaced atomically and readable by the backend" {
+    make_pair "$ISSUED" 203.0.113.7
+    tls_issue_ip 203.0.113.7
+    [ -r "$TLS_REPORT_DIR/status.json" ]
+    [ -z "$(find "$TLS_REPORT_DIR" -name '*.new')" ]
+    [ "$(stat -f %Lp "$TLS_REPORT_DIR/status.json" 2>/dev/null || stat -c %a "$TLS_REPORT_DIR/status.json")" = 644 ]
 }

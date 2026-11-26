@@ -68,6 +68,7 @@ services:
       - ../update-status:/app/update-status
       # An organization-CA certificate staged for the host to install (plan 03.5A); created 0700 by ./bioaf.
       - ../tls-upload:/app/tls-upload
+      - ../tls-report:/app/tls-report:ro
       # Recovery backups the backend writes before upgrading the database (backend/entrypoint.sh,
       # app/schema_upgrade.py). On the host, beside ./bioaf backup's dumps, so they outlive the
       # container. Read fresh on every update, so the first update from any older ./bioaf gets it.

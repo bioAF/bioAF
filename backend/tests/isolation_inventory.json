@@ -620,6 +620,16 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_certificate_report.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_certificate_upload.py": {
    "category": "real_commit",
    "evidence": [

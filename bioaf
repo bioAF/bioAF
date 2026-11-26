@@ -516,6 +516,8 @@ ensure_update_agent() {
     mkdir -p "$SCRIPT_DIR/update-requests"
     # Private: an uploaded certificate's key passes through here (plan 03.5A).
     [ -d "$SCRIPT_DIR/tls-upload" ] || mkdir -m 700 "$SCRIPT_DIR/tls-upload"
+    # Host-written certificate report the backend reads (Settings > Networking).
+    [ -d "$SCRIPT_DIR/tls-report" ] || mkdir -m 755 "$SCRIPT_DIR/tls-report"
     [ -d "$SCRIPT_DIR/update-status" ] || mkdir -m 755 "$SCRIPT_DIR/update-status"
     update_agent_identity || return 1
 
@@ -1849,8 +1851,10 @@ cmd_update() {
 
     write_update_status in_progress restart
     stop_frozen_backend
-    # Created by this user before Compose would create it as root (plan 03.5A certificate uploads).
+    # Created by this user before Compose would create them as root (plan 03.5A certificate uploads
+    # and the certificate report).
     [ -d "$SCRIPT_DIR/tls-upload" ] || mkdir -m 700 "$SCRIPT_DIR/tls-upload"
+    [ -d "$SCRIPT_DIR/tls-report" ] || mkdir -m 755 "$SCRIPT_DIR/tls-report"
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
 

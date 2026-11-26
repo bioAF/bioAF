@@ -173,6 +173,8 @@ class Settings(BaseSettings):
     notebook_gateway_port: int = 8443
     # Where an uploaded organization-CA certificate is staged for the host to install (plan 03.5A).
     tls_upload_dir: str = "/app/tls-upload"
+    # The host's certificate report (installer/tls.sh), mounted read-only.
+    tls_report_dir: str = "/app/tls-report"
 
     # SSL / TLS
     ssl_enabled: bool = False

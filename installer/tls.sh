@@ -20,6 +20,8 @@ TLS_CERTS_DIR="${TLS_CERTS_DIR:-${SSL_CERT_DIR:-$_TLS_ROOT/docker/certs}}"
 TLS_STATE_DIR="${TLS_STATE_DIR:-$_TLS_ROOT/host-state/tls}"
 TLS_WEBROOT="${TLS_WEBROOT:-${LETSENCRYPT_WEBROOT:-/var/www/letsencrypt}}"
 TLS_UPLOAD_DIR="${TLS_UPLOAD_DIR:-$_TLS_ROOT/tls-upload}"
+# Host-written, backend-readable (read-only mount): what Settings shows for the installed certificate.
+TLS_REPORT_DIR="${TLS_REPORT_DIR:-$_TLS_ROOT/tls-report}"
 TLS_COMPOSE="${TLS_COMPOSE:-docker compose -f $_TLS_ROOT/docker/docker-compose.yml --env-file $_TLS_ROOT/docker/.env}"
 TLS_CERT_NAME="bioaf"
 
@@ -110,6 +112,35 @@ _tls_acme_owns_installed() {
     [ "$(cat "$marker")" = "$(_tls_digest "$TLS_CERTS_DIR/tls.crt")" ]
 }
 
+_tls_json() { printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+_tls_cert_field() {
+    # _tls_cert_field <enddate|subject|issuer>: the installed certificate's field, without its label.
+    openssl x509 -in "$TLS_CERTS_DIR/tls.crt" -noout "-$1" 2>/dev/null | sed -E 's/^[A-Za-z]+= *//'
+}
+
+_tls_write_report() {
+    # _tls_write_report <succeeded|failed|none>: the installed certificate and the last renewal attempt
+    # ("none": bioAF does not renew it). Replaced atomically; never fails the operation that called it.
+    local result="$1" dir="$TLS_REPORT_DIR" certificate=null renewal=null owned=false
+    [ -d "$dir" ] || mkdir -m 755 "$dir" 2>/dev/null
+    [ -d "$dir" ] && [ -w "$dir" ] || return 0
+    if [ -f "$TLS_CERTS_DIR/tls.crt" ]; then
+        certificate="{\"not_after\": \"$(_tls_json "$(_tls_cert_field enddate)")\", \"subject\": \"$(_tls_json "$(_tls_cert_field subject)")\", \"issuer\": \"$(_tls_json "$(_tls_cert_field issuer)")\"}"
+    fi
+    _tls_acme_owns_installed && owned=true
+    if [ "$result" != none ]; then
+        renewal="{\"at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"result\": \"$result\"}"
+    fi
+    if (umask 022 && printf '{"certificate": %s, "renewed_by_bioaf": %s, "last_renewal": %s}\n' \
+        "$certificate" "$owned" "$renewal" > "$dir/.status.json.new"); then
+        mv -f "$dir/.status.json.new" "$dir/status.json"
+    else
+        rm -f "$dir/.status.json.new"
+    fi
+    return 0
+}
+
 _tls_certbot() {
     # _tls_certbot <certbot args...>: the pinned certbot with bioAF's own state directory.
     mkdir -p "$TLS_STATE_DIR/letsencrypt"
@@ -142,13 +173,15 @@ tls_issue_ip() {
         --ip-address "$ip" --cert-name "$TLS_CERT_NAME" --agree-tos --register-unsafely-without-email \
         "${extra[@]}"; then
         _tls_err "The certificate request failed; the current certificate is unchanged."
+        _tls_write_report failed
         return 1
     fi
-    _tls_copy_out || { _tls_err "The issued certificate could not be read."; return 1; }
+    _tls_copy_out || { _tls_err "The issued certificate could not be read."; _tls_write_report failed; return 1; }
     tls_install_pair "$TLS_STATE_DIR/stage/tls.crt" "$TLS_STATE_DIR/stage/tls.key"
     local rc=$?
     _tls_record_acme_install
     rm -rf "$TLS_STATE_DIR/stage"
+    if [ "$rc" -eq 0 ]; then _tls_write_report succeeded; else _tls_write_report failed; fi
     return $rc
 }
 
@@ -157,15 +190,17 @@ tls_renew() {
     _tls_acme_owns_installed || return 0
     if ! _tls_certbot renew --cert-name "$TLS_CERT_NAME"; then
         _tls_err "Certificate renewal failed; the current certificate is unchanged."
+        _tls_write_report failed
         return 1
     fi
-    _tls_copy_out || { _tls_err "The renewed certificate could not be read."; return 1; }
+    _tls_copy_out || { _tls_err "The renewed certificate could not be read."; _tls_write_report failed; return 1; }
     local rc=0
     if ! cmp -s "$TLS_STATE_DIR/stage/tls.crt" "$TLS_CERTS_DIR/tls.crt"; then
         tls_install_pair "$TLS_STATE_DIR/stage/tls.crt" "$TLS_STATE_DIR/stage/tls.key" || rc=$?
         _tls_record_acme_install
     fi
     rm -rf "$TLS_STATE_DIR/stage"
+    if [ "$rc" -eq 0 ]; then _tls_write_report succeeded; else _tls_write_report failed; fi
     return $rc
 }
 
@@ -175,7 +210,10 @@ tls_install_uploaded() {
     local dir="$TLS_UPLOAD_DIR" rc=0
     tls_install_pair "$dir/tls.crt" "$dir/tls.key" || rc=$?
     # An installed upload ends bioAF's renewal of any earlier Let's Encrypt certificate.
-    [ "$rc" -eq 0 ] && rm -f "$(_tls_marker)"
+    if [ "$rc" -eq 0 ]; then
+        rm -f "$(_tls_marker)"
+        _tls_write_report none
+    fi
     rm -f "$dir/tls.crt" "$dir/tls.key"
     return $rc
 }

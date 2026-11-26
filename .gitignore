@@ -54,6 +54,7 @@ update-gate/
 /host-state/
 # Organization-CA certificate staged by the backend for the host to install (plan 03.5A).
 /tls-upload/
+/tls-report/
 
 # Terraform
 *.tfvars
