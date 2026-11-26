@@ -726,10 +726,14 @@ status_json() {
 # whether one is due.
 # ---------------------------------------------------------------------------
 
+# installer/tls.sh records the certificate certbot installed in host-state/tls/acme-installed; certbot's
+# own state is root-only on a real host, so the agent never looks inside it.
+mark_acme_installed() { mkdir -p "$REPO/host-state/tls" && echo digest > "$REPO/host-state/tls/acme-installed"; }
+
 @test "with a bioAF-issued certificate the agent renews it, then not again within the interval" {
     stub_updater 0
     rm -f "$REPO/update-requests/update_7.json"
-    mkdir -p "$REPO/host-state/tls/letsencrypt/config/live/bioaf"
+    mark_acme_installed
     agent_round
     [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
     agent_round
@@ -739,9 +743,21 @@ status_json() {
 @test "the renewal runs again once the interval has passed" {
     stub_updater 0
     rm -f "$REPO/update-requests/update_7.json"
-    mkdir -p "$REPO/host-state/tls/letsencrypt/config/live/bioaf" "$REPO/host-only"
+    mark_acme_installed
+    mkdir -p "$REPO/host-only"
     echo $(( $(date +%s) - 6 * 3600 - 5 )) > "$REPO/host-only/tls-renew.last"
     agent_round
+    [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
+}
+
+@test "the agent renews although certbot's own state is unreadable to it" {
+    stub_updater 0
+    rm -f "$REPO/update-requests/update_7.json"
+    mark_acme_installed
+    mkdir -p "$REPO/host-state/tls/letsencrypt"
+    chmod 000 "$REPO/host-state/tls/letsencrypt"
+    agent_round
+    chmod 700 "$REPO/host-state/tls/letsencrypt"
     [ "$(grep -c '^tls-renew$' "$REPO/updater-calls")" -eq 1 ]
 }
 

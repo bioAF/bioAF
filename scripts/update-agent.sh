@@ -185,8 +185,9 @@ rotate_agent_log() {
 }
 
 maybe_renew_certificate() {
-    # Only for a certificate bioAF issued (./bioaf tls-issue-ip); never more than once per interval.
-    [ -d "$SCRIPT_DIR/host-state/tls/letsencrypt/config/live/bioaf" ] || return 0
+    # Only while a certificate bioAF issued (./bioaf tls-issue-ip) is installed, by installer/tls.sh's
+    # host-owned record; certbot's own state is root-only. Never more than once per interval.
+    [ -f "$SCRIPT_DIR/host-state/tls/acme-installed" ] || return 0
     local stamp="$LOG_DIR/tls-renew.last" now last
     now=$(date +%s)
     last=$(cat "$stamp" 2>/dev/null || echo 0)
