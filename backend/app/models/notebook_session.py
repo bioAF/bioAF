@@ -87,6 +87,9 @@ class ComputeSession(Base):
     # latest attempt (also the per-node claim) and why it failed (node_ssh.REPORT_FAILURES), if it did.
     report_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     report_failure: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Protected notebook access (plan 03.5A): the IDE's own per-session secret (Jupyter token), kept
+    # encrypted here and in the session's Kubernetes Secret; added upstream by the gateway only.
+    notebook_access_secret: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
 
     user = relationship("User")
     organization = relationship("Organization")
