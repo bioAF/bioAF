@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select, update
 
+from app import runtime
 from app.adapters.registry import get_work_node_adapter
 from app.adapters.work_nodes.node_ssh import REPORT_FAILURES, REPORT_REPORTED, REPORT_UNAVAILABLE, REPORT_UNREACHABLE
 from app.models.notebook_session import ComputeSession
@@ -221,7 +222,8 @@ async def report_round(
         async with gate:
             await _report_one(factory, adapter, target, now, node_deadline, in_flight)
 
-    tasks = [asyncio.create_task(bounded(t)) for t in targets]
+    # Owned by the bound task owner (shutdown cancels and awaits them), like other fan-out work.
+    tasks = [runtime.spawn(bounded(t), role="work-node-report") for t in targets]
     done, pending = await asyncio.wait(tasks, timeout=round_budget)
     for task in pending:
         task.cancel()

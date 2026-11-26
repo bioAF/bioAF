@@ -615,6 +615,16 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_certificate_upload.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_check_settings.py": {
    "category": "no_database",
    "evidence": [],
@@ -1274,6 +1284,14 @@
    "route": "committed_reset_candidate"
   },
   "test_environment_build_aws.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_environment_template_provenance.py": {
    "category": "single_connection",
    "evidence": [
     "fixture:db_engine",
@@ -3173,7 +3191,28 @@
    "evidence": [],
    "route": "none"
   },
+  "test_notebook_access_grant.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_notebook_api_v1.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_notebook_capability.py": {
    "category": "real_commit",
    "evidence": [
     "fixture:client",
@@ -3201,6 +3240,14 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_notebook_exposure_containment.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_notebook_file_mounting.py": {
    "category": "real_commit",
    "evidence": [
@@ -3208,6 +3255,30 @@
     "fixture:db_engine",
     "fixture:session",
     "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_notebook_gateway.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "create_task"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_notebook_gateway_deployment.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_notebook_gateway_jupyter.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory"
    ],
    "route": "committed_reset_candidate"
   },
@@ -3237,6 +3308,16 @@
    "evidence": [],
    "route": "none"
   },
+  "test_notebook_launch_readiness.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_notebook_lifecycle_review.py": {
    "category": "real_commit",
    "evidence": [
@@ -3257,6 +3338,11 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_notebook_live_pod_uid.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_notebook_output_discovery.py": {
    "category": "real_commit",
    "evidence": [
@@ -3268,6 +3354,16 @@
    "route": "committed_reset_candidate"
   },
   "test_notebook_output_provenance.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_notebook_protected_launch.py": {
    "category": "real_commit",
    "evidence": [
     "fixture:client",
@@ -3303,6 +3399,11 @@
    "route": "committed_reset_candidate"
   },
   "test_notebook_resource_release.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_notebook_runtime.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"
@@ -5758,6 +5859,16 @@
    "evidence": [],
    "route": "none"
   },
+  "test_work_node_experiment_link.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_work_node_login_key.py": {
    "category": "real_commit",
    "evidence": [
@@ -5775,6 +5886,27 @@
     "fixture:session"
    ],
    "route": "rollback_candidate"
+  },
+  "test_work_node_report.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_work_node_report_adapters.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_work_node_reports_service.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "async_session_factory",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
   },
   "test_work_node_ssh_trust.py": {
    "category": "no_database",

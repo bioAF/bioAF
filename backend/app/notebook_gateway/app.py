@@ -29,6 +29,7 @@ from starlette.responses import PlainTextResponse, RedirectResponse, Response, S
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from app import runtime
 from app.notebook_gateway.access import PodConfirmations, current_access
 from app.notebook_gateway.transport import NotebookTransport, Upstream, ide_path
 from app.services import notebook_access_grant as grants
@@ -339,7 +340,9 @@ class Gateway:
                 if access is None:
                     return
 
-        tasks = [asyncio.create_task(t()) for t in (browser_to_ide, ide_to_browser, still_allowed)]
+        tasks = [
+            runtime.spawn(t(), role="notebook-gateway-socket") for t in (browser_to_ide, ide_to_browser, still_allowed)
+        ]
         try:
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         except WebSocketDisconnect:
