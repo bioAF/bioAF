@@ -21,6 +21,7 @@ from app.schemas.work_node import (
     ProjectSummary,
     WorkNodeSettings,
 )
+from app.schemas.entity_reference import ExperimentReference
 from app.services.audit_service import log_action
 
 router = APIRouter(prefix="/api/v1/work-nodes", tags=["work-nodes"])
@@ -41,6 +42,12 @@ def _project_summary(project) -> ProjectSummary | None:
     return ProjectSummary(id=project.id, name=project.name)
 
 
+def _experiment_reference(experiment) -> ExperimentReference | None:
+    if not experiment:
+        return None
+    return ExperimentReference(id=experiment.id, name=experiment.name)
+
+
 def _work_node_response(cs) -> WorkNodeResponse:
     return WorkNodeResponse(
         id=cs.id,
@@ -48,6 +55,8 @@ def _work_node_response(cs) -> WorkNodeResponse:
         user=_user_summary(cs.user) if hasattr(cs, "user") and cs.user else None,
         project_id=cs.project_id,
         project=_project_summary(getattr(cs, "project", None)),
+        experiment_id=cs.experiment_id,
+        experiment=_experiment_reference(getattr(cs, "experiment", None)),
         environment_version_id=cs.environment_version_id,
         machine_type=cs.machine_type,
         input_file_ids=[v for v in (cs.data_mount_paths or []) if isinstance(v, int)],

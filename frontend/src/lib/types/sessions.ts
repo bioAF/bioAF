@@ -313,6 +313,9 @@ export interface WorkNode {
   user: UserSummary | null;
   project_id: number | null;
   project: ProjectSummary | null;
+  /** The Experiment the node was launched for; null for a Project-only or legacy unlinked node. */
+  experiment_id?: number | null;
+  experiment?: ExperimentReference | null;
   environment_version_id: number | null;
   machine_type: string | null;
   input_file_ids: number[] | null;

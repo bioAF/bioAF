@@ -71,10 +71,10 @@ export function WorkNodeDetailModal({
         <span className="text-gray-500">User</span>
         <span>{node.user?.name || node.user?.email || NOT_SET}</span>
       </div>
-      {formatLinkedTo({ project: node.project }) && (
+      {formatLinkedTo({ experiment: node.experiment, project: node.project }) && (
         <div className="flex justify-between">
           <span className="text-gray-500">Linked to</span>
-          <span>{formatLinkedTo({ project: node.project })}</span>
+          <span>{formatLinkedTo({ experiment: node.experiment, project: node.project })}</span>
         </div>
       )}
       <div className="flex justify-between">

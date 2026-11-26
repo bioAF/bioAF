@@ -7,7 +7,7 @@
 // classify_gce_vm_failure). Anything else falls through to the raw status.
 //
 // formatLinkedTo collapses the (experiment, project) pair into one "Linked to"
-// cell. Only one of the two can be set on a row.
+// cell. The Experiment is preferred when both are recorded.
 
 import type { ExperimentReference, ProjectSummary } from "@/lib/types";
 

@@ -276,7 +276,7 @@ export default function WorkNodesPage() {
               {nodes.map((node) => (
                 <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => setViewingNode(node))}>
                   <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || NOT_SET}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? NOT_SET}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ experiment: node.experiment, project: node.project }) ?? NOT_SET}</td>
                   <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || NOT_SET}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{node.cpu_cores} CPU / {node.memory_gb} GB</td>
                   <td className="px-4 py-3">

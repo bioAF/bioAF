@@ -17972,6 +17972,9 @@ export interface components {
             created_at: string;
             /** Environment Version Id */
             environment_version_id?: number | null;
+            experiment?: components["schemas"]["ExperimentReference"] | null;
+            /** Experiment Id */
+            experiment_id?: number | null;
             /** Failure Message */
             failure_message?: string | null;
             /** Failure Reason */
