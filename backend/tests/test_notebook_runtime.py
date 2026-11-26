@@ -46,6 +46,20 @@ RENDERERS = {
 
 
 @pytest.mark.parametrize("which", list(RENDERERS))
+def test_the_dockerfile_builds_without_buildkit(which):
+    # Cloud Build's docker step (and CodeBuild's) use the classic builder, which refuses BuildKit-only
+    # syntax: a live Cloud Build failed on `COPY --chmod` (2026-11-26, blackbird).
+    dockerfile = RENDERERS[which]()
+    for line in dockerfile.splitlines():
+        instruction = line.strip().split(" ", 1)[0].upper()
+        if instruction in ("COPY", "ADD"):
+            assert not re.search(r"--(chmod|link|parents|exclude)\b", line), line
+        if instruction == "RUN":
+            assert "--mount" not in line and "<<" not in line, line
+    assert re.search(r"^RUN chmod 0755 /usr/local/bin/bioaf-notebook-check$", dockerfile, re.M)
+
+
+@pytest.mark.parametrize("which", list(RENDERERS))
 def test_both_build_paths_share_one_pinned_unprivileged_runtime(which):
     dockerfile = RENDERERS[which]()
     from_lines = [line for line in dockerfile.splitlines() if line.startswith("FROM ")]

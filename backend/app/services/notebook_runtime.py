@@ -107,7 +107,9 @@ def runtime_layer(*, r_home: str | None) -> str:
         "         && curl -sf http://127.0.0.1:8787/auth-sign-in >/dev/null && touch /etc/bioaf/rstudio-serves; \\",
         "         pkill -f rserver || true; \\",
         "       fi",
-        f"COPY --chmod=0755 bioaf-notebook-check {CHECK_PATH}",
+        # Plain COPY + chmod: build services use the classic builder, which refuses COPY --chmod.
+        f"COPY bioaf-notebook-check {CHECK_PATH}",
+        f"RUN chmod 0755 {CHECK_PATH}",
         f"RUN chown {NOTEBOOK_UID}:{NOTEBOOK_GID} /etc/bioaf",
     ]
     return "\n".join(lines) + "\n"
