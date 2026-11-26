@@ -2090,6 +2090,12 @@ cmd_tls_issue_ip() {
     fi
 }
 
+cmd_contain_notebook_exposure() {
+    # contain-notebook-exposure [--apply]: report (and with --apply remove) public listeners of notebook
+    # sessions launched before the protected gateway (plan 03.5F). Nothing is stopped or deleted.
+    $DC exec -T backend python -m app.cli.contain_notebook_exposure "$@"
+}
+
 cmd_tls_renew() {
     tls_renew || exit 1
 }
@@ -2141,6 +2147,9 @@ cmd_help() {
     echo "  rotate-encryption-keys [--dry-run]"
     echo "                      Re-encrypt sensitive DB columns under the primary"
     echo "                      key in BIOAF_ENCRYPTION_KEYS (used during rotation)."
+    echo "  contain-notebook-exposure [--apply]"
+    echo "                      List notebook sessions from before protected access that still have a"
+    echo "                      public address; --apply removes it (sessions keep running)."
     echo "  tls-issue-ip [address]"
     echo "                      Get a trusted Let's Encrypt certificate for this server's public IP"
     echo "                      address (renewed automatically)."
@@ -2210,6 +2219,7 @@ case "$command" in
     release-stale-update-gate) cmd_release_stale_update_gate ;;
     tls-issue-ip) cmd_tls_issue_ip "$@" ;;
     tls-renew) cmd_tls_renew ;;
+    contain-notebook-exposure) cmd_contain_notebook_exposure "$@" ;;
     tls-install-uploaded) cmd_tls_install_uploaded ;;
     reset-install-metrics-identity) cmd_reset_install_metrics_identity "$@" ;;
     help|-h|--help) cmd_help ;;
