@@ -160,6 +160,8 @@ io_init
 # ---------------------------------------------------------------------------
 bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew ensure_gcloud_python \
     use_cask_python_for_gcloud || exit 1
+# A stable public address for the HTTPS certificate (plan 03.5A).
+bioaf_load_helper installer/static_ip.sh required gcp_keep_public_ip || exit 1
 # Prompts and interactive commands (sudo, gcloud auth login, ssh) all read
 # from the terminal from here on.
 attach_terminal || exit 1
@@ -1112,6 +1114,13 @@ else
         --format="value(networkInterfaces[0].networkIP)" 2>/dev/null || echo "")
 fi
 
+# Keep the public address: the HTTPS certificate names it (plan 03.5A). Same address, no restart.
+if [ "$USE_PUBLIC_IP" = true ] && [ -n "$VM_IP" ]; then
+    step "Keep this server's public address ${VM_IP} (static)" -- \
+        gcp_keep_public_ip "$VM_NAME" "${ZONE%-*}" "$PROJECT_ID" "$VM_IP" \
+        || warn "The address could not be made static; if it changes, run ./bioaf tls-issue-ip on the server."
+fi
+
 # ---------------------------------------------------------------------------
 # Wait for VM readiness
 # ---------------------------------------------------------------------------
@@ -1287,6 +1296,11 @@ if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ]; then
     fi
 fi
 
+# A trusted certificate for a public address (plan 03.5A); private installations upload their own.
+TLS_REMOTE_STEP="true"
+if [ "$USE_PUBLIC_IP" = true ]; then
+    TLS_REMOTE_STEP='./bioaf tls-issue-ip || echo "HTTPS still uses the temporary certificate. Run ./bioaf tls-issue-ip on the server to retry."'
+fi
 if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ] && [ -f "${PREFILL_LOCAL}" ]; then
     echo ""
     echo "  Cloning bioAF and running setup on the VM. This will take a few minutes."
@@ -1304,6 +1318,7 @@ fi
 cd "$HOME/bioAF"
 git pull --ff-only origin main 2>/dev/null || true
 ./bioaf setup --prefill "$HOME/.bioaf-prefill.yaml"
+'"$TLS_REMOTE_STEP"'
 '; then
         REMOTE_SETUP_SUCCEEDED=true
     else

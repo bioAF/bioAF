@@ -216,6 +216,8 @@ io_init
 # loading as the output helper.
 # ---------------------------------------------------------------------------
 bioaf_load_helper installer/local_prereqs.sh required attach_terminal ensure_homebrew || exit 1
+# A stable public address for the HTTPS certificate (plan 03.5A).
+bioaf_load_helper installer/static_ip.sh required aws_keep_public_ip || exit 1
 
 # SSH recovery access (plan 03B): the console link, access sheet, optional administrator key and the
 # automatic recovery probe. Loaded once a VM exists; optional: without it the install continues.
@@ -754,6 +756,13 @@ if [ -n "${INSTANCE_ID}" ]; then
         aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
     VM_IP="$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' --output text 2>/dev/null || echo "")"
+    # Keep the public address: the HTTPS certificate names it (plan 03.5A).
+    if static_ip="$(aws_keep_public_ip "$INSTANCE_ID" "$VM_NAME")" && [ -n "$static_ip" ]; then
+        VM_IP="$static_ip"
+        step "Keep this server's public address ${VM_IP} (Elastic IP)" -- true
+    else
+        warn "An Elastic IP could not be attached; if the address changes, run ./bioaf tls-issue-ip on the server."
+    fi
     note "Public IP: ${VM_IP}"
 fi
 
@@ -914,6 +923,7 @@ fi
 cd "$HOME/bioAF"
 git pull --ff-only origin main 2>/dev/null || true
 ./bioaf setup --prefill "$HOME/.bioaf-prefill.yaml"
+./bioaf tls-issue-ip || echo "HTTPS still uses the temporary certificate. Run ./bioaf tls-issue-ip on the server to retry."
 '; then
             REMOTE_SETUP_SUCCEEDED=true
         else
