@@ -67,7 +67,8 @@ cat > "$work/check.ipynb" <<'NB'
  "nbformat": 4, "nbformat_minor": 5}
 NB
 jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=120 \
-    --output executed.ipynb "$work/check.ipynb" >/dev/null 2>&1 || fail "Jupyter could not execute a Python cell"
+    --output executed.ipynb "$work/check.ipynb" >"$work/nbconvert.log" 2>&1 \
+    || fail "Jupyter could not execute a Python cell: $(tail -c 600 "$work/nbconvert.log")"
 grep -q '"42' "$work/executed.ipynb" || fail "the Python cell did not produce its output"
 
 rstudio=unsupported

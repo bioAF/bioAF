@@ -224,3 +224,27 @@ def test_the_r_session_check_gives_rsession_the_r_directories_r_reports():
     for name, part in (("R_SHARE_DIR", "share"), ("R_INCLUDE_DIR", "include"), ("R_DOC_DIR", "doc")):
         assert name in script
         assert f'R.home("{part}")' in script
+
+
+def test_a_failed_cell_reports_jupyters_own_error(tmp_path):
+    # A live scientific-image build failed with only "Jupyter could not execute a Python cell"
+    # (2026-11-26): the failure must carry the reason.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "jupyter"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  server|lab) exit 0 ;;\n"
+        '  nbconvert) echo "DeadKernelError: Kernel died before replying to kernel_info" >&2; exit 1 ;;\n'
+        "esac\n"
+    )
+    fake.chmod(0o755)
+    script = tmp_path / "check"
+    script.write_text(notebook_runtime.CHECK_SCRIPT)
+    script.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "BIOAF_EXPECTED_UID": str(os.getuid()), "HOME": str(tmp_path)}
+    result = subprocess.run([str(script)], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode != 0
+    assert "Jupyter could not execute a Python cell" in result.stdout
+    assert "DeadKernelError: Kernel died before replying to kernel_info" in result.stdout
