@@ -573,7 +573,6 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         5 * MINUTE,
         "Installation metrics sender error: %s",
     ),
-    _job("idempotency-cleanup", _idempotency_cleanup, HOUR, HOUR, "Idempotency cleanup error: %s"),
     # Soon after every start (so right after an update) and every six hours (plan 03.5A).
     _job(
         "notebook-gateway-port",
@@ -582,4 +581,5 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         6 * HOUR,
         "Notebook gateway port reconciliation error: %s",
     ),
+    _job("idempotency-cleanup", _idempotency_cleanup, HOUR, HOUR, "Idempotency cleanup error: %s"),
 ]
