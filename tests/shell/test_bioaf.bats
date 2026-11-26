@@ -2534,3 +2534,26 @@ mark_unchanged() { sleep 1; touch "$1/marker"; sleep 1; }
     [ "$(grep -c 'proxy_set_header X-Bioaf-Edge-Token "\${BIOAF_EDGE_TOKEN}";' "$conf")" -ge 2 ]
     [ "$(grep -c 'proxy_set_header X-Real-IP \$remote_addr;' "$conf")" -ge 2 ]
 }
+
+# ---------------------------------------------------------------------------
+# Certificates through ./bioaf (plan 03.5A): the TLS helper must get bioaf's own Compose command.
+# Seen live on GKE (2026-11-26): `TLS_COMPOSE="$DC" source ...` scoped the variable to the source
+# builtin, so installing an issued certificate died with "TLS_COMPOSE: unbound variable".
+# ---------------------------------------------------------------------------
+
+@test "bioaf installs an uploaded certificate with its own Compose command" {
+    local stubs="$BATS_TEST_TMPDIR/stubs" upload="$BATS_TEST_TMPDIR/upload" certs="$BATS_TEST_TMPDIR/certs"
+    mkdir -p "$stubs" "$upload" "$certs"
+    printf '#!/bin/sh\necho "docker $*" >> "%s/calls"\nexit 0\n' "$BATS_TEST_TMPDIR" > "$stubs/docker"
+    chmod +x "$stubs/docker"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$upload/tls.key" -out "$upload/tls.crt" -days 7 \
+        -subj /CN=bioaf.lab.internal >/dev/null 2>&1
+    unset TLS_COMPOSE
+    PATH="$stubs:$PATH" TLS_UPLOAD_DIR="$upload" TLS_CERTS_DIR="$certs" TLS_STATE_DIR="$BATS_TEST_TMPDIR/state" \
+        TLS_REPORT_DIR="$BATS_TEST_TMPDIR/report" run bash "$BIOAF_SCRIPT" tls-install-uploaded
+    [ "$status" -eq 0 ] || { echo "$output"; false; }
+    [[ "$output" != *"unbound variable"* ]]
+    [ -s "$certs/tls.crt" ]
+    grep -q "docker compose .*exec -T nginx nginx -t" "$BATS_TEST_TMPDIR/calls"
+    grep -q "docker compose .*exec -T nginx nginx -s reload" "$BATS_TEST_TMPDIR/calls"
+}

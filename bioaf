@@ -53,8 +53,10 @@ if [ -f "$SCRIPT_DIR/installer/host_prereqs.sh" ]; then
 fi
 # HTTPS certificates (plan 03.5A): Let's Encrypt IP certificates and organization-CA uploads.
 if [ -f "$SCRIPT_DIR/installer/tls.sh" ]; then
+    # A plain assignment: a prefix assignment (VAR=x source ...) would last only while the file is read.
+    TLS_COMPOSE="$DC"
     # shellcheck source=installer/tls.sh
-    TLS_COMPOSE="$DC" source "$SCRIPT_DIR/installer/tls.sh"
+    source "$SCRIPT_DIR/installer/tls.sh"
 fi
 # The host I/O program shared with the update agent, read now so an update that checks out another
 # release keeps using the code this process started with.
