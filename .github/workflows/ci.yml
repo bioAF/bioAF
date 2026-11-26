@@ -198,7 +198,7 @@ jobs:
           python-version: "3.12"
 
       # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "0.13.5"
           enable-cache: true
@@ -273,7 +273,7 @@ jobs:
           python-version: "3.12"
 
       # The uv version the backend image copies (docker/Dockerfile.backend); the cache is keyed on the lock.
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: "0.13.5"
           enable-cache: true
@@ -834,7 +834,7 @@ jobs:
       # image `latest` resolved to when pinned); Dependabot does not track it, so a maintainer moves it by hand with the
       # digest from ghcr.io.
       - name: Check for secrets in code
-        uses: trufflesecurity/trufflehog@8cd2fdddd14a513cce30888e975d09233a61705c # v3.88.8
+        uses: trufflesecurity/trufflehog@4ef51f69ca6347aaa76a5e64a87eac9c0c909f71 # v3.100.1
         with:
           version: 3.100.1@sha256:9c7a8325d43a4af2960d3f21d61a08981d8a1bf0542e007efa2e47097e386452
           extra_args: --only-verified
@@ -870,7 +870,7 @@ jobs:
           fi
 
       - name: Review introduced dependencies
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
           fail-on-scopes: runtime, development, unknown
