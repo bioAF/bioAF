@@ -1849,6 +1849,8 @@ cmd_update() {
 
     write_update_status in_progress restart
     stop_frozen_backend
+    # Created by this user before Compose would create it as root (plan 03.5A certificate uploads).
+    [ -d "$SCRIPT_DIR/tls-upload" ] || mkdir -m 700 "$SCRIPT_DIR/tls-upload"
     $DC up -d || update_failed restart "Could not start the v${target_version} containers."
     wait_for_db
 
