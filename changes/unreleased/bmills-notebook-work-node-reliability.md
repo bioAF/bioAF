@@ -11,6 +11,10 @@
   its build proved; older versions show as unverified.
 - Show a session as running only once Jupyter or RStudio itself answers. Refuse a launch of a tool the
   environment was proven not to have, and fail an image without the tool with a plain reason.
+- Signing out of bioAF also ends access to notebook sessions opened through the protected address, and
+  an open notebook connection closes when its sign-in expires.
+- Run each environment version, and the built-in scientific image, exactly as its build recorded it (by
+  image digest). Jupyter and RStudio are shown as verified only from the build's own check result.
 - Add `./bioaf contain-notebook-exposure [--apply]` to remove the public address of sessions started
   before this release without stopping them or deleting files.
 
@@ -20,6 +24,8 @@
   (`./bioaf tls-issue-ip`). The installers keep the public address static and open port 8443.
 - Upload a certificate from your organization's own certificate authority for a private installation in
   Settings > Networking.
+- Show the installed certificate's expiry and renewal health in Settings > Networking on installations
+  without a hostname. An uploaded certificate is never replaced by automatic renewal.
 
 ### Work Nodes
 
