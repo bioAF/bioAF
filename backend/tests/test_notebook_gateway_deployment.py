@@ -93,7 +93,8 @@ def test_both_installers_open_the_gateway_port_like_https():
 
 
 @pytest.mark.asyncio
-async def test_the_kubernetes_transport_addresses_only_the_granted_pod(tmp_path):
+@pytest.mark.parametrize("header_name", ["Authorization", "authorization"])  # GKE, EKS
+async def test_the_kubernetes_transport_addresses_only_the_granted_pod(tmp_path, header_name):
     ca = tmp_path / "ca.crt"
     import subprocess
 
@@ -119,13 +120,18 @@ async def test_the_kubernetes_transport_addresses_only_the_granted_pod(tmp_path)
         check=True,
         capture_output=True,
     )
-    config = SimpleNamespace(
-        host="https://10.0.0.1/", ssl_ca_cert=str(ca), api_key={"authorization": "Bearer cluster-token"}
-    )
+    from kubernetes import client as k8s
+
+    # Built the way build_out_of_cluster_client builds it: the token is a default header, not api_key.
+    config = k8s.Configuration()
+    config.host = "https://10.0.0.1/"
+    config.ssl_ca_cert = str(ca)
+    api_client = k8s.ApiClient(config)
+    api_client.set_default_header(header_name, "Bearer cluster-token")
     adapter = SimpleNamespace()
 
     async def client():
-        return SimpleNamespace(configuration=config)
+        return api_client
 
     adapter._get_api_client_async = client
     transport = KubernetesPodProxyTransport(lambda: adapter)

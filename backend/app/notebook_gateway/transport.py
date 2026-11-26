@@ -12,6 +12,7 @@ import ssl
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.adapters.kubernetes.connection import api_client_auth_header
 from app.services.notebook_access_grant import AccessGrant
 
 IDE_PORTS = {"jupyter": 8888, "rstudio": 8787}
@@ -69,10 +70,9 @@ class KubernetesPodProxyTransport:
         port = IDE_PORTS[session_type]
         prefix = f"/api/v1/namespaces/{grant.namespace}/pods/{grant.pod_name}:{port}/proxy"
         context = ssl.create_default_context(cafile=config.ssl_ca_cert) if config.ssl_ca_cert else True
-        token = (config.api_key or {}).get("authorization") or (config.api_key or {}).get("BearerToken")
-        headers = {}
-        if token:
-            headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+        # The adapter's client carries its bearer token as a default header (GKE and EKS casings).
+        token = api_client_auth_header(api_client)
+        headers = {"Authorization": token} if token else {}
         ws_host = host.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
         return Upstream(
             http_base=host + prefix,
