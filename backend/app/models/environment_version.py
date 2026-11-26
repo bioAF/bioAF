@@ -23,7 +23,8 @@ class EnvironmentVersion(Base):
     build_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_uri: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Plan 03.5B: what this version's successful build proved under the notebook runtime contract
-    # (notebook_runtime.capability_after_build). Null: built before the contract, or not a notebook.
+    # (notebook_runtime.capability_from_build, from the build's own evidence and digest). Null: built
+    # before the contract, or not a notebook.
     notebook_capability: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # The template revision this version's definition is, unmodified; null when user-managed.
     template_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)

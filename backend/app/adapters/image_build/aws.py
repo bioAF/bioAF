@@ -29,7 +29,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.adapters.image_build.base import ImageBuildProvider
+from app.adapters.image_build.base import (
+    CAPABILITY_FILE,
+    MAX_EVIDENCE_BYTES,
+    BuildResult,
+    ImageBuildProvider,
+    decode_evidence,
+)
 
 logger = logging.getLogger("bioaf.image_build")
 
@@ -51,8 +57,12 @@ _HEAVY_BUILD_MINUTES = 90
 # (a tar.gz the service uploaded to S3), extracts it, logs in to ECR, builds the
 # Dockerfile, and pushes the image. $CONTEXT_URI / $IMAGE_URI come from the
 # per-build environment overrides; $AWS_DEFAULT_REGION drives the ECR login host.
-_BUILDSPEC = """\
+_BUILDSPEC = f"""\
 version: 0.2
+env:
+  exported-variables:
+    - IMAGE_DIGEST
+    - NOTEBOOK_CAPABILITY
 phases:
   pre_build:
     commands:
@@ -66,6 +76,10 @@ phases:
   post_build:
     commands:
       - docker push "$IMAGE_URI"
+      # Evidence: the pushed digest and the notebook runtime check's result read out of the image
+      # just built (empty for an image without it), returned as exported variables.
+      - IMAGE_DIGEST="$(docker inspect --format='{{{{index .RepoDigests 0}}}}' "$IMAGE_URI" | sed 's/.*@//')"
+      - NOTEBOOK_CAPABILITY="$(docker run --rm --entrypoint cat "$IMAGE_URI" {CAPABILITY_FILE} 2>/dev/null | head -c {MAX_EVIDENCE_BYTES} | base64 | tr -d '\\n' || true)"
 """
 
 
@@ -194,6 +208,21 @@ class CodeBuildImageBuildProvider(ImageBuildProvider):
         except Exception as e:
             logger.error("Failed to check CodeBuild %s: %s", build_id, e)
             return "UNKNOWN"
+
+    def build_result(self, credentials: Any, config: dict, build_id: str) -> BuildResult:
+        try:
+            builds = self._client(config["region"]).batch_get_builds(ids=[build_id]).get("builds", [])
+        except Exception as e:
+            logger.error("Failed to read CodeBuild %s: %s", build_id, e)
+            return BuildResult("UNKNOWN", None, None)
+        if not builds:
+            return BuildResult("UNKNOWN", None, None)
+        build = builds[0]
+        exported = {v.get("name"): v.get("value") for v in build.get("exportedEnvironmentVariables") or []}
+        status = _STATUS_MAP.get(build.get("buildStatus", ""), "UNKNOWN")
+        return BuildResult(
+            status, exported.get("IMAGE_DIGEST") or None, decode_evidence(exported.get("NOTEBOOK_CAPABILITY"))
+        )
 
     def cancel_build(self, credentials: Any, config: dict, build_id: str) -> None:
         try:

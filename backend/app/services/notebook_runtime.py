@@ -9,8 +9,9 @@ EnvironmentVersions (``environment_build_service``). Each image
   executes a Python cell as that user and, when the environment has R, R evaluates an expression and
   RStudio Server serves its sign-in page.
 
-A successful build therefore proves the capabilities its definition declares; the result is recorded
-on the EnvironmentVersion with this contract's version. Images built before this contract, and user
+The build provider reads the check's result back out of the image it built and returns it with the
+pushed digest; only that evidence is recorded as "verified" on the EnvironmentVersion, and sessions
+launch by that digest. Images built before this contract, and user
 Dockerfiles that do not include it, are "unverified", never assumed compatible.
 
 The RStudio PAM exception: rserver itself runs as root (it authenticates against PAM and starts each
@@ -20,6 +21,9 @@ R session as the signed-in user); R analysis runs as that user. Jupyter never ru
 from __future__ import annotations
 
 import re
+
+from app.adapters.image_build import base as image_build_base
+from app.adapters.image_build.base import BuildResult
 
 CONTRACT_VERSION = 1
 
@@ -35,7 +39,8 @@ RSTUDIO_URL = f"https://download2.rstudio.org/server/jammy/amd64/{RSTUDIO_DEB}"
 RSTUDIO_SHA256 = "d8ffb8e5c2dadb1c74df037c291a5585e595d978b3aec48a4a94a970e04a947d"
 
 CHECK_PATH = "/usr/local/bin/bioaf-notebook-check"
-CAPABILITY_FILE = "/etc/bioaf/notebook-capability.json"
+# Read back out of the built image by the build provider as the build's evidence.
+CAPABILITY_FILE = image_build_base.CAPABILITY_FILE
 
 # Run at the end of the build as the notebook user. Exits nonzero (failing the build) when a capability
 # the image must have is missing. No network access is needed.
@@ -129,29 +134,61 @@ def conda_has_r(definition_content: str) -> bool:
     return "r-base" in names or "r" in names
 
 
-def capability_after_build(definition_format: str, definition_content: str, *, image_uri: str, build_id: str) -> dict:
-    """What a successful build of this definition proved (the check ran and passed), or "unverified".
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
-    A conda notebook definition always gets the check. A Dockerfile definition is proven only when it
-    ends with the contract's own check step (the system scientific template); any other Dockerfile is
-    the user's own and stays unverified.
+
+def _runs_the_check(definition_format: str, definition_content: str) -> bool:
+    """Whether bioAF's own check is the definition's last step, so its result cannot be overwritten.
+
+    A conda notebook definition always gets the check. A Dockerfile counts only when it ends with the
+    contract's check step (the system scientific template); a user's own Dockerfile could write the
+    capability file itself, so its evidence proves nothing.
     """
     if definition_format == "conda":
-        jupyter = "verified"
-        rstudio = "verified" if conda_has_r(definition_content) else "unsupported"
-    elif definition_content.rstrip().endswith(check_step(require_rstudio=True).rstrip()):
-        jupyter = rstudio = "verified"
-    elif definition_content.rstrip().endswith(check_step(require_rstudio=False).rstrip()):
-        jupyter, rstudio = "verified", "unsupported"
-    else:
-        jupyter = rstudio = "unverified"
+        return True
+    content = definition_content.rstrip()
+    return any(content.endswith(check_step(require_rstudio=r).rstrip()) for r in (True, False))
+
+
+def capability_from_build(
+    definition_format: str, definition_content: str, result: BuildResult, *, image_uri: str, build_id: str
+) -> dict:
+    """What a successful build proved: the check's own result read out of the built image, bound to
+    the pushed digest. Anything less (no evidence, no digest, another contract, a definition whose
+    last step is not the check) records "unverified", never an inferred claim.
+    """
+    evidence = result.evidence or {}
+    digest = result.image_digest if result.image_digest and _DIGEST.fullmatch(result.image_digest) else None
+    proven = (
+        digest is not None
+        and evidence.get("contract") == CONTRACT_VERSION
+        and _runs_the_check(definition_format, definition_content)
+    )
+    jupyter = rstudio = "unverified"
+    if proven:
+        jupyter = "verified" if evidence.get("jupyter") == "verified" else "unverified"
+        rstudio = evidence.get("rstudio") if evidence.get("rstudio") in ("verified", "unsupported") else "unverified"
     return {
         "contract": CONTRACT_VERSION,
         "jupyter": jupyter,
         "rstudio": rstudio,
         "image_uri": image_uri,
+        "image_digest": digest,
         "build_id": build_id,
     }
+
+
+def launch_image(image_uri: str, capability: dict | None) -> str:
+    """The image a session launches: pinned to the recorded digest when there is one, so a moved tag
+    never changes what a verified version runs."""
+    digest = (capability or {}).get("image_digest")
+    if not digest or not _DIGEST.fullmatch(digest):
+        return image_uri
+    name = image_uri.split("@", 1)[0]
+    last = name.rsplit("/", 1)[-1]
+    if ":" in last:
+        name = name[: len(name) - len(last)] + last.split(":", 1)[0]
+    return f"{name}@{digest}"
 
 
 def add_check_script(tar) -> None:

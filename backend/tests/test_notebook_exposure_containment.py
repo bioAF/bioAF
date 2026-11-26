@@ -7,7 +7,6 @@ cannot be removed in place, so the report says those sessions need a save and re
 """
 
 import copy
-from types import SimpleNamespace
 
 import pytest
 from kubernetes.client import V1ObjectMeta, V1Service, V1ServicePort, V1ServiceSpec

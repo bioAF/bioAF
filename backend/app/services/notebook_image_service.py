@@ -19,6 +19,7 @@ from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app.services import notebook_runtime
 from app.services.notebook_runtime import add_check_script
 from app.adapters.image_build import get_image_build_provider
+from app.adapters.image_build.base import BuildResult
 from app.adapters.image_registry import get_image_registry_provider
 from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.exceptions import StateError, ValidationError
@@ -348,6 +349,13 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
     return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
+async def check_build_result(session: AsyncSession, build_id: str) -> BuildResult:
+    """The build's status with its pushed image digest and the runtime check's evidence (plan 03.5B)."""
+    platform = await resolve_image_platform(session)
+    credentials = await resolve_image_credentials(session, platform)
+    return get_image_build_provider().build_result(credentials, platform.config, build_id)
+
+
 async def request_provider_cancel(session: AsyncSession, build_id: str) -> None:
     """Ask the build provider to cancel ``build_id``. A request is not settlement: the build poller
     records CANCELLED (and the component state) only once the provider reports it."""
@@ -419,7 +427,9 @@ async def build_notebook_image(session: AsyncSession, user_id: int | None = None
     return build_id
 
 
-async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> None:
+async def _ensure_default_environment(
+    session: AsyncSession, image_uri: str, result: BuildResult | None = None, build_id: str = ""
+) -> None:
     """Create the default scRNA-seq environment if none exists yet.
 
     Called after a successful notebook image build so users have an
@@ -480,9 +490,13 @@ async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> 
         definition_content=definition,
         image_uri=image_uri,
         created_by_user_id=user_id,
-        # Built from the system template, whose final step is the runtime check (plan 03.5B).
-        notebook_capability=notebook_runtime.capability_after_build(
-            "dockerfile", definition, image_uri=image_uri, build_id=""
+        # What the build's own evidence proved (plan 03.5B); unverified without it.
+        notebook_capability=notebook_runtime.capability_from_build(
+            "dockerfile",
+            definition,
+            result or BuildResult("SUCCESS", None, None),
+            image_uri=image_uri,
+            build_id=build_id,
         ),
     )
     session.add(version)
@@ -537,8 +551,8 @@ async def poll_image_build(session: AsyncSession) -> str | None:
             AND enabled = true AND status = 'provisioning'
             """)
         )
-        # Create default environment if none exists yet
-        await _ensure_default_environment(session, image_uri)
+        # Create default environment if none exists yet, with what this build proved.
+        await _ensure_default_environment(session, image_uri, await check_build_result(session, build_id), build_id)
     elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
         logger.error("Notebook image build %s failed with status %s", build_id, status)
         # Clear the image URI since the build failed

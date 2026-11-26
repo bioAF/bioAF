@@ -14,6 +14,7 @@ import subprocess
 
 import pytest
 
+from app.adapters.image_build.base import BuildResult
 from app.services import notebook_runtime
 from app.services.environment_build_service import _build_conda_dockerfile
 from app.services.environment_service import DEFAULT_NOTEBOOK_CONDA_YML
@@ -85,24 +86,26 @@ def test_pipeline_conda_images_keep_their_own_builder():
     assert "bioaf-notebook-check" not in dockerfile
 
 
-@pytest.mark.parametrize(
-    "definition, expected",
-    [
-        (DEFAULT_NOTEBOOK_CONDA_YML, {"jupyter": "verified", "rstudio": "verified"}),
-        (NOTEBOOK_YML_WITHOUT_R, {"jupyter": "verified", "rstudio": "unsupported"}),
-    ],
-)
-def test_a_successful_build_records_what_its_check_proved(definition, expected):
-    capability = notebook_runtime.capability_after_build("conda", definition, image_uri="reg/img:v1.1", build_id="b-1")
+DIGEST = "sha256:" + "b" * 64
+
+
+@pytest.mark.parametrize("rstudio", ["verified", "unsupported"])
+def test_a_successful_build_records_what_its_check_reported(rstudio):
+    # The check's own result, read out of the built image and bound to the pushed digest.
+    result = BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": rstudio})
+    capability = notebook_runtime.capability_from_build(
+        "conda", DEFAULT_NOTEBOOK_CONDA_YML, result, image_uri="reg/img:v1.1", build_id="b-1"
+    )
     assert capability["contract"] == notebook_runtime.CONTRACT_VERSION
-    assert {k: capability[k] for k in ("jupyter", "rstudio")} == expected
+    assert (capability["jupyter"], capability["rstudio"]) == ("verified", rstudio)
     assert capability["image_uri"] == "reg/img:v1.1" and capability["build_id"] == "b-1"
 
 
 def test_a_definition_without_the_check_is_never_claimed_compatible():
     # A raw Dockerfile definition is the user's own; the runtime check is not part of it.
-    capability = notebook_runtime.capability_after_build(
-        "dockerfile", "FROM python:3.11\n", image_uri="x", build_id="b"
+    result = BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": "verified"})
+    capability = notebook_runtime.capability_from_build(
+        "dockerfile", "FROM python:3.11\n", result, image_uri="x", build_id="b"
     )
     assert capability["jupyter"] == "unverified" and capability["rstudio"] == "unverified"
 

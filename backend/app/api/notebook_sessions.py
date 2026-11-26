@@ -223,7 +223,10 @@ async def launch_session(
                 f"This environment does not include {tool}. Choose an environment built for {tool}, "
                 "or add it to this environment and build a new version.",
             )
-        image = env_version.image_uri
+        from app.services.notebook_runtime import launch_image
+
+        # By digest when the build recorded one, so the version runs exactly what was verified.
+        image = launch_image(env_version.image_uri, env_version.notebook_capability)
     else:
         scrna_image = await _get_config_value(session, "bioaf_scrna_image")
         if not scrna_image or scrna_image == "null":

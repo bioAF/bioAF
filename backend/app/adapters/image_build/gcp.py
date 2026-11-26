@@ -11,13 +11,21 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 from typing import Any
 
-from app.adapters.image_build.base import ImageBuildProvider
+from app.adapters.image_build.base import (
+    CAPABILITY_FILE,
+    MAX_EVIDENCE_BYTES,
+    BuildResult,
+    ImageBuildProvider,
+    decode_evidence,
+)
 
 logger = logging.getLogger("bioaf.image_build")
 
 _CLOUD_BUILD_API = "https://cloudbuild.googleapis.com/v1"
+_EVIDENCE_STEP = 1
 
 
 def authorized_request(credentials: Any, method: str, url: str, body: dict | None = None) -> dict:
@@ -84,7 +92,18 @@ class GcpCloudBuildProvider(ImageBuildProvider):
                 {
                     "name": "gcr.io/cloud-builders/docker",
                     "args": ["build", "-t", image_uri, "-f", "Dockerfile", "."],
-                }
+                },
+                {
+                    # Evidence: the notebook runtime check's result, read out of the image just built
+                    # (empty for an image without it). Returned in results.buildStepOutputs[1].
+                    "name": "gcr.io/cloud-builders/docker",
+                    "entrypoint": "bash",
+                    "args": [
+                        "-c",
+                        f"docker run --rm --entrypoint cat {shlex.quote(image_uri)} {CAPABILITY_FILE} "
+                        f"2>/dev/null | head -c {MAX_EVIDENCE_BYTES} > $$BUILDER_OUTPUT/output || true",
+                    ],
+                },
             ],
             "images": [image_uri],
             "options": {
@@ -111,6 +130,22 @@ class GcpCloudBuildProvider(ImageBuildProvider):
         except Exception as e:
             logger.error("Failed to check build %s: %s", build_id, e)
             return "UNKNOWN"
+
+    def build_result(self, credentials: Any, config: dict, build_id: str) -> BuildResult:
+        project_id = config["project_id"]
+        url = f"{_CLOUD_BUILD_API}/projects/{project_id}/builds/{build_id}"
+        try:
+            result = authorized_request(credentials, "GET", url)
+        except Exception as e:
+            logger.error("Failed to read build %s: %s", build_id, e)
+            return BuildResult("UNKNOWN", None, None)
+        results = result.get("results") or {}
+        wanted = set(result.get("images") or [])
+        images = results.get("images") or []
+        digest = next((i.get("digest") for i in images if not wanted or i.get("name") in wanted), None)
+        outputs = results.get("buildStepOutputs") or []
+        evidence = decode_evidence(outputs[_EVIDENCE_STEP]) if len(outputs) > _EVIDENCE_STEP else None
+        return BuildResult(result.get("status", "UNKNOWN"), digest or None, evidence)
 
     def cancel_build(self, credentials: Any, config: dict, build_id: str) -> None:
         project_id = config["project_id"]

@@ -14,7 +14,11 @@ onto the same enum, behind this interface.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 # Neutral build-status contract. Cloud Build returns these verbatim; other
@@ -29,6 +33,36 @@ TIMEOUT = "TIMEOUT"
 UNKNOWN = "UNKNOWN"
 
 BUILD_STATUSES = frozenset({QUEUED, WORKING, SUCCESS, FAILURE, CANCELLED, TIMEOUT})
+
+
+# Where the notebook runtime check records its result inside the image (notebook_runtime.CAPABILITY_FILE).
+CAPABILITY_FILE = "/etc/bioaf/notebook-capability.json"
+# The most evidence a build may return (Cloud Build keeps the first 4 KB of a step's output).
+MAX_EVIDENCE_BYTES = 4096
+
+
+@dataclass(frozen=True)
+class BuildResult:
+    """A build's neutral status, the pushed image's digest, and the check result read out of that image.
+
+    ``image_digest`` and ``evidence`` are None when the build did not produce them (a non-notebook
+    image, a build submitted before bioAF collected evidence, or an unreadable result).
+    """
+
+    status: str
+    image_digest: str | None
+    evidence: dict | None
+
+
+def decode_evidence(raw: str | None) -> dict | None:
+    """The check result a build returned (base64 of the capability JSON), or None."""
+    if not raw or len(raw) > 2 * MAX_EVIDENCE_BYTES:
+        return None
+    try:
+        value = json.loads(base64.b64decode(raw, validate=True).decode())
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 class ImageBuildProvider(ABC):
@@ -80,6 +114,10 @@ class ImageBuildProvider(ABC):
     @abstractmethod
     def check_build_status(self, credentials: Any, config: dict, build_id: str) -> str:
         """Return the neutral status for ``build_id`` (``UNKNOWN`` if unreadable)."""
+
+    @abstractmethod
+    def build_result(self, credentials: Any, config: dict, build_id: str) -> BuildResult:
+        """The build's status with its image digest and check evidence (``UNKNOWN`` if unreadable)."""
 
     @abstractmethod
     def cancel_build(self, credentials: Any, config: dict, build_id: str) -> None:

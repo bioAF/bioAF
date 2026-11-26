@@ -944,12 +944,14 @@ class EnvironmentBuildService:
             if status == "SUCCESS":
                 version.status = "ready"
                 if await _is_notebook_environment(session, version.environment_id):
-                    from app.services.notebook_runtime import capability_after_build
+                    from app.services.notebook_image_service import check_build_result
+                    from app.services.notebook_runtime import capability_from_build
 
-                    # The build ran the runtime check and passed: record what it proved (plan 03.5B).
-                    version.notebook_capability = capability_after_build(
+                    # Record what the build's own evidence proved, bound to its digest (plan 03.5B).
+                    version.notebook_capability = capability_from_build(
                         version.definition_format,
                         version.definition_content,
+                        await check_build_result(session, version.build_id),
                         image_uri=version.image_uri or "",
                         build_id=version.build_id,
                     )

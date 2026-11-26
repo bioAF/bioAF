@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
+from app.adapters.image_build.base import BuildResult
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.environment_build_service import EnvironmentBuildService
@@ -50,8 +51,21 @@ async def _version(
     return version
 
 
-async def _poll(session, outcome):
-    with patch("app.services.notebook_image_service.check_build_status", return_value=outcome):
+DIGEST = "sha256:" + "c" * 64
+
+
+def _evidence(rstudio="verified"):
+    return BuildResult("SUCCESS", DIGEST, {"contract": 1, "jupyter": "verified", "rstudio": rstudio})
+
+
+async def _poll(session, outcome, result=None):
+    with (
+        patch("app.services.notebook_image_service.check_build_status", return_value=outcome),
+        patch(
+            "app.services.notebook_image_service.check_build_result",
+            return_value=result or BuildResult(outcome, None, None),
+        ),
+    ):
         await EnvironmentBuildService.poll_in_progress_builds(session)
         await session.commit()
 
@@ -61,13 +75,25 @@ async def _poll(session, outcome):
 async def test_a_successful_notebook_build_records_its_proven_capabilities(session, admin_user, definition, rstudio):
     version = await _version(session, admin_user, definition=definition)
     vid = version.id
-    await _poll(session, "SUCCESS")
+    await _poll(session, "SUCCESS", _evidence(rstudio))
     session.expire_all()
     row = await session.get(EnvironmentVersion, vid)
     assert row.notebook_capability["contract"] == 1
     assert (row.notebook_capability["jupyter"], row.notebook_capability["rstudio"]) == ("verified", rstudio)
     assert row.notebook_capability["image_uri"] == "us-docker.pkg.dev/p/r/env:v1.1"
+    assert row.notebook_capability["image_digest"] == DIGEST
     assert row.notebook_capability["build_id"] == "build-1"
+
+
+@pytest.mark.asyncio
+async def test_a_build_that_returned_no_evidence_stays_unverified(session, admin_user):
+    # For example, a build submitted before this release that finishes after the upgrade.
+    version = await _version(session, admin_user)
+    vid = version.id
+    await _poll(session, "SUCCESS")
+    session.expire_all()
+    row = await session.get(EnvironmentVersion, vid)
+    assert (row.notebook_capability["jupyter"], row.notebook_capability["rstudio"]) == ("unverified", "unverified")
 
 
 @pytest.mark.asyncio
@@ -102,7 +128,8 @@ async def test_the_default_scientific_environment_records_its_proven_capabilitie
     adapter = MagicMock()
     adapter.image_storage_pip_packages.return_value = "google-cloud-storage"
     with patch("app.adapters.registry.get_storage_adapter", return_value=adapter):
-        await _ensure_default_environment(session, "us-docker.pkg.dev/p/r/bioaf-scrna:latest")
+        await _ensure_default_environment(session, "us-docker.pkg.dev/p/r/bioaf-scrna:latest", _evidence(), "b-9")
     await session.commit()
     row = (await session.execute(text("SELECT notebook_capability FROM environment_versions"))).scalar_one()
     assert (row["jupyter"], row["rstudio"]) == ("verified", "verified")
+    assert row["image_digest"] == DIGEST and row["build_id"] == "b-9"
