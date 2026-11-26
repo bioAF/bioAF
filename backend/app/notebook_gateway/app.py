@@ -356,13 +356,29 @@ class Gateway:
 
 
 def create_app():
-    """The production gateway: the notebook adapter's Kubernetes client as transport."""
-    from app.adapters.registry import get_notebook_adapter
+    """The production gateway process: its own adapter registry, the Kubernetes Pod proxy as transport.
+
+    Run with ``uvicorn app.notebook_gateway.app:create_app --factory`` (docker-compose.yml). It serves
+    no bioAF API route and runs no database upgrade.
+    """
+    from contextlib import asynccontextmanager
+
+    from app.adapters.registry import get_notebook_adapter, initialize_adapters
     from app.database import async_session_factory
     from app.notebook_gateway.transport import KubernetesPodProxyTransport
 
-    return Gateway(
+    gateway = Gateway(
         session_factory=async_session_factory,
         adapter_provider=get_notebook_adapter,
-        transport=KubernetesPodProxyTransport(get_notebook_adapter()),
-    ).app
+        transport=KubernetesPodProxyTransport(get_notebook_adapter),
+    )
+
+    @asynccontextmanager
+    async def lifespan(app):
+        async with async_session_factory() as session:
+            await initialize_adapters(session, session_factory=async_session_factory)
+        logger.info("Notebook gateway ready")
+        yield
+
+    gateway.app.router.lifespan_context = lifespan
+    return gateway.app

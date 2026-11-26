@@ -21,7 +21,7 @@
 #   2. Verifies your AWS credentials (aws sts get-caller-identity)
 #   3. Selects a region
 #   4. Creates an EC2 key pair for SSH (saves the private key locally)
-#   5. Creates a security group (tcp:80, tcp:443 from anywhere; tcp:22 from you)
+#   5. Creates a security group (tcp:80, tcp:443, tcp:8443 from anywhere; tcp:22 from you)
 #   6. Creates the bioaf-app IAM role + instance profile (starter policy)
 #   7. Launches an Ubuntu 22.04 EC2 VM (IMDSv2-only) with the profile attached
 #   8. Writes a prefill (~/.bioaf/prefill.yaml) stamped cloud_provider: aws
@@ -436,6 +436,7 @@ authorize_ingress() {
 }
 authorize_ingress tcp 80 "0.0.0.0/0" "HTTP"
 authorize_ingress tcp 443 "0.0.0.0/0" "HTTPS"
+authorize_ingress tcp 8443 "0.0.0.0/0" "Notebooks (HTTPS)"
 authorize_ingress tcp 22 "$SSH_CIDR" "SSH"
 
 # Adding this rule removes nothing: a reused group keeps any SSH rules it already

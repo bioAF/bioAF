@@ -59,11 +59,11 @@ class DirectTransport:
 class KubernetesPodProxyTransport:
     """Through the Kubernetes API server's Pod proxy, with the notebook adapter's client."""
 
-    def __init__(self, adapter):
-        self._adapter = adapter
+    def __init__(self, adapter_provider):
+        self._adapter_provider = adapter_provider
 
     async def upstream(self, grant: AccessGrant, session_type: str) -> Upstream:
-        api_client = await self._adapter._get_api_client_async()
+        api_client = await self._adapter_provider()._get_api_client_async()
         config = api_client.configuration
         host = config.host.rstrip("/")
         port = IDE_PORTS[session_type]

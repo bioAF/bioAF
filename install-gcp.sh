@@ -13,7 +13,7 @@
 #   2. Authenticates with Google Cloud
 #   3. Selects or creates a GCP project
 #   4. Enables required APIs
-#   5. Creates a firewall rule for web traffic (ports 80, 443)
+#   5. Creates a firewall rule for web traffic (ports 80, 443, and 8443 for notebooks)
 #   6. Creates the bioaf-managed Resource Manager tag and a custom IAM role
 #   7. Creates the bioaf-bootstrap and bioaf-app service accounts (no keys)
 #   8. Creates a VM with bioaf-app attached and the bootstrap email in metadata
@@ -283,7 +283,7 @@ echo "     Homebrew to install it with"
 echo "  2. Authenticate your Google account"
 echo "  3. Select your GCP project"
 echo "  4. Enable required GCP APIs"
-echo "  5. Create a firewall rule for web traffic (ports 80, 443)"
+echo "  5. Create a firewall rule for web traffic (ports 80, 443, and 8443 for notebooks)"
 echo "  6. Create two scoped service accounts (no JSON keys are downloaded)"
 echo "  7. Create an e2-medium VM with Ubuntu 22.04 (30GB disk)"
 echo ""
@@ -705,12 +705,17 @@ section "Step 6: Firewall Rule"
 
 existing_fw=$(gcloud compute firewall-rules describe "$FIREWALL_RULE_NAME" --project="$PROJECT_ID" --format="value(name)" 2>/dev/null || echo "")
 if [ -n "$existing_fw" ]; then
-    step "Firewall rule '$FIREWALL_RULE_NAME' already exists" -- true
+    # Existing installations gain the notebook gateway port (plan 03.5A); same sources as 443.
+    step "Update firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443, tcp:8443)" -- \
+        gcloud compute firewall-rules update "$FIREWALL_RULE_NAME" \
+            --project="$PROJECT_ID" \
+            --allow=tcp:80,tcp:443,tcp:8443 \
+            --quiet
 else
-    step "Create firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443)" -- \
+    step "Create firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443, tcp:8443)" -- \
         gcloud compute firewall-rules create "$FIREWALL_RULE_NAME" \
             --project="$PROJECT_ID" \
-            --allow=tcp:80,tcp:443 \
+            --allow=tcp:80,tcp:443,tcp:8443 \
             --target-tags="$NETWORK_TAG" \
             --source-ranges=0.0.0.0/0 \
             --description="Allow web traffic to bioAF" \
