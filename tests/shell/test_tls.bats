@@ -16,6 +16,30 @@ make_pair() {
         -out "$1/cert.pem" -days "${3:-7}" -subj "/CN=$2" >/dev/null 2>&1
 }
 
+make_expired_pair() {
+    # make_expired_pair <workdir> <cert> <key>: a certificate valid only in 2020, signed by a throwaway CA
+    # (openssl ca takes explicit dates on OpenSSL and LibreSSL alike; req -days 0 is refused by OpenSSL 3).
+    local d="$1"
+    mkdir -p "$d/new"; : > "$d/index.txt"; echo 01 > "$d/serial"
+    cat > "$d/ca.cnf" <<CNF
+[ca]
+default_ca = d
+[d]
+dir = $d
+database = $d/index.txt
+new_certs_dir = $d/new
+serial = $d/serial
+default_md = sha256
+policy = p
+[p]
+commonName = supplied
+CNF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$d/ca.key" -out "$d/ca.crt" -days 1 -subj /CN=old-ca >/dev/null 2>&1
+    openssl req -new -newkey rsa:2048 -nodes -keyout "$3" -out "$d/req.csr" -subj /CN=expired >/dev/null 2>&1
+    openssl ca -batch -config "$d/ca.cnf" -cert "$d/ca.crt" -keyfile "$d/ca.key" -in "$d/req.csr" -out "$2" \
+        -startdate 20200101000000Z -enddate 20200102000000Z >/dev/null 2>&1
+}
+
 setup() {
     TEST_DIR="$(mktemp -d)"
     export STUBS="$TEST_DIR/stubs"; mkdir -p "$STUBS"
@@ -130,9 +154,9 @@ teardown() { chmod -R u+rwx "$TEST_DIR" 2>/dev/null; rm -rf "$TEST_DIR"; }
     printf 'garbage' > "$TEST_DIR/x/garbage.pem"
     run tls_install_pair "$TEST_DIR/x/garbage.pem" "$TEST_DIR/x/key.pem"
     [ "$status" -ne 0 ]
-    # Expires within the hour: refused (openssl cannot make one already expired portably).
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$TEST_DIR/x/k2" \
-        -out "$TEST_DIR/x/c2" -days 0 -subj "/CN=x" >/dev/null 2>&1 || skip "openssl cannot make a 0-day certificate"
+    # Already expired: refused.
+    make_expired_pair "$TEST_DIR/old-ca" "$TEST_DIR/x/c2" "$TEST_DIR/x/k2"
+    ! openssl x509 -in "$TEST_DIR/x/c2" -noout -checkend 0 >/dev/null
     run tls_install_pair "$TEST_DIR/x/c2" "$TEST_DIR/x/k2"
     [ "$status" -ne 0 ]
 }
@@ -283,7 +307,7 @@ report() { python3 -c "import json,sys; d=json.load(open('$TLS_REPORT_DIR/status
     tls_issue_ip 203.0.113.7
     [ -r "$TLS_REPORT_DIR/status.json" ]
     [ -z "$(find "$TLS_REPORT_DIR" -name '*.new')" ]
-    [ "$(stat -f %Lp "$TLS_REPORT_DIR/status.json" 2>/dev/null || stat -c %a "$TLS_REPORT_DIR/status.json")" = 644 ]
+    [ "$(python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$TLS_REPORT_DIR/status.json")" = 644 ]
 }
 
 @test "a failed reload keeps the serving certificate on disk and the next renewal retries" {
