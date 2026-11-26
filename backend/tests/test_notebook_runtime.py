@@ -214,3 +214,13 @@ def test_rstudio_proven_under_an_older_contract_is_no_longer_claimed():
     assert current.rstudio == "verified"
     unsupported = notebook_capability({"contract": 1, "jupyter": "verified", "rstudio": "unsupported"})
     assert unsupported.rstudio == "unsupported"
+
+
+def test_the_r_session_check_gives_rsession_the_r_directories_r_reports():
+    # rsession finds R through the directories rserver exports; R reports them itself, so system R
+    # (/usr/lib/R with /usr/share/R/...) and a conda R both work. Without them rsession fails in
+    # discoverR (seen on GKE, 2026-11-26).
+    script = notebook_runtime.CHECK_SCRIPT
+    for name, part in (("R_SHARE_DIR", "share"), ("R_INCLUDE_DIR", "include"), ("R_DOC_DIR", "doc")):
+        assert name in script
+        assert f'R.home("{part}")' in script

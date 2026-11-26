@@ -82,8 +82,14 @@ if [ "$require_rstudio" = 1 ]; then
     which_r="$(sed -n 's/^rsession-which-r=//p' "$conf" 2>/dev/null)"
     which_r="${which_r:-$(command -v R)}"
     r_home="$("$which_r" RHOME 2>/dev/null)"
+    # The directories rserver exports for rsession, as R itself reports them (system R keeps share,
+    # include and doc outside R_HOME; a conda R keeps them inside).
+    r_share="$("$which_r" --vanilla --slave -e 'cat(R.home("share"))' 2>/dev/null)"
+    r_include="$("$which_r" --vanilla --slave -e 'cat(R.home("include"))' 2>/dev/null)"
+    r_doc="$("$which_r" --vanilla --slave -e 'cat(R.home("doc"))' 2>/dev/null)"
     ld_extra="$(sed -n 's/^rsession-ld-library-path=//p' "$conf" 2>/dev/null)"
-    R_HOME="$r_home" LD_LIBRARY_PATH="$r_home/lib${ld_extra:+:$ld_extra}" \
+    R_HOME="$r_home" R_SHARE_DIR="$r_share" R_INCLUDE_DIR="$r_include" R_DOC_DIR="$r_doc" \
+        LD_LIBRARY_PATH="$r_home/lib${ld_extra:+:$ld_extra}" \
         timeout 120 /usr/lib/rstudio-server/bin/rsession --verify-installation 1 >"$work/rsession.log" 2>&1 \
         || fail "RStudio could not start an R session: $(tail -c 300 "$work/rsession.log")"
     rstudio=verified
