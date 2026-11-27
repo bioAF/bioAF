@@ -90,10 +90,10 @@ def test_the_reader_policy_grants_only_reads_on_this_clusters_log_group():
     assert actions and all(
         a.split(":")[1].startswith(("Get", "Filter", "Describe", "StartQuery", "StopQuery")) for a in actions
     )
-    assert 'resource "aws_iam_policy" "control_plane_log_reader"' in main
-    assert 'output "control_plane_log_reader_policy_arn"' in (MODULE / "outputs.tf").read_text()
-    # The module never attaches it: operators attach it to their designated roles.
-    assert "aws_iam_policy.control_plane_log_reader.arn" not in re.sub(r'output "[^"]+" \{[^}]*\}', "", main)
+    assert 'output "control_plane_log_reader_policy_json"' in (MODULE / "outputs.tf").read_text()
+    # The module never creates or attaches an IAM policy for it: operators do, with their own access.
+    assert 'resource "aws_iam_policy"' not in main
+    assert "aws_iam_role_policy_attachment" not in _block(doc, "statement")
 
 
 def test_the_app_reaches_the_private_api_only_on_443_from_its_security_group():

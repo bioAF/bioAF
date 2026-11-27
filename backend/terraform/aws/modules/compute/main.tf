@@ -179,8 +179,10 @@ import {
   id       = each.value
 }
 
-# Read access for designated infrastructure/security operators. The module creates the policy but
-# never attaches it: an operator attaches it to the roles they choose, so the app grants no reads.
+# Read access for designated infrastructure/security operators. The module only renders the policy
+# document (output below); an operator creates and attaches it to the roles they choose with their
+# own credentials. The app creates no IAM policy for it and grants no reads, and teardown is never
+# blocked by a policy still attached to operator roles.
 data "aws_iam_policy_document" "control_plane_log_reader" {
   statement {
     effect = "Allow"
@@ -199,13 +201,6 @@ data "aws_iam_policy_document" "control_plane_log_reader" {
     actions   = ["logs:DescribeLogGroups", "logs:GetQueryResults", "logs:StopQuery"]
     resources = ["*"]
   }
-}
-
-resource "aws_iam_policy" "control_plane_log_reader" {
-  name        = "${local.cluster_name}-control-plane-log-reader"
-  description = "Read the ${local.cluster_name} EKS control-plane logs. Attach to designated operator roles."
-  policy      = data.aws_iam_policy_document.control_plane_log_reader.json
-  tags        = local.tags
 }
 
 # --- IRSA OIDC provider -------------------------------------------------------

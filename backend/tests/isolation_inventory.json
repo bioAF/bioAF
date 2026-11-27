@@ -1256,6 +1256,14 @@
    "evidence": [],
    "route": "none"
   },
+  "test_eks_endpoint_hooks.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_eks_endpoint_policy.py": {
    "category": "no_database",
    "evidence": [],
