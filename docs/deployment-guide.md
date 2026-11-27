@@ -92,12 +92,16 @@ The script walks you through:
 3. Selecting a region
 4. Creating an EC2 key pair for SSH (private key saved locally)
 5. Creating a security group (ports 80 and 443 from anywhere, port 22 from you)
-6. Creating the `bioaf-app` IAM role + instance profile (starter policy)
+6. Creating the `bioaf-app` IAM role + instance profile, its installation-scoped policy and the
+   boundary for roles bioAF creates
 7. Launching an Ubuntu 22.04 EC2 VM (IMDSv2-only) with the profile attached
 8. Stamping the install as `cloud_provider: aws`
 
 The VM authenticates to AWS through its instance profile (the analog of the GCP
-VM's attached service account), so no long-lived credentials are stored. The
+VM's attached service account), so no long-lived credentials are stored. The profile
+can change only this installation's resources; an installation set up before that
+change moves over with `./install-aws.sh --reconcile-permissions` (see
+[AWS permissions reconciliation](operations/aws-permissions-reconcile.md)). The
 script then offers to finish setup on the VM for you, or prints a worksheet so
 you can SSH in and run `./bioaf setup` yourself.
 

@@ -23,7 +23,8 @@
 #   3. Selects a region
 #   4. Creates an EC2 key pair for SSH (saves the private key locally)
 #   5. Creates a security group (tcp:80, tcp:443, tcp:8443 from anywhere; tcp:22 from you)
-#   6. Creates the bioaf-app IAM role + instance profile (starter policy)
+#   6. Creates the bioaf-app IAM role + instance profile, its installation-scoped policy and the
+#      boundary for roles the app creates (installer/aws_iam.sh)
 #   7. Launches an Ubuntu 22.04 EC2 VM (IMDSv2-only) with the profile attached
 #   8. Writes a prefill (~/.bioaf/prefill.yaml) stamped cloud_provider: aws
 #   9. Offers to finish setup on the VM (automatic) or prints a worksheet
