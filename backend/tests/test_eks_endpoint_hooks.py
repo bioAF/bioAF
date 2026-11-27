@@ -382,3 +382,18 @@ async def test_status_reports_preserved_unrestricted_access_as_pending_hardening
     assert status["pending_hardening"] is True
     rows = (await session.execute(text("SELECT count(*) FROM platform_config WHERE key LIKE 'aws_eks_%'"))).scalar()
     assert rows >= 2
+
+
+@pytest.mark.asyncio
+async def test_an_apply_that_left_the_endpoint_unchanged_keeps_the_cutover_pending(session):
+    """The update flow applies one target at a time; a node-group apply must not strand the cutover."""
+    await _preserved(session)
+    await _request(session)
+    await _prepare(session, _state(), run_id=7)
+    applied = await _prepare(session, _state(), phase="apply", run_id=7)
+    describe, logs = _fakes()
+    with describe, logs:
+        await eks_endpoint.finish_apply(session, applied, run_id=7, succeeded=True)
+    recorded = await _config(session)
+    assert json.loads(recorded["aws_eks_endpoint_cutover"])["status"] == "pending"
+    assert recorded["aws_eks_endpoint_mode"] == "preserve_existing"

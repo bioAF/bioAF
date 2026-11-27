@@ -232,9 +232,16 @@ async def finish_apply(session: AsyncSession, config: dict, *, run_id: int | Non
         except ValidationError:
             live = None
         if live is not None and live.get("arn") == snapshot.get("cluster_arn"):
-            if policy.endpoint_equal(policy.live_endpoint(live), _cutover_target(cutover)):
+            endpoint = policy.live_endpoint(live)
+            if policy.endpoint_equal(endpoint, _cutover_target(cutover)):
                 await _commit_cutover(session, fresh, cutover, live)
                 return
+            if policy.endpoint_equal(endpoint, policy.live_endpoint(_as_live(snapshot))):
+                # A successful apply that did not touch the cluster (the update flow applies one
+                # target at a time): the cutover is still pending, nothing to reconcile.
+                await _set(session, fresh, policy.CUTOVER_KEY, {**cutover, "status": PENDING, "apply_run_id": None})
+                return
+    # A failed apply may leave an EKS update still in progress, so the next plan reconciles it.
     await _set(session, fresh, policy.CUTOVER_KEY, {**cutover, "status": NEEDS_RECONCILE})
     logger.warning("EKS endpoint cutover run %s did not verify; it needs reconciliation", run_id)
 
