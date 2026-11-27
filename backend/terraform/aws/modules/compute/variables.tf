@@ -116,3 +116,60 @@ variable "app_security_group_id" {
   default     = ""
   description = "The application VM's security group, the only source the backend-sync group admits on tcp:22."
 }
+
+# --- EKS API endpoint access (plan 04C) ------------------------------------------
+#
+# The backend chooses these per installation (private-only, restricted public, or an existing
+# cluster's preserved settings) and always passes them explicitly. The defaults are the fresh-install
+# private-only shape.
+
+variable "endpoint_public_access" {
+  type        = bool
+  default     = false
+  description = "Whether the Kubernetes API is reachable from the internet (restricted by public_access_cidrs)."
+}
+
+variable "endpoint_private_access" {
+  type        = bool
+  default     = true
+  description = "Whether the Kubernetes API is reachable from inside the VPC and peered networks."
+
+  validation {
+    condition     = var.endpoint_public_access || var.endpoint_private_access
+    error_message = "At least one of the public or private Kubernetes API endpoints must be enabled."
+  }
+}
+
+variable "public_access_cidrs" {
+  type        = list(string)
+  default     = []
+  description = "Source CIDRs allowed to reach the public endpoint. Empty when the public endpoint is off."
+}
+
+# --- EKS control-plane logging (plan 04C) ----------------------------------------
+
+variable "control_plane_log_types" {
+  type        = list(string)
+  default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  description = "EKS control-plane log types exported to CloudWatch."
+}
+
+variable "control_plane_log_retention_days" {
+  type        = number
+  default     = 30
+  description = "How long CloudWatch keeps control-plane logs. Bounds storage time, not ingestion cost."
+
+  validation {
+    condition = contains(
+      [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
+      var.control_plane_log_retention_days
+    )
+    error_message = "Retention must be a CloudWatch Logs retention value (for example 30, 90 or 365 days)."
+  }
+}
+
+variable "adopt_control_plane_log_group" {
+  type        = bool
+  default     = false
+  description = "Set by the backend when the cluster's log group already exists outside this state, so it is imported instead of created."
+}
