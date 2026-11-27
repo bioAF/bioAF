@@ -14,6 +14,7 @@
 #
 # Usage:
 #   ./install-aws.sh [--region us-east-1] [--ssh-cidr 203.0.113.7/32] [--ref <ref>] [--verbose]
+#   ./install-aws.sh --reconcile-permissions [--region us-east-1]   (existing installation)
 #
 # What this script does:
 #   1. Checks for (or installs) the AWS CLI v2; on macOS it installs it with
@@ -136,9 +137,11 @@ BIOAF_INSTALLER_REF="${BIOAF_INSTALLER_REF:-}"
 REGION_FLAG=""
 SSH_CIDR=""
 ADMIN_SSH_KEY=ask
+RECONCILE_PERMISSIONS=no
 aws_usage() {
     cat <<'USAGE'
 Usage: install-aws.sh [--region <region>] [--ssh-cidr <cidr>] [--admin-ssh-key] [--ref <ref>] [--verbose]
+       install-aws.sh --reconcile-permissions [--region <region>] [--ref <ref>] [--verbose]
 
 Options:
   --region <region>   AWS region to deploy into (e.g. us-east-1). Defaults to
@@ -160,6 +163,14 @@ Options:
                           | bash -s -- --ref <ref>
   --verbose, -v       Print all command output inline instead of routing it to
                       the install log. Use when debugging a failed step.
+  --reconcile-permissions
+                      On an existing installation only: list the roles and EC2
+                      resources bioAF created, and after you confirm, put the
+                      role boundary on those roles, tag them and the resources
+                      with this installation, and replace the bioaf-app policy
+                      with the narrowed one. Creates nothing else and does not
+                      touch the VM or the app. See
+                      docs/operations/aws-permissions-reconcile.md.
 
 Both "--option value" and "--option=value" work.
 
@@ -175,6 +186,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --verbose|-v) BIOAF_VERBOSE=1 ;;
         --admin-ssh-key) ADMIN_SSH_KEY=yes ;;
+        --reconcile-permissions) RECONCILE_PERMISSIONS=yes ;;
         --region|--ssh-cidr|--ref)
             if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then aws_flag_error "$1 needs a value"; fi
             case "$1" in
@@ -243,7 +255,7 @@ BOOT_DISK_GB="30"
 KEY_NAME="bioaf"                   # EC2 key pair name
 SECURITY_GROUP_NAME="bioaf-allow-web"
 APP_ROLE_NAME="bioaf-app"          # IAM role + instance profile (analog of the app SA)
-APP_POLICY_NAME="bioaf-app-starter"
+APP_POLICY_NAME="bioaf-app"
 # Canonical's public SSM parameters for the latest Ubuntu 22.04 amd64 AMI, in
 # preference order. ebs-gp2 is the variant Canonical publishes in every region;
 # ebs-gp3 is NOT (it 404s in e.g. us-west-1), so we resolve the first that exists.
@@ -318,6 +330,12 @@ if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
     exit 1
 fi
 CALLER_ARN="$(aws sts get-caller-identity --query Arn --output text)"
+
+# The bioaf-app policy, the boundary for roles the app creates, and existing-installation
+# reconciliation (security plan 04B). Loaded once credentials work, like the later helpers.
+bioaf_load_helper installer/aws_iam.sh required aws_iam_installation_id aws_iam_boundary_arn \
+    aws_iam_role_boundary_policy aws_iam_app_policy aws_iam_ensure_boundary aws_iam_put_app_policy \
+    aws_iam_owned_roles aws_iam_owned_ec2 aws_iam_claim || exit 1
 step "Authenticated as ${CALLER_ARN}" -- true
 note "Account: ${ACCOUNT_ID}"
 
@@ -345,7 +363,7 @@ step "Using region ${REGION}" -- true
 # The SSH source range, settled before anything is created. Without --ssh-cidr it
 # is this machine's public IPv4 /32; if that cannot be detected the install stops
 # rather than opening SSH wider than asked.
-if [ -z "$SSH_CIDR" ]; then
+if [ -z "$SSH_CIDR" ] && [ "$RECONCILE_PERMISSIONS" != yes ]; then
     # Only a lookup that succeeded counts: a failed or partial transfer may still print an address.
     MY_IP=""
     if MY_IP_BODY="$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null)"; then
@@ -367,6 +385,58 @@ if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
     red "  pick a region that has one, then re-run."
     exit 1
 fi
+INSTALLATION_ID="$(aws_iam_installation_id "$ACCOUNT_ID" "$REGION")"
+
+# ---------------------------------------------------------------------------
+# --reconcile-permissions: an existing installation adopts the narrowed permissions (plan 04B).
+# ---------------------------------------------------------------------------
+if [ "$RECONCILE_PERMISSIONS" = yes ]; then
+    section "Reconcile bioAF permissions (existing installation)"
+    if ! aws iam get-role --role-name "$APP_ROLE_NAME" >/dev/null 2>&1; then
+        red "  No ${APP_ROLE_NAME} role in this account: there is no installation to reconcile."
+        exit 1
+    fi
+    APP_VM="$(aws ec2 describe-instances \
+        --filters "Name=tag:Name,Values=${VM_NAME}" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null || echo "None")"
+    APP_VPC="$VPC_ID"
+    if [ "$APP_VM" != "None" ] && [ -n "$APP_VM" ]; then
+        APP_VPC="$(aws ec2 describe-instances --instance-ids "$APP_VM" \
+            --query 'Reservations[0].Instances[0].VpcId' --output text)"
+    else
+        APP_VM=""
+    fi
+    RECONCILE_ROLES="$(mktemp -t bioaf-roles-XXXXXX)"
+    RECONCILE_EC2="$(mktemp -t bioaf-ec2-XXXXXX)"
+    aws_iam_owned_roles "$APP_ROLE_NAME" > "$RECONCILE_ROLES"
+    aws_iam_owned_ec2 "$REGION" > "$RECONCILE_EC2"
+    echo ""
+    echo "  Installation:   ${INSTALLATION_ID}"
+    echo "  App role:       ${APP_ROLE_NAME} (policy replaced; never bounded or tagged)"
+    echo "  App VM:         ${APP_VM:-none found}"
+    echo "  App VPC:        ${APP_VPC}"
+    echo "  Roles to bound and tag ($(grep -c . "$RECONCILE_ROLES" || true)):"
+    sed 's/^/    /' "$RECONCILE_ROLES"
+    echo "  EC2 resources to tag ($(grep -c . "$RECONCILE_EC2" || true)):"
+    sed 's/^/    /' "$RECONCILE_EC2"
+    echo ""
+    echo "  Review the lists: anything here becomes this installation's to change and clean up."
+    read -rp "  Apply? [y/N] " reconcile_answer || true
+    if [ "$reconcile_answer" != "y" ] && [ "$reconcile_answer" != "Y" ]; then
+        say "  Nothing was changed."
+        rm -f "$RECONCILE_ROLES" "$RECONCILE_EC2"
+        exit 0
+    fi
+    step "Create or update the boundary for roles bioAF creates" -- aws_iam_ensure_boundary "$ACCOUNT_ID" "$REGION"
+    step "Bound and tag bioAF's roles, tag its EC2 resources and the app VM" -- \
+        aws_iam_claim "$ACCOUNT_ID" "$REGION" "$RECONCILE_ROLES" "$RECONCILE_EC2" "$APP_VM"
+    step "Replace the ${APP_ROLE_NAME} policy with the narrowed one" -- \
+        aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$APP_VPC" "$APP_ROLE_NAME"
+    rm -f "$RECONCILE_ROLES" "$RECONCILE_EC2"
+    green "  Permissions reconciled. Next: run Check for Infrastructure Updates in bioAF."
+    exit 0
+fi
+
 SUBNET_ID="$(aws ec2 describe-subnets \
     --filters "Name=vpc-id,Values=${VPC_ID}" "Name=default-for-az,Values=true" \
     --query 'Subnets[0].SubnetId' --output text 2>/dev/null || echo "None")"
@@ -503,141 +573,13 @@ else
             --description "bioAF application role (EC2 instance profile)"
 fi
 
-# Starter inline policy. Intentionally broad enough to bring the app up, let the
-# S3StorageProvider reach bioaf-* buckets, let the app's TerraformExecutor
-# provision the EKS compute stack (VPC + EKS + the cluster/node/IRSA IAM roles)
-# via the instance profile, AND let it build container images (the image_build
-# Terraform module's CodeBuild project + its bioaf-* service role via the existing
-# bioaf-* IAM create/PassRole grant; ECR repo ensure + CodeBuild StartBuild/poll
-# via the BioafImageBuild statement); TIGHTEN in Stage 7 (least-privilege per seam). S3 and
-# the created IAM roles are scoped to bioaf-* names; the EC2/EKS control-plane
-# services are left at "*" because most do not support resource-level scoping
-# cleanly and this is a starter. (This is the AWS analog of bioaf-app holding
-# container.admin + service-account create on GCP, where the GKE module likewise
-# creates the runner service accounts.) iam:GetRole is granted on "*" (read-only)
-# because EKS CreateNodegroup validates the AWSServiceRoleForAmazonEKSNodegroup /
-# AWSServiceRoleForAutoScaling service-linked roles by GetRole on the caller's
-# behalf, and those SLR ARNs are not under bioaf-*.
-POLICY_DOC="$(mktemp -t bioaf-policy-XXXXXX.json)"
-cat >"$POLICY_DOC" <<'JSON'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "BioafS3Buckets",
-      "Effect": "Allow",
-      "Action": "s3:*",
-      "Resource": ["arn:aws:s3:::bioaf-*", "arn:aws:s3:::bioaf-*/*"]
-    },
-    {
-      "Sid": "BioafControlPlaneStarter",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:Describe*",
-        "ec2:CreateTags",
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:CreateSecret",
-        "secretsmanager:PutSecretValue",
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchGetImage",
-        "ecr:GetDownloadUrlForLayer",
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents",
-        "ce:GetCostAndUsage"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BioafEksCompute",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:*",
-        "eks:*"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BioafEksAutoscalingTags",
-      "Effect": "Allow",
-      "Action": [
-        "autoscaling:CreateOrUpdateTags",
-        "autoscaling:DeleteTags",
-        "autoscaling:DescribeTags",
-        "autoscaling:DescribeAutoScalingGroups"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BioafEksIamRoles",
-      "Effect": "Allow",
-      "Action": [
-        "iam:CreateRole",
-        "iam:DeleteRole",
-        "iam:GetRole",
-        "iam:TagRole",
-        "iam:UntagRole",
-        "iam:AttachRolePolicy",
-        "iam:DetachRolePolicy",
-        "iam:ListAttachedRolePolicies",
-        "iam:PutRolePolicy",
-        "iam:DeleteRolePolicy",
-        "iam:GetRolePolicy",
-        "iam:ListRolePolicies",
-        "iam:ListInstanceProfilesForRole",
-        "iam:CreateInstanceProfile",
-        "iam:DeleteInstanceProfile",
-        "iam:GetInstanceProfile",
-        "iam:AddRoleToInstanceProfile",
-        "iam:RemoveRoleFromInstanceProfile",
-        "iam:PassRole"
-      ],
-      "Resource": [
-        "arn:aws:iam::*:role/bioaf-*",
-        "arn:aws:iam::*:instance-profile/bioaf-*"
-      ]
-    },
-    {
-      "Sid": "BioafEksIamGlobal",
-      "Effect": "Allow",
-      "Action": [
-        "iam:CreateOpenIDConnectProvider",
-        "iam:DeleteOpenIDConnectProvider",
-        "iam:GetOpenIDConnectProvider",
-        "iam:TagOpenIDConnectProvider",
-        "iam:ListOpenIDConnectProviders",
-        "iam:CreateServiceLinkedRole",
-        "iam:GetRole"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "BioafImageBuild",
-      "Effect": "Allow",
-      "Action": [
-        "ecr:CreateRepository",
-        "ecr:DescribeRepositories",
-        "codebuild:CreateProject",
-        "codebuild:UpdateProject",
-        "codebuild:DeleteProject",
-        "codebuild:BatchGetProjects",
-        "codebuild:StartBuild",
-        "codebuild:BatchGetBuilds",
-        "codebuild:StopBuild",
-        "logs:GetLogEvents",
-        "logs:FilterLogEvents",
-        "logs:DescribeLogStreams",
-        "logs:DescribeLogGroups"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-JSON
-step "Attach starter policy ${APP_POLICY_NAME} (TIGHTEN in Stage 7)" -- \
-    aws iam put-role-policy --role-name "$APP_ROLE_NAME" \
-        --policy-name "$APP_POLICY_NAME" \
-        --policy-document "file://${POLICY_DOC}"
+# The app role's permissions (security plan 04B; installer/aws_iam.sh documents them): reads stay
+# account-wide where AWS cannot scope them, and every change is limited to this installation. The
+# boundary policy comes first, since the app may only create roles under it. The app cannot edit
+# its own role or the boundary.
+step "Create or update the boundary for roles bioAF creates" -- aws_iam_ensure_boundary "$ACCOUNT_ID" "$REGION"
+step "Attach the ${APP_POLICY_NAME} policy" -- \
+    aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$VPC_ID" "$APP_ROLE_NAME"
 
 if aws iam get-instance-profile --instance-profile-name "$APP_ROLE_NAME" >/dev/null 2>&1; then
     step "Instance profile ${APP_ROLE_NAME} already exists" -- true
@@ -697,6 +639,9 @@ echo ""
 if [ "$EXISTING_VM" != "None" ] && [ -n "$EXISTING_VM" ]; then
     warn "VM '${VM_NAME}' already exists (${EXISTING_VM}) - skipping launch."
     INSTANCE_ID="$EXISTING_VM"
+    # The app changes its own VM's security groups only when the VM carries the ownership tag.
+    maybe_step "Tag ${EXISTING_VM} with this installation" -- \
+        aws ec2 create-tags --resources "$EXISTING_VM" --tags "Key=bioaf:installation,Value=${INSTALLATION_ID}"
 else
     read -rp "  Launch this VM? [Y/n] " create_vm
     if [ "$create_vm" = "n" ] || [ "$create_vm" = "N" ]; then
@@ -742,7 +687,7 @@ BIOAF_USERDATA_EOF
             --metadata-options "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2" \
             --block-device-mappings "DeviceName=/dev/sda1,Ebs={VolumeSize=${BOOT_DISK_GB},VolumeType=gp3}" \
             --user-data "file://${USERDATA_TMP}" \
-            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${VM_NAME}},{Key=bioaf_cloud_provider,Value=aws}]" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${VM_NAME}},{Key=bioaf_cloud_provider,Value=aws},{Key=bioaf:installation,Value=${INSTALLATION_ID}}]" \
             --query 'Instances[0].InstanceId' --output text)"
         step "Launched VM '${VM_NAME}' (${INSTANCE_ID})" -- true
     fi
