@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.image_build import get_image_build_provider
 from app.adapters.image_registry import get_image_registry_provider
 from app.exceptions import NotFoundError, StateError, ValidationError
+from app.platform.aws_installation import installation_id
 from app.models.environment import Environment
 from app.models.environment_version import EnvironmentVersion
 from app.services.audit_service import log_action
@@ -195,6 +196,12 @@ variable "conda_env_name" {
   default = "bioaf"
 }
 
+# This installation's ownership tag value (plan 04B): the build role may change and clean up only
+# instances, volumes, snapshots and AMIs that carry it.
+variable "installation_id" {
+  type = string
+}
+
 source "amazon-ebs" "work_node" {
   region        = var.region
   instance_type = "t3.large"
@@ -211,6 +218,27 @@ source "amazon-ebs" "work_node" {
 
   ssh_username    = "ubuntu"
   ami_name        = var.image_name
+
+  # The pre-created builder group (image_build module), so Packer creates no security group.
+  security_group_filter {
+    filters = {
+      "tag:bioaf:installation" = var.installation_id
+      "group-name"             = "bioaf-packer-builder"
+    }
+  }
+
+  run_tags = {
+    "bioaf:installation" = var.installation_id
+    bioaf-managed        = "true"
+  }
+  run_volume_tags = {
+    "bioaf:installation" = var.installation_id
+    bioaf-managed        = "true"
+  }
+  snapshot_tags = {
+    "bioaf:installation" = var.installation_id
+    bioaf-managed        = "true"
+  }
   ami_description = "bioAF work node environment"
 
   # A rebuild reuses the deterministic AMI name, so deregister the prior one.
@@ -226,7 +254,8 @@ source "amazon-ebs" "work_node" {
   }
 
   tags = {
-    bioaf-managed = "true"
+    "bioaf:installation" = var.installation_id
+    bioaf-managed        = "true"
   }
 }
 
@@ -878,6 +907,7 @@ class EnvironmentBuildService:
                 "region": platform.config["region"],
                 "image_name": image_name,
                 "conda_env_name": conda_env_name,
+                "installation_id": installation_id(platform.config.get("account_id"), platform.config["region"]) or "",
             },
             timeout="3600s",
         )

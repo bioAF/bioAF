@@ -72,6 +72,18 @@ resource "aws_iam_role" "codebuild" {
   }
 }
 
+# The account's default VPC: where the Packer builder instance runs (no compute dependency).
+data "aws_vpc" "default" {
+  default = true
+}
+
+locals {
+  account   = var.account_id == "" ? "*" : var.account_id
+  ec2_arn   = "arn:${data.aws_partition.current.partition}:ec2:${var.region}:${local.account}"
+  owned     = local.installation_id == "" ? "unset" : local.installation_id
+  canonical = "099720109477" # Ubuntu's AMI owner, the Packer source image.
+}
+
 data "aws_iam_policy_document" "codebuild" {
   # ECR auth token is account-wide (cannot be resource-scoped).
   statement {
@@ -97,15 +109,20 @@ data "aws_iam_policy_document" "codebuild" {
     resources = ["arn:aws:ecr:${var.region}:${var.account_id}:repository/bioaf-*"]
   }
 
-  # Read the build context (the Dockerfile tar.gz the app uploaded to the working
-  # bucket). Scoped to bioaf-* buckets, mirroring the bioaf-app s3:* on bioaf-*.
+  # Read the build context (the tar.gz the app uploaded to the working bucket), only from this
+  # account's bioaf-* buckets.
   statement {
     sid       = "ReadBuildContext"
     actions   = ["s3:GetObject", "s3:GetObjectVersion"]
     resources = ["arn:aws:s3:::bioaf-*/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceAccount"
+      values   = [local.account]
+    }
   }
 
-  # Build logs. STARTER scope (Resource "*"); tighten in Stage 7.
+  # Build logs: only this project's CodeBuild log group.
   statement {
     sid = "BuildLogs"
     actions = [
@@ -113,33 +130,23 @@ data "aws_iam_policy_document" "codebuild" {
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
-    resources = ["*"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:logs:${var.region}:${local.account}:log-group:/aws/codebuild/${local.project_name}",
+      "arn:${data.aws_partition.current.partition}:logs:${var.region}:${local.account}:log-group:/aws/codebuild/${local.project_name}:*",
+    ]
   }
 
-  # Packer (amazon-ebs) work-node AMI builds: Packer launches a transient builder
-  # EC2 instance in the default VPC, provisions it, then registers an AMI and
-  # tears the instance down. This is HashiCorp's documented minimal EC2 set for
-  # amazon-ebs. Most EC2 actions cannot be resource-scoped (they act on
-  # not-yet-created instances/images), so this is a STARTER statement (Resource
-  # "*"); tighten in Stage 7. Present so the same CodeBuild role can build both
-  # container images (ECR) and work-node AMIs.
+  # --- Packer (amazon-ebs) work-node AMI builds (plan 04B) ----------------------
+  #
+  # Packer launches a transient builder from Ubuntu's AMI into the default VPC using the
+  # pre-created bioaf-packer-builder group below, registers the AMI, and terminates the builder.
+  # Every instance, volume, snapshot and AMI carries bioaf:installation (the template's run_tags,
+  # run_volume_tags, snapshot_tags and tags); changes and cleanup need that tag. The role cannot
+  # create or edit security groups or share images.
+
   statement {
-    sid = "PackerAmiBuild"
+    sid = "PackerDescribe"
     actions = [
-      "ec2:AttachVolume",
-      "ec2:AuthorizeSecurityGroupIngress",
-      "ec2:CopyImage",
-      "ec2:CreateImage",
-      "ec2:CreateKeypair",
-      "ec2:CreateSecurityGroup",
-      "ec2:CreateSnapshot",
-      "ec2:CreateTags",
-      "ec2:CreateVolume",
-      "ec2:DeleteKeyPair",
-      "ec2:DeleteSecurityGroup",
-      "ec2:DeleteSnapshot",
-      "ec2:DeleteVolume",
-      "ec2:DeregisterImage",
       "ec2:DescribeImageAttribute",
       "ec2:DescribeImages",
       "ec2:DescribeInstances",
@@ -152,17 +159,153 @@ data "aws_iam_policy_document" "codebuild" {
       "ec2:DescribeVolumes",
       "ec2:DescribeVpcs",
       "ec2:DescribeAvailabilityZones",
-      "ec2:DetachVolume",
-      "ec2:GetPasswordData",
-      "ec2:ModifyImageAttribute",
-      "ec2:ModifyInstanceAttribute",
-      "ec2:ModifySnapshotAttribute",
-      "ec2:RegisterImage",
-      "ec2:RunInstances",
-      "ec2:StopInstances",
-      "ec2:TerminateInstances",
+      "ec2:DescribeKeyPairs",
     ]
     resources = ["*"]
+  }
+
+  # RunInstances creates the instance and its volumes, which must carry the ownership tag.
+  statement {
+    sid       = "PackerLaunchOwned"
+    actions   = ["ec2:RunInstances"]
+    resources = ["${local.ec2_arn}:instance/*", "${local.ec2_arn}:volume/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/bioaf:installation"
+      values   = [local.owned]
+    }
+  }
+
+  # ... into the default VPC only ...
+  statement {
+    sid       = "PackerLaunchNetwork"
+    actions   = ["ec2:RunInstances"]
+    resources = ["${local.ec2_arn}:subnet/*", "${local.ec2_arn}:security-group/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:Vpc"
+      values   = [data.aws_vpc.default.arn]
+    }
+  }
+
+  # ... from Ubuntu's published image ...
+  statement {
+    sid       = "PackerLaunchSourceImage"
+    actions   = ["ec2:RunInstances"]
+    resources = ["arn:${data.aws_partition.current.partition}:ec2:${var.region}::image/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:Owner"
+      values   = [local.canonical]
+    }
+  }
+
+  # ... with Packer's temporary key pair and a fresh network interface.
+  statement {
+    sid       = "PackerLaunchKeyAndInterface"
+    actions   = ["ec2:RunInstances"]
+    resources = ["${local.ec2_arn}:key-pair/packer_*", "${local.ec2_arn}:network-interface/*"]
+  }
+
+  statement {
+    sid       = "PackerTemporaryKeyPair"
+    actions   = ["ec2:CreateKeyPair", "ec2:DeleteKeyPair"]
+    resources = ["${local.ec2_arn}:key-pair/packer_*"]
+  }
+
+  # Tags at launch (run_tags / run_volume_tags), always including the ownership tag.
+  statement {
+    sid       = "PackerTagAtLaunch"
+    actions   = ["ec2:CreateTags"]
+    resources = ["${local.ec2_arn}:instance/*", "${local.ec2_arn}:volume/*", "${local.ec2_arn}:network-interface/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["RunInstances"]
+    }
+  }
+
+  # Work on the builder it launched: stop, terminate, image it.
+  statement {
+    sid = "PackerOwnedBuilder"
+    actions = [
+      "ec2:StopInstances",
+      "ec2:TerminateInstances",
+      "ec2:CreateImage",
+      "ec2:AttachVolume",
+      "ec2:DetachVolume",
+      "ec2:DeleteVolume",
+    ]
+    resources = ["${local.ec2_arn}:instance/*", "${local.ec2_arn}:volume/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/bioaf:installation"
+      values   = [local.owned]
+    }
+  }
+
+  # CreateImage / RegisterImage produce the new AMI and its snapshots.
+  statement {
+    sid       = "PackerNewImage"
+    actions   = ["ec2:CreateImage", "ec2:RegisterImage", "ec2:CreateSnapshot"]
+    resources = ["arn:${data.aws_partition.current.partition}:ec2:${var.region}::image/*", "arn:${data.aws_partition.current.partition}:ec2:${var.region}::snapshot/*"]
+  }
+
+  # Packer tags the AMI and its snapshots after creation, so these tags cannot be tied to the
+  # create call; they must carry the ownership tag. (Residual: this role could tag another image
+  # or snapshot in the account as owned. It runs only bioAF's own buildspec.)
+  statement {
+    sid       = "PackerTagImage"
+    actions   = ["ec2:CreateTags"]
+    resources = ["arn:${data.aws_partition.current.partition}:ec2:${var.region}::image/*", "arn:${data.aws_partition.current.partition}:ec2:${var.region}::snapshot/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/bioaf:installation"
+      values   = [local.owned]
+    }
+  }
+
+  # Rebuild cleanup (force_deregister / force_delete_snapshot) and failed-build cleanup: only
+  # images and snapshots this installation owns.
+  statement {
+    sid       = "PackerCleanupOwned"
+    actions   = ["ec2:DeregisterImage", "ec2:DeleteSnapshot"]
+    resources = ["arn:${data.aws_partition.current.partition}:ec2:${var.region}::image/*", "arn:${data.aws_partition.current.partition}:ec2:${var.region}::snapshot/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/bioaf:installation"
+      values   = [local.owned]
+    }
+  }
+}
+
+# The builder's security group, so Packer never creates or edits one. SSH from anywhere matches the
+# temporary group Packer created before (temporary_security_group_source_cidrs defaults to
+# 0.0.0.0/0): CodeBuild's egress address is not fixed. The builder lives only for one build.
+resource "aws_security_group" "packer_builder" {
+  name        = "bioaf-packer-builder"
+  description = "bioAF Packer work-node AMI builder (transient instances only)"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "SSH from the CodeBuild Packer run"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Package mirrors and conda channels"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    managed_by = "bioaf"
+    purpose    = "image-build"
   }
 }
 

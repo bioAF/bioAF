@@ -100,3 +100,65 @@ def test_the_autoscaler_can_scale_only_this_clusters_groups():
         assert all(a.split(":")[1].startswith(("Describe", "Get")) for a in actions), statement
     nodegroup = [s for s in statements if "eks:DescribeNodegroup" in s]
     assert nodegroup and "nodegroup/${local.cluster_name}/*" in nodegroup[0]
+
+
+def _codebuild():
+    main = (AWS_MODULES / "image_build" / "main.tf").read_text()
+    return main, _statements(_block(main, 'data "aws_iam_policy_document" "codebuild"'))
+
+
+def test_the_build_role_has_no_unconditioned_ec2_mutation():
+    _, statements = _codebuild()
+    for statement in statements:
+        actions = re.findall(r'"(ec2:[A-Za-z]+)"', statement)
+        mutating = [a for a in actions if not a.split(":")[1].startswith(("Describe", "Get"))]
+        if mutating and '"*"' in statement:
+            assert "condition" in statement, statement
+
+
+def test_the_build_role_cannot_share_images_or_edit_security_groups():
+    _, statements = _codebuild()
+    actions = {a for s in statements for a in re.findall(r'"(ec2:[A-Za-z]+)"', s)}
+    for forbidden in (
+        "ec2:ModifyImageAttribute",
+        "ec2:ModifySnapshotAttribute",
+        "ec2:CopyImage",
+        "ec2:CreateSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup",
+        "ec2:GetPasswordData",
+    ):
+        assert forbidden not in actions
+
+
+def test_the_build_role_cleans_up_only_owned_images_and_snapshots():
+    _, statements = _codebuild()
+    cleanup = [s for s in statements if "ec2:DeregisterImage" in s]
+    assert len(cleanup) == 1
+    assert "ec2:DeleteSnapshot" in cleanup[0]
+    assert "aws:ResourceTag/bioaf:installation" in cleanup[0]
+
+
+def test_the_build_role_launches_only_into_the_default_vpc_from_canonical_images():
+    main, statements = _codebuild()
+    launch = [s for s in statements if "ec2:RunInstances" in s]
+    joined = "\n".join(launch)
+    assert "ec2:Vpc" in joined and "data.aws_vpc.default.arn" in joined
+    assert "ec2:Owner" in joined and "local.canonical" in joined
+    assert re.search(r'canonical\s*=\s*"099720109477"', main)
+    assert "aws:RequestTag/bioaf:installation" in joined
+
+
+def test_the_build_role_logs_and_context_reads_are_scoped():
+    _, statements = _codebuild()
+    logs = [s for s in statements if "logs:PutLogEvents" in s][0]
+    assert "log-group:/aws/codebuild/${local.project_name}" in logs and '"*"' not in logs
+    context = [s for s in statements if "s3:GetObject" in s][0]
+    assert "aws:ResourceAccount" in context
+
+
+def test_the_packer_builder_group_is_created_by_terraform_in_the_default_vpc():
+    main, _ = _codebuild()
+    group = _block(main, 'resource "aws_security_group" "packer_builder"')
+    assert 'name        = "bioaf-packer-builder"' in group
+    assert "vpc_id      = data.aws_vpc.default.id" in group
