@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.53
+
+### Dependencies
+
+- Bump docker/setup-buildx-action from 3.12.0 to 4.4.1 (CI workflow actions).
+
 ## v2026.11.52
 
 ### Maintenance
