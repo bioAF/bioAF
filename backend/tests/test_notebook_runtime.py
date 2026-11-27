@@ -248,3 +248,15 @@ def test_a_failed_cell_reports_jupyters_own_error(tmp_path):
     assert result.returncode != 0
     assert "Jupyter could not execute a Python cell" in result.stdout
     assert "DeadKernelError: Kernel died before replying to kernel_info" in result.stdout
+
+
+@pytest.mark.parametrize("which", list(RENDERERS))
+def test_the_notebook_users_home_is_theirs_before_the_check(which):
+    # Root steps (registering the R kernel) left root-owned files under ~/.local/share/jupyter, so the
+    # unprivileged Jupyter could not read its own config (live scientific-image build, 2026-11-26).
+    dockerfile = RENDERERS[which]()
+    lines = dockerfile.splitlines()
+    chown = next(i for i, line in enumerate(lines) if "chown -R 1000:100 /home/jovyan" in line)
+    last_root = max(i for i, line in enumerate(lines) if line.strip() == "USER root")
+    final_user = max(i for i, line in enumerate(lines) if line.strip() == "USER 1000")
+    assert last_root < chown < final_user

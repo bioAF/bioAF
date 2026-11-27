@@ -132,6 +132,9 @@ def runtime_layer(*, r_home: str | None) -> str:
         f"COPY bioaf-notebook-check {CHECK_PATH}",
         f"RUN chmod 0755 {CHECK_PATH}",
         f"RUN chown {NOTEBOOK_UID}:{NOTEBOOK_GID} /etc/bioaf",
+        # Root steps (registering kernels) can leave root-owned files in the notebook user's home, which
+        # the unprivileged Jupyter then cannot read: give the home back to the notebook user.
+        f"RUN mkdir -p /home/jovyan && chown -R {NOTEBOOK_UID}:{NOTEBOOK_GID} /home/jovyan",
     ]
     return "\n".join(lines) + "\n"
 
