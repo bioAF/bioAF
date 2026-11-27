@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioaf-backend"
-version = "2026.11.51"
+version = "2026.11.52"
 description = "bioAF control plane backend"
 requires-python = ">=3.12"
 dependencies = [

@@ -11,6 +11,13 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.52
+
+### Maintenance
+
+- Give each Dependabot pull request a templated changelog entry, so dependency updates no longer fail the
+  changelog check and appear in the release notes.
+
 ## v2026.11.51
 
 ### Dependencies
