@@ -6617,6 +6617,71 @@
         "title": "EksEndpointCutoverRequest",
         "type": "object"
       },
+      "EksEndpointSettingsUpdate": {
+        "properties": {
+          "log_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A CloudWatch Logs retention value; default 30.",
+            "title": "Log Retention Days"
+          },
+          "log_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Control-plane log types; must keep audit and authenticator. Default all five.",
+            "title": "Log Types"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "private_only",
+                  "public_restricted",
+                  "preserve_existing"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A new cluster's endpoint mode. Refused once a cluster exists (use a cutover).",
+            "title": "Mode"
+          },
+          "public_access_cidrs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approved egress CIDRs for public_restricted; no unrestricted range.",
+            "title": "Public Access Cidrs"
+          }
+        },
+        "title": "EksEndpointSettingsUpdate",
+        "type": "object"
+      },
       "EksEndpointSnapshot": {
         "properties": {
           "cluster_arn": {
@@ -49310,6 +49375,47 @@
           }
         },
         "summary": "Request Eks Endpoint Cutover",
+        "tags": [
+          "eks_endpoint"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/eks-endpoint/settings": {
+      "put": {
+        "operationId": "update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EksEndpointSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EksEndpointStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Eks Endpoint Settings",
         "tags": [
           "eks_endpoint"
         ]

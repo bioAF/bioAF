@@ -175,6 +175,11 @@ def _logging(config: dict) -> dict:
     return {"control_plane_log_types": types, "control_plane_log_retention_days": days}
 
 
+def compute_logging(config: dict) -> dict:
+    """The validated control-plane logging inputs alone. Raises to refuse."""
+    return _logging(config)
+
+
 def compute_tfvars(config: dict, cluster_in_state: bool) -> dict:
     """The explicit endpoint and logging inputs for a compute plan or apply. Raises to refuse."""
     _mode, endpoint = _target(config, cluster_in_state)

@@ -44,3 +44,16 @@ class EksEndpointCutoverRequest(BaseModel):
             "verified and the recovery procedure is ready."
         )
     )
+
+
+class EksEndpointSettingsUpdate(BaseModel):
+    mode: Literal["private_only", "public_restricted", "preserve_existing"] | None = Field(
+        default=None, description="A new cluster's endpoint mode. Refused once a cluster exists (use a cutover)."
+    )
+    public_access_cidrs: list[str] | None = Field(
+        default=None, description="Approved egress CIDRs for public_restricted; no unrestricted range."
+    )
+    log_retention_days: int | None = Field(default=None, description="A CloudWatch Logs retention value; default 30.")
+    log_types: list[str] | None = Field(
+        default=None, description="Control-plane log types; must keep audit and authenticator. Default all five."
+    )

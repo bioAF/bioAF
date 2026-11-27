@@ -7138,6 +7138,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/eks-endpoint/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Eks Endpoint Settings */
+        put: operations["update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/notebook-image/build-status": {
         parameters: {
             query?: never;
@@ -11591,6 +11608,29 @@ export interface components {
              * @description The administrator confirms the application, node and independent operator recovery paths were verified and the recovery procedure is ready.
              */
             recovery_paths_verified: boolean;
+        };
+        /** EksEndpointSettingsUpdate */
+        EksEndpointSettingsUpdate: {
+            /**
+             * Log Retention Days
+             * @description A CloudWatch Logs retention value; default 30.
+             */
+            log_retention_days?: number | null;
+            /**
+             * Log Types
+             * @description Control-plane log types; must keep audit and authenticator. Default all five.
+             */
+            log_types?: string[] | null;
+            /**
+             * Mode
+             * @description A new cluster's endpoint mode. Refused once a cluster exists (use a cutover).
+             */
+            mode?: ("private_only" | "public_restricted" | "preserve_existing") | null;
+            /**
+             * Public Access Cidrs
+             * @description Approved egress CIDRs for public_restricted; no unrestricted range.
+             */
+            public_access_cidrs?: string[] | null;
         };
         /** EksEndpointSnapshot */
         EksEndpointSnapshot: {
@@ -32649,6 +32689,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EksEndpointStatus"];
+                };
+            };
+        };
+    };
+    update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EksEndpointSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EksEndpointStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

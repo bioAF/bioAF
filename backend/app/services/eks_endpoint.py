@@ -308,3 +308,47 @@ async def cancel_cutover(session: AsyncSession) -> None:
     live = await _describe(snapshot.get("cluster_name") or "", config.get("aws_region"))
     policy.require_live_matches(snapshot, live)
     await _set(session, config, policy.CUTOVER_KEY, "")
+
+
+async def update_settings(
+    session: AsyncSession,
+    *,
+    mode: str | None = None,
+    public_access_cidrs: list[str] | None = None,
+    log_retention_days: int | None = None,
+    log_types: list[str] | None = None,
+) -> None:
+    """Installation settings: logging at any time; the endpoint mode only before a cluster exists.
+
+    A deployed cluster's endpoint moves only through a reviewed cutover, so a mode or CIDR change
+    here is refused once compute is deployed.
+    """
+    config = await PlatformConfigService.get_many(
+        session, [*STATUS_KEYS, "aws_app_vpc_id", "aws_app_security_group_id"]
+    )
+    candidate = dict(config)
+    if log_retention_days is not None:
+        candidate[policy.RETENTION_KEY] = str(log_retention_days)
+    if log_types is not None:
+        candidate[policy.LOG_TYPES_KEY] = json.dumps(log_types)
+    logging_inputs = policy.compute_logging(candidate)
+
+    if mode is not None or public_access_cidrs is not None:
+        if config.get("compute_deployed") == "true" or policy._json(config, policy.SNAPSHOT_KEY):
+            raise ValidationError(
+                "This installation already has a cluster; change its Kubernetes API endpoint through a reviewed cutover."
+            )
+        chosen = mode or config.get(policy.MODE_KEY) or policy.PRIVATE_ONLY
+        if chosen not in policy.HARDENED_MODES:
+            raise ValidationError(f"A new cluster's endpoint mode must be one of {', '.join(policy.HARDENED_MODES)}.")
+        candidate[policy.MODE_KEY] = chosen
+        if chosen == policy.PUBLIC_RESTRICTED:
+            candidate[policy.CIDRS_KEY] = json.dumps(policy.validate_public_cidrs(public_access_cidrs))
+        await _set(session, config, policy.MODE_KEY, chosen)
+        if chosen == policy.PUBLIC_RESTRICTED:
+            await _set(session, config, policy.CIDRS_KEY, candidate[policy.CIDRS_KEY])
+
+    if log_retention_days is not None:
+        await _set(session, config, policy.RETENTION_KEY, str(logging_inputs["control_plane_log_retention_days"]))
+    if log_types is not None:
+        await _set(session, config, policy.LOG_TYPES_KEY, logging_inputs["control_plane_log_types"])
