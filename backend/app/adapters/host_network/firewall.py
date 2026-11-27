@@ -267,14 +267,22 @@ class GcpHostNetwork:
         highest-priority matching rule, so 8443 then behaves as 443 does, exceptions included, and
         no rule matching 443 changes. Rules bioAF does not own are never modified. Mirrors of rules
         that changed are updated, and mirrors of rules that are gone are removed: restrictions are
-        written before the access they restrict and removed after it.
+        written before the access they restrict and removed after it. Only this network's rules are
+        read or changed: another installation in the project keeps its own.
+
+        GCP does not let one rule mix service accounts with network tags, so a rule whose sources are
+        service accounts is mirrored onto this host's own service account. Without it (its metadata
+        server could not say) such an allow is not mirrored, and such a deny cannot be: then no
+        access is mirrored at all, so the gateway is never open where HTTPS is not.
         """
         from google.cloud import compute_v1
 
         rules = list(self.client.list(project=self.project))
+        rules = [r for r in rules if self._network_path(r.network) == self.network]
         wanted = {}
+        unplaceable = []
         for rule in rules:
-            if _is_gateway_rule(rule.name) or self._network_path(rule.network) != self.network:
+            if _is_gateway_rule(rule.name):
                 continue
             if getattr(rule, "disabled", False) or (rule.direction or "INGRESS") != "INGRESS":
                 continue
@@ -287,6 +295,14 @@ class GcpHostNetwork:
             if not self._applies_here(rule, targets, restricts=restricts):
                 continue
             gateway = [str(GATEWAY_PORT)]
+            if rule.source_service_accounts:
+                if not (targets and targets.service_accounts):
+                    if restricts:
+                        unplaceable.append(rule.name)
+                    continue
+                scope = {"target_service_accounts": list(targets.service_accounts)}
+            else:
+                scope = {"target_tags": [self.target_tag]}
             mirror = compute_v1.Firewall(
                 name=gateway_rule_name(rule.name),
                 network=self.network,
@@ -297,7 +313,7 @@ class GcpHostNetwork:
                 source_tags=list(rule.source_tags or []),
                 source_service_accounts=list(rule.source_service_accounts or []),
                 destination_ranges=list(rule.destination_ranges or []),
-                target_tags=[self.target_tag],
+                **scope,
                 description=f"Managed by bioAF: {rule.name} applied to the notebook gateway (tcp:{GATEWAY_PORT}).",
             )
             if restricts:
@@ -305,6 +321,12 @@ class GcpHostNetwork:
             else:
                 mirror.allowed = [compute_v1.Allowed(I_p_protocol="tcp", ports=gateway)]
             wanted[mirror.name] = mirror
+        if unplaceable:
+            logger.warning(
+                "The notebook gateway stays closed: bioAF cannot apply %s to it without this server's service account",
+                ", ".join(sorted(unplaceable)),
+            )
+            wanted = {name: m for name, m in wanted.items() if m.denied}
         for mirror in sorted(wanted.values(), key=lambda m: (not m.denied, m.name)):
             self._upsert(mirror)
         stale = [r for r in rules if _is_gateway_rule(r.name) and r.name not in wanted]

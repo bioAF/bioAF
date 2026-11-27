@@ -262,6 +262,78 @@ def test_gcp_a_deny_bioaf_cannot_place_is_applied_to_the_gateway():
     assert gateway_rule_name("deny-by-account") not in _mirrors(known)
 
 
+OTHER_NET = "projects/lab-project/global/networks/lab-vpc"
+ME = "bioaf-vm@lab-project.iam.gserviceaccount.com"
+PIPELINES = "pipelines@lab-project.iam.gserviceaccount.com"
+
+
+class ValidatingFirewalls(FakeFirewalls):
+    """Refuses what GCP refuses: service accounts mixed with network tags in one rule."""
+
+    def _check(self, rule):
+        if (list(rule.source_service_accounts) and list(rule.target_tags)) or (
+            list(rule.source_tags) and list(rule.target_service_accounts)
+        ):
+            raise ValueError("Service accounts and network tags cannot be mixed in one firewall rule")
+
+    def insert(self, project, firewall_resource):
+        self._check(firewall_resource)
+        return super().insert(project, firewall_resource)
+
+    def patch(self, project, firewall, firewall_resource):
+        self._check(firewall_resource)
+        return super().patch(project, firewall, firewall_resource)
+
+
+def _from_sa(rule, *accounts):
+    rule.target_tags = []
+    rule.source_service_accounts = list(accounts)
+    return rule
+
+
+def test_gcp_gateway_rules_on_another_network_are_never_touched():
+    """Another installation in the same project, on its own VPC, keeps its gateway rules."""
+    theirs = _web(gateway_rule_name("their-web"), ports=("8443",))
+    theirs.network = OTHER_NET
+    old = _web(GATEWAY_RULE, ports=("8443",))
+    old.network = OTHER_NET
+    fw = FakeFirewalls([_web()])
+    fw.rules[theirs.name] = theirs
+    fw.rules[GATEWAY_RULE] = old
+    _ensure(fw)
+    assert theirs.name in fw.rules and GATEWAY_RULE in fw.rules
+    assert ("delete", theirs.name) not in fw.calls and ("delete", GATEWAY_RULE) not in fw.calls
+
+
+def test_gcp_a_rule_with_source_service_accounts_is_mirrored_onto_this_hosts_service_account():
+    fw = ValidatingFirewalls([_from_sa(_web(sources=()), PIPELINES)])
+    _ensure(fw, HostTargets(tags=("bioaf",), service_accounts=(ME,)))
+    mirror = fw.rules[gateway_rule_name("bioaf-allow-web")]
+    assert list(mirror.source_service_accounts) == [PIPELINES]
+    assert (list(mirror.target_tags), list(mirror.target_service_accounts)) == ([], [ME])
+
+
+def test_gcp_without_this_hosts_service_account_a_service_account_allow_is_not_mirrored():
+    fw = ValidatingFirewalls([_web(), _from_sa(_web("from-pipelines", ports=("443",), sources=()), PIPELINES)])
+    _ensure(fw)
+    assert set(_mirrors(fw)) == {gateway_rule_name("bioaf-allow-web")}
+
+
+def test_gcp_without_this_hosts_service_account_a_service_account_deny_closes_the_gateway():
+    """bioAF cannot place that exception on 8443, so notebooks close rather than open wider than HTTPS."""
+    deny = _deny("deny-pipelines", priority=900, sources=(), tags=())
+    deny.source_service_accounts = [PIPELINES]
+    fw = ValidatingFirewalls([_web()])
+    _ensure(fw)
+    fw.rules["deny-pipelines"] = deny
+    assert _ensure(fw) == {"opened": False, "sources": []}
+    assert _mirrors(fw) == {}
+    # Once bioAF knows this host's account, the exception is placed and notebooks open again.
+    assert _ensure(fw, HostTargets(tags=("bioaf",), service_accounts=(ME,)))["opened"] is True
+    placed = fw.rules[gateway_rule_name("deny-pipelines")]
+    assert (list(placed.target_service_accounts), list(placed.source_service_accounts)) == ([ME], [PIPELINES])
+
+
 # -- AWS -------------------------------------------------------------------------------------------
 
 AWS = HostIdentity(
