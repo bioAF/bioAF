@@ -17,6 +17,23 @@ provider "aws" {
   region = var.region
   # No explicit credentials: on AWS the app runs on an EC2 VM whose bioaf-app
   # instance profile is the ambient credential (same as the storage module).
+
+  default_tags {
+    tags = local.ownership_tags
+  }
+}
+
+# --- Installation ownership (plan 04B) -------------------------------------------
+#
+# The narrowed bioaf-app policy lets the app change EC2 resources only when they carry this
+# installation's tag, and create roles only under the installer's permissions boundary. Both are
+# derived from the account and region (installer/aws_iam.sh and app/platform/aws_installation.py
+# use the same naming). The default tags put the ownership tag on every resource at creation.
+
+locals {
+  installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
+  ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
+  role_boundary   = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
 }
 
 # --- Naming + shared locals ---------------------------------------------------
@@ -115,9 +132,10 @@ data "aws_iam_policy_document" "cluster_assume" {
 }
 
 resource "aws_iam_role" "cluster" {
-  name               = "${local.cluster_name}-cluster"
-  assume_role_policy = data.aws_iam_policy_document.cluster_assume.json
-  tags               = local.tags
+  name                 = "${local.cluster_name}-cluster"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.cluster_assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "cluster" {
@@ -235,9 +253,10 @@ data "aws_iam_policy_document" "node_assume" {
 }
 
 resource "aws_iam_role" "node" {
-  name               = "${local.cluster_name}-node"
-  assume_role_policy = data.aws_iam_policy_document.node_assume.json
-  tags               = local.tags
+  name                 = "${local.cluster_name}-node"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.node_assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "node_eks_worker" {
@@ -444,9 +463,10 @@ data "aws_iam_policy_document" "ebs_csi_trust" {
 }
 
 resource "aws_iam_role" "ebs_csi" {
-  name               = "${local.cluster_name}-ebs-csi"
-  assume_role_policy = data.aws_iam_policy_document.ebs_csi_trust.json
-  tags               = local.tags
+  name                 = "${local.cluster_name}-ebs-csi"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.ebs_csi_trust.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
@@ -522,10 +542,11 @@ data "aws_iam_policy_document" "runner_trust" {
 }
 
 resource "aws_iam_role" "runner" {
-  for_each           = local.runners
-  name               = "bioaf-${each.key}-runner-${var.stack_uid}"
-  assume_role_policy = data.aws_iam_policy_document.runner_trust[each.key].json
-  tags               = merge(local.tags, { runner = each.key })
+  for_each             = local.runners
+  name                 = "bioaf-${each.key}-runner-${var.stack_uid}"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.runner_trust[each.key].json
+  tags                 = merge(local.tags, { runner = each.key })
 }
 
 data "aws_iam_policy_document" "runner_s3" {
@@ -596,9 +617,10 @@ data "aws_iam_policy_document" "work_node_assume" {
 }
 
 resource "aws_iam_role" "work_node" {
-  name               = "bioaf-work-node-${var.stack_uid}"
-  assume_role_policy = data.aws_iam_policy_document.work_node_assume.json
-  tags               = merge(local.tags, { purpose = "work-node" })
+  name                 = "bioaf-work-node-${var.stack_uid}"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.work_node_assume.json
+  tags                 = merge(local.tags, { purpose = "work-node" })
 }
 
 # S3 read/write to bioaf-* buckets (inputs in, outputs/scripts out), mirroring the
@@ -693,9 +715,10 @@ data "aws_iam_policy_document" "cluster_autoscaler_trust" {
 }
 
 resource "aws_iam_role" "cluster_autoscaler" {
-  name               = "${local.cluster_name}-cluster-autoscaler"
-  assume_role_policy = data.aws_iam_policy_document.cluster_autoscaler_trust.json
-  tags               = local.tags
+  name                 = "${local.cluster_name}-cluster-autoscaler"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.cluster_autoscaler_trust.json
+  tags                 = local.tags
 }
 
 # The canonical Cluster Autoscaler permission set. STARTER scope (Resource "*"),

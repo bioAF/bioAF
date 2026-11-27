@@ -13,6 +13,25 @@ provider "aws" {
   region = var.region
   # Ambient instance-profile creds (the bioaf-app role), like the other AWS
   # modules. No explicit credentials block.
+
+  default_tags {
+    tags = local.ownership_tags
+  }
+}
+
+data "aws_partition" "current" {}
+
+# --- Installation ownership (plan 04B) -------------------------------------------
+#
+# The narrowed bioaf-app policy lets the app change EC2 resources only when they carry this
+# installation's tag, and create roles only under the installer's permissions boundary. Both are
+# derived from the account and region (installer/aws_iam.sh and app/platform/aws_installation.py
+# use the same naming). The default tags put the ownership tag on every resource at creation.
+
+locals {
+  installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
+  ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
+  role_boundary   = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
 }
 
 # The AWS analog of GCP's Cloud Build: Cloud Build is serverless (the app just
@@ -43,8 +62,9 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "codebuild" {
-  name               = local.role_name
-  assume_role_policy = data.aws_iam_policy_document.assume.json
+  name                 = local.role_name
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.assume.json
 
   tags = {
     managed_by = "bioaf"

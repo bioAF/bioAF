@@ -334,6 +334,11 @@
    "evidence": [],
    "route": "none"
   },
+  "test_aws_installation_ownership.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_aws_validation_adapter.py": {
    "category": "no_database",
    "evidence": [],
