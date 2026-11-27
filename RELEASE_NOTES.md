@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.49
+
+### Dependencies
+
+- Bump docker/build-push-action from 6.19.2 to 7.4.0 (CI workflow actions).
+
 ## v2026.11.48
 
 ### Dependencies
