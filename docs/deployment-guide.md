@@ -822,11 +822,19 @@ Every certificate is installed the same way: checked, swapped into place, checke
 one restored if nginx refuses it.
 
 The installers open tcp:8443 like 443. An installation created before this release needs no manual step:
-within a minute of starting after the update (and every six hours after), bioAF opens tcp:8443 to exactly
-the sources that can reach its HTTPS port, using the same cloud access it uses for the server's SSH rules
-(GCP: a `bioaf-notebook-gateway` firewall rule; AWS: a rule beside each HTTPS rule on the server's
-security groups). It never opens the port wider than HTTPS. If it cannot, the backend log says so and
-only opening notebooks is affected.
+within a minute of starting after the update (and every six hours after), bioAF makes tcp:8443 reachable
+from exactly the sources that can reach its HTTPS port, using the same cloud access it uses for the
+server's SSH rules:
+
+- GCP: for each firewall rule that allows or denies tcp:443 on the server, a `bioaf-notebook-gateway-*`
+  rule matching only tcp:8443 with the same action, priority and sources, so exceptions to HTTPS apply to
+  notebooks too.
+- AWS: the sources of each HTTPS permission are added for tcp:8443 on the same security group, described
+  as `bioAF notebook gateway`.
+
+Notebook access narrows or closes when HTTPS does. bioAF changes only the 8443 access it created: rules
+for port 443 and any 8443 rules you added yourself are never modified, so access to the web portal is
+unchanged. If it cannot reconcile the port, the backend log says so and only opening notebooks is affected.
 
 ### Notebook sessions started before protected access
 

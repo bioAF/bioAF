@@ -22,7 +22,8 @@
 
 - Request and automatically renew a Let's Encrypt certificate for a public IP-only installation
   (`./bioaf tls-issue-ip`). The installers keep the public address static and open port 8443; an
-  existing installation opens port 8443 on its own after updating, to the same sources as HTTPS.
+  existing installation opens port 8443 on its own after updating, following its HTTPS firewall rules
+  (including exceptions and later narrowing or removal) without changing access to port 443.
 - Upload a certificate from your organization's own certificate authority for a private installation in
   Settings > Networking.
 - Show the installed certificate's expiry and renewal health in Settings > Networking on installations
