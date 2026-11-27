@@ -1264,6 +1264,16 @@
    "evidence": [],
    "route": "none"
   },
+  "test_eks_endpoint_api.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
   "test_eks_endpoint_hooks.py": {
    "category": "single_connection",
    "evidence": [
