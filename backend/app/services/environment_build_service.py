@@ -171,7 +171,8 @@ build {
 #     (from the CodeBuild workspace), so the builder needs NO S3/IAM access.
 #   - awscli + S3 output sync replace the GCS staging tooling (the runtime sync
 #     runs from the work-node startup script in the EC2 launch provider, 8b-launch).
-#   - force_deregister/force_delete_snapshot so a rebuild can reuse the AMI name.
+#   - No automatic deregistration: each build number has its own AMI name, and the build role
+#     may not remove images (plan 04B). Superseded AMIs are removed by an operator.
 # Packer reads its inputs from PKR_VAR_* env vars the CodeBuild build sets.
 PACKER_VM_TEMPLATE_AWS = """\
 packer {
@@ -241,10 +242,6 @@ source "amazon-ebs" "work_node" {
     bioaf-managed = "true"
   }
   ami_description = "bioAF work node environment"
-
-  # A rebuild reuses the deterministic AMI name, so deregister the prior one.
-  force_deregister      = true
-  force_delete_snapshot = true
 
   # The build instance is transient (Packer creates it, provisions, destroys it).
   launch_block_device_mappings {
