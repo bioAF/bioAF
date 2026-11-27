@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.48
+
+### Dependencies
+
+- Bump actions/setup-node from 5.0.0 to 7.1.0 (CI workflow actions).
+
 ## v2026.11.47
 
 ### Notebook sessions
