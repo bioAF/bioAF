@@ -154,8 +154,8 @@ class TerraformExecutor:
                 )
                 run.tfvars_json = cloud.write_tfvars(work_dir, module_name, config)
                 plan_json = await TerraformExecutor._run_plan_capture(work_dir, env, targets)
-                cloud.review_plan(module_name, config, plan_json)
-                parsed = TerraformPlanParser.parse(plan_json)
+                recorded = cloud.review_plan(module_name, config, plan_json)
+                parsed = {**TerraformPlanParser.parse(plan_json), **recorded}
                 if module_name == "foundation" and config.get("terraform_initialized") == "true":
                     TerraformExecutor._refuse_foundation_recreation(parsed)
 

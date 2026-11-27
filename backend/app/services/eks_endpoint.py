@@ -18,6 +18,7 @@ Decisions live in ``eks_endpoint_policy``; AWS reads go through ``app.adapters.e
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -236,17 +237,44 @@ def require_same_inputs(planned: dict | None, applying: dict) -> None:
         )
 
 
-def require_within_review(reviewed: dict | None, fresh: dict) -> None:
-    """Every change the apply would make must be one the reviewed plan showed, with the same action."""
-    allowed = {(r.get("address"), r.get("action")) for r in (reviewed or {}).get("resources") or []}
+REVIEWED_CHANGES_KEY = "reviewed_changes"
+
+
+def change_digests(raw_plan: dict) -> dict[str, str]:
+    """A digest of every real change in a ``terraform show -json`` plan: its actions and its values
+    before and after (including which values are unknown until apply), by address."""
+    digests: dict[str, str] = {}
+    for rc in raw_plan.get("resource_changes") or []:
+        change = rc.get("change") or {}
+        actions = change.get("actions") or []
+        if not actions or actions in (["no-op"], ["read"]):
+            continue
+        payload = json.dumps(
+            {
+                "actions": actions,
+                "before": change.get("before"),
+                "after": change.get("after"),
+                "after_unknown": change.get("after_unknown"),
+            },
+            sort_keys=True,
+            default=str,
+        )
+        digests[rc.get("address", "")] = hashlib.sha256(payload.encode()).hexdigest()
+    return digests
+
+
+def require_within_review(reviewed_plan: dict | None, fresh_raw_plan: dict) -> None:
+    """Every change the apply would make must be exactly one the review showed: same address,
+    same actions, same values."""
+    reviewed = (reviewed_plan or {}).get(REVIEWED_CHANGES_KEY)
+    if not isinstance(reviewed, dict):
+        raise ValidationError("This plan has no recorded changes to compare; plan again and review.")
     outside = sorted(
-        f"{r.get('action')} {r.get('address')}"
-        for r in fresh.get("resources") or []
-        if (r.get("address"), r.get("action")) not in allowed
+        address for address, digest in change_digests(fresh_raw_plan).items() if reviewed.get(address) != digest
     )
     if outside:
         raise ValidationError(
-            "The compute apply would make changes the review did not show "
+            "The compute apply would make changes that differ from the review "
             f"({', '.join(outside)}). Nothing was applied; plan again and review."
         )
 
@@ -260,13 +288,12 @@ async def review_apply(
     plan_now: Callable[[], Awaitable[dict]],
 ) -> None:
     """Make the compute apply the reviewed plan: same inputs, a fresh plan that passes the same
-    review and contains nothing the review did not, applied from that exact plan file."""
-    from app.services.plan_parser import TerraformPlanParser
-
+    review and whose every change (actions and values) the review showed, applied from that exact
+    plan file."""
     require_same_inputs(planned_tfvars, applying_tfvars)
     fresh = await plan_now()
     policy.review_plan(fresh, config)
-    require_within_review(reviewed_plan, TerraformPlanParser.parse(fresh))
+    require_within_review(reviewed_plan, fresh)
 
 
 async def finish_apply(session: AsyncSession, config: dict, *, run_id: int | None, succeeded: bool) -> None:

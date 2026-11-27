@@ -341,3 +341,46 @@ async def test_a_matching_apply_runs_the_checked_plan_file(session):
     args = spawn.call_args.args
     assert args[:2] == ("terraform", "apply") and args[-1] == "tfplan"
     assert not any(str(a).startswith("-target") for a in args)
+
+
+def _rule_change(cidr):
+    show = json.loads(_show(["update"], (True, ["0.0.0.0/0"]), (True, ["0.0.0.0/0"])))
+    show["resource_changes"].append(
+        {
+            "address": "aws_security_group.work_node",
+            "type": "aws_security_group",
+            "name": "work_node",
+            "change": {
+                "actions": ["update"],
+                "before": {"ingress": [{"cidr_blocks": ["10.0.0.0/16"]}]},
+                "after": {"ingress": [{"cidr_blocks": [cidr]}]},
+                "after_unknown": {},
+            },
+        }
+    )
+    return json.dumps(show)
+
+
+@pytest.mark.asyncio
+async def test_an_apply_whose_update_differs_from_the_reviewed_values_is_refused(session):
+    """Review round 2, finding 2: same address and action, different values (10.0.0.0/16 -> 0.0.0.0/0)."""
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run, _ = await _plan(session, user_id, _state(), _rule_change("10.0.0.0/16"))
+    assert run.status == "awaiting_confirmation", run.error_message
+
+    spawn, events = await _apply(session, user_id, run, _rule_change("0.0.0.0/0"))
+
+    spawn.assert_not_called()
+    assert any(e.event_type == "apply_error" and "aws_security_group.work_node" in (e.message or "") for e in events)
+
+
+@pytest.mark.asyncio
+async def test_an_apply_with_the_reviewed_values_proceeds(session):
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run, _ = await _plan(session, user_id, _state(), _rule_change("10.0.0.0/16"))
+
+    spawn, _ = await _apply(session, user_id, run, _rule_change("10.0.0.0/16"))
+
+    spawn.assert_called_once()

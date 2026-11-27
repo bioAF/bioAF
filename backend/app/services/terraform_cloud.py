@@ -95,9 +95,11 @@ class TerraformCloud(ABC):
         inputs, returning the config the tfvars are written from. Raise to refuse. Default: unchanged."""
         return config
 
-    def review_plan(self, module_name: str, config: dict, raw_plan: dict) -> None:
-        """Refuse a plan (``terraform show -json``) this cloud's guardrails do not allow. Default: allow."""
-        return None
+    def review_plan(self, module_name: str, config: dict, raw_plan: dict) -> dict:
+        """Refuse a plan (``terraform show -json``) this cloud's guardrails do not allow. Return
+        extra keys to record in the run's plan_json for the apply to compare. Default: allow,
+        record nothing."""
+        return {}
 
     async def review_apply(
         self,
@@ -281,10 +283,12 @@ class AwsTerraformCloud(TerraformCloud):
         return await eks_endpoint.prepare_run(session, config, phase=phase, run_id=run_id, pull_state=pull_once)
 
     def review_plan(self, module_name, config, raw_plan):
-        if module_name == "compute":
-            from app.services import eks_endpoint_policy
+        if module_name != "compute":
+            return {}
+        from app.services import eks_endpoint, eks_endpoint_policy
 
-            eks_endpoint_policy.review_plan(raw_plan, config)
+        eks_endpoint_policy.review_plan(raw_plan, config)
+        return {eks_endpoint.REVIEWED_CHANGES_KEY: eks_endpoint.change_digests(raw_plan)}
 
     async def review_apply(self, module_name, config, *, planned_tfvars, applying_tfvars, reviewed_plan, plan_now):
         if module_name != "compute":
