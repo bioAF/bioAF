@@ -27,6 +27,13 @@ group related entries when assembled. Example:
   `nextflow.config`.
 ```
 
+## Dependabot pull requests
+
+Dependabot pull requests get their entry automatically. The Dependabot
+Changelog workflow renders `.github/dependabot-changelog.md` from the pull
+request's title and commits it as `dependabot-<PR number>.md`. Change the
+template there; do not hand-write entries for these pull requests.
+
 ## When you do not need an entry
 
 If a PR is internal-only (CI tweak, test-only change, refactor with no user

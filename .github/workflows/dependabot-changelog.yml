@@ -1,0 +1,69 @@
+name: Dependabot Changelog
+
+# Dependabot cannot add a file under changes/unreleased/, so the changelog check would fail each of its pull
+# requests. This workflow renders .github/dependabot-changelog.md from the pull request's title and commits it to
+# the Dependabot branch (backend/tests/test_dependabot_changelog.py).
+#
+# pull_request_target runs this file as it is on main, with repository secrets, so it never checks out or runs the
+# pull request's code: it only reads the template at the base commit and writes one file through the contents API.
+# RELEASE_PAT makes that commit, because a commit made with GITHUB_TOKEN does not start CI on the new head. The
+# commit fires synchronize again; that run finds the entry and changes nothing.
+
+on:
+  # The trigger is needed for the write credential; the job runs no pull request code (see above).
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  entry:
+    name: Add the templated changelog entry
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: dependabot-changelog-${{ github.event.pull_request.number }}
+    steps:
+      # The title is Dependabot's text: it reaches jq as an argument and the API as a field, never as shell.
+      - name: Commit the templated changelog entry
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          entry="changes/unreleased/dependabot-${PR_NUMBER}.md"
+          if gh api --method GET "repos/${REPOSITORY}/contents/${entry}" -f ref="$HEAD_REF" --silent 2>/dev/null; then
+            echo "$entry is already on the branch"
+            exit 0
+          fi
+
+          case "$HEAD_REF" in
+            dependabot/github_actions/*) area="CI workflow actions" ;;
+            dependabot/npm_and_yarn/*) area="frontend" ;;
+            dependabot/uv/*) area="backend" ;;
+            *)
+              echo "::error::No changelog area for this Dependabot ecosystem; add one to dependabot-changelog.yml."
+              exit 1
+              ;;
+          esac
+
+          template=$(gh api --method GET "repos/${REPOSITORY}/contents/.github/dependabot-changelog.md" \
+            -f ref="$BASE_SHA" -H "Accept: application/vnd.github.raw+json")
+          # The area goes in first, so a placeholder spelled inside the title is kept as text.
+          content=$(jq -rn --arg t "$template" --arg title "$PR_TITLE" --arg area "$area" '
+            ($title | sub("^[a-z]+(\\([^)]*\\))?!?: *"; "") | (.[0:1] | ascii_upcase) + .[1:]) as $summary
+            | $t | gsub("\\{\\{area\\}\\}"; $area) | gsub("\\{\\{summary\\}\\}"; $summary)')
+
+          gh api --method PUT "repos/${REPOSITORY}/contents/${entry}" --silent \
+            -f message="Add the changelog entry for this dependency update" \
+            -f content="$(printf '%s\n' "$content" | base64 | tr -d '\n')" \
+            -f branch="$HEAD_REF"
+          echo "Committed $entry:"
+          printf '%s\n' "$content"
