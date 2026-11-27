@@ -1145,6 +1145,11 @@
    ],
    "route": "rollback_candidate"
   },
+  "test_dependabot_changelog.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_dependency_authority.py": {
    "category": "no_database",
    "evidence": [],
