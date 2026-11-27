@@ -25,6 +25,7 @@ import posixpath
 import uuid
 from datetime import datetime, timezone
 
+from app.platform.aws_installation import ownership_tags
 from app.config import compute_mode_for
 from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import VmInstance, WorkNodeProvider
@@ -390,6 +391,7 @@ class Ec2VmInstance(VmInstance):
                 session,
                 [
                     "aws_region",
+                    "aws_account_id",
                     "working_bucket_name",
                     "aws_work_node_subnet_id",
                     "aws_work_node_security_group_id",
@@ -476,6 +478,7 @@ class Ec2VmInstance(VmInstance):
 
         ec2 = self._client("ec2")
         ami_id = await asyncio.to_thread(self._resolve_ami_id, ec2, image_uri)
+        owned = ownership_tags(cfg.get("aws_account_id"), cfg.get("aws_region"))
 
         run_kwargs: dict = {
             "ImageId": ami_id,
@@ -518,8 +521,13 @@ class Ec2VmInstance(VmInstance):
                         {"Key": "bioaf-user", "Value": str(user_id)},
                         {"Key": "bioaf-managed", "Value": "true"},
                         {"Key": "bioaf-launch", "Value": str(vm_spec.get("launch_attempt_id") or "")},
+                        *owned,
                     ],
-                }
+                },
+                # The narrowed app policy (plan 04B) creates only volumes and interfaces that carry
+                # this installation's ownership tag.
+                {"ResourceType": "volume", "Tags": [{"Key": "bioaf-managed", "Value": "true"}, *owned]},
+                {"ResourceType": "network-interface", "Tags": [{"Key": "bioaf-managed", "Value": "true"}, *owned]},
             ],
         }
         if instance_profile:
