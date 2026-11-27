@@ -193,6 +193,10 @@ async def prepare_run(
                     await _set(session, config, policy.CUTOVER_KEY, cutover)
         elif mode == policy.PRESERVE_EXISTING:
             policy.require_live_matches(policy._json(config, policy.SNAPSHOT_KEY) or {}, live)
+        elif phase == "plan" and not policy._json(config, policy.SNAPSHOT_KEY):
+            # A cluster created in a hardened mode: record its verified endpoint so a later reviewed
+            # cutover has a baseline.
+            await _set(session, config, policy.SNAPSHOT_KEY, policy.snapshot_existing_cluster(state, live, config))
     elif mode is None and phase == "plan":
         # A fresh cluster: record the default so the next plan does not mistake it for a legacy one.
         policy.compute_tfvars(config, cluster_in_state=False)

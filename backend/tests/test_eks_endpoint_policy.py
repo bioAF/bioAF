@@ -307,3 +307,8 @@ def test_preserved_unrestricted_access_is_reported_as_pending_hardening():
 
 def test_a_hardened_mode_is_not_pending():
     assert policy.status({"aws_eks_endpoint_mode": "private_only"})["pending_hardening"] is False
+
+
+def test_a_deployed_cluster_without_a_recorded_mode_is_pending():
+    assert policy.status({"compute_deployed": "true"})["pending_hardening"] is True
+    assert policy.status({})["pending_hardening"] is False

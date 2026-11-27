@@ -397,3 +397,14 @@ async def test_an_apply_that_left_the_endpoint_unchanged_keeps_the_cutover_pendi
     recorded = await _config(session)
     assert json.loads(recorded["aws_eks_endpoint_cutover"])["status"] == "pending"
     assert recorded["aws_eks_endpoint_mode"] == "preserve_existing"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_cluster_gets_a_verified_snapshot_on_its_next_plan(session):
+    """So a later reviewed cutover (for example to restricted public access) has a baseline."""
+    await _seed(session, compute_deployed="true", aws_eks_endpoint_mode="private_only", gke_cluster_name=NAME)
+    await _prepare(session, _state(public=False, cidrs=()), live=_live(public=False, cidrs=()))
+    recorded = await _config(session)
+    assert recorded["aws_eks_endpoint_mode"] == "private_only"
+    snapshot = json.loads(recorded["aws_eks_endpoint_snapshot"])
+    assert snapshot["cluster_arn"] == ARN and snapshot["endpoint_public_access"] is False

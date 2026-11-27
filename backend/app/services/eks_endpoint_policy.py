@@ -384,8 +384,9 @@ def status(config: dict) -> dict:
         "mode": mode,
         "endpoint_public_access": public,
         "public_access_cidrs": cidrs,
-        # Preserved settings are temporary; only a hardened mode closes the finding.
-        "pending_hardening": mode not in HARDENED_MODES if mode else False,
+        # Preserved settings are temporary; only a hardened mode closes the finding. A deployed
+        # cluster whose endpoint is not recorded yet is still pending.
+        "pending_hardening": mode not in HARDENED_MODES if mode else config.get("compute_deployed") == "true",
         "snapshot": snapshot or None,
         "cutover": cutover,
     }
