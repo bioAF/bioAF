@@ -18,6 +18,7 @@ resource "google_storage_bucket" "terraform_state" {
   name                        = var.state_bucket_name
   location                    = var.bucket_location
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   force_destroy               = false
 
   versioning {
@@ -40,6 +41,7 @@ resource "google_storage_bucket" "backups" {
   name                        = var.backups_bucket_name != "" ? var.backups_bucket_name : "bioaf-backups-${var.project_id}"
   location                    = var.bucket_location
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   force_destroy               = false
 
   versioning {

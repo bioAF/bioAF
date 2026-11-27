@@ -30,6 +30,7 @@ resource "google_storage_bucket" "ingest" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -56,6 +57,7 @@ resource "google_storage_bucket" "raw" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -83,6 +85,7 @@ resource "google_storage_bucket" "working" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -100,6 +103,7 @@ resource "google_storage_bucket" "results" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -120,6 +124,7 @@ resource "google_storage_bucket" "references" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -150,6 +155,7 @@ resource "google_storage_bucket" "literature" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
@@ -181,6 +187,7 @@ resource "google_storage_bucket" "config_backups" {
   storage_class = "STANDARD"
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning { enabled = true }
   force_destroy = false
 
