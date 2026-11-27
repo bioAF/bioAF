@@ -17,6 +17,8 @@ See [architecture and support status](architecture.md) before choosing a deploym
 
 - [Foundation Bucket Guards](operations/foundation-bucket-guards.md): add public-access prevention to
   an existing GCP installation's Terraform-state and backup buckets.
+- [EKS API Endpoint and Control-Plane Logs](operations/eks-endpoint-and-logs.md): endpoint modes,
+  the reviewed cutover and its recovery, and log retention and readers on AWS installations.
 
 ## Role Guides
 

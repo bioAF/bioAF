@@ -11,7 +11,7 @@
 - ``PUT    /api/v1/infrastructure/eks-endpoint/settings``: control-plane log retention and types at
   any time; the endpoint mode and approved CIDRs only before a cluster exists.
 
-AWS installations only. See docs/operations/eks-endpoint-cutover.md.
+AWS installations only. See docs/operations/eks-endpoint-and-logs.md.
 """
 
 from fastapi import APIRouter, Depends
