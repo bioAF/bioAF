@@ -385,23 +385,58 @@ def _safe_image_name(env_name: str) -> str:
     return env_name.lower().replace(" ", "-").replace("_", "-")
 
 
+async def _is_notebook_environment(session: AsyncSession, environment_id: int) -> bool:
+    env_type = await session.scalar(select(Environment.environment_type).where(Environment.id == environment_id))
+    return env_type == "notebook"
+
+
 def _image_tag(version_number: int, build_number: int = 1) -> str:
     """The ``v<version>.<build>`` tag used for an environment image."""
     return f"v{version_number}.{build_number}"
 
 
-def _build_conda_dockerfile(definition_content: str, env_name: str) -> tuple[str, str]:
+# Notebook environments (plan 03.5B): the shared notebook base and runtime contract, so a notebook
+# EnvironmentVersion and the built-in scientific image are held to the same proof.
+NOTEBOOK_CONDA_DOCKERFILE_TEMPLATE = """\
+FROM {base_image}
+
+USER root
+COPY environment.yml /tmp/environment.yml
+RUN mamba env create -f /tmp/environment.yml && \\
+    mamba clean -afy && \\
+    fix-permissions /opt/conda/envs/{env_name}
+
+ENV PATH=/opt/conda/envs/{env_name}/bin:$PATH
+"""
+
+
+def _build_conda_dockerfile(
+    definition_content: str, env_name: str, environment_type: str = "pipeline"
+) -> tuple[str, str]:
     """Generate a Dockerfile from a conda environment.yml.
 
+    Notebook environments use the notebook runtime contract; pipelines keep the generic builder.
     Returns (dockerfile_content, environment_yml_content).
     """
     import yaml
+
+    from app.services import notebook_runtime
 
     # Parse to extract the conda env name
     data = yaml.safe_load(definition_content)
     conda_env_name = data.get("name", "base") if data else "base"
 
-    dockerfile = CONDA_DOCKERFILE_TEMPLATE.format(env_name=conda_env_name)
+    if environment_type != "notebook":
+        return CONDA_DOCKERFILE_TEMPLATE.format(env_name=conda_env_name), definition_content
+    has_r = notebook_runtime.conda_has_r(definition_content)
+    prefix = f"/opt/conda/envs/{conda_env_name}"
+    dockerfile = (
+        NOTEBOOK_CONDA_DOCKERFILE_TEMPLATE.format(
+            base_image=notebook_runtime.NOTEBOOK_BASE_IMAGE, env_name=conda_env_name
+        )
+        + notebook_runtime.runtime_layer(r_home=prefix if has_r else None)
+        + notebook_runtime.check_step(require_rstudio=has_r)
+    )
     return dockerfile, definition_content
 
 
@@ -410,14 +445,21 @@ async def _upload_version_build_context(
     working_bucket: str,
     version: EnvironmentVersion,
     env_name: str,
+    environment_type: str = "pipeline",
 ) -> str:
     """Create a tar.gz with the build context and upload to storage."""
     from app.adapters.registry import get_storage_adapter
 
+    from app.services.notebook_runtime import add_check_script
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        # The notebook capability check (plan 03.5B), used by notebook images and harmless elsewhere.
+        add_check_script(tar)
         if version.definition_format == "conda":
-            dockerfile_content, env_yml = _build_conda_dockerfile(version.definition_content, env_name)
+            dockerfile_content, env_yml = _build_conda_dockerfile(
+                version.definition_content, env_name, environment_type
+            )
             # Add Dockerfile
             df_bytes = dockerfile_content.encode()
             info = tarfile.TarInfo(name="Dockerfile")
@@ -596,7 +638,9 @@ class EnvironmentBuildService:
         get_image_registry_provider().ensure_repository(credentials, platform.config, image_name)
 
         # Upload build context (cloud-neutral: build_uri + upload_file)
-        object_path = await _upload_version_build_context(session, working_bucket, version, env.name)
+        object_path = await _upload_version_build_context(
+            session, working_bucket, version, env.name, env.environment_type
+        )
         context_uri = get_storage_adapter().build_uri(working_bucket, object_path)
 
         image_uri = get_image_registry_provider().image_uri(platform.config, image_name, tag)
@@ -619,6 +663,8 @@ class EnvironmentBuildService:
 
         # Update version record
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_uri
         await session.flush()
@@ -753,6 +799,8 @@ class EnvironmentBuildService:
 
         # Update version record
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_uri
         await session.flush()
@@ -835,6 +883,8 @@ class EnvironmentBuildService:
         )
 
         version.status = "building"
+        # A new build proves (or not) again; nothing is claimed while it runs (plan 03.5B).
+        version.notebook_capability = None
         version.build_id = build_id
         version.image_uri = image_name
         await session.flush()
@@ -865,7 +915,8 @@ class EnvironmentBuildService:
     async def poll_in_progress_builds(session: AsyncSession) -> int:
         """Poll all in-progress environment builds and update statuses.
 
-        Returns the number of builds that changed status.
+        Returns the number of builds changed: a new status, or a recorded attempt to read a successful
+        build's unreadable result (the polling job commits only when this is nonzero).
         """
         from app.services.notebook_image_service import check_build_status
 
@@ -892,6 +943,28 @@ class EnvironmentBuildService:
             status = await check_build_status(session, version.build_id)
 
             if status == "SUCCESS":
+                if await _is_notebook_environment(session, version.environment_id):
+                    from app.services.notebook_image_service import MAX_EVIDENCE_ATTEMPTS, check_build_result
+                    from app.services.notebook_runtime import capability_from_build
+
+                    result = await check_build_result(session, version.build_id)
+                    if result.status == "UNKNOWN":
+                        # Unreadable (transient), not "no evidence": stay building and read it again,
+                        # going ahead unverified only after the last attempt.
+                        attempts = int((version.notebook_capability or {}).get("evidence_attempts", 0)) + 1
+                        if attempts < MAX_EVIDENCE_ATTEMPTS:
+                            version.notebook_capability = {"evidence_attempts": attempts}
+                            # A change to persist: the polling job commits only when one is reported.
+                            changed += 1
+                            continue
+                    # Record what the build's own evidence proved, bound to its digest (plan 03.5B).
+                    version.notebook_capability = capability_from_build(
+                        version.definition_format,
+                        version.definition_content,
+                        result,
+                        image_uri=version.image_uri or "",
+                        build_id=version.build_id,
+                    )
                 version.status = "ready"
                 changed += 1
                 completed_versions.append(version)

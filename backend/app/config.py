@@ -169,6 +169,13 @@ class Settings(BaseSettings):
     local_node_cost_hourly: float = 0.01
     local_storage_cost_monthly: float = 0.11
 
+    # Plan 03.5A: the notebook gateway's port on the installation's own host (separate browser origin).
+    notebook_gateway_port: int = 8443
+    # Where an uploaded organization-CA certificate is staged for the host to install (plan 03.5A).
+    tls_upload_dir: str = "/app/tls-upload"
+    # The host's certificate report (installer/tls.sh), mounted read-only.
+    tls_report_dir: str = "/app/tls-report"
+
     # SSL / TLS
     ssl_enabled: bool = False
     ssl_certfile: str = ""

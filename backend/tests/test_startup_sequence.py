@@ -113,8 +113,9 @@ async def test_startup_runs_its_steps_in_order_and_starts_owned_workers(startup)
         # still waiting out its startup delay here); 34 with the upload filing retries (storage
         # lifecycle 11F); 35 with upload settlement checks (provider upload sessions); 36 with the
         # removal of moved files' superseded objects (project 12B.1c). Owner-approved (2026-11-24): 35 once
-        # the unsupported SLURM job-status poll was retired.
-        assert len(roles) == 35
+        # the unsupported SLURM job-status poll was retired; 36 with the notebook gateway port
+        # reconciliation (plan 03.5A, owner-approved 2026-11-26).
+        assert len(roles) == 36
         assert {
             "pipeline-monitor",
             "pubsub-listener",

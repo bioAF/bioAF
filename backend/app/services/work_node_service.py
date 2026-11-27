@@ -718,6 +718,7 @@ class WorkNodeService:
             .options(
                 selectinload(ComputeSession.user),
                 selectinload(ComputeSession.project),
+                selectinload(ComputeSession.experiment),
             )
             .where(
                 ComputeSession.organization_id == org_id,
@@ -767,6 +768,7 @@ class WorkNodeService:
             .options(
                 selectinload(ComputeSession.user),
                 selectinload(ComputeSession.project),
+                selectinload(ComputeSession.experiment),
             )
             .where(
                 ComputeSession.id == session_id,

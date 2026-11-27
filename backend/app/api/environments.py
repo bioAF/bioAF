@@ -17,6 +17,7 @@ from app.schemas.environment import (
     UserSummary,
     VersionCreateRequest,
     VersionResponse,
+    notebook_capability,
 )
 from app.services.environment_service import EnvironmentService
 
@@ -60,6 +61,7 @@ def _env_response(env) -> EnvironmentResponse:
             status=v.status,
             definition_format=v.definition_format,
             image_uri=v.image_uri,
+            notebook_capability=notebook_capability(v.notebook_capability),
             created_at=v.created_at,
         )
 
@@ -149,6 +151,7 @@ async def get_environment(
                 status=v.status,
                 definition_format=v.definition_format,
                 image_uri=v.image_uri,
+                notebook_capability=notebook_capability(v.notebook_capability),
                 created_at=v.created_at,
             )
             for v in versions

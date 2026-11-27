@@ -21,6 +21,28 @@ class EnvironmentUpdateRequest(BaseModel):
     visibility: str | None = None
 
 
+class NotebookCapability(BaseModel):
+    # The runtime contract version the result was proven under; null when nothing was proven.
+    contract: int | None = None
+    # verified | unsupported (no R in the environment) | unverified (never proven)
+    jupyter: str = "unverified"
+    rstudio: str = "unverified"
+
+
+# Contract 1 proved only that RStudio served its sign-in page, not that it could start an R session.
+RSTUDIO_SESSION_CONTRACT = 2
+
+
+def notebook_capability(raw: dict | None) -> NotebookCapability:
+    if not raw:
+        return NotebookCapability()
+    rstudio = raw.get("rstudio", "unverified")
+    contract = raw.get("contract")
+    if rstudio == "verified" and (not isinstance(contract, int) or contract < RSTUDIO_SESSION_CONTRACT):
+        rstudio = "unverified"
+    return NotebookCapability(contract=contract, jupyter=raw.get("jupyter", "unverified"), rstudio=rstudio)
+
+
 class EnvironmentVersionSummary(BaseModel):
     id: int
     version_number: int
@@ -28,6 +50,7 @@ class EnvironmentVersionSummary(BaseModel):
     status: str
     definition_format: str
     image_uri: str | None = None
+    notebook_capability: NotebookCapability = NotebookCapability()
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}

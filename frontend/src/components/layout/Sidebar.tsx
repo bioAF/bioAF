@@ -296,7 +296,7 @@ export function Sidebar({
               <span className="flex flex-col leading-none">
                 <span className="text-base font-bold text-bioaf-700">bioAF</span>
                 <span className="mt-0.5 text-[10px] tracking-tight text-gray-600 whitespace-nowrap">
-                  Comp Bio Automation Framework
+                  Biotech Automation Framework
                 </span>
               </span>
             </Link>

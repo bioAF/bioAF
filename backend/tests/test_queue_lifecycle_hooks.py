@@ -35,8 +35,14 @@ async def test_notebook_image_poll_invokes_orchestrator_on_success(session):
     await _set_config(session, "gcp_region", "us-central1")
     await session.commit()
 
+    from app.adapters.image_build.base import BuildResult
+
     with (
         patch.object(notebook_image_service, "check_build_status", new=AsyncMock(return_value="SUCCESS")),
+        # The build's result is readable (an unreadable one defers publishing).
+        patch.object(
+            notebook_image_service, "check_build_result", new=AsyncMock(return_value=BuildResult("SUCCESS", None, None))
+        ),
         patch("app.services.component_queue.process_queued_components", new=AsyncMock()) as spy,
     ):
         await notebook_image_service.poll_image_build(session)

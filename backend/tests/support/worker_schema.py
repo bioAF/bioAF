@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.plugins import invocation
 from tests.plugins.db_url import database_url
+from tests.support import schema_ddl
 
 ALEMBIC_DIR = Path(__file__).resolve().parent.parent.parent / "alembic"
 
@@ -134,10 +135,12 @@ async def _build(prefix: str, worker: str) -> WorkerSchema:
     admin = create_async_engine(url)
     engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
     try:
-        async with admin.begin() as conn:
+        async with admin.connect() as conn:
+            raw = await conn.get_raw_connection()
             for name in (schema, seed_schema):
-                await conn.execute(text(f"DROP SCHEMA IF EXISTS {_q(name)} CASCADE"))
-                await conn.execute(text(f"CREATE SCHEMA {_q(name)}"))
+                # A batch of tables per transaction, so concurrent workers never exhaust the lock table.
+                await schema_ddl.drop_schema(raw.driver_connection, name)
+                await raw.driver_connection.execute(f"CREATE SCHEMA {_q(name)}")
 
         cfg = Config(str(ALEMBIC_DIR / "alembic.ini"))
         cfg.set_main_option("script_location", str(ALEMBIC_DIR))

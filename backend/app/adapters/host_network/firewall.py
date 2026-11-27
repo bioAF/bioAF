@@ -30,8 +30,10 @@ backend included) could still delete them, which ``check_recovery`` reports as d
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger("bioaf.host_ssh_filter")
 
@@ -46,6 +48,13 @@ ALLOW_RULES = {4: "bioaf-ssh-filter-allow-v4", 6: "bioaf-ssh-filter-allow-v6"}
 DENY_RULES = {4: "bioaf-ssh-filter-deny-v4", 6: "bioaf-ssh-filter-deny-v6"}
 EVERYWHERE = {4: "0.0.0.0/0", 6: "::/0"}
 AWS_RECOVERY_GROUP = "bioaf-ssh-recovery"
+# The notebook gateway (plan 03.5A) is reachable from exactly where the application's HTTPS is.
+# bioAF owns only the 8443 access it creates: on GCP the rules named ``GATEWAY_RULE`` or
+# ``GATEWAY_RULE-*``, on AWS the 8443 sources carrying ``AWS_GATEWAY_MARK`` as their description.
+GATEWAY_PORT = 8443
+HTTPS_PORT = 443
+GATEWAY_RULE = "bioaf-notebook-gateway"
+AWS_GATEWAY_MARK = "bioAF notebook gateway"
 AWS_FILTER_GROUP = "bioaf-ssh-filter"
 
 
@@ -67,16 +76,69 @@ def _by_family(ranges: list[str]) -> dict[int, list[str]]:
     return families
 
 
-def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
+def _reaches(port: int, protocol: str, ports: list[str]) -> bool:
     if str(protocol) not in ("tcp", "6", "all"):
         return False
     if not ports:
         return True
     for spec in ports:
         low, _, high = str(spec).partition("-")
-        if int(low) <= 22 <= int(high or low):
+        if int(low) <= port <= int(high or low):
             return True
     return False
+
+
+def _reaches_ssh(protocol: str, ports: list[str]) -> bool:
+    return _reaches(22, protocol, ports)
+
+
+def _aws_reaches(permission: dict, port: int) -> bool:
+    protocol = str(permission.get("IpProtocol"))
+    if protocol == "-1":
+        return True
+    if protocol not in ("tcp", "6"):
+        return False
+    return int(permission.get("FromPort", 0)) <= port <= int(permission.get("ToPort", 65535))
+
+
+@dataclass(frozen=True)
+class HostTargets:
+    """This host's own network tags and service accounts, as its metadata server reports them."""
+
+    tags: tuple[str, ...] = ()
+    service_accounts: tuple[str, ...] = ()
+
+
+def gateway_rule_name(source_rule: str) -> str:
+    """The name of bioAF's GCP rule mirroring ``source_rule`` onto the gateway port (fits GCP's 63)."""
+    return f"{GATEWAY_RULE}-{hashlib.sha256(source_rule.encode()).hexdigest()[:12]}"
+
+
+def _is_gateway_rule(name: str) -> bool:
+    return name == GATEWAY_RULE or name.startswith(GATEWAY_RULE + "-")
+
+
+# AWS permission sources and the fields that identify each one.
+_AWS_SOURCE_FIELDS = {
+    "IpRanges": ("CidrIp",),
+    "Ipv6Ranges": ("CidrIpv6",),
+    "PrefixListIds": ("PrefixListId",),
+    "UserIdGroupPairs": ("GroupId", "UserId", "VpcPeeringConnectionId"),
+}
+
+
+def _aws_sources(permission: dict):
+    """(identity, kind, entry) for each source of an AWS permission."""
+    for kind, fields in _AWS_SOURCE_FIELDS.items():
+        for entry in permission.get(kind) or []:
+            yield (kind, *(entry.get(f) for f in fields)), kind, entry
+
+
+def _aws_gateway_permission(sources: list[tuple[str, dict]]) -> dict:
+    permission: dict = {"IpProtocol": "tcp", "FromPort": GATEWAY_PORT, "ToPort": GATEWAY_PORT}
+    for kind, entry in sources:
+        permission.setdefault(kind, []).append(entry)
+    return permission
 
 
 # Rule lists a patch cannot empty (an empty list is not sent) and GCP refuses a full update, so
@@ -182,6 +244,96 @@ class GcpHostNetwork:
     def _delete(self, name) -> None:
         if self._existing(name) is not None:
             self.client.delete(project=self.project, firewall=name).result(timeout=120)
+
+    def _applies_here(self, rule, targets: HostTargets | None, *, restricts: bool) -> bool:
+        """Whether ``rule`` applies to this host. Without this host's service accounts, a rule that
+        targets accounts is taken to apply when it restricts access and not when it grants it."""
+        tags = set(rule.target_tags or [])
+        accounts = set(rule.target_service_accounts or [])
+        if not tags and not accounts:
+            return True
+        if tags & {self.target_tag, *(targets.tags if targets else ())}:
+            return True
+        if accounts:
+            return restricts if targets is None else bool(accounts & set(targets.service_accounts))
+        return False
+
+    def ensure_gateway_port(self, targets: HostTargets | None = None) -> dict:
+        """Make the notebook gateway port reachable from exactly where HTTPS is on this host.
+
+        Each enabled ingress rule that allows or denies tcp:443 on this host, and does not already
+        cover the gateway port, gets a bioAF rule matching only tcp:8443 with the same action,
+        priority, sources and destinations, targeting this host. GCP decides each port by its own
+        highest-priority matching rule, so 8443 then behaves as 443 does, exceptions included, and
+        no rule matching 443 changes. Rules bioAF does not own are never modified. Mirrors of rules
+        that changed are updated, and mirrors of rules that are gone are removed: restrictions are
+        written before the access they restrict and removed after it. Only this network's rules are
+        read or changed: another installation in the project keeps its own.
+
+        GCP does not let one rule mix service accounts with network tags, so a rule whose sources are
+        service accounts is mirrored onto this host's own service account. Without it (its metadata
+        server could not say) such an allow is not mirrored, and such a deny cannot be: then no
+        access is mirrored at all, so the gateway is never open where HTTPS is not.
+        """
+        from google.cloud import compute_v1
+
+        rules = list(self.client.list(project=self.project))
+        rules = [r for r in rules if self._network_path(r.network) == self.network]
+        wanted = {}
+        unplaceable = []
+        for rule in rules:
+            if _is_gateway_rule(rule.name):
+                continue
+            if getattr(rule, "disabled", False) or (rule.direction or "INGRESS") != "INGRESS":
+                continue
+            restricts = bool(rule.denied)
+            ports = [(p.I_p_protocol, list(p.ports or [])) for p in (rule.denied if restricts else rule.allowed)]
+            if not any(_reaches(HTTPS_PORT, proto, p) for proto, p in ports):
+                continue
+            if any(_reaches(GATEWAY_PORT, proto, p) for proto, p in ports):
+                continue
+            if not self._applies_here(rule, targets, restricts=restricts):
+                continue
+            gateway = [str(GATEWAY_PORT)]
+            if rule.source_service_accounts:
+                if not (targets and targets.service_accounts):
+                    if restricts:
+                        unplaceable.append(rule.name)
+                    continue
+                scope = {"target_service_accounts": list(targets.service_accounts)}
+            else:
+                scope = {"target_tags": [self.target_tag]}
+            mirror = compute_v1.Firewall(
+                name=gateway_rule_name(rule.name),
+                network=self.network,
+                disabled=False,
+                direction="INGRESS",
+                priority=rule.priority,
+                source_ranges=list(rule.source_ranges or []),
+                source_tags=list(rule.source_tags or []),
+                source_service_accounts=list(rule.source_service_accounts or []),
+                destination_ranges=list(rule.destination_ranges or []),
+                **scope,
+                description=f"Managed by bioAF: {rule.name} applied to the notebook gateway (tcp:{GATEWAY_PORT}).",
+            )
+            if restricts:
+                mirror.denied = [compute_v1.Denied(I_p_protocol="tcp", ports=gateway)]
+            else:
+                mirror.allowed = [compute_v1.Allowed(I_p_protocol="tcp", ports=gateway)]
+            wanted[mirror.name] = mirror
+        if unplaceable:
+            logger.warning(
+                "The notebook gateway stays closed: bioAF cannot apply %s to it without this server's service account",
+                ", ".join(sorted(unplaceable)),
+            )
+            wanted = {name: m for name, m in wanted.items() if m.denied}
+        for mirror in sorted(wanted.values(), key=lambda m: (not m.denied, m.name)):
+            self._upsert(mirror)
+        stale = [r for r in rules if _is_gateway_rule(r.name) and r.name not in wanted]
+        for rule in sorted(stale, key=lambda r: (bool(r.denied), r.name)):
+            self._delete(rule.name)
+        sources = sorted({s for m in wanted.values() if m.allowed for s in m.source_ranges})
+        return {"opened": any(m.allowed for m in wanted.values()), "sources": sources}
 
     def recovery_sources(self) -> list[dict]:
         return [{"kind": "gcp_iap", "source": GCP_IAP_SOURCE, "priority": GCP_IAP_PRIORITY, "ports": "tcp:22"}]
@@ -584,6 +736,60 @@ class AwsHostNetwork:
                 raise FilterApplyError(RESTORE_FAILED) from exc
             raise FilterApplyError(KEPT) from exc
         return {"provider": "aws", "revoked": revoked, "filter_group": filter_group}
+
+    def ensure_gateway_port(self, targets: HostTargets | None = None) -> dict:
+        """Make the notebook gateway port reachable from exactly the sources HTTPS has on this
+        instance's groups. Security groups only allow, so each group gets, for 8443, the sources
+        its HTTPS permissions have and that do not already reach 8443, marked as bioAF's; bioAF's
+        marked 8443 sources that HTTPS no longer has are revoked after anything new is added.
+        Permissions bioAF did not add, and every HTTPS permission, are never changed."""
+        group_ids = [g["GroupId"] for g in self._instance()["SecurityGroups"]]
+        groups = self.client.describe_security_groups(GroupIds=group_ids)["SecurityGroups"]
+        additions, removals = [], []
+        for group in groups:
+            permissions = group.get("IpPermissions", [])
+            wanted: dict = {}
+            for permission in permissions:
+                if _aws_reaches(permission, HTTPS_PORT) and not _aws_reaches(permission, GATEWAY_PORT):
+                    for key, kind, entry in _aws_sources(permission):
+                        fields = _AWS_SOURCE_FIELDS[kind]
+                        wanted[key] = (
+                            kind,
+                            {**{f: entry[f] for f in fields if entry.get(f)}, "Description": AWS_GATEWAY_MARK},
+                        )
+            reaching, owned = set(), {}
+            for permission in permissions:
+                if not _aws_reaches(permission, GATEWAY_PORT):
+                    continue
+                exact = str(permission.get("IpProtocol")) in ("tcp", "6") and (
+                    permission.get("FromPort"),
+                    permission.get("ToPort"),
+                ) == (GATEWAY_PORT, GATEWAY_PORT)
+                for key, kind, entry in _aws_sources(permission):
+                    reaching.add(key)
+                    if exact and entry.get("Description") == AWS_GATEWAY_MARK:
+                        owned[key] = (kind, entry)
+            add = [source for key, source in wanted.items() if key not in reaching]
+            remove = [source for key, source in owned.items() if key not in wanted]
+            if add:
+                additions.append((group["GroupId"], add))
+            if remove:
+                removals.append((group["GroupId"], remove))
+        for group_id, sources in additions:
+            try:
+                self.client.authorize_security_group_ingress(
+                    GroupId=group_id, IpPermissions=[_aws_gateway_permission(sources)]
+                )
+            except Exception as exc:
+                if "Duplicate" not in str(exc):
+                    raise
+                for source in sources:  # one already exists: add the rest one by one
+                    self._authorize(GroupId=group_id, IpPermissions=[_aws_gateway_permission([source])])
+        for group_id, sources in removals:
+            self.client.revoke_security_group_ingress(
+                GroupId=group_id, IpPermissions=[_aws_gateway_permission(sources)]
+            )
+        return {"opened": bool(additions), "sources": []}
 
     def _authorize(self, **rule) -> None:
         try:

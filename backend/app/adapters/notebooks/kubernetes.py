@@ -10,6 +10,7 @@ gke_cluster_ca_cert) and a GCP access token from the credential injector
 """
 
 import asyncio
+import secrets
 from collections.abc import Callable
 import logging
 import posixpath
@@ -22,6 +23,7 @@ from kubernetes import client
 from app.config import compute_mode_for
 from app.settings_contract import ComputeMode, is_simulated
 from app.platform.shell_args import ShellExpr, safe_relative_path, shell_word
+from app.platform.notebook_jupyter_auth import JUPYTER_CONFIG_DIR, JUPYTER_CONFIG_KEY, JUPYTER_GATEWAY_CONFIG
 from app.adapters.base import NotebookProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.kubernetes.connection import GkeConnection, api_client_auth_header
@@ -189,7 +191,19 @@ def notebook_service_name(session_id) -> str:
 
 HOME_DIR = "/home/jovyan"
 # The jupyter image's notebook user (jovyan) and group (users).
-JUPYTER_UID_GID = "1000:100"
+JUPYTER_UID = 1000
+JUPYTER_GID = 100
+JUPYTER_UID_GID = f"{JUPYTER_UID}:{JUPYTER_GID}"
+
+
+def gateway_path(session_id) -> str:
+    """The session's path on the protected notebook gateway; the IDE is configured to serve under it."""
+    return f"/s/{int(session_id)}/"
+
+
+def access_secret_name(session_id) -> str:
+    """The per-session Secret holding the IDE's own token, owned by (and deleted with) the Pod."""
+    return f"bioaf-notebook-access-{int(session_id)}"
 
 
 def rstudio_git_ssh_setup(*, home_dir: str, username: str, ssh_private_key: str, known_hosts: str) -> str:
@@ -624,14 +638,15 @@ class KubernetesNotebookProvider(NotebookProvider):
         # Determine container command based on session type
         if session_type == "jupyter":
             container_port = 8888
+            # Plan 03.5A: served only through the protected gateway, under its session path, with its
+            # own token (JUPYTER_TOKEN, from the session's Secret) as defense in depth.
             container_command = [
                 "jupyter",
                 "lab",
                 "--ip=0.0.0.0",
                 f"--port={container_port}",
                 "--no-browser",
-                "--NotebookApp.token=''",
-                "--NotebookApp.password=''",
+                f"--ServerApp.base_url={gateway_path(session_id)}",
             ]
         elif session_type == "ssh":
             # SSH work node (ADR-034): sshd as main process with PAM auth
@@ -744,7 +759,8 @@ class KubernetesNotebookProvider(NotebookProvider):
                 f"{ssh_setup}"
                 f"{git_setup}"
                 f"exec /usr/lib/rstudio-server/bin/rserver "
-                f"--www-address=0.0.0.0 --www-port={container_port} --server-daemonize=0"
+                f"--www-address=0.0.0.0 --www-port={container_port} --server-daemonize=0 "
+                f"--www-root-path={gateway_path(session_id)}"
             )
             container_command = ["/bin/sh", "-c", startup_script]
 
@@ -866,9 +882,51 @@ class KubernetesNotebookProvider(NotebookProvider):
             },
         }
 
-        # RStudio and SSH require root for user management
+        # RStudio and SSH require root for user management (RStudio's PAM launcher; R sessions run as
+        # the signed-in user). Jupyter never runs as root (plan 03.5B).
         if session_type in ("rstudio", "ssh"):
             notebook_container["securityContext"] = {"runAsUser": 0}
+        elif session_type == "jupyter":
+            notebook_container["securityContext"] = {
+                "runAsUser": JUPYTER_UID,
+                "runAsGroup": JUPYTER_GID,
+                "runAsNonRoot": True,
+                "allowPrivilegeEscalation": False,
+            }
+            notebook_container.setdefault("env", []).extend(
+                [
+                    {
+                        "name": "JUPYTER_TOKEN",
+                        "valueFrom": {"secretKeyRef": {"name": access_secret_name(session_id), "key": "token"}},
+                    },
+                    # Merged with the image's own config: accept the token from the gateway's header.
+                    {"name": "JUPYTER_CONFIG_PATH", "value": JUPYTER_CONFIG_DIR},
+                ]
+            )
+            volumes.append(
+                {
+                    "name": "bioaf-jupyter-config",
+                    "secret": {
+                        "secretName": access_secret_name(session_id),
+                        "items": [{"key": JUPYTER_CONFIG_KEY, "path": "jupyter_server_config.py"}],
+                    },
+                }
+            )
+            notebook_container["volumeMounts"].append(
+                {"name": "bioaf-jupyter-config", "mountPath": JUPYTER_CONFIG_DIR, "readOnly": True}
+            )
+        if session_type in INTERACTIVE_SESSION_TYPES:
+            # Readiness from the IDE itself (plan 03.5C): Jupyter's API root and RStudio's sign-in page
+            # answer only once the IDE is serving. The startup probe covers initialization within the
+            # 30-minute launch deadline.
+            probe_path = f"{gateway_path(session_id)}api" if session_type == "jupyter" else "/auth-sign-in"
+            http_get = {"path": probe_path, "port": container_port}
+            notebook_container["startupProbe"] = {"httpGet": http_get, "periodSeconds": 10, "failureThreshold": 150}
+            notebook_container["readinessProbe"] = {
+                "httpGet": dict(http_get),
+                "periodSeconds": 10,
+                "failureThreshold": 3,
+            }
 
         # GPU support for SSH work nodes
         gpu = session_spec.get("gpu")
@@ -963,6 +1021,8 @@ class KubernetesNotebookProvider(NotebookProvider):
             "labels": {
                 **ownership_labels(session_spec),
                 "bioaf.io/pool": node_pool,
+                # Reachable only through the protected notebook gateway (plan 03.5A).
+                **({"bioaf.io/access": "gateway"} if session_type in INTERACTIVE_SESSION_TYPES else {}),
             },
         }
         if annotations:
@@ -982,6 +1042,11 @@ class KubernetesNotebookProvider(NotebookProvider):
                     }
                 ],
                 "serviceAccountName": "bioaf-notebook-runner",
+                # The runner account can act in the shared notebook namespace (other sessions' Pods and
+                # Secrets), so its API token is never mounted where user code runs (plan 03.5A). Cloud
+                # identity does not use it: GKE Workload Identity and EKS IRSA/Pod Identity inject
+                # their own credentials.
+                "automountServiceAccountToken": False,
                 "initContainers": init_containers,
                 "containers": containers,
                 "volumes": volumes,
@@ -1025,8 +1090,46 @@ class KubernetesNotebookProvider(NotebookProvider):
             container_port = 8787
 
         core_client = self._get_k8s_core_client()
-        core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
+        secret_name = access_secret_name(session_id) if session_type == "jupyter" else None
+        if secret_name:
+            core_client.create_namespaced_secret(
+                namespace=namespace,
+                body={
+                    "apiVersion": "v1",
+                    "kind": "Secret",
+                    "metadata": {"name": secret_name, "namespace": namespace, "labels": ownership_labels(session_spec)},
+                    "type": "Opaque",
+                    "stringData": {
+                        "token": session_spec.get("ide_secret") or secrets.token_urlsafe(32),
+                        JUPYTER_CONFIG_KEY: JUPYTER_GATEWAY_CONFIG,
+                    },
+                },
+            )
+        try:
+            created_pod = core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
+        except Exception:
+            if secret_name:
+                try:
+                    core_client.delete_namespaced_secret(name=secret_name, namespace=namespace)
+                except Exception:
+                    logger.warning("Could not remove access secret for session %s after a failed launch", session_id)
+            raise
         logger.info("Created pod %s in %s", pod_name, namespace)
+        pod_uid = getattr(getattr(created_pod, "metadata", None), "uid", None)
+        if secret_name and isinstance(pod_uid, str):
+            # Owned by the Pod: Kubernetes deletes the Secret with it.
+            try:
+                core_client.patch_namespaced_secret(
+                    name=secret_name,
+                    namespace=namespace,
+                    body={
+                        "metadata": {
+                            "ownerReferences": [{"apiVersion": "v1", "kind": "Pod", "name": pod_name, "uid": pod_uid}]
+                        }
+                    },
+                )
+            except Exception:
+                logger.warning("Access secret for session %s is not owned by its pod; it stays labelled", session_id)
 
         # A headless run exposes no server: skip the LoadBalancer Service and the readiness poll
         # (there is nothing to reach). Its completion is polled off the notebook container's exit.
@@ -1048,7 +1151,9 @@ class KubernetesNotebookProvider(NotebookProvider):
                             "protocol": "TCP",
                         }
                     ],
-                    "type": "LoadBalancer",
+                    # Cluster-internal only: browsers reach the IDE through the protected gateway
+                    # (plan 03.5A), never through a public address.
+                    "type": "ClusterIP",
                 },
             }
             try:
@@ -1123,6 +1228,43 @@ class KubernetesNotebookProvider(NotebookProvider):
 
     def recorded_workload(self, ns) -> NotebookWorkload | None:
         return self.resolve_workload(ns)[0]
+
+    async def live_pod_uid(self, workload: NotebookWorkload) -> str:
+        """The UID of the running, not-deleting Pod carrying this workload's ownership labels (plan 03.5A).
+
+        Any other Pod, a read failure or a timeout is ConnectionUnavailableError: no access is granted
+        to something bioAF cannot confirm.
+        """
+        from app.adapters.notebooks.lifecycle import REQUEST_TIMEOUT_SECONDS, _pod_belongs
+        from app.exceptions import ConnectionUnavailableError
+
+        refused = ConnectionUnavailableError("bioAF could not confirm this session's workload.", reason="unconfirmed")
+        if self.is_local:
+            raise refused
+        try:
+            core = self._get_k8s_core_client()
+            pod = await asyncio.to_thread(
+                core.read_namespaced_pod,
+                workload.pod_name,
+                workload.namespace,
+                _request_timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Notebook session %s: Pod read for access failed (%s)", workload.session_id, type(exc).__name__
+            )
+            raise refused from None
+        meta = getattr(pod, "metadata", None)
+        phase = getattr(getattr(pod, "status", None), "phase", None)
+        if (
+            meta is None
+            or not _pod_belongs(pod, workload)
+            or meta.deletion_timestamp
+            or phase != "Running"
+            or not meta.uid
+        ):
+            raise refused
+        return str(meta.uid)
 
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> pod and Service names carrying a ``bioaf.io/session`` label (raises on read errors)."""
@@ -1645,6 +1787,9 @@ class KubernetesNotebookProvider(NotebookProvider):
                 "failure_message": assessment.message,
             }
         if assessment.state == "ready":
+            if ((pod.metadata.labels or {}) if pod.metadata else {}).get("bioaf.io/access") == "gateway":
+                # Readiness probes passed: the IDE itself answers. Open goes through the gateway.
+                return {**base, "status": "running", "access_url": gateway_path(session_id)}
             port = 8888 if session_type == "jupyter" else 8787
             if workload is not None:
                 # Ownership and the address from one Service response (see _verified_service_url).

@@ -2904,6 +2904,63 @@
             "title": "Fqdn",
             "type": "string"
           },
+          "issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer"
+          },
+          "last_renewal_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Renewal At"
+          },
+          "last_renewal_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Renewal Result"
+          },
+          "not_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not After"
+          },
+          "renewed_by_bioaf": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renewed By Bioaf"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2914,6 +2971,60 @@
           "status"
         ],
         "title": "CertificateStatusResponse",
+        "type": "object"
+      },
+      "CertificateUpload": {
+        "properties": {
+          "certificate_pem": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Certificate Pem",
+            "type": "string"
+          },
+          "private_key_pem": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Private Key Pem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "certificate_pem",
+          "private_key_pem"
+        ],
+        "title": "CertificateUpload",
+        "type": "object"
+      },
+      "CertificateUploadResponse": {
+        "properties": {
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "not_after": {
+            "format": "date-time",
+            "title": "Not After",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "names",
+          "not_after",
+          "issuer"
+        ],
+        "title": "CertificateUploadResponse",
         "type": "object"
       },
       "ChangePasswordRequest": {
@@ -6789,6 +6900,13 @@
               }
             ],
             "title": "Image Uri"
+          },
+          "notebook_capability": {
+            "$ref": "#/components/schemas/NotebookCapability",
+            "default": {
+              "jupyter": "unverified",
+              "rstudio": "unverified"
+            }
           },
           "status": {
             "title": "Status",
@@ -11928,6 +12046,33 @@
           "status"
         ],
         "title": "NodePoolStatus",
+        "type": "object"
+      },
+      "NotebookCapability": {
+        "properties": {
+          "contract": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract"
+          },
+          "jupyter": {
+            "default": "unverified",
+            "title": "Jupyter",
+            "type": "string"
+          },
+          "rstudio": {
+            "default": "unverified",
+            "title": "Rstudio",
+            "type": "string"
+          }
+        },
+        "title": "NotebookCapability",
         "type": "object"
       },
       "NotebookImageBuildStatus": {
@@ -22693,6 +22838,29 @@
         "title": "ServiceAccountUpdate",
         "type": "object"
       },
+      "SessionAccessResponse": {
+        "properties": {
+          "entry_url": {
+            "title": "Entry Url",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "ticket": {
+            "title": "Ticket",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_url",
+          "ticket",
+          "expires_in"
+        ],
+        "title": "SessionAccessResponse",
+        "type": "object"
+      },
       "SessionCredentialRequest": {
         "properties": {
           "password": {
@@ -27399,6 +27567,27 @@
             ],
             "title": "Environment Version Id"
           },
+          "experiment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExperimentReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
           "failure_message": {
             "anyOf": [
               {
@@ -27522,6 +27711,17 @@
               }
             ],
             "title": "Project Id"
+          },
+          "report_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Status"
           },
           "requested_disk_gb": {
             "anyOf": [
@@ -50769,6 +50969,49 @@
         ]
       }
     },
+    "/api/v1/notebooks/sessions/{session_id}/access": {
+      "post": {
+        "description": "A single-use ticket that opens the caller's own running session in the notebook gateway.",
+        "operationId": "open_session_access_api_v1_notebooks_sessions__session_id__access_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Session Access",
+        "tags": [
+          "notebook-sessions"
+        ]
+      }
+    },
     "/api/v1/notebooks/sessions/{session_id}/provenance": {
       "get": {
         "description": "Return full provenance for a session: inputs, outputs, environment, user.",
@@ -51315,6 +51558,48 @@
           }
         },
         "summary": "Certificate Status",
+        "tags": [
+          "networking"
+        ]
+      }
+    },
+    "/api/v1/settings/networking/certificate/upload": {
+      "post": {
+        "description": "Install a certificate from the organization's own CA (private installations, plan 03.5A).\n\nChecked here, staged privately, and installed by the host's fixed operation, which checks it again.",
+        "operationId": "upload_certificate_api_v1_settings_networking_certificate_upload_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Certificate",
         "tags": [
           "networking"
         ]

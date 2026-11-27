@@ -123,17 +123,21 @@ def _plain(url: str) -> str:
 
 
 def drop_schemas(names: list[str], url: str | None = None) -> None:
-    quoted = [quote(n) for n in names]
-    if not quoted:
+    for name in names:
+        quote(name)  # validates every name before anything is dropped
+    if not names:
         return
 
     async def _drop() -> None:
         import asyncpg
 
+        # Imported here: schema_ddl imports this module.
+        from tests.support import schema_ddl
+
         conn = await asyncpg.connect(_plain(url or database_url()), timeout=10)
         try:
-            for name in quoted:
-                await conn.execute(f"DROP SCHEMA IF EXISTS {name} CASCADE")
+            for name in names:
+                await schema_ddl.drop_schema(conn, name)
         finally:
             await conn.close()
 

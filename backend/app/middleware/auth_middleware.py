@@ -4,7 +4,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from app.services.auth_service import CONTENT_TOKEN_PURPOSE, AuthService
+from app.services.auth_service import AuthService
 from app.services.api_key_service import KEY_PREFIX as API_KEY_PREFIX
 from app.services.audit_service import current_api_key_id
 
@@ -89,7 +89,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if auth_header and auth_header.startswith("Bearer "):
                 try:
                     payload = AuthService.validate_token(auth_header.split(" ", 1)[1])
-                    if payload.get("purpose") != CONTENT_TOKEN_PURPOSE:
+                    # A purpose-scoped token (content, notebook access, setup, invite) is never a session.
+                    if not payload.get("purpose"):
                         request.state.current_user = payload
                 except Exception:
                     pass
@@ -170,8 +171,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         try:
             payload = AuthService.validate_token(token)
-            # Same signing key, but a content token is never a session.
-            if payload.get("purpose") == CONTENT_TOKEN_PURPOSE:
+            # Same signing key, but a purpose-scoped token (content, notebook access, setup, invite)
+            # is never a session.
+            if payload.get("purpose"):
                 return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
             # JWT callers have no per-key scope envelope; mark explicitly.
             payload.setdefault("scopes", None)

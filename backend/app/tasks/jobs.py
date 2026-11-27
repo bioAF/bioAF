@@ -192,10 +192,23 @@ def _notebook_lifecycle() -> Iteration:
     return iteration
 
 
-async def _work_node_heartbeat(session) -> None:
-    from app.services.work_node_service import WorkNodeService
+def _work_node_heartbeat() -> Iteration:
+    """Finish interrupted or failed Stops, then read Work Node reports over SSH (plan 03.5D).
 
-    await WorkNodeService.check_heartbeat_timeouts(session)
+    Neither step stops a node for missing reports. Each node is contacted at most every
+    REPORT_INTERVAL; the round is bounded by its own concurrency, per-node and round deadlines.
+    """
+    factory = _factory()
+
+    async def iteration() -> None:
+        from app.services import work_node_reports
+        from app.services.work_node_service import WorkNodeService
+
+        async with factory() as session:
+            await WorkNodeService.check_heartbeat_timeouts(session)
+        await work_node_reports.report_round(factory)
+
+    return iteration
 
 
 # --- 5 min and hourly ------------------------------------------------------------------------------
@@ -257,6 +270,13 @@ async def _export_cleanup(session) -> None:
     from app.services.data_export import retention
 
     await retention.run(session)
+
+
+async def _notebook_gateway_port(session) -> None:
+    from app.services.notebook_gateway_network import ensure_gateway_port
+
+    await ensure_gateway_port(session)
+    await session.commit()
 
 
 def _idempotency_cleanup() -> Iteration:
@@ -522,7 +542,7 @@ PERIODIC_JOBS: list[PeriodicJob] = [
     ),
     _job(
         "work-node-heartbeat",
-        _with_session(_work_node_heartbeat),
+        _work_node_heartbeat,
         MINUTE,
         MINUTE,
         "Work node heartbeat check error: %s",
@@ -552,6 +572,14 @@ PERIODIC_JOBS: list[PeriodicJob] = [
         MINUTE,
         5 * MINUTE,
         "Installation metrics sender error: %s",
+    ),
+    # Soon after every start (so right after an update) and every six hours (plan 03.5A).
+    _job(
+        "notebook-gateway-port",
+        _with_session(_notebook_gateway_port),
+        MINUTE,
+        6 * HOUR,
+        "Notebook gateway port reconciliation error: %s",
     ),
     _job("idempotency-cleanup", _idempotency_cleanup, HOUR, HOUR, "Idempotency cleanup error: %s"),
 ]

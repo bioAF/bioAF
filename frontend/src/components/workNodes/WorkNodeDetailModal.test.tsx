@@ -37,3 +37,37 @@ test("a node launched before login rules existed shows no rule row", () => {
   render(<WorkNodeDetailModal node={node()} repos={[]} canStop={false} onStop={() => {}} onClose={() => {}} />);
   expect(screen.queryByText("SSH login rule")).not.toBeInTheDocument();
 });
+
+// Plan 03.5D: how reporting stands, next to Last Heartbeat. Proposed wording, pending owner sign-off.
+test.each([
+  ["current", "Reporting normally"],
+  ["stale", "Not reporting. The work node keeps running; missing reports do not stop it."],
+  ["unreachable", "Not reporting. The work node keeps running; missing reports do not stop it."],
+  ["awaiting", "Waiting for the first report"],
+  ["unavailable", "This work node was started before reporting was available"],
+])("reporting %s", (status, text) => {
+  render(
+    <WorkNodeDetailModal
+      node={node({ report_status: status } as Partial<WorkNode>)}
+      repos={[]}
+      canStop={false}
+      onStop={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.getByText("Reporting")).toBeInTheDocument();
+  expect(screen.getByText(text)).toBeInTheDocument();
+});
+
+test("a stopped node shows no reporting row", () => {
+  render(
+    <WorkNodeDetailModal
+      node={node({ status: "stopped", report_status: null } as Partial<WorkNode>)}
+      repos={[]}
+      canStop={false}
+      onStop={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.queryByText("Reporting")).not.toBeInTheDocument();
+});

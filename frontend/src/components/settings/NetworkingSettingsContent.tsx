@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
 import { useConfirm } from "@/hooks/useConfirm";
+import { formatRecordedTime } from "@/lib/recordedTime";
 
 interface NetworkingConfig {
   hostname: string;
@@ -25,6 +26,12 @@ interface ReachabilityResult {
 interface CertificateStatus {
   fqdn: string;
   status: string;
+  // Reported by the host for an installation without a hostname (plan 03.5A).
+  not_after?: string | null;
+  issuer?: string | null;
+  renewed_by_bioaf?: boolean | null;
+  last_renewal_at?: string | null;
+  last_renewal_result?: string | null;
 }
 
 const HOSTNAME_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -92,6 +99,7 @@ export function NetworkingSettingsContent() {
   const [applyingHttps, setApplyingHttps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reachabilityResult, setReachabilityResult] = useState<ReachabilityResult | null>(null);
+  const [installedCert, setInstalledCert] = useState<CertificateStatus | null>(null);
 
   useEffect(() => {
     api
@@ -103,6 +111,16 @@ export function NetworkingSettingsContent() {
       })
       .catch((e) => setError(String(e)));
   }, []);
+
+  // Without a hostname there is no managed certificate to request; show the one the host reports.
+  const noHostname = config !== null && !config.fqdn;
+  useEffect(() => {
+    if (!noHostname) return;
+    api
+      .get<CertificateStatus>("/api/v1/settings/networking/certificate/status")
+      .then((status) => setInstalledCert(status.not_after ? status : null))
+      .catch((e) => logError("reading the installed certificate", e));
+  }, [noHostname]);
 
   const hostnameError = hostname ? validateHostname(hostname) : null;
   const domainError = domain ? validateDomain(domain) : null;
@@ -401,6 +419,42 @@ export function NetworkingSettingsContent() {
             </span>
           )}
         </div>
+
+        {installedCert?.not_after && (
+          <div data-testid="installed-certificate" className="mb-4 rounded border border-gray-200 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-semibold">Installed certificate</span>
+              {installedCert.status === "active" ? (
+                <StatusPill value="active" tone="ok" />
+              ) : (
+                <StatusPill value="failed" tone="bad" />
+              )}
+            </div>
+            <p className="text-gray-700">Expires {formatRecordedTime(installedCert.not_after, "monthDayYearTime")}</p>
+            {installedCert.renewed_by_bioaf ? (
+              <>
+                <p className="mt-2 text-gray-700">Renewed automatically by bioAF.</p>
+                {installedCert.last_renewal_at && installedCert.last_renewal_result && (
+                  <p className="text-gray-700">
+                    Last renewal check: {formatRecordedTime(installedCert.last_renewal_at, "monthDayTime")} (
+                    {installedCert.last_renewal_result})
+                  </p>
+                )}
+                {installedCert.last_renewal_result === "failed" && (
+                  <p
+                    data-testid="certificate-renewal-failed"
+                    className="mt-2 text-yellow-900 bg-yellow-50 border border-yellow-200 rounded px-3 py-2"
+                  >
+                    The last renewal attempt failed. The current certificate keeps working until it expires.
+                    bioAF tries again every six hours.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-gray-700">Not renewed by bioAF. Upload a new certificate before it expires.</p>
+            )}
+          </div>
+        )}
 
         {certManualAction && (
           <div

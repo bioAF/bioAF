@@ -68,6 +68,7 @@ from app.models.orphaned_resource import OrphanedResource
 from app.models.session_credential import SessionCredential
 from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.notebook_session_file import NotebookSessionFile
+from app.models.notebook_access_ticket import NotebookAccessTicket
 from app.models.sequencing_batch import SequencingBatch
 from app.models.manifest_entry import ManifestEntry
 from app.models.entity_snapshot import EntitySnapshot
@@ -155,6 +156,7 @@ __all__ = [
     "ExperimentFieldDefault",
     "ComputeSession",
     "NotebookSession",
+    "NotebookAccessTicket",
     "SlurmJob",
     "UserQuota",
     "PipelineRun",

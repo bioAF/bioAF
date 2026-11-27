@@ -22,8 +22,10 @@ cleanup() {
 trap cleanup EXIT
 
 docker network create "$run" >/dev/null
-# nginx resolves both upstreams at start; the frontend container answers to both names. No backend route is checked.
+# nginx resolves every upstream at start; the frontend container answers to all their names. No backend or
+# notebook gateway route is checked.
 docker run -d --name "$run-frontend" --network "$run" --network-alias frontend --network-alias backend \
+  --network-alias notebook-gateway \
   -p 127.0.0.1::3000 "$image" >/dev/null
 
 mkdir -p "$work/certs"

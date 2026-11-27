@@ -16,6 +16,10 @@ class Environment(Base):
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     visibility: Mapped[str] = mapped_column(String(50), nullable=False, server_default="team")
     environment_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="notebook")
+    # Plan 03.5B: which system template this environment came from, and its revision then. Kept after
+    # customization (ancestry); null for user environments and for legacy ones of unknown provenance.
+    template_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    template_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True
     )

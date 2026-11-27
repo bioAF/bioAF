@@ -189,7 +189,9 @@ async def test_heartbeat_records_the_nodes_applied_login_policy(
 
 
 @pytest.mark.parametrize("builder", ["gce", "ec2"])
-def test_the_heartbeat_reports_the_policy_status(builder):
+def test_the_node_installs_no_heartbeat_callback_even_with_an_api_address(builder):
+    """Owner-approved change (2026-11-25, plan 03.5D): the backend reads the policy status over the
+    verified SSH route; the node never calls the backend, whatever the launch spec says."""
     from app.adapters.work_nodes.ec2 import _build_ec2_startup_script
     from app.adapters.work_nodes.gce import _build_startup_script
 
@@ -202,8 +204,11 @@ def test_the_heartbeat_reports_the_policy_status(builder):
             "api_base_url": "https://bioaf.example.org",
         }
     )
-    cron = next(line for line in script.splitlines() if "heartbeat" in line and "crontab" in line)
-    assert "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status" in cron
+    assert "crontab" not in script
+    assert "/heartbeat" not in script
+    assert "bioaf.example.org" not in script
+    # The node-scoped token file is kept for compatibility with existing clients.
+    assert "/etc/bioaf/token" in script
 
 
 @pytest.mark.parametrize("ranges", [[], ["10.20.0.0/16"]])

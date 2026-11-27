@@ -313,6 +313,9 @@ export interface WorkNode {
   user: UserSummary | null;
   project_id: number | null;
   project: ProjectSummary | null;
+  /** The Experiment the node was launched for; null for a Project-only or legacy unlinked node. */
+  experiment_id?: number | null;
+  experiment?: ExperimentReference | null;
   environment_version_id: number | null;
   machine_type: string | null;
   input_file_ids: number[] | null;
@@ -333,7 +336,10 @@ export interface WorkNode {
   gce_instance_name: string | null;
   gce_zone: string | null;
   github_repo_ids: number[] | null;
+  /** Last Heartbeat: the last successful report from the node (plan 03.5D), not the last attempt. */
   heartbeat_at: string | null;
+  /** current | stale | unreachable | awaiting | unavailable; null unless the node is running. */
+  report_status?: string | null;
   started_at: string | null;
   stopped_at: string | null;
   created_at: string;

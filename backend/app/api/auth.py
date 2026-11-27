@@ -18,7 +18,7 @@ from app.schemas.auth import (
 from app.schemas.session_credential import SessionCredentialRequest, SessionCredentialResponse
 from app.services.access_log_service import AccessLogService
 from app.services.audit_service import log_action
-from app.services import role_service
+from app.services import notebook_access_grant, role_service
 from app.services.auth_service import OLD_INVITE_PLACEHOLDER, AuthService
 from app.services.email_service import EmailService
 from app.services.session_credential_service import SessionCredentialService
@@ -106,6 +106,8 @@ async def logout(request: Request, session: AsyncSession = Depends(get_session))
         entity_id=user_id,
         action="logout",
     )
+    # Signing out also ends access to notebook sessions opened through the protected gateway.
+    await notebook_access_grant.revoke_user_access(session, user_id)
     await session.commit()
     return {"message": "Logged out"}
 

@@ -213,6 +213,15 @@ def assess_pod(pod, events: list[dict], *, container: str = "notebook") -> PodAs
     term = getattr(state, "terminated", None) if state else None
     if phase in ("Failed", "Succeeded") or term is not None:
         why = getattr(term, "reason", None) if term is not None else None
+        exit_code = getattr(term, "exit_code", None) if term is not None else None
+        # The image has no executable for the tool (126/127 from the shell, or the runtime could not
+        # start the command): a plain, actionable reason instead of a generic stop (plan 03.5C).
+        if exit_code in (126, 127) or why in ("StartError", "ContainerCannotRun"):
+            return PodAssessment(
+                "failed",
+                "incompatible_image",
+                "This environment cannot start the selected tool. Choose an environment built for it.",
+            )
         if why == "OOMKilled":
             return PodAssessment("failed", "oom_killed", "The notebook ran out of memory (OOMKilled).")
         reason, message = classify_pod_failure(

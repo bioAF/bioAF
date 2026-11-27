@@ -8,7 +8,7 @@ from typing import Literal
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -213,10 +213,25 @@ async def launch_session(
                 f"Environment version must be in ready status (current: {env_version.status}). "
                 "Build the environment first.",
             )
-        image = env_version.image_uri
+        # A tool this environment's build proved it does not have is refused now, not after a
+        # launch that could only fail (plan 03.5C). Unverified environments are not refused.
+        proven = (env_version.notebook_capability or {}).get(body.session_type)
+        if proven in ("unsupported", "failed"):
+            tool = "RStudio" if body.session_type == "rstudio" else "Jupyter"
+            raise HTTPException(
+                400,
+                f"This environment does not include {tool}. Choose an environment built for {tool}, "
+                "or add it to this environment and build a new version.",
+            )
+        from app.services.notebook_runtime import launch_image
+
+        # By digest when the build recorded one, so the version runs exactly what was verified.
+        image = launch_image(env_version.image_uri, env_version.notebook_capability)
     else:
-        scrna_image = await _get_config_value(session, "bioaf_scrna_image")
-        if not scrna_image or scrna_image == "null":
+        from app.services.notebook_image_service import scientific_image
+
+        scrna_image = await scientific_image(session)
+        if not scrna_image:
             build_status = await _get_config_value(session, "notebook_image_build_status")
             if build_status in ("QUEUED", "WORKING"):
                 raise HTTPException(
@@ -285,6 +300,53 @@ async def stop_session(
 ):
     notebook_session = await stop_owned_session(session, session_id, current_user)
     return _session_response(notebook_session)
+
+
+class SessionAccessResponse(BaseModel):
+    # Where the browser posts the ticket (the notebook gateway's own origin) and the single-use ticket.
+    entry_url: str
+    ticket: str
+    expires_in: int
+
+
+def _gateway_entry_url(request: Request) -> str:
+    """The gateway entry on this installation's own host, on the notebook port (a separate origin)."""
+    from app.config import settings
+
+    host = (request.headers.get("host") or request.url.hostname or "").strip()
+    if host.startswith("["):
+        hostname = host.split("]")[0] + "]"
+    else:
+        hostname = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return f"https://{hostname}:{settings.notebook_gateway_port}/_bioaf/enter"
+
+
+@router.post("/sessions/{session_id}/access", response_model=SessionAccessResponse)
+async def open_session_access(
+    session_id: int,
+    request: Request,
+    current_user: dict = require_permission("notebooks", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    """A single-use ticket that opens the caller's own running session in the notebook gateway."""
+    from app.services import notebook_access_grant
+    from app.services.audit_service import log_action
+
+    issued = await notebook_access_grant.issue_ticket(
+        session, session_id=session_id, user_id=int(current_user["sub"]), org_id=int(current_user["org_id"])
+    )
+    await log_action(
+        session,
+        user_id=int(current_user["sub"]),
+        entity_type="notebook_session",
+        entity_id=session_id,
+        action="open_access",
+        details={"expires_in": issued.expires_in},
+    )
+    await session.commit()
+    return SessionAccessResponse(
+        entry_url=_gateway_entry_url(request), ticket=issued.ticket, expires_in=issued.expires_in
+    )
 
 
 @router.post("/sessions/{session_id}/sync")
@@ -559,6 +621,10 @@ async def update_container_registry(
     current_user: dict = require_permission("notebooks", "edit"),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.services.notebook_image_service import SCIENTIFIC_IMAGE_DIGEST_KEY
+
     await PlatformConfigService.set(session, "bioaf_scrna_image", body.bioaf_scrna_image)
+    # An administrator's own image is used as given: the built image's digest no longer applies.
+    await PlatformConfigService.set(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
     await session.commit()
     return {"status": "ok"}

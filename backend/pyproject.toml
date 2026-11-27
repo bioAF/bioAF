@@ -38,6 +38,9 @@ dependencies = [
     # and multipart (file upload) parsing.
     "python-multipart>=0.0.31",
     "asyncssh>=2.14",
+    # The notebook gateway's WebSocket client to the IDE (plan 03.5A). Already locked through uvicorn's
+    # standard extras; declared because the application imports it. Bounded to the tested major.
+    "websockets>=17.4,<18",
     # Phase 5: Data Management + Visualization
     "google-cloud-storage>=2.14",
     # AWS SDK for the S3 storage provider (Stage 6a) and later AWS substrate

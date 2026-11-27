@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -367,6 +368,70 @@ async def request_certificate(
     return CertificateStatusResponse(fqdn=fqdn, status=CERT_STATUS_PROVISIONING)
 
 
+class CertificateUpload(BaseModel):
+    certificate_pem: str = Field(min_length=1, max_length=65536)
+    private_key_pem: str = Field(min_length=1, max_length=65536)
+
+
+class CertificateUploadResponse(BaseModel):
+    status: str
+    names: list[str]
+    not_after: datetime
+    issuer: str
+
+
+@router.post("/certificate/upload", response_model=CertificateUploadResponse, status_code=202)
+async def upload_certificate(
+    body: CertificateUpload,
+    request: Request,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+) -> CertificateUploadResponse:
+    """Install a certificate from the organization's own CA (private installations, plan 03.5A).
+
+    Checked here, staged privately, and installed by the host's fixed operation, which checks it again.
+    """
+    from app.services import certificate_upload
+
+    summary = certificate_upload.check_pair(
+        body.certificate_pem, body.private_key_pem, host=request.headers.get("host", "")
+    )
+    certificate_upload.stage_and_request_install(body.certificate_pem, body.private_key_pem)
+    await audit_service.log_action(
+        session,
+        user_id=int(current_user["sub"]),
+        entity_type="platform_config",
+        entity_id=0,
+        action="upload_certificate",
+        details={"names": summary.names, "not_after": summary.not_after.isoformat(), "issuer": summary.issuer},
+    )
+    await session.commit()
+    return CertificateUploadResponse(
+        status="installing", names=summary.names, not_after=summary.not_after, issuer=summary.issuer
+    )
+
+
+def _reported_certificate_status() -> CertificateStatusResponse:
+    """Without a hostname: the certificate the host reports as installed, or "not requested"."""
+    from datetime import datetime, timezone
+
+    from app.config import settings
+    from app.services.certificate_report import read_report
+
+    report = read_report(settings.tls_report_dir)
+    if report is None:
+        return CertificateStatusResponse(fqdn="", status=CERT_STATUS_NOT_REQUESTED)
+    return CertificateStatusResponse(
+        fqdn="",
+        status="active" if report.not_after > datetime.now(timezone.utc) else "failed",
+        not_after=report.not_after,
+        issuer=report.issuer,
+        renewed_by_bioaf=report.renewed_by_bioaf,
+        last_renewal_at=report.last_renewal_at,
+        last_renewal_result=report.last_renewal_result,
+    )
+
+
 @router.get("/certificate/status", response_model=CertificateStatusResponse)
 async def certificate_status(
     current_user: dict = require_permission("infrastructure", "view"),
@@ -379,7 +444,7 @@ async def certificate_status(
     domain = config.get("networking_domain", "")
     fqdn = _compute_fqdn(hostname, domain)
     if not hostname or not domain:
-        return CertificateStatusResponse(fqdn="", status=CERT_STATUS_NOT_REQUESTED)
+        return _reported_certificate_status()
 
     status_str = await applier.get_certificate_status(fqdn)
     await _upsert(session, "networking_cert_status", status_str)

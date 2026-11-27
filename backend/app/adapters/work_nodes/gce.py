@@ -15,6 +15,7 @@ from app.settings_contract import ComputeMode, is_simulated
 from app.adapters.base import VmInstance, WorkNodeProvider
 from app.adapters.capabilities import ProviderCapabilities
 from app.adapters.models import (
+    NodeReportResult,
     StoredObject,
     TerminationResult,
     VmInfo,
@@ -27,8 +28,14 @@ from app.adapters.work_nodes.node_ssh import (
     STOP_DELETE_UNCONFIRMED,
     STOP_SAVE_FAILED,
     STOP_STATE_UNKNOWN,
+    REPORT_MISMATCH,
+    REPORT_REPORTED,
+    REPORT_UNAVAILABLE,
+    REPORT_UNREACHABLE,
     NodeSyncError,
     host_key_install_lines,
+    read_node_report,
+    report_error_outcome,
     run_sync_command,
     sync_outputs_command,
 )
@@ -347,22 +354,14 @@ def _build_startup_script(vm_spec: dict) -> str:
         "MOTD_EOF",
     ]
 
-    # 8. Heartbeat agent
+    # 8. Heartbeat token
     if heartbeat_token:
         lines += [
             "",
-            "# 8. Heartbeat agent",
+            "# 8. Heartbeat token (kept for existing clients; the backend reads reports over SSH)",
             "mkdir -p /etc/bioaf",
             f"echo '{heartbeat_token}' > /etc/bioaf/token",
         ]
-        # Simple heartbeat cron: POST every 5 minutes
-        api_base = vm_spec.get("api_base_url", "")
-        if api_base:
-            lines += [
-                f"echo '*/5 * * * * curl -s -X POST {api_base}/api/v1/work-nodes/sessions/{session_id}/heartbeat "
-                f'-H "X-Heartbeat-Token: {heartbeat_token}" '
-                f'-H "X-SSH-Policy: $(cat /etc/bioaf/ssh-policy-status 2>/dev/null)" > /dev/null 2>&1\' | crontab -',
-            ]
 
     # 9. Ownership
     lines += [
@@ -931,6 +930,63 @@ class GceVmInstance(VmInstance):
             "output_files": output_files,
             "gcs_output_prefix": gcs_output_prefix,
         }
+
+    async def report_vm(
+        self,
+        instance_name: str,
+        zone: str,
+        *,
+        gcp_project_id: str = "",
+        session_id: int = 0,
+        sync_private_key: str | None = None,
+        host_public_key: str | None = None,
+        provider_instance_id: str | None = None,
+        launch_attempt_id: str | None = None,
+        sync_route: str | None = None,
+        timeout: float = 15,
+        **kwargs,
+    ) -> NodeReportResult:
+        """Read the node's report from the instance it was launched as, over its recorded route only.
+
+        A replaced or missing instance is a mismatch and is not contacted. A private-route node is
+        read over its internal address; a failure there is never retried over the public address.
+        """
+        if self.is_local:
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        from google.cloud import compute_v1
+
+        try:
+            await self.load_gcp_config()
+            project = gcp_project_id or (self._gcp_config or {}).get("gcp_project_id", "")
+            instances_client = compute_v1.InstancesClient(credentials=self._get_gcp_credentials())
+        except Exception as exc:
+            logger.warning("Work node report for %s: provider unavailable (%s)", instance_name, type(exc).__name__)
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        instance = await asyncio.to_thread(self._get_instance, instances_client, project, zone, instance_name)
+        if instance is _UNKNOWN:
+            return NodeReportResult(outcome=REPORT_UNAVAILABLE)
+        if instance is None:
+            return NodeReportResult(outcome=REPORT_MISMATCH)
+        labels = dict(instance.labels or {})
+        if (
+            (provider_instance_id and str(instance.id) != str(provider_instance_id))
+            or (session_id and labels.get("bioaf-session") != str(session_id))
+            or (launch_attempt_id and labels.get("bioaf-launch") != launch_attempt_id)
+        ):
+            return NodeReportResult(outcome=REPORT_MISMATCH)
+        if instance.status != "RUNNING":
+            return NodeReportResult(outcome=REPORT_UNREACHABLE)
+        address = _internal_ip(instance) if sync_route == "private-v1" else _external_ip(instance)
+        if not address:
+            return NodeReportResult(outcome=REPORT_UNREACHABLE)
+        try:
+            report = await read_node_report(
+                address, sync_private_key=sync_private_key, host_public_key=host_public_key, timeout=timeout
+            )
+        except NodeSyncError as exc:
+            logger.info("Work node report for %s failed: %s", instance_name, type(exc).__name__)
+            return NodeReportResult(outcome=report_error_outcome(exc))
+        return NodeReportResult(outcome=REPORT_REPORTED, ssh_policy_status=report.ssh_policy_status)
 
     @staticmethod
     def _get_instance(instances_client, project: str, zone: str, instance_name: str):

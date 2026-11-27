@@ -770,6 +770,16 @@ class NotebookProvider(ABC):
         """The workload a recorded session owns, or None when this backend manages none."""
         return self.resolve_workload(ns)[0]
 
+    async def live_pod_uid(self, workload: NotebookWorkload) -> str:
+        """The UID of the running Pod that carries this workload's identity (plan 03.5A).
+
+        Raises ConnectionUnavailableError when no such Pod can be confirmed. The default manages no
+        Pods and confirms none.
+        """
+        from app.exceptions import ConnectionUnavailableError
+
+        raise ConnectionUnavailableError("This session's workload cannot be confirmed.", reason="unconfirmed")
+
     async def labelled_workloads(self) -> dict[int, list[str]]:
         """Session id -> names of the session-labelled resources that exist (empty when not managed)."""
         return {}
@@ -916,6 +926,15 @@ class WorkNodeProvider(ABC):
         from app.platform.work_node_inventory import LaunchOutcome
 
         return LaunchOutcome("none") if not requests else LaunchOutcome("unknown")
+
+    async def report_vm(self, instance_name: str, zone: str, **kwargs):
+        """Read the node's liveness/policy report over its recorded verified route (NodeReportResult).
+
+        The default cannot reach a node and says so; it never reports liveness it did not observe.
+        """
+        from app.adapters.models import NodeReportResult
+
+        return NodeReportResult(outcome="unavailable")
 
     async def inventory_instances(self) -> list:
         """Every existing bioAF Work Node instance in this installation, as ManagedInstance records.

@@ -114,6 +114,7 @@ class FakeCore:
         # (verb, kind, name) -> HTTP status to raise, e.g. ("delete", "pod", "bioaf-notebook-42"): 403
         self.errors = dict(errors or {})
         self.calls: list[tuple] = []
+        self.secret_calls: list[tuple] = []
         # Accepted deletes leave the object terminating unless this is True.
         self.delete_is_immediate = False
 
@@ -155,6 +156,16 @@ class FakeCore:
 
     def delete_namespaced_service(self, name, namespace, body=None, **_):
         return self._delete(self.services, "service", name, namespace, body)
+
+    # Per-session access Secrets (plan 03.5A), recorded apart from the pod/Service calls.
+    def create_namespaced_secret(self, namespace, body, **_):
+        self.secret_calls.append(("create", body["metadata"]["name"]))
+
+    def patch_namespaced_secret(self, name, namespace, body, **_):
+        self.secret_calls.append(("patch", name))
+
+    def delete_namespaced_secret(self, name, namespace, **_):
+        self.secret_calls.append(("delete", name))
 
     def connect_get_namespaced_pod_exec(self, *args, **kwargs):
         """The exec entry point; tests patch ``kubernetes.stream.stream`` to observe exec calls."""

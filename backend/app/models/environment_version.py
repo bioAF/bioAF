@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,6 +22,12 @@ class EnvironmentVersion(Base):
     definition_content: Mapped[str] = mapped_column(Text, nullable=False)
     build_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_uri: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Plan 03.5B: what this version's successful build proved under the notebook runtime contract
+    # (notebook_runtime.capability_from_build, from the build's own evidence and digest). Null: built
+    # before the contract, or not a notebook.
+    notebook_capability: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The template revision this version's definition is, unmodified; null when user-managed.
+    template_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=True

@@ -79,6 +79,12 @@ class ReachabilityTestResult(BaseModel):
 class CertificateStatusResponse(BaseModel):
     fqdn: str
     status: str  # not_requested | provisioning | active | failed
+    # From the host's certificate report, for an installation without a hostname (plan 03.5A).
+    not_after: datetime | None = None
+    issuer: str | None = None
+    renewed_by_bioaf: bool | None = None
+    last_renewal_at: datetime | None = None
+    last_renewal_result: str | None = None  # succeeded | failed
 
 
 class EnforceHttpsRequest(BaseModel):

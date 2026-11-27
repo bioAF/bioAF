@@ -13,7 +13,7 @@
 #   2. Authenticates with Google Cloud
 #   3. Selects or creates a GCP project
 #   4. Enables required APIs
-#   5. Creates a firewall rule for web traffic (ports 80, 443)
+#   5. Creates a firewall rule for web traffic (ports 80, 443, and 8443 for notebooks)
 #   6. Creates the bioaf-managed Resource Manager tag and a custom IAM role
 #   7. Creates the bioaf-bootstrap and bioaf-app service accounts (no keys)
 #   8. Creates a VM with bioaf-app attached and the bootstrap email in metadata
@@ -283,7 +283,7 @@ echo "     Homebrew to install it with"
 echo "  2. Authenticate your Google account"
 echo "  3. Select your GCP project"
 echo "  4. Enable required GCP APIs"
-echo "  5. Create a firewall rule for web traffic (ports 80, 443)"
+echo "  5. Create a firewall rule for web traffic (ports 80, 443, and 8443 for notebooks)"
 echo "  6. Create two scoped service accounts (no JSON keys are downloaded)"
 echo "  7. Create an e2-medium VM with Ubuntu 22.04 (30GB disk)"
 echo ""
@@ -705,12 +705,17 @@ section "Step 6: Firewall Rule"
 
 existing_fw=$(gcloud compute firewall-rules describe "$FIREWALL_RULE_NAME" --project="$PROJECT_ID" --format="value(name)" 2>/dev/null || echo "")
 if [ -n "$existing_fw" ]; then
-    step "Firewall rule '$FIREWALL_RULE_NAME' already exists" -- true
+    # Existing installations gain the notebook gateway port (plan 03.5A); same sources as 443.
+    step "Update firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443, tcp:8443)" -- \
+        gcloud compute firewall-rules update "$FIREWALL_RULE_NAME" \
+            --project="$PROJECT_ID" \
+            --allow=tcp:80,tcp:443,tcp:8443 \
+            --quiet
 else
-    step "Create firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443)" -- \
+    step "Create firewall rule '$FIREWALL_RULE_NAME' (tcp:80, tcp:443, tcp:8443)" -- \
         gcloud compute firewall-rules create "$FIREWALL_RULE_NAME" \
             --project="$PROJECT_ID" \
-            --allow=tcp:80,tcp:443 \
+            --allow=tcp:80,tcp:443,tcp:8443 \
             --target-tags="$NETWORK_TAG" \
             --source-ranges=0.0.0.0/0 \
             --description="Allow web traffic to bioAF" \
@@ -1107,6 +1112,15 @@ else
         --format="value(networkInterfaces[0].networkIP)" 2>/dev/null || echo "")
 fi
 
+# Keep the public address: the HTTPS certificate names it (plan 03.5A). Same address, no restart.
+# Loaded once a VM exists (like the SSH recovery helper); optional: without it the address stays as it is.
+if [ "$USE_PUBLIC_IP" = true ] && [ -n "$VM_IP" ] \
+    && bioaf_load_helper installer/static_ip.sh optional gcp_keep_public_ip; then
+    step "Keep this server's public address ${VM_IP} (static)" -- \
+        gcp_keep_public_ip "$VM_NAME" "${ZONE%-*}" "$PROJECT_ID" "$VM_IP" \
+        || warn "The address could not be made static; if it changes, run ./bioaf tls-issue-ip on the server."
+fi
+
 # ---------------------------------------------------------------------------
 # Wait for VM readiness
 # ---------------------------------------------------------------------------
@@ -1282,6 +1296,11 @@ if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ]; then
     fi
 fi
 
+# A trusted certificate for a public address (plan 03.5A); private installations upload their own.
+TLS_REMOTE_STEP="true"
+if [ "$USE_PUBLIC_IP" = true ]; then
+    TLS_REMOTE_STEP='./bioaf tls-issue-ip || echo "HTTPS still uses the temporary certificate. Run ./bioaf tls-issue-ip on the server to retry."'
+fi
 if [ "${finish_choice:-2}" = "1" ] && [ -n "$VM_IP" ] && [ -f "${PREFILL_LOCAL}" ]; then
     echo ""
     echo "  Cloning bioAF and running setup on the VM. This will take a few minutes."
@@ -1299,6 +1318,7 @@ fi
 cd "$HOME/bioAF"
 git pull --ff-only origin main 2>/dev/null || true
 ./bioaf setup --prefill "$HOME/.bioaf-prefill.yaml"
+'"$TLS_REMOTE_STEP"'
 '; then
         REMOTE_SETUP_SUCCEEDED=true
     else

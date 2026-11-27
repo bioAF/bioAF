@@ -27,7 +27,7 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    environment:
+    environment: &backend_environment
       PYTHONPATH: /app
       BIOAF_DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://bioaf:CHANGE_ME@db:5432/bioaf}
       BIOAF_JWT_SECRET_KEY: ${SECRET_KEY:-CHANGE_ME_TO_RANDOM_STRING}
@@ -66,6 +66,9 @@ services:
     volumes:
       - ../update-requests:/app/update-requests
       - ../update-status:/app/update-status
+      # An organization-CA certificate staged for the host to install (plan 03.5A); created 0700 by ./bioaf.
+      - ../tls-upload:/app/tls-upload
+      - ../tls-report:/app/tls-report:ro
       # Recovery backups the backend writes before upgrading the database (backend/entrypoint.sh,
       # app/schema_upgrade.py). On the host, beside ./bioaf backup's dumps, so they outlive the
       # container. Read fresh on every update, so the first update from any older ./bioaf gets it.
@@ -96,6 +99,21 @@ services:
           memory: 1536M
     restart: unless-stopped
 
+  # Protected notebook gateway (plan 03.5A): the backend image as a separate process with no bioAF API
+  # route and no database upgrade (the backend's entrypoint owns that). nginx serves it on :8443.
+  notebook-gateway:
+    image: ghcr.io/bioaf/bioaf-backend:${BIOAF_IMAGE_TAG:-latest}
+    entrypoint: ["python", "-m", "uvicorn", "app.notebook_gateway.app:create_app", "--factory"]
+    command: ["--host", "0.0.0.0", "--port", "8001", "--no-server-header"]
+    environment: *backend_environment
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    restart: unless-stopped
+
   frontend:
     image: ghcr.io/bioaf/bioaf-frontend:${BIOAF_IMAGE_TAG:-latest}
     build:
@@ -120,6 +138,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8443:8443"
     volumes:
       # Rendered by the nginx image at start, substituting only BIOAF_ variables (the edge token).
       - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
@@ -137,6 +156,7 @@ services:
     depends_on:
       - frontend
       - backend
+      - notebook-gateway
     deploy:
       resources:
         limits:

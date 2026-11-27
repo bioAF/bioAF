@@ -52,6 +52,9 @@ update-gate/
 /host-only/
 # The update agent's private staging for status writes and its running-code record; never mounted
 /host-state/
+# Organization-CA certificate staged by the backend for the host to install (plan 03.5A).
+/tls-upload/
+/tls-report/
 
 # Terraform
 *.tfvars

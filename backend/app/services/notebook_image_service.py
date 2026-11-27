@@ -16,7 +16,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials.credential_injector import load_gcp_credentials
+from app.services import notebook_runtime
+from app.services.notebook_runtime import add_check_script
 from app.adapters.image_build import get_image_build_provider
+from app.adapters.image_build.base import BuildResult
 from app.adapters.image_registry import get_image_registry_provider
 from app.adapters.image_registry.gcp import AR_REPO_ID
 from app.exceptions import StateError, ValidationError
@@ -34,7 +37,7 @@ DOCKERFILE_CONTENT = """\
 # Pinned for reproducibility (postmortem of build 28b547ac: floating :latest left
 # R 4.1.2 too old for current packages). Bump these ARGs deliberately; never float
 # to :latest. After changing a pin, validate with a Cloud Build, then lock results.
-FROM jupyter/scipy-notebook@sha256:fca4bcc9cbd49d9a15e0e4df6c666adf17776c950da9fa94a4f0a045d5c4ad33
+FROM __NOTEBOOK_BASE_IMAGE__
 
 USER root
 
@@ -43,7 +46,6 @@ ARG R_VERSION=4.4.3
 ARG BIOC_VERSION=3.20
 ARG CRAN_SNAPSHOT=2024-12-02
 ARG PRESTO_REF=a24772a135c7895a8183b007376050556c60a05b
-ARG RSTUDIO_DEB=rstudio-server-2024.04.2-764-amd64.deb
 
 # System libraries. Several of these are the reason R/Python packages fail to
 # build or load if absent: libglpk (igraph), libopenblas (igraph.so links
@@ -159,17 +161,12 @@ RUN jupyter kernelspec list | grep -qi '\\bir\\b' || (echo 'ERROR: IRkernel spec
 # Verify the key Python imports resolve too
 RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"
 
-# RStudio Server (pinned jammy build)
-RUN apt-get update && apt-get install -y --no-install-recommends gdebi-core wget \\
-    && wget -q https://download2.rstudio.org/server/jammy/amd64/${RSTUDIO_DEB} \\
-    && gdebi -n ${RSTUDIO_DEB} \\
-    && rm rstudio-server-*.deb \\
-    && rm -rf /var/lib/apt/lists/*
-
-USER ${NB_UID}
-
-WORKDIR /home/jovyan
 """
+
+# RStudio Server, the notebook user and the capability check come from the shared runtime contract
+# (plan 03.5B), so this image and notebook EnvironmentVersions are held to the same proof.
+DOCKERFILE_CONTENT = DOCKERFILE_CONTENT.replace("__NOTEBOOK_BASE_IMAGE__", notebook_runtime.NOTEBOOK_BASE_IMAGE)
+DOCKERFILE_CONTENT += notebook_runtime.runtime_layer(r_home=None) + notebook_runtime.check_step(require_rstudio=True)
 
 
 def _render_dockerfile() -> str:
@@ -277,6 +274,7 @@ async def _upload_build_context(session: AsyncSession, working_bucket: str) -> s
         info.size = len(dockerfile_bytes)
         info.mtime = int(time.time())
         tar.addfile(info, io.BytesIO(dockerfile_bytes))
+        add_check_script(tar)
 
     buf.seek(0)
     object_path = "builds/bioaf-scrna/source.tar.gz"
@@ -351,6 +349,53 @@ async def check_build_status(session: AsyncSession, build_id: str) -> str:
     return get_image_build_provider().check_build_status(credentials, platform.config, build_id)
 
 
+SCIENTIFIC_IMAGE_DIGEST_KEY = "bioaf_scrna_image_digest"
+# How many times a successful build's unreadable result has been read; publishing waits meanwhile.
+SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY = "notebook_image_evidence_attempts"
+MAX_EVIDENCE_ATTEMPTS = 10
+
+
+def _attempts(value: str | None) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except ValueError:
+        return 0
+
+
+async def _reset_scientific_image(session: AsyncSession) -> None:
+    """Before a new build: no image, digest or pending evidence read from an earlier one."""
+    for key in ("bioaf_scrna_image", SCIENTIFIC_IMAGE_DIGEST_KEY, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY):
+        await _set_config(session, key, "null")
+
+
+async def scientific_image(session: AsyncSession) -> str | None:
+    """The built-in scientific image a session without an EnvironmentVersion runs, or None.
+
+    Pinned to the digest its build pushed when one was recorded; an administrator's own image (which
+    clears the digest) is used as given.
+    """
+    image = (await _read_config(session, "bioaf_scrna_image") or "").strip()
+    if not image or image == "null":
+        return None
+    digest = (await _read_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY) or "").strip()
+    return notebook_runtime.launch_image(image, {"image_digest": digest} if digest != "null" else None)
+
+
+async def check_build_result(session: AsyncSession, build_id: str) -> BuildResult:
+    """The build's status with its pushed image digest and the runtime check's evidence (plan 03.5B).
+
+    Unreadable evidence is no evidence: the version is recorded unverified and launched by its tag,
+    and the build poll that asked carries on.
+    """
+    try:
+        platform = await resolve_image_platform(session)
+        credentials = await resolve_image_credentials(session, platform)
+        return get_image_build_provider().build_result(credentials, platform.config, build_id)
+    except Exception as exc:
+        logger.warning("Could not read the result of build %s: %s", build_id, type(exc).__name__)
+        return BuildResult("UNKNOWN", None, None)
+
+
 async def request_provider_cancel(session: AsyncSession, build_id: str) -> None:
     """Ask the build provider to cancel ``build_id``. A request is not settlement: the build poller
     records CANCELLED (and the component state) only once the provider reports it."""
@@ -399,8 +444,8 @@ async def build_notebook_image(session: AsyncSession, user_id: int | None = None
     platform.require_target()
     platform.require_build_service()
 
-    # Clear any stale image URI from a previous failed build attempt
-    await _set_config(session, "bioaf_scrna_image", "null")
+    # Clear any stale image URI (and its digest) from a previous failed build attempt
+    await _reset_scientific_image(session)
     # Reset build tracking so poll_image_build picks up the new build
     await _set_config(session, "notebook_image_build_status", "null")
     await _set_config(session, "notebook_image_build_id", "null")
@@ -422,7 +467,9 @@ async def build_notebook_image(session: AsyncSession, user_id: int | None = None
     return build_id
 
 
-async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> None:
+async def _ensure_default_environment(
+    session: AsyncSession, image_uri: str, result: BuildResult | None = None, build_id: str = ""
+) -> None:
     """Create the default scRNA-seq environment if none exists yet.
 
     Called after a successful notebook image build so users have an
@@ -474,19 +521,67 @@ async def _ensure_default_environment(session: AsyncSession, image_uri: str) -> 
     session.add(env)
     await session.flush()
 
+    definition = _render_dockerfile()
     version = EnvironmentVersion(
         environment_id=env.id,
         version_number=1,
         status="ready",
         definition_format="dockerfile",
-        definition_content=_render_dockerfile(),
+        definition_content=definition,
         image_uri=image_uri,
         created_by_user_id=user_id,
+        # What the build's own evidence proved (plan 03.5B); unverified without it.
+        notebook_capability=notebook_runtime.capability_from_build(
+            "dockerfile",
+            definition,
+            result or BuildResult("SUCCESS", None, None),
+            image_uri=image_uri,
+            build_id=build_id,
+        ),
     )
     session.add(version)
     await session.flush()
 
     logger.info("Created default environment '%s' (id=%d) with image %s", env.name, env.id, image_uri)
+
+
+async def _publish_scientific_image(session: AsyncSession, build_id: str, platform) -> None:
+    """Publish a successful build: its image, the digest it pushed, and the default environment.
+
+    Deferred while the build's result cannot be read (see ``MAX_EVIDENCE_ATTEMPTS``).
+    """
+    # Now that the build succeeded, write the image URI and the digest it pushed; launches pin to
+    # the digest (scientific_image), so a moved tag never changes what runs.
+    image_uri = get_image_uri(platform.config)
+    result = await check_build_result(session, build_id)
+    if result.status == "UNKNOWN":
+        # The result could not be read (a transient failure), which is not "no evidence": read it
+        # again on the next poll, and publish by tag, unverified, only after the last attempt.
+        attempts = _attempts(await _read_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY)) + 1
+        if attempts < MAX_EVIDENCE_ATTEMPTS:
+            await _set_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY, str(attempts))
+            logger.warning("Build %s result unreadable (attempt %d); retrying", build_id, attempts)
+            return
+    await _set_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY, "null")
+    await _set_config(session, "bioaf_scrna_image", image_uri)
+    await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, result.image_digest or "null")
+    # Drain the wizard's queue: any rstudio/jupyterhub queued before the
+    # image existed can now flip to enabled (or stay provisioning if
+    # compute is not up yet). Local import to avoid a cycle through
+    # component_queue -> notebook_image_service.build_notebook_image.
+    from app.services.component_queue import process_queued_components
+
+    await process_queued_components(session)
+    # Update component states for notebook components
+    await session.execute(
+        text("""
+        UPDATE component_states SET status = 'enabled'
+        WHERE component_key IN ('rstudio', 'jupyterhub')
+        AND enabled = true AND status = 'provisioning'
+        """)
+    )
+    # Create default environment if none exists yet, with what this build proved.
+    await _ensure_default_environment(session, image_uri, result, build_id)
 
 
 async def poll_image_build(session: AsyncSession) -> str | None:
@@ -500,6 +595,13 @@ async def poll_image_build(session: AsyncSession) -> str | None:
         return None
 
     current_status = await _read_config(session, "notebook_image_build_status")
+    if current_status == "SUCCESS" and _attempts(await _read_config(session, SCIENTIFIC_IMAGE_EVIDENCE_ATTEMPTS_KEY)):
+        # Succeeded, but its result could not be read yet: try again before publishing.
+        platform = await resolve_image_platform(session)
+        if platform.has_target:
+            await _publish_scientific_image(session, build_id, platform)
+            await session.flush()
+        return current_status
     if current_status in ("SUCCESS", "FAILURE", "CANCELLED", "TIMEOUT"):
         return current_status
 
@@ -517,30 +619,12 @@ async def poll_image_build(session: AsyncSession) -> str | None:
 
     if status == "SUCCESS":
         logger.info("Notebook image build %s completed successfully", build_id)
-        # Now that the build succeeded, write the image URI
-        image_uri = get_image_uri(platform.config)
-        await _set_config(session, "bioaf_scrna_image", image_uri)
-        # Drain the wizard's queue: any rstudio/jupyterhub queued before the
-        # image existed can now flip to enabled (or stay provisioning if
-        # compute is not up yet). Local import to avoid a cycle through
-        # component_queue -> notebook_image_service.build_notebook_image.
-        from app.services.component_queue import process_queued_components
-
-        await process_queued_components(session)
-        # Update component states for notebook components
-        await session.execute(
-            text("""
-            UPDATE component_states SET status = 'enabled'
-            WHERE component_key IN ('rstudio', 'jupyterhub')
-            AND enabled = true AND status = 'provisioning'
-            """)
-        )
-        # Create default environment if none exists yet
-        await _ensure_default_environment(session, image_uri)
+        await _publish_scientific_image(session, build_id, platform)
     elif status in ("FAILURE", "CANCELLED", "TIMEOUT"):
         logger.error("Notebook image build %s failed with status %s", build_id, status)
         # Clear the image URI since the build failed
         await _set_config(session, "bioaf_scrna_image", "null")
+        await _set_config(session, SCIENTIFIC_IMAGE_DIGEST_KEY, "null")
         # Mark notebook components as build_failed so the UI shows retry
         await session.execute(
             text("""

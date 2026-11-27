@@ -65,3 +65,16 @@ export function sshLoginRuleText(node: WorkNode): string | null {
   if (node.ssh_policy_status === "failed") return `Revision ${revision} could not be checked on this work node`;
   return `Revision ${revision}, in force on this work node`;
 }
+
+/** How the node's reporting stands (plan 03.5D), or null when the node is not running. Proposed wording. */
+const REPORTING_TEXT: Record<string, string> = {
+  current: "Reporting normally",
+  stale: "Not reporting. The work node keeps running; missing reports do not stop it.",
+  unreachable: "Not reporting. The work node keeps running; missing reports do not stop it.",
+  awaiting: "Waiting for the first report",
+  unavailable: "This work node was started before reporting was available",
+};
+
+export function reportingText(node: WorkNode): string | null {
+  return REPORTING_TEXT[node.report_status ?? ""] ?? null;
+}

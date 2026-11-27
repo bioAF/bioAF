@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.entity_reference import ProjectSummary
+from app.schemas.entity_reference import ExperimentReference, ProjectSummary
 from app.schemas.user_summary import UserSummary
 
 
@@ -28,6 +28,9 @@ class WorkNodeResponse(BaseModel):
     user: UserSummary | None = None
     project_id: int | None = None
     project: ProjectSummary | None = None
+    # The Experiment the node was launched for; null for a Project-only or legacy unlinked node.
+    experiment_id: int | None = None
+    experiment: ExperimentReference | None = None
     environment_version_id: int | None = None
     machine_type: str | None = None
     input_file_ids: list[int] | None = None
@@ -48,7 +51,11 @@ class WorkNodeResponse(BaseModel):
     gce_instance_name: str | None = None
     gce_zone: str | None = None
     github_repo_ids: list[int] | None = None
+    # Last Heartbeat: the last successful report from the node (plan 03.5D), not the last attempt.
     heartbeat_at: datetime | None = None
+    # How reporting stands: current | stale | unreachable | awaiting | unavailable; null unless running
+    # (or kept running by a failed Stop). Never a reason to stop the node.
+    report_status: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None
     created_at: datetime

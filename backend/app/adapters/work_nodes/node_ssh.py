@@ -19,6 +19,7 @@ different server key refuses before any remote command runs.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import asyncssh
@@ -26,6 +27,8 @@ import asyncssh
 HOST_KEY_PATH = "/etc/ssh/bioaf_host_ed25519_key"
 HOST_KEY_CONFIG = "/etc/ssh/sshd_config.d/00-bioaf-host-key.conf"
 SYNC_USER = "bioaf-sync"
+# Written by the node's boot-time SSH policy step (sshd_policy.STATUS_PATH).
+SSH_POLICY_STATUS_PATH = "/etc/bioaf/ssh-policy-status"
 
 # The readiness version of a session row whose sync key and host identity are durable. Sessions
 # without it (launched before this release) hold their sync key only in an old process's memory.
@@ -112,6 +115,45 @@ def host_key_install_lines(host_private_key: str, host_public_key: str) -> list[
     ]
 
 
+def _client_credentials(sync_private_key: str | None, host_public_key: str | None):
+    if not sync_private_key or not host_public_key:
+        raise NodeTrustError("missing durable sync credential or recorded host identity")
+    try:
+        return asyncssh.import_private_key(sync_private_key), asyncssh.import_public_key(host_public_key)
+    except (asyncssh.KeyImportError, ValueError) as exc:
+        raise NodeTrustError("stored node credential could not be read") from exc
+
+
+@asynccontextmanager
+async def _verified_connection(address: str, *, sync_private_key, host_public_key, port: int, connect_timeout: float):
+    """A connection as ``bioaf-sync`` to the server holding the recorded host key, and no other.
+
+    Shared by Stop's save and the liveness report. Refusals and transport failures are mapped to
+    NodeTrustError / NodeSyncError, including those raised while the caller uses the connection.
+    """
+    client_key, trusted_host = _client_credentials(sync_private_key, host_public_key)
+    try:
+        async with asyncssh.connect(
+            address,
+            port=port,
+            username=SYNC_USER,
+            client_keys=[client_key],
+            known_hosts=([trusted_host], [], []),
+            agent_path=None,
+            config=None,
+            password=None,
+            kbdint_auth=False,
+            connect_timeout=connect_timeout,
+        ) as conn:
+            yield conn
+    except asyncssh.HostKeyNotVerifiable as exc:
+        raise NodeTrustError("node presented an unrecognized server key") from exc
+    except asyncssh.PermissionDenied as exc:
+        raise NodeTrustError("node refused the backend sync credential") from exc
+    except (OSError, asyncio.TimeoutError, asyncssh.Error) as exc:
+        raise NodeSyncError(type(exc).__name__) from exc
+
+
 async def run_sync_command(
     address: str,
     *,
@@ -127,32 +169,117 @@ async def run_sync_command(
     unusable or the server presents any other key; NodeSyncError when the node cannot be reached
     or the command does not finish in time.
     """
-    if not sync_private_key or not host_public_key:
-        raise NodeTrustError("missing durable sync credential or recorded host identity")
-    try:
-        client_key = asyncssh.import_private_key(sync_private_key)
-        trusted_host = asyncssh.import_public_key(host_public_key)
-    except (asyncssh.KeyImportError, ValueError) as exc:
-        raise NodeTrustError("stored node credential could not be read") from exc
+    async with _verified_connection(
+        address,
+        sync_private_key=sync_private_key,
+        host_public_key=host_public_key,
+        port=port,
+        connect_timeout=min(timeout, 30),
+    ) as conn:
+        result = await asyncio.wait_for(conn.run(command), timeout=timeout)
+    return result.exit_status if result.exit_status is not None else 255
+
+
+# -- Liveness and policy report (plan 03.5D) -------------------------------------------------------
+
+REPORT_HEADER = "bioaf-node-report 1"
+REPORT_MAX_BYTES = 4096
+REPORTED_POLICY_STATES = ("applied", "failed", "failed_closed")
+
+
+# Outcomes of one report attempt (NodeReportResult.outcome).
+REPORT_REPORTED = "reported"
+REPORT_UNREACHABLE = "unreachable"
+REPORT_UNTRUSTED = "untrusted"
+REPORT_MALFORMED = "malformed"
+REPORT_MISMATCH = "mismatch"
+REPORT_UNAVAILABLE = "unavailable"
+REPORT_FAILURES = (REPORT_UNREACHABLE, REPORT_UNTRUSTED, REPORT_MALFORMED, REPORT_MISMATCH, REPORT_UNAVAILABLE)
+
+
+class NodeReportMalformed(NodeSyncError):
+    """The node answered, but not with a well-formed report. Nothing it said is used."""
+
+
+@dataclass(frozen=True)
+class NodeReport:
+    # The SSH login policy outcome the node recorded at boot, or None when it recorded no known value.
+    ssh_policy_status: str | None
+
+
+def report_command(status_path: str = SSH_POLICY_STATUS_PATH) -> str:
+    """The fixed, read-only report the backend runs on a node. Takes no caller input.
+
+    Reads at most 32 bytes of the policy status file and keeps only ``[a-z_]``, so whatever the
+    file holds the reply is one header line and one bounded policy line.
+    """
+    return (
+        f"printf '%s\\n' '{REPORT_HEADER}'; "
+        f"p=$(head -c 32 {status_path} 2>/dev/null | tr -cd 'a-z_'); "
+        "printf 'ssh_policy=%s\\n' \"$p\""
+    )
+
+
+def parse_node_report(stdout: str) -> NodeReport:
+    """The report in ``stdout``; NodeReportMalformed for anything but the known, bounded shape."""
+    if len(stdout.encode("utf-8", "replace")) > REPORT_MAX_BYTES:
+        raise NodeReportMalformed("report exceeds its size bound")
+    lines = stdout.splitlines()
+    if not lines or lines[0] != REPORT_HEADER:
+        raise NodeReportMalformed("report header missing or unsupported")
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        key, sep, value = line.partition("=")
+        if not sep or key != "ssh_policy" or key in fields:
+            raise NodeReportMalformed("report has an unknown or repeated field")
+        fields[key] = value
+    policy = fields.get("ssh_policy")
+    return NodeReport(ssh_policy_status=policy if policy in REPORTED_POLICY_STATES else None)
+
+
+async def read_node_report(
+    address: str,
+    *,
+    sync_private_key: str | None,
+    host_public_key: str | None,
+    port: int = 22,
+    timeout: float = 15,
+) -> NodeReport:
+    """Read the node's report over the verified connection, within ``timeout`` seconds overall.
+
+    At most REPORT_MAX_BYTES + 1 bytes of output are read; a longer reply is malformed.
+    """
+
+    async def exchange() -> bytes:
+        async with _verified_connection(
+            address,
+            sync_private_key=sync_private_key,
+            host_public_key=host_public_key,
+            port=port,
+            connect_timeout=timeout,
+        ) as conn:
+            async with conn.create_process(report_command(), encoding=None) as process:
+                received = b""
+                while len(received) <= REPORT_MAX_BYTES:
+                    chunk = await process.stdout.read(REPORT_MAX_BYTES + 1 - len(received))
+                    if not chunk:
+                        break
+                    received += chunk
+                return received
 
     try:
-        async with asyncssh.connect(
-            address,
-            port=port,
-            username=SYNC_USER,
-            client_keys=[client_key],
-            known_hosts=([trusted_host], [], []),
-            agent_path=None,
-            config=None,
-            password=None,
-            kbdint_auth=False,
-            connect_timeout=min(timeout, 30),
-        ) as conn:
-            result = await asyncio.wait_for(conn.run(command), timeout=timeout)
-    except asyncssh.HostKeyNotVerifiable as exc:
-        raise NodeTrustError("node presented an unrecognized server key") from exc
-    except asyncssh.PermissionDenied as exc:
-        raise NodeTrustError("node refused the backend sync credential") from exc
-    except (OSError, asyncio.TimeoutError, asyncssh.Error) as exc:
-        raise NodeSyncError(type(exc).__name__) from exc
-    return result.exit_status if result.exit_status is not None else 255
+        received = await asyncio.wait_for(exchange(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise NodeSyncError("TimeoutError") from exc
+    if len(received) > REPORT_MAX_BYTES:
+        raise NodeReportMalformed("report exceeds its size bound")
+    return parse_node_report(received.decode("utf-8", "replace"))
+
+
+def report_error_outcome(exc: NodeSyncError) -> str:
+    """The bounded outcome for a failed report exchange."""
+    if isinstance(exc, NodeReportMalformed):
+        return REPORT_MALFORMED
+    if isinstance(exc, NodeTrustError):
+        return REPORT_UNTRUSTED
+    return REPORT_UNREACHABLE

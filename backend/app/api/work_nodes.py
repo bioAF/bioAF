@@ -4,6 +4,8 @@ Provides launch, stop, list, detail, heartbeat, and machine type endpoints
 under /api/v1/work-nodes/.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +23,9 @@ from app.schemas.work_node import (
     ProjectSummary,
     WorkNodeSettings,
 )
+from app.schemas.entity_reference import ExperimentReference
 from app.services.audit_service import log_action
+from app.services.work_node_reports import report_status
 
 router = APIRouter(prefix="/api/v1/work-nodes", tags=["work-nodes"])
 settings_router = APIRouter(prefix="/api/v1/settings", tags=["work-node-settings"])
@@ -41,6 +45,12 @@ def _project_summary(project) -> ProjectSummary | None:
     return ProjectSummary(id=project.id, name=project.name)
 
 
+def _experiment_reference(experiment) -> ExperimentReference | None:
+    if not experiment:
+        return None
+    return ExperimentReference(id=experiment.id, name=experiment.name)
+
+
 def _work_node_response(cs) -> WorkNodeResponse:
     return WorkNodeResponse(
         id=cs.id,
@@ -48,6 +58,8 @@ def _work_node_response(cs) -> WorkNodeResponse:
         user=_user_summary(cs.user) if hasattr(cs, "user") and cs.user else None,
         project_id=cs.project_id,
         project=_project_summary(getattr(cs, "project", None)),
+        experiment_id=cs.experiment_id,
+        experiment=_experiment_reference(getattr(cs, "experiment", None)),
         environment_version_id=cs.environment_version_id,
         machine_type=cs.machine_type,
         input_file_ids=[v for v in (cs.data_mount_paths or []) if isinstance(v, int)],
@@ -66,6 +78,7 @@ def _work_node_response(cs) -> WorkNodeResponse:
         gce_zone=cs.gce_zone,
         github_repo_ids=cs.github_repo_ids,
         heartbeat_at=cs.heartbeat_at,
+        report_status=report_status(cs, datetime.now(timezone.utc)),
         started_at=cs.started_at,
         stopped_at=cs.stopped_at,
         created_at=cs.created_at,

@@ -588,6 +588,20 @@ class TerminationResult(BaseModel):
     stop_failure: str | None = None
 
 
+class NodeReportResult(BaseModel):
+    """Returned from report_vm (plan 03.5D): the outcome of one Work Node report attempt.
+
+    ``outcome`` is "reported" only for an authenticated, well-formed reply from the recorded
+    instance. Otherwise: "unreachable" (not running, no address, transport failure or timeout),
+    "untrusted" (server key or credential refused), "malformed" (reply outside the known shape),
+    "mismatch" (the recorded instance is gone or replaced) or "unavailable" (the provider could not
+    answer, or this installation cannot report).
+    """
+
+    outcome: str
+    ssh_policy_status: str | None = None
+
+
 # --- Cellxgene ---------------------------------------------------------------
 
 

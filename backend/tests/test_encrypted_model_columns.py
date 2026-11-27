@@ -252,3 +252,33 @@ async def test_slack_webhook_url_encrypted(db_engine, admin_user):
             )
         ).scalar_one()
         assert raw.startswith("gAAAA")
+
+
+@pytest.mark.asyncio
+async def test_notebook_access_secret_encrypted_and_rotated(db_engine, admin_user):
+    """Plan 03.5A: the IDE's per-session secret is encrypted at rest and re-encrypted on rotation."""
+    from app.cli import rotate_encryption_keys as rotate_cli
+    from app.models.notebook_session import ComputeSession
+
+    async with _factory(db_engine)() as session:
+        cs = ComputeSession(
+            user_id=admin_user.id,
+            organization_id=admin_user.organization_id,
+            session_type="jupyter",
+            resource_profile="small",
+            cpu_cores=2,
+            memory_gb=8,
+            notebook_access_secret="ide-secret",
+        )
+        session.add(cs)
+        await session.commit()
+        cs_id = cs.id
+
+    async with _factory(db_engine)() as session:
+        raw = (
+            await session.execute(
+                sa_text("SELECT notebook_access_secret FROM compute_sessions WHERE id = :id"), {"id": cs_id}
+            )
+        ).scalar_one()
+        assert raw.startswith("gAAAA") and "ide-secret" not in raw
+    assert ("compute_sessions", "notebook_access_secret") in rotate_cli._ENCRYPTED_COLUMNS

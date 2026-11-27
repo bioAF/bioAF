@@ -8128,6 +8128,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notebooks/sessions/{session_id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Session Access
+         * @description A single-use ticket that opens the caller's own running session in the notebook gateway.
+         */
+        post: operations["open_session_access_api_v1_notebooks_sessions__session_id__access_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notebooks/sessions/{session_id}/provenance": {
         parameters: {
             query?: never;
@@ -8393,6 +8413,28 @@ export interface paths {
         get: operations["certificate_status_api_v1_settings_networking_certificate_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/networking/certificate/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Certificate
+         * @description Install a certificate from the organization's own CA (private installations, plan 03.5A).
+         *
+         *     Checked here, staged privately, and installed by the host's fixed operation, which checks it again.
+         */
+        post: operations["upload_certificate_api_v1_settings_networking_certificate_upload_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10226,6 +10268,37 @@ export interface components {
         CertificateStatusResponse: {
             /** Fqdn */
             fqdn: string;
+            /** Issuer */
+            issuer?: string | null;
+            /** Last Renewal At */
+            last_renewal_at?: string | null;
+            /** Last Renewal Result */
+            last_renewal_result?: string | null;
+            /** Not After */
+            not_after?: string | null;
+            /** Renewed By Bioaf */
+            renewed_by_bioaf?: boolean | null;
+            /** Status */
+            status: string;
+        };
+        /** CertificateUpload */
+        CertificateUpload: {
+            /** Certificate Pem */
+            certificate_pem: string;
+            /** Private Key Pem */
+            private_key_pem: string;
+        };
+        /** CertificateUploadResponse */
+        CertificateUploadResponse: {
+            /** Issuer */
+            issuer: string;
+            /** Names */
+            names: string[];
+            /**
+             * Not After
+             * Format: date-time
+             */
+            not_after: string;
             /** Status */
             status: string;
         };
@@ -11571,6 +11644,13 @@ export interface components {
             id: number;
             /** Image Uri */
             image_uri?: string | null;
+            /**
+             * @default {
+             *       "jupyter": "unverified",
+             *       "rstudio": "unverified"
+             *     }
+             */
+            notebook_capability: components["schemas"]["NotebookCapability"];
             /** Status */
             status: string;
             /** Version Number */
@@ -13152,6 +13232,21 @@ export interface components {
             spot: boolean;
             /** Status */
             status: string;
+        };
+        /** NotebookCapability */
+        NotebookCapability: {
+            /** Contract */
+            contract?: number | null;
+            /**
+             * Jupyter
+             * @default unverified
+             */
+            jupyter: string;
+            /**
+             * Rstudio
+             * @default unverified
+             */
+            rstudio: string;
         };
         /** NotebookImageBuildStatus */
         NotebookImageBuildStatus: {
@@ -16465,6 +16560,15 @@ export interface components {
             /** Role Id */
             role_id?: number | null;
         };
+        /** SessionAccessResponse */
+        SessionAccessResponse: {
+            /** Entry Url */
+            entry_url: string;
+            /** Expires In */
+            expires_in: number;
+            /** Ticket */
+            ticket: string;
+        };
         /** SessionCredentialRequest */
         SessionCredentialRequest: {
             /** Password */
@@ -17972,6 +18076,9 @@ export interface components {
             created_at: string;
             /** Environment Version Id */
             environment_version_id?: number | null;
+            experiment?: components["schemas"]["ExperimentReference"] | null;
+            /** Experiment Id */
+            experiment_id?: number | null;
             /** Failure Message */
             failure_message?: string | null;
             /** Failure Reason */
@@ -17995,6 +18102,8 @@ export interface components {
             project?: components["schemas"]["ProjectSummary"] | null;
             /** Project Id */
             project_id?: number | null;
+            /** Report Status */
+            report_status?: string | null;
             /** Requested Disk Gb */
             requested_disk_gb?: number | null;
             /** Resource Profile */
@@ -33738,6 +33847,37 @@ export interface operations {
             };
         };
     };
+    open_session_access_api_v1_notebooks_sessions__session_id__access_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAccessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_session_provenance_api_v1_notebooks_sessions__session_id__provenance_get: {
         parameters: {
             query?: never;
@@ -34189,6 +34329,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CertificateStatusResponse"];
+                };
+            };
+        };
+    };
+    upload_certificate_api_v1_settings_networking_certificate_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateUploadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

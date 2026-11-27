@@ -89,6 +89,11 @@ dependencies:
 # bioconductor-* packages were built against (currently 4.3 / 4.4 on
 # bioconda); conda-forge's r-base is well past the R 4.1 line that
 # produced the GlobalOptions findMatches failure in the prior Dockerfile.
+# Explicit provenance of the system Default Notebook definition (plan 03.5B). Bump the revision when
+# DEFAULT_NOTEBOOK_CONDA_YML changes; versions keep the revision they were made from.
+DEFAULT_NOTEBOOK_TEMPLATE = "default-notebook"
+DEFAULT_NOTEBOOK_TEMPLATE_REVISION = 1
+
 DEFAULT_NOTEBOOK_CONDA_YML = """\
 name: bioaf-notebook
 channels:
@@ -362,6 +367,7 @@ class EnvironmentService:
             definition_format=definition_format,
             definition_content=definition_content,
             created_by_user_id=user_id,
+            template_revision=_template_revision_of(env, definition_format, definition_content),
         )
         session.add(version)
         await session.flush()
@@ -450,6 +456,7 @@ class EnvironmentService:
             definition_format=original.definition_format,
             definition_content=original.definition_content,
             created_by_user_id=user_id,
+            template_revision=original.template_revision,
         )
         session.add(rebuild)
         await session.flush()
@@ -474,6 +481,17 @@ class EnvironmentService:
         """Get all versions currently in 'building' status."""
         result = await session.execute(select(EnvironmentVersion).where(EnvironmentVersion.status == "building"))
         return list(result.scalars().all())
+
+
+def _template_revision_of(env, definition_format: str, definition_content: str) -> int | None:
+    """The template revision a new version's definition is, when it is that template unmodified."""
+    if (
+        env.template_key == DEFAULT_NOTEBOOK_TEMPLATE
+        and definition_format == "conda"
+        and definition_content == DEFAULT_NOTEBOOK_CONDA_YML
+    ):
+        return DEFAULT_NOTEBOOK_TEMPLATE_REVISION
+    return None
 
 
 async def ensure_default_work_node_environment(session: AsyncSession) -> None:
@@ -652,6 +670,8 @@ async def ensure_default_notebook_environment(session: AsyncSession) -> None:
         created_by_user_id=user_id,
         visibility="organization",
         environment_type="notebook",
+        template_key=DEFAULT_NOTEBOOK_TEMPLATE,
+        template_revision=DEFAULT_NOTEBOOK_TEMPLATE_REVISION,
     )
     session.add(env)
     await session.flush()
@@ -664,6 +684,7 @@ async def ensure_default_notebook_environment(session: AsyncSession) -> None:
         definition_format="conda",
         definition_content=DEFAULT_NOTEBOOK_CONDA_YML,
         created_by_user_id=user_id,
+        template_revision=DEFAULT_NOTEBOOK_TEMPLATE_REVISION,
     )
     session.add(version)
     await session.flush()
