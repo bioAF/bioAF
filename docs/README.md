@@ -13,6 +13,11 @@ See [architecture and support status](architecture.md) before choosing a deploym
 - [Installation Metrics](installation-metrics.md): the optional, opt-in reports an installation can share,
   and how to change or withdraw that choice.
 
+## Operator Procedures
+
+- [Foundation Bucket Guards](operations/foundation-bucket-guards.md): add public-access prevention to
+  an existing GCP installation's Terraform-state and backup buckets.
+
 ## Role Guides
 
 Built-in roles are starting points. Actual actions depend on effective permissions and enabled components.

@@ -1735,6 +1735,14 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_foundation_upgrade_refusal.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_frozen_migrations.py": {
    "category": "no_database",
    "evidence": [],
@@ -1807,6 +1815,11 @@
    "route": "none"
   },
   "test_gcp_config_service.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_gcp_public_access_prevention.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"

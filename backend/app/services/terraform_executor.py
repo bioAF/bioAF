@@ -146,6 +146,8 @@ class TerraformExecutor:
                 await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
                 plan_json = await TerraformExecutor._run_plan_capture(work_dir, env, targets)
                 parsed = TerraformPlanParser.parse(plan_json)
+                if module_name == "foundation" and config.get("terraform_initialized") == "true":
+                    TerraformExecutor._refuse_foundation_recreation(parsed)
 
                 run.plan_json = parsed
                 run.resources_planned = parsed["total"]
@@ -206,6 +208,8 @@ class TerraformExecutor:
         if run.status not in ("awaiting_confirmation", "applying"):
             raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
         await TerraformExecutor._require_storage_identity(session, run.module_name)
+        if (run.module_name or "foundation") == "foundation" and await TerraformExecutor._initialized(session):
+            TerraformExecutor._refuse_foundation_recreation(run.plan_json or {})
 
         await TerraformExecutor._join_operation(session, run)
         run.action = "apply"
@@ -1444,6 +1448,40 @@ class TerraformExecutor:
             logger.info("Deleted lock file %s", uri)
         except Exception as exc:
             logger.warning("Error deleting lock file %s: %s", uri, exc)
+
+    # Foundation resources whose re-creation would collide with an existing state or backup bucket.
+    _FOUNDATION_BUCKETS = frozenset(
+        {"google_storage_bucket.terraform_state", "google_storage_bucket.backups", "aws_s3_bucket.this"}
+    )
+
+    @staticmethod
+    def foundation_recreations(plan: dict) -> list[str]:
+        """Foundation bucket addresses a parsed plan would create or replace."""
+        return [
+            r["address"]
+            for r in plan.get("resources") or []
+            if r.get("address") in TerraformExecutor._FOUNDATION_BUCKETS and r.get("action") in ("create", "replace")
+        ]
+
+    @staticmethod
+    def _refuse_foundation_recreation(plan: dict) -> None:
+        """Bootstrap keeps no durable foundation state, so after initialization a foundation plan
+        sees empty state and proposes creating the existing buckets. Refuse it rather than let it
+        collide with (or replace) the state and backup buckets."""
+        recreated = TerraformExecutor.foundation_recreations(plan)
+        if recreated:
+            raise StateError(
+                "This foundation plan would create or replace existing buckets "
+                f"({', '.join(recreated)}). The installation is already initialized and the foundation "
+                "module has no remote state, so its buckets are changed by an operator instead: "
+                "see docs/operations/foundation-bucket-guards.md."
+            )
+
+    @staticmethod
+    async def _initialized(session: AsyncSession) -> bool:
+        from app.platform.platform_config_service import PlatformConfigService
+
+        return (await PlatformConfigService.get(session, "terraform_initialized")) == "true"
 
     @staticmethod
     async def _require_storage_identity(session: AsyncSession, module_name: str | None) -> None:
