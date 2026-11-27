@@ -334,6 +334,11 @@
    "evidence": [],
    "route": "none"
   },
+  "test_aws_disproven_findings.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_aws_eks_guardrails_terraform.py": {
    "category": "no_database",
    "evidence": [],
