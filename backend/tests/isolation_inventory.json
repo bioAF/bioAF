@@ -1256,6 +1256,11 @@
    "evidence": [],
    "route": "none"
   },
+  "test_eks_endpoint_policy.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_emitted_name_matching.py": {
    "category": "single_connection",
    "evidence": [

@@ -87,7 +87,9 @@ def test_the_reader_policy_grants_only_reads_on_this_clusters_log_group():
     doc = _block(main, 'data "aws_iam_policy_document" "control_plane_log_reader"')
     assert "aws_cloudwatch_log_group.control_plane.arn" in doc
     actions = set(re.findall(r'"(logs:[A-Za-z]+)"', doc))
-    assert actions and all(a.split(":")[1].startswith(("Get", "Filter", "Describe", "StartQuery", "StopQuery")) for a in actions)
+    assert actions and all(
+        a.split(":")[1].startswith(("Get", "Filter", "Describe", "StartQuery", "StopQuery")) for a in actions
+    )
     assert 'resource "aws_iam_policy" "control_plane_log_reader"' in main
     assert 'output "control_plane_log_reader_policy_arn"' in (MODULE / "outputs.tf").read_text()
     # The module never attaches it: operators attach it to their designated roles.
