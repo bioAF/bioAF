@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.51
+
+### Dependencies
+
+- Bump the actions-routine group with 3 updates (CI workflow actions).
+
 ## v2026.11.50
 
 ### Dependencies
