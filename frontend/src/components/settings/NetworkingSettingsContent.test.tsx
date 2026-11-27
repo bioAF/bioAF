@@ -3,7 +3,7 @@
  * certificate) sees its installed certificate in Settings: expiry, who renews it, and the last
  * renewal attempt, from the host's report (owner-approved copy, 2026-11-26).
  */
-import { render, screen } from "@/testing/renderWithProviders";
+import { act, render, screen, waitFor } from "@/testing/renderWithProviders";
 import { formatRecordedTime } from "@/lib/recordedTime";
 
 const get = jest.fn();
@@ -94,7 +94,9 @@ test("without a reported certificate nothing extra is shown", async () => {
   serve({ fqdn: "", status: "not_requested" });
   render(<NetworkingSettingsContent />);
   await screen.findByTestId("networking-tls-card");
-  expect(get).toHaveBeenCalledWith("/api/v1/settings/networking/certificate/status");
+  // The status is requested once the configuration has rendered; let that response settle too.
+  await waitFor(() => expect(get).toHaveBeenCalledWith("/api/v1/settings/networking/certificate/status"));
+  await act(async () => {});
   expect(screen.queryByTestId("installed-certificate")).not.toBeInTheDocument();
 });
 
