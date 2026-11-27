@@ -5,7 +5,8 @@
 # policies that only the installer (an operator) writes:
 #
 #   bioaf-app-access-core      bioaf-app: reads, data, and EC2 limited to this installation
-#   bioaf-app-access-control   bioaf-app: EKS and IAM, plus the denials
+#   bioaf-app-access-control   bioaf-app: EKS, instance profiles, OIDC, plus the IAM denials
+#   bioaf-app-access-roles     bioaf-app: role creation, per-purpose policy attachment and passing
 #   bioaf-app-access-services  bioaf-app: ECR, CodeBuild and logs
 #   bioaf-app-created-role-boundary
 #                              the permissions boundary on every role the app creates
@@ -29,8 +30,8 @@
 # aws_iam_ensure_policies ACCOUNT REGION APP_VPC DEFAULT_VPC
 #                                          create or update every document (the boundary first)
 
-AWS_IAM_POLICIES="bioaf-app-created-role-boundary bioaf-role-s3-readwrite bioaf-role-s3-readonly bioaf-role-cluster-autoscaler bioaf-role-image-build bioaf-app-access-core bioaf-app-access-control bioaf-app-access-services"
-AWS_IAM_APP_POLICIES="bioaf-app-access-core bioaf-app-access-control bioaf-app-access-services"
+AWS_IAM_POLICIES="bioaf-app-created-role-boundary bioaf-role-s3-readwrite bioaf-role-s3-readonly bioaf-role-cluster-autoscaler bioaf-role-image-build bioaf-app-access-core bioaf-app-access-control bioaf-app-access-roles bioaf-app-access-services"
+AWS_IAM_APP_POLICIES="bioaf-app-access-core bioaf-app-access-control bioaf-app-access-roles bioaf-app-access-services"
 
 aws_iam_installation_id() { printf '%s-%s' "$1" "$2"; }
 aws_iam_policy_arn() { printf 'arn:aws:iam::%s:policy/%s' "$1" "$2"; }
@@ -53,13 +54,14 @@ aws_iam_policy_document() {
 {"Version":"2012-10-17","Statement":[
 {"Sid":"Read","Effect":"Allow","Action":["ec2:Describe*","ec2:GetInstanceTypesFromInstanceRequirements","elasticloadbalancing:Describe*","autoscaling:Describe*","eks:Describe*","eks:List*","ecr:GetAuthorizationToken","ecr:BatchCheckLayerAvailability","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:DescribeImages","ecr:DescribeRepositories","ecr:ListImages","ssm:GetParameter","ssm:GetParameters","sts:GetCallerIdentity","kms:DescribeKey"],"Resource":"*"},
 {"Sid":"ClusterAndNodes","Effect":"Allow","Action":["ec2:AttachVolume","ec2:DetachVolume","ec2:CreateVolume","ec2:ModifyVolume","ec2:DeleteVolume","ec2:CreateSnapshot","ec2:DeleteSnapshot","ec2:CreateTags","ec2:AuthorizeSecurityGroupIngress","ec2:RevokeSecurityGroupIngress","ec2:CreateSecurityGroup","ec2:DeleteSecurityGroup","ec2:CreateRoute","ec2:DeleteRoute","ec2:ModifyInstanceAttribute","ec2:AssignPrivateIpAddresses","ec2:UnassignPrivateIpAddresses","ec2:AssignIpv6Addresses","ec2:UnassignIpv6Addresses","ec2:AttachNetworkInterface","ec2:DetachNetworkInterface","ec2:CreateNetworkInterface","ec2:DeleteNetworkInterface","ec2:ModifyNetworkInterfaceAttribute","elasticloadbalancing:*","autoscaling:UpdateAutoScalingGroup","autoscaling:SetDesiredCapacity","autoscaling:TerminateInstanceInAutoScalingGroup","iam:CreateServiceLinkedRole"],"Resource":"*"},
-{"Sid":"Builder","Effect":"Allow","Action":["ec2:RunInstances","ec2:StopInstances","ec2:TerminateInstances","ec2:CreateImage","ec2:RegisterImage","ec2:CreateKeyPair","ec2:DeleteKeyPair"],"Resource":"*"},
+{"Sid":"Builder","Effect":"Allow","Action":["ec2:RunInstances","ec2:StopInstances","ec2:TerminateInstances","ec2:CreateImage","ec2:RegisterImage","ec2:DeregisterImage","ec2:CreateKeyPair","ec2:DeleteKeyPair"],"Resource":"*"},
 {"Sid":"Keys","Effect":"Allow","Action":["kms:CreateGrant","kms:ListGrants","kms:RevokeGrant","kms:Decrypt","kms:Encrypt","kms:ReEncrypt*","kms:GenerateDataKey*"],"Resource":"*"},
 {"Sid":"ImagesPush","Effect":"Allow","Action":["ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage","ecr:CreateRepository"],"Resource":"arn:aws:ecr:${r}:${a}:repository/bioaf-*"},
 {"Sid":"Data","Effect":"Allow","Action":"s3:*","Resource":["arn:aws:s3:::bioaf-*","arn:aws:s3:::bioaf-*/*"],"Condition":{"StringEquals":{"aws:ResourceAccount":"${a}"}}},
+{"Sid":"BuildLogs","Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":["arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*","arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*:*"]},
 {"Sid":"DenyUnownedInstances","Effect":"Deny","Action":["ec2:TerminateInstances","ec2:StopInstances"],"Resource":"*","Condition":{"StringNotEquals":{"aws:ResourceTag/bioaf:installation":"${id}"}}},
 {"Sid":"DenyUnownedStorage","Effect":"Deny","Action":["ec2:DeleteVolume","ec2:DeleteSnapshot"],"Resource":"*","Condition":{"StringNotEquals":{"aws:ResourceTag/bioaf:installation":"${id}","aws:ResourceTag/ebs.csi.aws.com/cluster":"true"}}},
-{"Sid":"DenyImageRemoval","Effect":"Deny","Action":"ec2:DeregisterImage","Resource":"*"},
+{"Sid":"DenyUnownedImageRemoval","Effect":"Deny","Action":"ec2:DeregisterImage","Resource":"*","Condition":{"StringNotEquals":{"aws:ResourceTag/bioaf:installation":"${id}"}}},
 ${retag},${share},${logdel}
 ]}
 JSON
@@ -84,8 +86,8 @@ JSON
         cat <<JSON
 {"Version":"2012-10-17","Statement":[
 {"Sid":"Discover","Effect":"Allow","Action":["autoscaling:DescribeAutoScalingGroups","autoscaling:DescribeAutoScalingInstances","autoscaling:DescribeLaunchConfigurations","autoscaling:DescribeScalingActivities","autoscaling:DescribeTags","ec2:DescribeImages","ec2:DescribeInstanceTypes","ec2:DescribeLaunchTemplateVersions","ec2:GetInstanceTypesFromInstanceRequirements"],"Resource":"*"},
-{"Sid":"NodeGroups","Effect":"Allow","Action":"eks:DescribeNodegroup","Resource":"arn:aws:eks:${r}:${a}:nodegroup/bioaf-*"},
-{"Sid":"Scale","Effect":"Allow","Action":["autoscaling:SetDesiredCapacity","autoscaling:TerminateInstanceInAutoScalingGroup"],"Resource":"*","Condition":{"StringEquals":{"aws:ResourceTag/k8s.io/cluster-autoscaler/enabled":"true"},"StringLike":{"aws:ResourceTag/eks:cluster-name":"bioaf-*"}}}
+{"Sid":"NodeGroups","Effect":"Allow","Action":"eks:DescribeNodegroup","Resource":"arn:aws:eks:${r}:${a}:nodegroup/\${aws:PrincipalTag/bioaf:cluster}/*"},
+{"Sid":"Scale","Effect":"Allow","Action":["autoscaling:SetDesiredCapacity","autoscaling:TerminateInstanceInAutoScalingGroup"],"Resource":"*","Condition":{"StringEquals":{"aws:ResourceTag/k8s.io/cluster-autoscaler/enabled":"true","aws:ResourceTag/eks:cluster-name":"\${aws:PrincipalTag/bioaf:cluster}"}}}
 ]}
 JSON
         ;;
@@ -105,6 +107,8 @@ JSON
 {"Sid":"PackerTagAtLaunch","Effect":"Allow","Action":"ec2:CreateTags","Resource":["${ec2}:instance/*","${ec2}:volume/*","${ec2}:network-interface/*"],"Condition":{"StringEquals":{"ec2:CreateAction":"RunInstances"}}},
 {"Sid":"PackerOwnedBuilder","Effect":"Allow","Action":["ec2:StopInstances","ec2:TerminateInstances","ec2:CreateImage","ec2:AttachVolume","ec2:DetachVolume","ec2:DeleteVolume"],"Resource":["${ec2}:instance/*","${ec2}:volume/*"],"Condition":{${owned}}},
 {"Sid":"PackerNewImage","Effect":"Allow","Action":["ec2:CreateImage","ec2:RegisterImage"],"Resource":["arn:aws:ec2:${r}::image/*","arn:aws:ec2:${r}::snapshot/*"]},
+{"Sid":"PackerTagAtCreateImage","Effect":"Allow","Action":"ec2:CreateTags","Resource":["arn:aws:ec2:${r}::image/*","arn:aws:ec2:${r}::snapshot/*"],"Condition":{"StringEquals":{"ec2:CreateAction":["CreateImage","RegisterImage"]}}},
+{"Sid":"PackerCleanupOwned","Effect":"Allow","Action":["ec2:DeregisterImage","ec2:DeleteSnapshot"],"Resource":["arn:aws:ec2:${r}::image/*","arn:aws:ec2:${r}::snapshot/*"],"Condition":{${owned}}},
 {"Sid":"PackerTagImage","Effect":"Allow","Action":"ec2:CreateTags","Resource":["arn:aws:ec2:${r}::image/*","arn:aws:ec2:${r}::snapshot/*"],"Condition":{"ForAllValues:StringNotEquals":{"aws:TagKeys":["bioaf:installation"]}}},
 ${retag},${share}
 ]}
@@ -138,22 +142,37 @@ JSON
 {"Version":"2012-10-17","Statement":[
 {"Sid":"Eks","Effect":"Allow","Action":"eks:*","Resource":["arn:aws:eks:${r}:${a}:cluster/bioaf-*","arn:aws:eks:${r}:${a}:nodegroup/bioaf-*","arn:aws:eks:${r}:${a}:addon/bioaf-*","arn:aws:eks:${r}:${a}:access-entry/bioaf-*"]},
 {"Sid":"NodeGroupTags","Effect":"Allow","Action":["autoscaling:CreateOrUpdateTags","autoscaling:DeleteTags"],"Resource":"*","Condition":{"StringLike":{"aws:ResourceTag/eks:cluster-name":"bioaf-*"}}},
-{"Sid":"RoleCreate","Effect":"Allow","Action":"iam:CreateRole","Resource":"${iam}:role/bioaf/*","Condition":{${bounded}}},
-{"Sid":"RoleAttach","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/*","${iam}:role/bioaf-*"],"Condition":{${bounded},"ArnLike":{"iam:PolicyARN":["arn:aws:iam::aws:policy/AmazonEKS*","arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly","arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy","${iam}:policy/bioaf-role-*"]}}},
-{"Sid":"RoleManageNew","Effect":"Allow","Action":["iam:DetachRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:UpdateAssumeRolePolicy","iam:UpdateRoleDescription"],"Resource":"${iam}:role/bioaf/*"},
-{"Sid":"RoleManageOwned","Effect":"Allow","Action":["iam:DetachRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:UpdateAssumeRolePolicy","iam:UpdateRoleDescription"],"Resource":"${iam}:role/bioaf-*","Condition":{${owned}}},
-{"Sid":"PassNew","Effect":"Allow","Action":"iam:PassRole","Resource":"${iam}:role/bioaf/*","Condition":{"StringEquals":{"iam:PassedToService":["eks.amazonaws.com","ec2.amazonaws.com","codebuild.amazonaws.com"]}}},
-{"Sid":"PassOwned","Effect":"Allow","Action":"iam:PassRole","Resource":"${iam}:role/bioaf-*","Condition":{"StringEquals":{"aws:ResourceTag/bioaf:installation":"${id}","iam:PassedToService":["eks.amazonaws.com","ec2.amazonaws.com","codebuild.amazonaws.com"]}}},
+{"Sid":"PassToEc2","Effect":"Allow","Action":"iam:PassRole","Resource":["${iam}:role/bioaf/bioaf-work-node-*","${iam}:role/bioaf-work-node-*"],"Condition":{"StringEquals":{"aws:ResourceTag/bioaf:installation":"${id}","iam:PassedToService":"ec2.amazonaws.com"}}},
 {"Sid":"ProfilesNew","Effect":"Allow","Action":["iam:CreateInstanceProfile","iam:DeleteInstanceProfile","iam:AddRoleToInstanceProfile","iam:RemoveRoleFromInstanceProfile","iam:TagInstanceProfile","iam:UntagInstanceProfile"],"Resource":"${iam}:instance-profile/bioaf/*"},
 {"Sid":"ProfilesOwned","Effect":"Allow","Action":["iam:DeleteInstanceProfile","iam:AddRoleToInstanceProfile","iam:RemoveRoleFromInstanceProfile","iam:TagInstanceProfile","iam:UntagInstanceProfile"],"Resource":"${iam}:instance-profile/bioaf-*","Condition":{${owned}}},
 {"Sid":"ClusterIdentity","Effect":"Allow","Action":["iam:CreateOpenIDConnectProvider","iam:DeleteOpenIDConnectProvider","iam:TagOpenIDConnectProvider","iam:UntagOpenIDConnectProvider","iam:UpdateOpenIDConnectProviderThumbprint","iam:AddClientIDToOpenIDConnectProvider"],"Resource":"${iam}:oidc-provider/oidc.eks.${r}.amazonaws.com/*"},
 {"Sid":"ServiceLinkedRoles","Effect":"Allow","Action":"iam:CreateServiceLinkedRole","Resource":"*","Condition":{"StringEquals":{"iam:AWSServiceName":["eks.amazonaws.com","eks-nodegroup.amazonaws.com","autoscaling.amazonaws.com","elasticloadbalancing.amazonaws.com","spot.amazonaws.com"]}}},
-{"Sid":"BuildLogs","Effect":"Allow","Action":["logs:GetLogEvents","logs:FilterLogEvents"],"Resource":["arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*","arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*:*"]},
 {"Sid":"DenySelfAndPolicies","Effect":"Deny","Action":["iam:Put*","iam:Delete*","iam:Attach*","iam:Detach*","iam:Update*","iam:Tag*","iam:Untag*","iam:Create*","iam:Add*","iam:Remove*","iam:SetDefaultPolicyVersion","iam:PassRole"],"Resource":["${iam}:role/bioaf-app","${iam}:instance-profile/bioaf-app","${iam}:policy/bioaf-*"]},
 {"Sid":"DenyProtected","Effect":"Deny","Action":["iam:Put*","iam:Delete*","iam:Attach*","iam:Detach*","iam:Update*","iam:Tag*","iam:Untag*","iam:PassRole","iam:AddRoleToInstanceProfile"],"Resource":"*","Condition":{"StringEquals":{"aws:ResourceTag/bioaf:protected":"true"}}},
-{"Sid":"DenyRolePolicyWritesAndBoundaryChanges","Effect":"Deny","Action":["iam:PutRolePolicy","iam:PutRolePermissionsBoundary","iam:DeleteRolePermissionsBoundary"],"Resource":"*"},
+{"Sid":"DenyRolePolicyTrustAndBoundaryChanges","Effect":"Deny","Action":["iam:PutRolePolicy","iam:UpdateAssumeRolePolicy","iam:PutRolePermissionsBoundary","iam:DeleteRolePermissionsBoundary"],"Resource":"*"},
 {"Sid":"DenyIamOwnershipOutsidePath","Effect":"Deny","Action":["iam:TagRole","iam:UntagRole","iam:TagInstanceProfile","iam:UntagInstanceProfile"],"NotResource":["${iam}:role/bioaf/*","${iam}:instance-profile/bioaf/*"],"Condition":{"ForAnyValue:StringEquals":{"aws:TagKeys":["bioaf:installation","bioaf:protected"]}}},
 ${logdel}
+]}
+JSON
+        ;;
+    bioaf-app-access-roles)
+        local iam="arn:aws:iam::${a}" boundary bounded
+        boundary="$(aws_iam_boundary_arn "$a")"
+        bounded="\"StringEquals\":{\"iam:PermissionsBoundary\":\"${boundary}\"}"
+        cat <<JSON
+{"Version":"2012-10-17","Statement":[
+{"Sid":"RoleCreate","Effect":"Allow","Action":"iam:CreateRole","Resource":"${iam}:role/bioaf/*","Condition":{${bounded}}},
+{"Sid":"AttachCluster","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-*-cluster","${iam}:role/bioaf-*-cluster"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"]}}},
+{"Sid":"AttachNode","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-*-node","${iam}:role/bioaf-*-node"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy","arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy","arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly","${iam}:policy/bioaf-role-s3-readwrite"]}}},
+{"Sid":"AttachEbsCsi","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-*-ebs-csi","${iam}:role/bioaf-*-ebs-csi"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"]}}},
+{"Sid":"AttachRunner","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-*-runner-*","${iam}:role/bioaf-*-runner-*"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["${iam}:policy/bioaf-role-s3-readwrite","${iam}:policy/bioaf-role-s3-readonly"]}}},
+{"Sid":"AttachWorkNode","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-work-node-*","${iam}:role/bioaf-work-node-*"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["${iam}:policy/bioaf-role-s3-readwrite"]}}},
+{"Sid":"AttachAutoscaler","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-*-cluster-autoscaler","${iam}:role/bioaf-*-cluster-autoscaler"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["${iam}:policy/bioaf-role-cluster-autoscaler"]}}},
+{"Sid":"AttachBuild","Effect":"Allow","Action":"iam:AttachRolePolicy","Resource":["${iam}:role/bioaf/bioaf-codebuild-image-build","${iam}:role/bioaf-codebuild-image-build"],"Condition":{${bounded},"ArnEquals":{"iam:PolicyARN":["${iam}:policy/bioaf-role-image-build"]}}},
+{"Sid":"RoleManageNew","Effect":"Allow","Action":["iam:DetachRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:UpdateRoleDescription"],"Resource":"${iam}:role/bioaf/*"},
+{"Sid":"RoleManageOwned","Effect":"Allow","Action":["iam:DetachRolePolicy","iam:DeleteRolePolicy","iam:DeleteRole","iam:TagRole","iam:UntagRole","iam:UpdateRoleDescription"],"Resource":"${iam}:role/bioaf-*","Condition":{${owned}}},
+{"Sid":"PassToEks","Effect":"Allow","Action":"iam:PassRole","Resource":["${iam}:role/bioaf/bioaf-*-cluster","${iam}:role/bioaf-*-cluster","${iam}:role/bioaf/bioaf-*-node","${iam}:role/bioaf-*-node","${iam}:role/bioaf/bioaf-*-ebs-csi","${iam}:role/bioaf-*-ebs-csi"],"Condition":{"StringEquals":{"aws:ResourceTag/bioaf:installation":"${id}","iam:PassedToService":"eks.amazonaws.com"}}},
+{"Sid":"PassToCodeBuild","Effect":"Allow","Action":"iam:PassRole","Resource":["${iam}:role/bioaf/bioaf-codebuild-image-build","${iam}:role/bioaf-codebuild-image-build"],"Condition":{"StringEquals":{"aws:ResourceTag/bioaf:installation":"${id}","iam:PassedToService":"codebuild.amazonaws.com"}}}
 ]}
 JSON
         ;;
@@ -162,7 +181,7 @@ JSON
 {"Version":"2012-10-17","Statement":[
 {"Sid":"Images","Effect":"Allow","Action":["ecr:CreateRepository","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer","ecr:ListImages","ecr:TagResource"],"Resource":"arn:aws:ecr:${r}:${a}:repository/bioaf-*"},
 {"Sid":"Builds","Effect":"Allow","Action":["codebuild:CreateProject","codebuild:UpdateProject","codebuild:DeleteProject","codebuild:StartBuild","codebuild:StopBuild"],"Resource":"arn:aws:codebuild:${r}:${a}:project/bioaf-*"},
-{"Sid":"BuildLogs","Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":["arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*","arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*:*"]},
+{"Sid":"BuildLogs","Effect":"Allow","Action":["logs:GetLogEvents","logs:FilterLogEvents"],"Resource":["arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*","arn:aws:logs:${r}:${a}:log-group:/aws/codebuild/bioaf-*:*"]},
 {"Sid":"ControlPlaneLogGroup","Effect":"Allow","Action":["logs:CreateLogGroup","logs:PutRetentionPolicy","logs:DeleteRetentionPolicy","logs:TagResource","logs:UntagResource","logs:ListTagsForResource","logs:TagLogGroup","logs:UntagLogGroup","logs:ListTagsLogGroup"],"Resource":["arn:aws:logs:${r}:${a}:log-group:/aws/eks/bioaf-*/cluster","arn:aws:logs:${r}:${a}:log-group:/aws/eks/bioaf-*/cluster:*"]},
 ${logdel}
 ]}
@@ -243,8 +262,8 @@ aws_iam_owned_profiles() {
 }
 
 # aws_iam_owned_ec2 REGION
-#     EC2 resource ARNs bioAF created in REGION (managed_by=bioaf or bioaf-managed=true), one per line.
-#     Images and snapshots are excluded: nothing the app does needs them owned.
+#     EC2 resource ARNs bioAF created in REGION (managed_by=bioaf or bioaf-managed=true), one per line,
+#     including work-node AMIs and snapshots, so an existing AMI's rebuild cleanup keeps working.
 aws_iam_owned_ec2() {
     local r="$1"
     {
@@ -252,7 +271,7 @@ aws_iam_owned_ec2() {
             --tag-filters Key=managed_by,Values=bioaf --query 'ResourceTagMappingList[].ResourceARN' --output text
         aws resourcegroupstaggingapi get-resources --region "$r" --resource-type-filters ec2 \
             --tag-filters Key=bioaf-managed,Values=true --query 'ResourceTagMappingList[].ResourceARN' --output text
-    } | tr '\t' '\n' | sed '/^$/d; /^None$/d; /:image\//d; /:snapshot\//d' | sort -u
+    } | tr '\t' '\n' | sed '/^$/d; /^None$/d' | sort -u
 }
 
 # aws_iam_claim ACCOUNT REGION ROLES_FILE PROFILES_FILE EC2_FILE [INSTANCE_ID]

@@ -356,18 +356,13 @@ def test_cloud_build_provider_cannot_build_vm_images():
         )
 
 
-def test_aws_packer_template_is_amazon_ebs_without_automatic_deregistration():
-    """The AWS work-node Packer template builds an amazon-ebs AMI and never removes an existing one.
-
-    Owner-approved change (plan 04B review): the build role may not deregister images or delete
-    snapshots, since it cannot prove an image is this installation's. Each rebuild has its own AMI
-    name (the build number), so only a retry of the same build meets an existing name, and that
-    fails clearly instead; superseded AMIs are removed by an operator."""
+def test_aws_packer_template_is_amazon_ebs_with_force_deregister():
+    """The AWS work-node Packer template builds an amazon-ebs AMI and is rebuild-safe."""
     from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS
 
     assert 'source "amazon-ebs"' in PACKER_VM_TEMPLATE_AWS
-    assert "force_deregister" not in PACKER_VM_TEMPLATE_AWS
-    assert "force_delete_snapshot" not in PACKER_VM_TEMPLATE_AWS
+    # Rebuilds reuse the deterministic AMI name, so a prior AMI must be deregistered.
+    assert "force_deregister      = true" in PACKER_VM_TEMPLATE_AWS
     # environment.yml is shipped to the builder (no S3/IAM needed on the build box).
     assert 'provisioner "file"' in PACKER_VM_TEMPLATE_AWS
     assert "amazon/aws-cli" not in PACKER_VM_TEMPLATE_AWS  # builder uses OS awscli, not a container

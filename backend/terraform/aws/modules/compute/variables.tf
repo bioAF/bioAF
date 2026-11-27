@@ -174,8 +174,14 @@ variable "adopt_control_plane_log_group" {
   description = "Set by the backend when the cluster's log group already exists outside this state, so it is imported instead of created."
 }
 
-variable "role_path" {
+variable "role_paths" {
+  type        = map(string)
+  default     = {}
+  description = "IAM path of each role or instance profile already in state, by name. The backend reads it from state so existing roles never move (plan 04B)."
+}
+
+variable "new_role_path" {
   type        = string
   default     = "/"
-  description = "IAM path for the roles (and instance profiles) this module creates. The backend passes /bioaf/ for new roles and the existing path for roles already in state (plan 04B)."
+  description = "IAM path for roles and instance profiles not yet in state. The backend passes /bioaf/; the default only matters when it does not (destroy, output reads)."
 }

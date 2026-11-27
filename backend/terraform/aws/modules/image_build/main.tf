@@ -62,7 +62,7 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "codebuild" {
-  path                 = var.role_path
+  path                 = lookup(var.role_paths, local.role_name, var.new_role_path)
   name                 = local.role_name
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.assume.json

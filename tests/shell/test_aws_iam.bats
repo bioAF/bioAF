@@ -99,7 +99,7 @@ line_of() { grep -n -- "$1" "$CALL_LOG" | head -1 | cut -d: -f1; }
 
 app_policy() { cat "$(ls "$DOCS"/iam-* | while read -r f; do grep -l '"Sid":"Ec2ChangeOwned"' "$f"; done | tail -1)"; }
 
-app_policies=(bioaf-app-access-core bioaf-app-access-control bioaf-app-access-services)
+app_policies=(bioaf-app-access-core bioaf-app-access-control bioaf-app-access-roles bioaf-app-access-services)
 
 @test "a fresh install creates the boundary and managed policies, then attaches the app's" {
     answers n
@@ -161,8 +161,7 @@ app_policies=(bioaf-app-access-core bioaf-app-access-control bioaf-app-access-se
     [ -n "$(calls 'iam tag-role --role-name bioaf-acme-1-node --tags Key=bioaf:installation,Value=123456789012-us-west-1')" ]
     [ -n "$(calls 'iam tag-instance-profile --instance-profile-name bioaf-work-node-1 --tags Key=bioaf:installation,Value=123456789012-us-west-1')" ]
     tagged="$(calls 'resourcegroupstaggingapi tag-resources')"
-    [[ "$tagged" == *"vpc/vpc-c"* && "$tagged" == *"subnet/subnet-c"* ]]
-    [[ "$tagged" != *"image/"* ]]
+    [[ "$tagged" == *"vpc/vpc-c"* && "$tagged" == *"subnet/subnet-c"* && "$tagged" == *"image/ami-w"* ]]
     [[ "$tagged" == *"bioaf:installation=123456789012-us-west-1"* ]]
     [ -n "$(calls 'ec2 create-tags --region us-west-1 --resources i-app')" ]
     for name in "${app_policies[@]}"; do

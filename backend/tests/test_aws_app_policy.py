@@ -18,7 +18,12 @@ from tests.support.iam_policy_eval import Request, allowed, allowed_with_boundar
 
 REPO = Path(__file__).resolve().parents[2]
 A, R, VPC, DVPC = "123456789012", "us-west-1", "vpc-0a1b2c3d4e5f60718", "vpc-0d0d0d0d0d0d0d0d0"
-APP_POLICIES = ("bioaf-app-access-core", "bioaf-app-access-control", "bioaf-app-access-services")
+APP_POLICIES = (
+    "bioaf-app-access-core",
+    "bioaf-app-access-control",
+    "bioaf-app-access-roles",
+    "bioaf-app-access-services",
+)
 ALL_POLICIES = (
     "bioaf-app-created-role-boundary",
     "bioaf-role-s3-readwrite",
@@ -140,7 +145,7 @@ def test_the_boundary_cannot_be_removed_or_replaced(app):
         assert decide(app, Request(action, _new("bioaf-acme-1-node"), ctx)) == "explicit_deny"
 
 
-def test_only_aws_eks_and_installer_policies_attach(app):
+def test_only_aws_eks_and_installer_policies_attach_to_their_own_role_kind(app):
     bounded = {"iam:PermissionsBoundary": BOUNDARY}
     for policy in (EKS_POLICY, f"arn:aws:iam::{A}:policy/bioaf-role-s3-readwrite"):
         assert allowed(
@@ -159,14 +164,63 @@ def test_the_installer_policies_themselves_are_off_limits(app):
         assert decide(app, Request(action, f"arn:aws:iam::{A}:policy/bioaf-role-image-build")) == "explicit_deny"
 
 
-def test_roles_are_passed_only_when_owned_and_only_to_approved_services(app):
-    eks = {"iam:PassedToService": "eks.amazonaws.com"}
-    assert allowed(app, Request("iam:PassRole", _new("bioaf-acme-1-cluster"), eks))
-    assert allowed(app, Request("iam:PassRole", _role("bioaf-acme-1-cluster"), {**eks, **OWNED}))
-    assert not allowed(app, Request("iam:PassRole", _role("bioaf-acme-1-cluster"), eks))
-    assert not allowed(
-        app, Request("iam:PassRole", _new("bioaf-acme-1-cluster"), {"iam:PassedToService": "lambda.amazonaws.com"})
-    )
+def test_roles_are_passed_only_when_owned_and_only_to_their_own_service(app):
+    def pass_to(role, service, owned=True):
+        ctx = {"iam:PassedToService": service, **(OWNED if owned else {})}
+        return allowed(app, Request("iam:PassRole", role, ctx))
+
+    assert pass_to(_new("bioaf-acme-1-cluster"), "eks.amazonaws.com")
+    assert pass_to(_new("bioaf-acme-1-node"), "eks.amazonaws.com")
+    assert pass_to(_new("bioaf-work-node-1"), "ec2.amazonaws.com")
+    assert pass_to(_new("bioaf-codebuild-image-build"), "codebuild.amazonaws.com")
+    assert pass_to(_role("bioaf-acme-1-cluster"), "eks.amazonaws.com")
+    assert not pass_to(_role("bioaf-acme-1-cluster"), "eks.amazonaws.com", owned=False)
+    # Review round 2, finding 1: a role cannot be passed to a service it is not meant for.
+    assert not pass_to(_new("bioaf-acme-1-cluster"), "codebuild.amazonaws.com")
+    assert not pass_to(_new("bioaf-acme-1-cluster"), "ec2.amazonaws.com")
+    assert not pass_to(_new("bioaf-acme-1-node"), "codebuild.amazonaws.com")
+    assert not pass_to(_new("bioaf-notebook-runner-1"), "codebuild.amazonaws.com")
+    assert not pass_to(_new("bioaf-acme-1-cluster"), "lambda.amazonaws.com")
+
+
+@pytest.mark.parametrize(
+    "role, policy",
+    [
+        ("bioaf-codebuild-image-build", "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"),
+        ("bioaf-work-node-1", "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"),
+        ("bioaf-notebook-runner-1", "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"),
+        ("bioaf-acme-1-node", "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"),
+        ("bioaf-acme-1-cluster", f"arn:aws:iam::{A}:policy/bioaf-role-image-build"),
+        ("bioaf-notebook-runner-1", f"arn:aws:iam::{A}:policy/bioaf-role-image-build"),
+        ("bioaf-codebuild-image-build", f"arn:aws:iam::{A}:policy/bioaf-role-s3-readwrite"),
+    ],
+)
+def test_a_policy_attaches_only_to_the_role_it_is_for(app, role, policy):
+    """Review round 2, finding 1: the cluster policy on a role passable to CodeBuild was an escape."""
+    ctx = {"iam:PermissionsBoundary": BOUNDARY, "iam:PolicyARN": policy}
+    assert not allowed(app, Request("iam:AttachRolePolicy", _new(role), ctx))
+
+
+@pytest.mark.parametrize(
+    "role, policy",
+    [
+        ("bioaf-acme-1-cluster", "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"),
+        ("bioaf-acme-1-node", "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"),
+        ("bioaf-acme-1-ebs-csi", "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"),
+        ("bioaf-cellxgene-runner-1", f"arn:aws:iam::{A}:policy/bioaf-role-s3-readonly"),
+        ("bioaf-work-node-1", f"arn:aws:iam::{A}:policy/bioaf-role-s3-readwrite"),
+        ("bioaf-acme-1-cluster-autoscaler", f"arn:aws:iam::{A}:policy/bioaf-role-cluster-autoscaler"),
+        ("bioaf-codebuild-image-build", f"arn:aws:iam::{A}:policy/bioaf-role-image-build"),
+    ],
+)
+def test_each_role_gets_its_own_policies(app, role, policy):
+    ctx = {"iam:PermissionsBoundary": BOUNDARY, "iam:PolicyARN": policy}
+    assert allowed(app, Request("iam:AttachRolePolicy", _new(role), ctx))
+
+
+def test_trust_policies_cannot_be_edited(app):
+    for role in (_new("bioaf-acme-1-cluster"), _role("bioaf-acme-1-cluster")):
+        assert decide(app, Request("iam:UpdateAssumeRolePolicy", role, OWNED)) == "explicit_deny"
 
 
 def test_an_unrelated_role_cannot_be_claimed_by_tagging_it(app):
@@ -220,9 +274,9 @@ def test_a_bounded_role_cannot_delete_log_history_or_unrelated_storage(anything,
     assert not allowed_with_boundary(anything, boundary, Request("ec2:DeleteVolume", f"{EC2}:volume/vol-unrelated"))
     csi = {"aws:ResourceTag/ebs.csi.aws.com/cluster": "true"}
     assert allowed_with_boundary(anything, boundary, Request("ec2:DeleteVolume", f"{EC2}:volume/vol-pvc", csi))
-    assert not allowed_with_boundary(
-        anything, boundary, Request("ec2:DeregisterImage", f"arn:aws:ec2:{R}::image/ami-1", OWNED)
-    )
+    image = f"arn:aws:ec2:{R}::image/"
+    assert not allowed_with_boundary(anything, boundary, Request("ec2:DeregisterImage", f"{image}ami-x"))
+    assert allowed_with_boundary(anything, boundary, Request("ec2:DeregisterImage", f"{image}ami-1", OWNED))
 
 
 def test_a_bounded_role_cannot_claim_resources_or_share_images(anything, boundary):
@@ -356,18 +410,68 @@ def test_secrets_and_unrelated_services_are_not_granted(app):
 # --- The image-build role (review finding 6) and the autoscaler ------------------------------------
 
 
-def test_the_build_role_cannot_claim_remove_or_share_images(build_role):
-    image, snapshot = f"arn:aws:ec2:{R}::image/ami-unrelated", f"arn:aws:ec2:{R}::snapshot/snap-unrelated"
-    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
+def test_the_build_role_owns_images_only_through_tags_at_creation(build_role):
+    image, snapshot = f"arn:aws:ec2:{R}::image/ami-new", f"arn:aws:ec2:{R}::snapshot/snap-new"
+    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation", "bioaf-managed"]}
     for resource in (image, snapshot):
+        # Packer passes run_tags (with the ownership tag) inside CreateImage: allowed.
+        assert allowed(build_role, Request("ec2:CreateTags", resource, {**claim, "ec2:CreateAction": "CreateImage"}))
+        # The same tag on an existing image or snapshot is a claim: denied.
         assert not allowed(build_role, Request("ec2:CreateTags", resource, claim))
+        # Later non-ownership tags (Packer's tags and snapshot_tags) are fine.
         assert allowed(build_role, Request("ec2:CreateTags", resource, {"aws:TagKeys": ["bioaf-managed"]}))
-    for action, resource in (
-        ("ec2:DeregisterImage", image),
-        ("ec2:DeleteSnapshot", snapshot),
-        ("ec2:ModifyImageAttribute", image),
-    ):
-        assert not allowed(build_role, Request(action, resource, OWNED)), action
+
+
+def test_the_build_role_cleans_up_only_owned_images_and_never_shares(build_role):
+    image, snapshot = f"arn:aws:ec2:{R}::image/ami-1", f"arn:aws:ec2:{R}::snapshot/snap-1"
+    for action, resource in (("ec2:DeregisterImage", image), ("ec2:DeleteSnapshot", snapshot)):
+        assert allowed(build_role, Request(action, resource, OWNED)), action
+        assert not allowed(build_role, Request(action, resource)), action
+    assert not allowed(build_role, Request("ec2:ModifyImageAttribute", image, OWNED))
+
+
+@pytest.mark.parametrize(
+    "policy, action, resource, ctx",
+    [
+        (
+            "bioaf-role-image-build",
+            "logs:CreateLogStream",
+            "log-group:/aws/codebuild/bioaf-image-build:log-stream:b",
+            {},
+        ),
+        ("bioaf-role-image-build", "logs:PutLogEvents", "log-group:/aws/codebuild/bioaf-image-build:log-stream:b", {}),
+        ("bioaf-role-image-build", "ecr:PutImage", "repository/bioaf-env-x", {}),
+        ("bioaf-role-image-build", "s3:GetObject", "bioaf-working-x/context.tar.gz", {"aws:ResourceAccount": A}),
+        ("bioaf-role-image-build", "ec2:RunInstances", "instance/*", TAGGED),
+        ("bioaf-role-image-build", "ec2:CreateImage", "instance/i-b", OWNED),
+        ("bioaf-role-image-build", "ec2:TerminateInstances", "instance/i-b", OWNED),
+        ("bioaf-role-image-build", "ec2:DeregisterImage", "image/ami-1", OWNED),
+        ("bioaf-role-image-build", "ec2:DeleteSnapshot", "snapshot/snap-1", OWNED),
+        ("bioaf-role-image-build", "ec2:CreateKeyPair", "key-pair/packer_1", {}),
+        ("bioaf-role-s3-readwrite", "s3:PutObject", "bioaf-results-x/a", {"aws:ResourceAccount": A}),
+        ("bioaf-role-s3-readonly", "s3:GetObject", "bioaf-results-x/a", {"aws:ResourceAccount": A}),
+        ("bioaf-role-cluster-autoscaler", "autoscaling:SetDesiredCapacity", "asg", {}),
+    ],
+)
+def test_what_each_role_needs_survives_the_boundary(boundary, policy, action, resource, ctx):
+    """Review round 2, finding 3: a grant the boundary removes breaks the workflow silently."""
+    service = action.split(":")[0]
+    arn = {
+        "logs": f"arn:aws:logs:{R}:{A}:{resource}",
+        "ecr": f"arn:aws:ecr:{R}:{A}:{resource}",
+        "s3": f"arn:aws:s3:::{resource}",
+        "autoscaling": f"arn:aws:autoscaling:{R}:{A}:autoScalingGroup:u:autoScalingGroupName/x",
+    }.get(service)
+    if arn is None:
+        regional = resource.startswith(("image/", "snapshot/"))
+        arn = f"arn:aws:ec2:{R}::{resource}" if regional else f"{EC2}:{resource}"
+    if policy == "bioaf-role-cluster-autoscaler":
+        ctx = {
+            "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true",
+            "aws:ResourceTag/eks:cluster-name": "bioaf-acme-1",
+            "aws:PrincipalTag/bioaf:cluster": "bioaf-acme-1",
+        }
+    assert allowed_with_boundary([_doc(policy)], boundary, Request(action, arn, ctx))
 
 
 def test_the_build_role_launches_only_ubuntu_into_the_default_vpc(build_role):
@@ -386,17 +490,25 @@ def test_the_build_role_launches_only_ubuntu_into_the_default_vpc(build_role):
     assert not allowed(build_role, Request("ec2:TerminateInstances", f"{EC2}:instance/i-x"))
 
 
-def test_the_autoscaler_scales_only_enabled_bioaf_node_groups():
+def test_the_autoscaler_scales_only_its_own_clusters_enabled_groups():
+    """Review round 2, finding 6: the autoscaler role's bioaf:cluster tag names its cluster."""
     autoscaler = [_doc("bioaf-role-cluster-autoscaler")]
     asg = f"arn:aws:autoscaling:{R}:{A}:autoScalingGroup:uuid:autoScalingGroupName/eks-x"
+    mine = {"aws:PrincipalTag/bioaf:cluster": "bioaf-acme-1"}
     tags = {
         "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true",
         "aws:ResourceTag/eks:cluster-name": "bioaf-acme-1",
     }
-    assert allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, tags))
-    other = {**tags, "aws:ResourceTag/eks:cluster-name": "payments"}
-    assert not allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, other))
-    assert not allowed(autoscaler, Request("autoscaling:TerminateInstanceInAutoScalingGroup", asg))
+    assert allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, {**tags, **mine}))
+    other = {**tags, "aws:ResourceTag/eks:cluster-name": "bioaf-acme-2"}
+    assert not allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, {**other, **mine}))
+    assert not allowed(autoscaler, Request("autoscaling:TerminateInstanceInAutoScalingGroup", asg, mine))
+    assert not allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, tags))
+    nodegroup = f"arn:aws:eks:{R}:{A}:nodegroup/bioaf-acme-2/ng/1"
+    assert not allowed(autoscaler, Request("eks:DescribeNodegroup", nodegroup, mine))
+    assert allowed(
+        autoscaler, Request("eks:DescribeNodegroup", f"arn:aws:eks:{R}:{A}:nodegroup/bioaf-acme-1/ng/1", mine)
+    )
 
 
 @pytest.mark.parametrize("name", ALL_POLICIES)

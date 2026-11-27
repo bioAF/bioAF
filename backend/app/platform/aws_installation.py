@@ -41,12 +41,13 @@ def ownership_tags(account_id: str | None, region: str | None) -> list[dict]:
 NEW_ROLE_PATH = "/bioaf/"
 
 
-def role_path_from_state(state: dict) -> str:
-    """The path of the module's roles already in state, else the path for new roles."""
+def role_paths_from_state(state: dict) -> dict[str, str]:
+    """Each role's and instance profile's current path, by name, so none of them moves."""
+    paths: dict[str, str] = {}
     for resource in state.get("resources") or []:
-        if resource.get("mode") == "managed" and resource.get("type") == "aws_iam_role":
+        if resource.get("mode") == "managed" and resource.get("type") in ("aws_iam_role", "aws_iam_instance_profile"):
             for instance in resource.get("instances") or []:
-                path = (instance.get("attributes") or {}).get("path")
-                if path:
-                    return path
-    return NEW_ROLE_PATH
+                attributes = instance.get("attributes") or {}
+                if attributes.get("name") and attributes.get("path"):
+                    paths[attributes["name"]] = attributes["path"]
+    return paths

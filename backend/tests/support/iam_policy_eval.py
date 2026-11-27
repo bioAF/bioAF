@@ -2,8 +2,8 @@
 
 It answers "would these identity policies allow this request?" for the subset of IAM the bioAF
 documents use: Allow/Deny statements, Action/Resource/NotResource wildcards, and the condition operators
-StringEquals, StringNotEquals, StringLike, ArnLike, Null, plus the ForAnyValue/ForAllValues set
-qualifiers. An explicit Deny wins; otherwise any matching Allow allows.
+StringEquals, StringNotEquals, StringLike, ArnLike, ArnEquals, Null, plus the ForAnyValue/ForAllValues set
+qualifiers, and ${...} policy variables taken from the request context. An explicit Deny wins; otherwise any matching Allow allows.
 
 This is not AWS's evaluator. It ignores SCPs, resource policies, session policies and service
 specific context. It proves what the documents say, not what AWS does; live simulation and a test
@@ -13,6 +13,7 @@ installation are still required.
 from __future__ import annotations
 
 import fnmatch
+import re
 from dataclasses import dataclass, field
 
 
@@ -46,7 +47,7 @@ def _single(operator: str, expected: list, actual) -> bool:
         return any(v in expected for v in values)
     if operator == "StringNotEquals":
         return all(v not in expected for v in values)
-    if operator in ("StringLike", "ArnLike"):
+    if operator in ("StringLike", "ArnLike", "ArnEquals"):
         return any(_match(p, v) for p in expected for v in values)
     raise NotImplementedError(operator)
 
@@ -68,7 +69,28 @@ def _condition(block: dict, context: dict) -> bool:
     return True
 
 
+_VARIABLE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _resolve(value, context: dict):
+    """Substitute IAM policy variables such as ${aws:PrincipalTag/x} from the request context.
+    An unresolvable variable becomes a value that matches nothing, as in IAM."""
+    if isinstance(value, list):
+        return [_resolve(v, context) for v in value]
+    if not isinstance(value, str):
+        return value
+    return _VARIABLE.sub(lambda m: str(context.get(m.group(1), "\x00unresolved\x00")), value)
+
+
 def _applies(statement: dict, request: Request) -> bool:
+    statement = {
+        **statement,
+        **{k: _resolve(statement[k], request.context) for k in ("Resource", "NotResource") if k in statement},
+        "Condition": {
+            op: {key: _resolve(v, request.context) for key, v in keys.items()}
+            for op, keys in statement.get("Condition", {}).items()
+        },
+    }
     actions = _as_list(statement.get("Action", []))
     if not any(_match(a, request.action, case_insensitive=True) for a in actions):
         return False

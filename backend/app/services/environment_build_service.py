@@ -171,8 +171,8 @@ build {
 #     (from the CodeBuild workspace), so the builder needs NO S3/IAM access.
 #   - awscli + S3 output sync replace the GCS staging tooling (the runtime sync
 #     runs from the work-node startup script in the EC2 launch provider, 8b-launch).
-#   - No automatic deregistration: each build number has its own AMI name, and the build role
-#     may not remove images (plan 04B). Superseded AMIs are removed by an operator.
+#   - force_deregister/force_delete_snapshot so a rebuild can reuse the AMI name. The build role
+#     may remove only images and snapshots tagged as this installation's at CreateImage (plan 04B).
 # Packer reads its inputs from PKR_VAR_* env vars the CodeBuild build sets.
 PACKER_VM_TEMPLATE_AWS = """\
 packer {
@@ -219,6 +219,11 @@ source "amazon-ebs" "work_node" {
 
   ssh_username    = "ubuntu"
   ami_name        = var.image_name
+
+  # A rebuild reuses the deterministic AMI name, so deregister the prior one. Only an image this
+  # installation tagged at creation (run_tags reach CreateImage) can be removed.
+  force_deregister      = true
+  force_delete_snapshot = true
 
   # The pre-created builder group (image_build module), so Packer creates no security group.
   security_group_filter {

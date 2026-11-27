@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.services.deployment_outputs import identifier_value
+from app.platform.aws_installation import NEW_ROLE_PATH
 from app.services.eks_endpoint_policy import CONFIG_KEYS as EKS_CONFIG_KEYS
 
 # The deployed layout: GCP modules at /app/terraform/modules (the executor's
@@ -184,8 +185,9 @@ class AwsTerraformCloud(TerraformCloud):
             # names, so no stack_uid; account_id scopes the ECR repo ARNs.
             tfvars["account_id"] = config.get("aws_account_id") or ""
             tfvars["org_slug"] = org_slug
-            if config.get("_aws_role_path"):
-                tfvars["role_path"] = config["_aws_role_path"]
+            if "_aws_role_paths" in config:
+                tfvars["role_paths"] = config["_aws_role_paths"]
+                tfvars["new_role_path"] = NEW_ROLE_PATH
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
             if storage_suffix:
@@ -216,8 +218,9 @@ class AwsTerraformCloud(TerraformCloud):
                 tfvars["app_security_group_id"] = app_sg
             # Explicit endpoint/logging inputs resolved by prepare_run for a plan or apply (plan 04C).
             tfvars.update(config.get("_eks_resolved") or {})
-            if config.get("_aws_role_path"):
-                tfvars["role_path"] = config["_aws_role_path"]
+            if "_aws_role_paths" in config:
+                tfvars["role_paths"] = config["_aws_role_paths"]
+                tfvars["new_role_path"] = NEW_ROLE_PATH
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))
@@ -255,7 +258,7 @@ class AwsTerraformCloud(TerraformCloud):
         if module_name not in ("compute", "image_build"):
             return config
         from app.exceptions import ValidationError
-        from app.platform.aws_installation import role_path_from_state
+        from app.platform.aws_installation import role_paths_from_state
 
         pulled: list = []
 
@@ -270,7 +273,7 @@ class AwsTerraformCloud(TerraformCloud):
                 f"The remote {module_name} state could not be read, so the existing roles cannot be identified. "
                 "Nothing was changed; check the state bucket and retry."
             )
-        config = {**config, "_aws_role_path": role_path_from_state(state)}
+        config = {**config, "_aws_role_paths": role_paths_from_state(state)}
         if module_name == "image_build":
             return config
         from app.services import eks_endpoint

@@ -97,36 +97,56 @@ def test_modules_write_no_role_policies_and_attach_only_installer_policies(modul
 
 
 @pytest.mark.parametrize("module", ["compute", "image_build"])
-def test_roles_and_profiles_take_the_path_the_backend_chooses(module):
+def test_each_role_and_profile_keeps_its_own_path_or_takes_the_new_one(module):
     main = (AWS_MODULES / module / "main.tf").read_text()
     for kind in ("aws_iam_role", "aws_iam_instance_profile"):
         for body in re.findall(rf'resource "{kind}" "[^"]+" \{{(.*?)\n\}}', main, re.S):
-            assert re.search(r"path\s*=\s*(local\.role_path|var\.role_path)", body), (kind, body[:80])
-    assert re.search(
-        r'variable "role_path" \{[^}]*default\s*=\s*"/"', (AWS_MODULES / module / "variables.tf").read_text(), re.S
-    )
+            name = re.search(r"\bname\s*=\s*(.+)", body).group(1).strip()
+            assert f"path = lookup(var.role_paths, {name}, var.new_role_path)" in re.sub(r"\s+", " ", body), body[:120]
+    variables = (AWS_MODULES / module / "variables.tf").read_text()
+    assert re.search(r'variable "role_paths" \{[^}]*default\s*=\s*\{\}', variables, re.S)
+    assert re.search(r'variable "new_role_path" \{[^}]*default\s*=\s*"/"', variables, re.S)
 
 
-def _role_state(path):
+def _iam_state(*items):
     return {
         "resources": [
-            {"mode": "managed", "type": "aws_iam_role", "name": "node", "instances": [{"attributes": {"path": path}}]}
+            {"mode": "managed", "type": kind, "name": key, "instances": [{"attributes": {"name": name, "path": path}}]}
+            for kind, key, name, path in items
         ]
     }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "state, expected", [({"resources": []}, "/bioaf/"), (_role_state("/"), "/"), (_role_state("/bioaf/"), "/bioaf/")]
+    "state, paths",
+    [
+        ({"resources": []}, {}),
+        (
+            _iam_state(("aws_iam_role", "codebuild", "bioaf-codebuild-image-build", "/")),
+            {"bioaf-codebuild-image-build": "/"},
+        ),
+        (
+            _iam_state(
+                ("aws_iam_role", "node", "bioaf-a-1-node", "/"),
+                ("aws_iam_instance_profile", "work_node", "bioaf-work-node-1", "/"),
+            ),
+            {"bioaf-a-1-node": "/", "bioaf-work-node-1": "/"},
+        ),
+    ],
 )
-async def test_new_roles_go_under_bioaf_and_existing_roles_keep_their_path(tmp_path, state, expected):
+async def test_existing_roles_keep_their_paths_and_any_missing_role_goes_under_bioaf(tmp_path, state, paths):
+    """Review finding 5: a legacy module that lost one role recreates it under /bioaf/."""
+
     async def pull():
         return state
 
     config = await AwsTerraformCloud().prepare_run(
         None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
     )
-    assert AwsTerraformCloud().write_tfvars(tmp_path, "image_build", config)["role_path"] == expected
+    tfvars = AwsTerraformCloud().write_tfvars(tmp_path, "image_build", config)
+    assert tfvars["role_paths"] == paths
+    assert tfvars["new_role_path"] == "/bioaf/"
 
 
 @pytest.mark.asyncio
