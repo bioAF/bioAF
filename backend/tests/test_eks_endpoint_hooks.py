@@ -408,3 +408,47 @@ async def test_a_fresh_cluster_gets_a_verified_snapshot_on_its_next_plan(session
     assert recorded["aws_eks_endpoint_mode"] == "private_only"
     snapshot = json.loads(recorded["aws_eks_endpoint_snapshot"])
     assert snapshot["cluster_arn"] == ARN and snapshot["endpoint_public_access"] is False
+
+
+# --- Identity on every plan and apply (review finding: recreated cluster accepted) -------
+
+
+def _recreated_live(**kwargs):
+    live = _live(**kwargs)
+    live["createdAt"] = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    return live
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["plan", "apply"])
+async def test_a_recreated_cluster_is_refused_in_preserve_existing(session, phase):
+    await _preserved(session)
+    with pytest.raises(ValidationError, match="not the recorded cluster"):
+        await _prepare(session, _state(), phase=phase, live=_recreated_live())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["plan", "apply"])
+async def test_a_recreated_cluster_is_refused_in_a_hardened_mode(session, phase):
+    await _seed(session, compute_deployed="true", aws_eks_endpoint_mode="private_only", gke_cluster_name=NAME)
+    await _prepare(session, _state(public=False, cidrs=()), live=_live(public=False, cidrs=()))
+    with pytest.raises(ValidationError, match="not the recorded cluster"):
+        await _prepare(
+            session, _state(public=False, cidrs=()), phase=phase, live=_recreated_live(public=False, cidrs=())
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_cutover_is_not_committed_onto_a_recreated_cluster(session):
+    await _preserved(session)
+    await _request(session)
+    await _prepare(session, _state(), run_id=7)
+    applied = await _prepare(session, _state(), phase="apply", run_id=7)
+    describe, logs = _fakes(live=_recreated_live(public=False, cidrs=()))
+    with describe, logs:
+        await eks_endpoint.finish_apply(session, applied, run_id=7, succeeded=True)
+    recorded = await _config(session)
+    assert recorded["aws_eks_endpoint_mode"] == "preserve_existing"
+    assert json.loads(recorded["aws_eks_endpoint_cutover"])["status"] == "needs_reconcile"
+    with pytest.raises(ValidationError, match="not the recorded cluster"):
+        await _prepare(session, _state(), run_id=9, live=_recreated_live(public=False, cidrs=()))

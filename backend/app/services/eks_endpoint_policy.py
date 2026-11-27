@@ -262,11 +262,13 @@ def snapshot_existing_cluster(state: dict | None, live: dict, config: dict) -> d
         raise ValidationError(
             f"The cluster in remote state ({attributes.get('name')}) does not have the recorded name {recorded_name}."
         )
-    if live.get("arn") != arn or not _same_instant(live.get("createdAt"), created):
+    try:
+        require_same_cluster({"cluster_arn": arn, "created_at": created}, live)
+    except ValidationError as exc:
         raise ValidationError(
             "The live EKS cluster does not match the cluster in remote compute state (ARN or creation time "
             "differ). It may have been replaced; nothing was recorded or changed."
-        )
+        ) from exc
     created_at = _parse_time(live.get("createdAt"))
     return {
         "cluster_arn": arn,
@@ -276,12 +278,32 @@ def snapshot_existing_cluster(state: dict | None, live: dict, config: dict) -> d
     }
 
 
-def require_live_matches(snapshot: dict, live: dict) -> None:
-    """Refuse when the live cluster or its endpoint moved away from the recorded snapshot."""
-    if live.get("arn") != snapshot.get("cluster_arn"):
+def require_same_cluster(recorded: dict, live: dict, state_attributes: dict | None = None) -> None:
+    """The one identity check: the live cluster (and, when given, the cluster in remote state) is
+    the recorded cluster by ARN and creation time. A cluster deleted and recreated under the same
+    name has the same ARN but a new creation time, so both are compared."""
+    arn, created = recorded.get("cluster_arn"), recorded.get("created_at")
+    if not arn or not created:
         raise ValidationError(
-            "The live EKS cluster changed since its endpoint was recorded (different ARN). Review it before applying."
+            "The recorded cluster identity has no ARN or creation time, so the cluster cannot be verified."
         )
+    if live.get("arn") != arn or not _same_instant(live.get("createdAt"), created):
+        raise ValidationError(
+            "The live EKS cluster is not the recorded cluster (ARN or creation time differ); it may have been "
+            "replaced. Nothing was changed; review the cluster before planning again."
+        )
+    if state_attributes is not None and (
+        state_attributes.get("arn") != arn or not _same_instant(state_attributes.get("created_at"), created)
+    ):
+        raise ValidationError(
+            "The remote compute state does not describe the recorded cluster (ARN or creation time differ). "
+            "Nothing was changed; reconcile the compute state."
+        )
+
+
+def require_live_matches(snapshot: dict, live: dict, state_attributes: dict | None = None) -> None:
+    """Refuse when the live cluster is not the recorded one or its endpoint moved from the snapshot."""
+    require_same_cluster(snapshot, live, state_attributes)
     endpoint = _live_endpoint(live)
     expected = _endpoint(
         bool(snapshot.get("endpoint_public_access")),

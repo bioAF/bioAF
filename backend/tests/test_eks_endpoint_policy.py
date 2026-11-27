@@ -312,3 +312,26 @@ def test_a_hardened_mode_is_not_pending():
 def test_a_deployed_cluster_without_a_recorded_mode_is_pending():
     assert policy.status({"compute_deployed": "true"})["pending_hardening"] is True
     assert policy.status({})["pending_hardening"] is False
+
+
+# --- One identity check everywhere (review finding: recreated cluster accepted) ---------
+
+
+def test_a_recreated_cluster_with_the_same_arn_fails_the_live_recheck():
+    recreated = _live(createdAt=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    with pytest.raises(ValidationError, match="not the recorded cluster"):
+        policy.require_live_matches(_snapshot(), recreated)
+
+
+def test_a_snapshot_without_a_creation_time_cannot_verify_anything():
+    snapshot = _snapshot()
+    del snapshot["created_at"]
+    with pytest.raises(ValidationError, match="creation time"):
+        policy.require_same_cluster(snapshot, _live())
+
+
+def test_remote_state_must_describe_the_recorded_cluster_too():
+    attributes = policy.state_cluster(_state(created_at="2026-09-01T00:00:00Z"))
+    with pytest.raises(ValidationError, match="remote compute state"):
+        policy.require_same_cluster(_snapshot(), _live(), attributes)
+    policy.require_same_cluster(_snapshot(), _live(), policy.state_cluster(_state()))

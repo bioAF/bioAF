@@ -111,8 +111,9 @@ async def _commit_cutover(session: AsyncSession, config: dict, cutover: dict, li
 
 async def _reconcile(session: AsyncSession, config: dict, cutover: dict, live: dict) -> dict | None:
     """Settle a cutover whose apply failed or was interrupted. Returns the cutover still pending."""
-    live_endpoint = policy.live_endpoint(live)
     snapshot = cutover.get("snapshot") or {}
+    policy.require_same_cluster(snapshot, live)
+    live_endpoint = policy.live_endpoint(live)
     if policy.endpoint_equal(live_endpoint, _cutover_target(cutover)):
         await _commit_cutover(session, config, cutover, live)
         return None
@@ -176,11 +177,22 @@ async def prepare_run(
             await _set(session, config, policy.MODE_KEY, policy.PRESERVE_EXISTING)
             mode = policy.PRESERVE_EXISTING
             logger.info("Recorded existing EKS endpoint for %s as preserve_existing", snapshot["cluster_arn"])
-        elif cutover:
+        else:
+            # Every later plan and apply, in every mode: the live cluster and the remote state are
+            # still the recorded cluster.
+            recorded = policy._json(config, policy.SNAPSHOT_KEY)
+            if recorded:
+                policy.require_same_cluster(recorded, live, attributes)
+            else:
+                # A cluster created in a hardened mode before its snapshot was recorded.
+                recorded = policy.snapshot_existing_cluster(state, live, config)
+                if phase == "plan":
+                    await _set(session, config, policy.SNAPSHOT_KEY, recorded)
+        if mode is not None and cutover:
             if cutover.get("status") in (APPLYING, NEEDS_RECONCILE):
                 cutover = await _reconcile(session, config, cutover, live)
             if cutover:
-                policy.require_live_matches(cutover.get("snapshot") or {}, live)
+                policy.require_live_matches(cutover.get("snapshot") or {}, live, attributes)
                 if phase == "plan":
                     cutover = {**cutover, "plan_run_id": run_id}
                     await _set(session, config, policy.CUTOVER_KEY, cutover)
@@ -192,11 +204,7 @@ async def prepare_run(
                     cutover = {**cutover, "status": APPLYING, "apply_run_id": run_id, "applying_at": _now()}
                     await _set(session, config, policy.CUTOVER_KEY, cutover)
         elif mode == policy.PRESERVE_EXISTING:
-            policy.require_live_matches(policy._json(config, policy.SNAPSHOT_KEY) or {}, live)
-        elif phase == "plan" and not policy._json(config, policy.SNAPSHOT_KEY):
-            # A cluster created in a hardened mode: record its verified endpoint so a later reviewed
-            # cutover has a baseline.
-            await _set(session, config, policy.SNAPSHOT_KEY, policy.snapshot_existing_cluster(state, live, config))
+            policy.require_live_matches(policy._json(config, policy.SNAPSHOT_KEY) or {}, live, attributes)
     elif mode is None and phase == "plan":
         # A fresh cluster: record the default so the next plan does not mistake it for a legacy one.
         policy.compute_tfvars(config, cluster_in_state=False)
@@ -235,7 +243,14 @@ async def finish_apply(session: AsyncSession, config: dict, *, run_id: int | Non
             live = await _describe(snapshot.get("cluster_name") or "", fresh.get("aws_region"))
         except ValidationError:
             live = None
-        if live is not None and live.get("arn") == snapshot.get("cluster_arn"):
+        same_cluster = False
+        if live is not None:
+            try:
+                policy.require_same_cluster(snapshot, live)
+                same_cluster = True
+            except ValidationError:
+                logger.warning("EKS cutover run %s: the live cluster is not the recorded one", run_id)
+        if same_cluster and live is not None:
             endpoint = policy.live_endpoint(live)
             if policy.endpoint_equal(endpoint, _cutover_target(cutover)):
                 await _commit_cutover(session, fresh, cutover, live)
