@@ -13,9 +13,12 @@
   administrator runs the reviewed cutover in `docs/operations/eks-endpoint-and-logs.md`.
 - Export all five EKS control-plane log types to CloudWatch with 30-day retention (configurable).
   The log group is kept on teardown, and reads are for operators only.
-- Narrow the `bioaf-app` AWS role to this installation's own resources. Roles the app creates now
-  carry a permissions boundary. The app can no longer change its own permissions, pass its own role,
-  claim resources by retagging, or share images. The cluster autoscaler can scale only its own
-  cluster's node groups. The image-build role is confined to its own builds, logs and images.
+- Narrow the `bioaf-app` AWS role to this installation's own resources, using installer-owned
+  managed policies. The app can no longer write role policies, change its own permissions, pass or
+  claim roles it does not own, claim resources by retagging, or share images. Roles it creates hold
+  only AWS's EKS policies and installer-owned policies under a permissions boundary. The cluster
+  autoscaler can scale only bioAF node groups. The image-build role is confined to its own builds
+  and logs and can no longer remove images; superseded work-node AMIs are now removed by an
+  operator.
   Existing AWS installations move over with `./install-aws.sh --reconcile-permissions`
   (`docs/operations/aws-permissions-reconcile.md`) before their next infrastructure update.

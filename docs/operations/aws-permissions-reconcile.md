@@ -7,22 +7,27 @@ permissions.
 
 ## What changes
 
-- **The `bioaf-app` role** gets the policy in `installer/aws_iam.sh` in place of
-  `bioaf-app-starter`. Reads stay account-wide where AWS cannot scope them. Changes are limited to:
+- **The `bioaf-app` role** gets three installer-owned managed policies (`bioaf-app-access-core`,
+  `bioaf-app-access-control`, `bioaf-app-access-services`, written by `installer/aws_iam.sh`) in
+  place of the inline `bioaf-app-starter` policy. Reads stay account-wide where AWS cannot scope
+  them. Changes are limited to:
   - EC2 resources tagged `bioaf:installation=<account>-<region>`;
   - security groups and routes in the application VPC;
   - `bioaf-*` EKS, ECR, CodeBuild and log resources in this account and region;
-  - IAM roles created under the role boundary.
+  - IAM roles under the `/bioaf/` path (new) or roles you tag during reconciliation (existing).
 
-  The app can no longer edit or pass its own role, remove a boundary, change a role tagged
-  `bioaf:protected=true`, move the ownership tag, read control-plane logs, delete control-plane log
-  history, or share images.
-- **A boundary policy**, `bioaf-app-created-role-boundary`, caps every role the app creates
-  (cluster, node, runner, Work Node, autoscaler, EBS CSI and CodeBuild roles). Those roles can never
-  write IAM, read secrets or assume other roles, whatever policy is attached to them.
-- **Ownership tags.** The narrowed policy needs the `bioaf:installation` tag on bioAF's existing EC2
-  resources, its Packer images and snapshots, the app VM and the roles it created. Reconciliation adds
-  them.
+  The app can no longer write any role policy, edit or pass its own role, change a boundary, touch
+  a role tagged `bioaf:protected=true`, tag IAM resources as its own, move the EC2 ownership tag,
+  read control-plane logs, delete log history, or remove or share images.
+- **What app-created roles can hold.** The app can attach only AWS's EKS policies and four
+  installer-owned policies (`bioaf-role-s3-readwrite`, `bioaf-role-s3-readonly`,
+  `bioaf-role-cluster-autoscaler`, `bioaf-role-image-build`). Every role also carries the
+  `bioaf-app-created-role-boundary`. That boundary lists only the actions those policies need and
+  repeats the app's denials, so no app-created role can terminate unrelated instances, delete
+  unrelated volumes or log groups, remove images, write IAM or read secrets.
+- **Ownership tags.** Existing EC2 resources, the app VM, and the roles and instance profiles bioAF
+  created get the `bioaf:installation` tag. Only an operator can add it to IAM resources.
+  Work-node images and snapshots are not tagged; nothing needs them owned.
 
 ## Order
 
@@ -62,16 +67,17 @@ The installer lists:
   never a role without that tag);
 - the EC2 resources tagged `managed_by=bioaf` or `bioaf-managed=true` that it will tag.
 
-Read the lists. Everything on them becomes this installation's to change and clean up. Answer `n`
+The lists also show the instance profiles of those roles. Read the lists: everything on them
+becomes this installation's to change and clean up. Answer `n`
 if anything does not belong to this installation; nothing is changed. Remove the wrong tag from
 that resource yourself and run reconciliation again.
 
 On `y` it:
 
-1. creates or updates the boundary policy;
-2. puts the boundary on each listed role and tags it;
+1. creates or updates the boundary and the managed policies;
+2. puts the boundary on each listed role and tags it and its instance profiles;
 3. tags the listed EC2 resources and the app VM;
-4. replaces the `bioaf-app` policy and deletes `bioaf-app-starter`.
+4. attaches the three app policies, then deletes the inline `bioaf-app-starter`.
 
 It creates no VM, key pair, security group or role, and does not touch the application. Running it
 again is safe.
@@ -90,7 +96,12 @@ again is safe.
 
 - One bioAF installation per AWS account (the `bioaf-app` role name is fixed), so the ownership tag
   is `<account>-<region>`.
-- Packer tags its images and snapshots after creating them, so the image-build role can tag images
-  and snapshots as owned. It runs only bioAF's own buildspec.
+- Existing roles keep their path (`/`); only roles created after this change use `/bioaf/`.
+- The EKS cluster role holds AWS's `AmazonEKSClusterPolicy`, which manages load balancers and their
+  security groups for Kubernetes `LoadBalancer` services. AWS does not scope that policy, so the
+  boundary allows those actions.
+- Work-node AMIs are never removed automatically. A retry of the same build after its AMI was
+  registered fails with a name conflict; start a new build. Delete superseded `bioaf-worknode-*`
+  AMIs and their snapshots yourself.
 - These documents were checked with a static evaluator in the test suite, not with AWS's policy
   simulator or a live installation. Validate on a test account before production.
