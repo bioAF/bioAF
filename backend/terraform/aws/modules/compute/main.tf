@@ -721,12 +721,14 @@ resource "aws_iam_role" "cluster_autoscaler" {
   tags                 = local.tags
 }
 
-# The canonical Cluster Autoscaler permission set. STARTER scope (Resource "*"),
-# consistent with the install-aws.sh starter policy; TIGHTEN in Stage 7 (scope
-# the mutating actions to this cluster's ASGs via an autoscaling:ResourceTag
-# condition on k8s.io/cluster-autoscaler/${cluster_name}).
+# The Cluster Autoscaler permission set, scoped per AWS's least-privilege guidance (plan 04B):
+# reads stay account-wide because these Describe/Get calls do not support resource scoping, while
+# scaling and terminating are allowed only on node-group ASGs carrying this cluster's
+# k8s.io/cluster-autoscaler/<cluster> = owned tag (applied below), and node-group reads only on this
+# cluster's node groups.
 data "aws_iam_policy_document" "cluster_autoscaler" {
   statement {
+    sid    = "Discover"
     effect = "Allow"
     actions = [
       "autoscaling:DescribeAutoScalingGroups",
@@ -734,15 +736,34 @@ data "aws_iam_policy_document" "cluster_autoscaler" {
       "autoscaling:DescribeLaunchConfigurations",
       "autoscaling:DescribeScalingActivities",
       "autoscaling:DescribeTags",
-      "autoscaling:SetDesiredCapacity",
-      "autoscaling:TerminateInstanceInAutoScalingGroup",
       "ec2:DescribeImages",
       "ec2:DescribeInstanceTypes",
       "ec2:DescribeLaunchTemplateVersions",
       "ec2:GetInstanceTypesFromInstanceRequirements",
-      "eks:DescribeNodegroup",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "DescribeThisClustersNodeGroups"
+    effect    = "Allow"
+    actions   = ["eks:DescribeNodegroup"]
+    resources = ["arn:${data.aws_partition.current.partition}:eks:${var.region}:${var.account_id == "" ? "*" : var.account_id}:nodegroup/${local.cluster_name}/*"]
+  }
+
+  statement {
+    sid    = "ScaleThisClustersGroups"
+    effect = "Allow"
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/${local.cluster_name}"
+      values   = ["owned"]
+    }
   }
 }
 

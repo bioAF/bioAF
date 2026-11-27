@@ -64,3 +64,39 @@ def test_every_role_a_module_creates_carries_the_boundary(module):
 def test_modules_receive_the_account_they_derive_ownership_from(tmp_path, module):
     tfvars = AwsTerraformCloud().write_tfvars(tmp_path, module, CONFIG)
     assert tfvars["account_id"] == "123456789012" and tfvars["region"] == "us-west-1"
+
+
+def _block(text: str, header: str) -> str:
+    start = text.index(header)
+    depth, i = 0, text.index("{", start)
+    while True:
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+        if depth == 0:
+            return text[start:i]
+
+
+def _statements(doc: str) -> list[str]:
+    out, rest = [], doc
+    while "statement {" in rest:
+        block = _block(rest, "statement {")
+        out.append(block)
+        rest = rest[rest.index(block) + len(block) :]
+    return out
+
+
+def test_the_autoscaler_can_scale_only_this_clusters_groups():
+    main = (AWS_MODULES / "compute" / "main.tf").read_text()
+    statements = _statements(_block(main, 'data "aws_iam_policy_document" "cluster_autoscaler"'))
+    mutating = [s for s in statements if "autoscaling:SetDesiredCapacity" in s]
+    assert len(mutating) == 1
+    scale = mutating[0]
+    assert "autoscaling:TerminateInstanceInAutoScalingGroup" in scale
+    assert "aws:ResourceTag/k8s.io/cluster-autoscaler/${local.cluster_name}" in scale
+    assert '"owned"' in scale
+    reads = [s for s in statements if s is not scale]
+    for statement in reads:
+        actions = re.findall(r'"([a-z0-9]+:[A-Za-z]+)"', statement)
+        assert all(a.split(":")[1].startswith(("Describe", "Get")) for a in actions), statement
+    nodegroup = [s for s in statements if "eks:DescribeNodegroup" in s]
+    assert nodegroup and "nodegroup/${local.cluster_name}/*" in nodegroup[0]
