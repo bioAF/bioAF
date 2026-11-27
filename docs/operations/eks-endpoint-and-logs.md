@@ -32,8 +32,13 @@ Check for Infrastructure Updates**) records the existing cluster:
    changes. If the check fails, the compute plan stops with an explanation and nothing is recorded.
 
 Every later compute plan passes those exact settings back and refuses any endpoint change. Before
-each apply the live endpoint is checked again; if someone changed it outside bioAF, the apply
-stops until it is reviewed.
+each apply the live cluster is checked again: it must be the recorded cluster (same ARN and creation
+time, in AWS and in the remote state) with the recorded endpoint. If anything changed outside
+bioAF, the apply stops until it is reviewed.
+
+A compute apply is the reviewed plan. It refuses inputs that changed since the plan, plans again,
+refuses any change the reviewed plan did not show (and any cluster replacement), and applies that
+checked plan file.
 
 The same upgrade turns on control-plane logging (all five types) with 30-day retention. Logging
 does not need the cutover.
