@@ -11,6 +11,12 @@
 > changelog section. Sections below v0.15.1 remain in their original SemVer
 > format.
 
+## v2026.11.50
+
+### Dependencies
+
+- Bump crazy-max/ghaction-import-gpg from 6.3.0 to 7.0.0 (CI workflow actions).
+
 ## v2026.11.49
 
 ### Dependencies
