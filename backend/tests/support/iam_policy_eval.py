@@ -1,7 +1,7 @@
 """A small, static IAM policy evaluator for testing bioAF's own policy documents (plan 04B).
 
 It answers "would these identity policies allow this request?" for the subset of IAM the bioAF
-documents use: Allow/Deny statements, Action/Resource wildcards, and the condition operators
+documents use: Allow/Deny statements, Action/Resource/NotResource wildcards, and the condition operators
 StringEquals, StringNotEquals, StringLike, ArnLike, Null, plus the ForAnyValue/ForAllValues set
 qualifiers. An explicit Deny wins; otherwise any matching Allow allows.
 
@@ -72,8 +72,10 @@ def _applies(statement: dict, request: Request) -> bool:
     actions = _as_list(statement.get("Action", []))
     if not any(_match(a, request.action, case_insensitive=True) for a in actions):
         return False
-    resources = _as_list(statement.get("Resource", []))
-    if not any(_match(r, request.resource) for r in resources):
+    if "NotResource" in statement:
+        if any(_match(r, request.resource) for r in _as_list(statement["NotResource"])):
+            return False
+    elif not any(_match(r, request.resource) for r in _as_list(statement.get("Resource", []))):
         return False
     return _condition(statement.get("Condition", {}), request.context)
 

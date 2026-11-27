@@ -256,7 +256,6 @@ BOOT_DISK_GB="30"
 KEY_NAME="bioaf"                   # EC2 key pair name
 SECURITY_GROUP_NAME="bioaf-allow-web"
 APP_ROLE_NAME="bioaf-app"          # IAM role + instance profile (analog of the app SA)
-APP_POLICY_NAME="bioaf-app"
 # Canonical's public SSM parameters for the latest Ubuntu 22.04 amd64 AMI, in
 # preference order. ebs-gp2 is the variant Canonical publishes in every region;
 # ebs-gp3 is NOT (it 404s in e.g. us-west-1), so we resolve the first that exists.
@@ -334,9 +333,9 @@ CALLER_ARN="$(aws sts get-caller-identity --query Arn --output text)"
 
 # The bioaf-app policy, the boundary for roles the app creates, and existing-installation
 # reconciliation (security plan 04B). Loaded once credentials work, like the later helpers.
-bioaf_load_helper installer/aws_iam.sh required aws_iam_installation_id aws_iam_boundary_arn \
-    aws_iam_role_boundary_policy aws_iam_app_policy aws_iam_ensure_boundary aws_iam_put_app_policy \
-    aws_iam_owned_roles aws_iam_owned_ec2 aws_iam_claim || exit 1
+bioaf_load_helper installer/aws_iam.sh required aws_iam_installation_id aws_iam_policy_document \
+    aws_iam_ensure_policies aws_iam_put_app_policy aws_iam_owned_roles aws_iam_owned_profiles \
+    aws_iam_owned_ec2 aws_iam_claim || exit 1
 step "Authenticated as ${CALLER_ARN}" -- true
 note "Account: ${ACCOUNT_ID}"
 
@@ -408,8 +407,10 @@ if [ "$RECONCILE_PERMISSIONS" = yes ]; then
         APP_VM=""
     fi
     RECONCILE_ROLES="$(mktemp -t bioaf-roles-XXXXXX)"
+    RECONCILE_PROFILES="$(mktemp -t bioaf-profiles-XXXXXX)"
     RECONCILE_EC2="$(mktemp -t bioaf-ec2-XXXXXX)"
     aws_iam_owned_roles "$APP_ROLE_NAME" > "$RECONCILE_ROLES"
+    aws_iam_owned_profiles "$RECONCILE_ROLES" > "$RECONCILE_PROFILES"
     aws_iam_owned_ec2 "$REGION" > "$RECONCILE_EC2"
     echo ""
     echo "  Installation:   ${INSTALLATION_ID}"
@@ -418,6 +419,8 @@ if [ "$RECONCILE_PERMISSIONS" = yes ]; then
     echo "  App VPC:        ${APP_VPC}"
     echo "  Roles to bound and tag ($(grep -c . "$RECONCILE_ROLES" || true)):"
     sed 's/^/    /' "$RECONCILE_ROLES"
+    echo "  Instance profiles to tag ($(grep -c . "$RECONCILE_PROFILES" || true)):"
+    sed 's/^/    /' "$RECONCILE_PROFILES"
     echo "  EC2 resources to tag ($(grep -c . "$RECONCILE_EC2" || true)):"
     sed 's/^/    /' "$RECONCILE_EC2"
     echo ""
@@ -425,15 +428,16 @@ if [ "$RECONCILE_PERMISSIONS" = yes ]; then
     read -rp "  Apply? [y/N] " reconcile_answer || true
     if [ "$reconcile_answer" != "y" ] && [ "$reconcile_answer" != "Y" ]; then
         say "  Nothing was changed."
-        rm -f "$RECONCILE_ROLES" "$RECONCILE_EC2"
+        rm -f "$RECONCILE_ROLES" "$RECONCILE_PROFILES" "$RECONCILE_EC2"
         exit 0
     fi
-    step "Create or update the boundary for roles bioAF creates" -- aws_iam_ensure_boundary "$ACCOUNT_ID" "$REGION"
-    step "Bound and tag bioAF's roles, tag its EC2 resources and the app VM" -- \
-        aws_iam_claim "$ACCOUNT_ID" "$REGION" "$RECONCILE_ROLES" "$RECONCILE_EC2" "$APP_VM"
-    step "Replace the ${APP_ROLE_NAME} policy with the narrowed one" -- \
-        aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$APP_VPC" "$APP_ROLE_NAME"
-    rm -f "$RECONCILE_ROLES" "$RECONCILE_EC2"
+    step "Create or update bioAF's managed policies and the role boundary" -- \
+        aws_iam_ensure_policies "$ACCOUNT_ID" "$REGION" "$APP_VPC" "$VPC_ID"
+    step "Bound and tag bioAF's roles, tag its profiles, EC2 resources and the app VM" -- \
+        aws_iam_claim "$ACCOUNT_ID" "$REGION" "$RECONCILE_ROLES" "$RECONCILE_PROFILES" "$RECONCILE_EC2" "$APP_VM"
+    step "Attach the narrowed ${APP_ROLE_NAME} policies and remove the starter policy" -- \
+        aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$APP_VPC" "$VPC_ID" "$APP_ROLE_NAME"
+    rm -f "$RECONCILE_ROLES" "$RECONCILE_PROFILES" "$RECONCILE_EC2"
     green "  Permissions reconciled. Next: run Check for Infrastructure Updates in bioAF."
     exit 0
 fi
@@ -578,9 +582,10 @@ fi
 # account-wide where AWS cannot scope them, and every change is limited to this installation. The
 # boundary policy comes first, since the app may only create roles under it. The app cannot edit
 # its own role or the boundary.
-step "Create or update the boundary for roles bioAF creates" -- aws_iam_ensure_boundary "$ACCOUNT_ID" "$REGION"
-step "Attach the ${APP_POLICY_NAME} policy" -- \
-    aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$VPC_ID" "$APP_ROLE_NAME"
+step "Create or update bioAF's managed policies and the role boundary" -- \
+    aws_iam_ensure_policies "$ACCOUNT_ID" "$REGION" "$VPC_ID" "$VPC_ID"
+step "Attach the ${APP_ROLE_NAME} policies" -- \
+    aws_iam_put_app_policy "$ACCOUNT_ID" "$REGION" "$VPC_ID" "$VPC_ID" "$APP_ROLE_NAME"
 
 if aws iam get-instance-profile --instance-profile-name "$APP_ROLE_NAME" >/dev/null 2>&1; then
     step "Instance profile ${APP_ROLE_NAME} already exists" -- true

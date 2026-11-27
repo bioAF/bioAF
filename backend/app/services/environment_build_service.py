@@ -197,7 +197,7 @@ variable "conda_env_name" {
 }
 
 # This installation's ownership tag value (plan 04B): the build role may change and clean up only
-# instances, volumes, snapshots and AMIs that carry it.
+# the builder instances and volumes that carry it (applied at launch).
 variable "installation_id" {
   type = string
 }
@@ -235,9 +235,10 @@ source "amazon-ebs" "work_node" {
     "bioaf:installation" = var.installation_id
     bioaf-managed        = "true"
   }
+  # The AMI and its snapshots are tagged after creation, so they never carry the ownership tag:
+  # the build role may not add it to an existing image (plan 04B review).
   snapshot_tags = {
-    "bioaf:installation" = var.installation_id
-    bioaf-managed        = "true"
+    bioaf-managed = "true"
   }
   ami_description = "bioAF work node environment"
 
@@ -254,8 +255,7 @@ source "amazon-ebs" "work_node" {
   }
 
   tags = {
-    "bioaf:installation" = var.installation_id
-    bioaf-managed        = "true"
+    bioaf-managed = "true"
   }
 }
 

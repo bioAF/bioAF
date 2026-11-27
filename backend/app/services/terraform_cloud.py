@@ -184,6 +184,8 @@ class AwsTerraformCloud(TerraformCloud):
             # names, so no stack_uid; account_id scopes the ECR repo ARNs.
             tfvars["account_id"] = config.get("aws_account_id") or ""
             tfvars["org_slug"] = org_slug
+            if config.get("_aws_role_path"):
+                tfvars["role_path"] = config["_aws_role_path"]
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
             if storage_suffix:
@@ -214,6 +216,8 @@ class AwsTerraformCloud(TerraformCloud):
                 tfvars["app_security_group_id"] = app_sg
             # Explicit endpoint/logging inputs resolved by prepare_run for a plan or apply (plan 04C).
             tfvars.update(config.get("_eks_resolved") or {})
+            if config.get("_aws_role_path"):
+                tfvars["role_path"] = config["_aws_role_path"]
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))
@@ -248,11 +252,30 @@ class AwsTerraformCloud(TerraformCloud):
         return "AWS is not configured. Set the AWS account before bootstrapping."
 
     async def prepare_run(self, session, module_name, config, *, phase, run_id, pull_state):
-        if module_name != "compute":
+        if module_name not in ("compute", "image_build"):
+            return config
+        from app.exceptions import ValidationError
+        from app.platform.aws_installation import role_path_from_state
+
+        pulled: list = []
+
+        async def pull_once():
+            if not pulled:
+                pulled.append(await pull_state())
+            return pulled[0]
+
+        state = await pull_once()
+        if state is None:
+            raise ValidationError(
+                f"The remote {module_name} state could not be read, so the existing roles cannot be identified. "
+                "Nothing was changed; check the state bucket and retry."
+            )
+        config = {**config, "_aws_role_path": role_path_from_state(state)}
+        if module_name == "image_build":
             return config
         from app.services import eks_endpoint
 
-        return await eks_endpoint.prepare_run(session, config, phase=phase, run_id=run_id, pull_state=pull_state)
+        return await eks_endpoint.prepare_run(session, config, phase=phase, run_id=run_id, pull_state=pull_once)
 
     def review_plan(self, module_name, config, raw_plan):
         if module_name == "compute":

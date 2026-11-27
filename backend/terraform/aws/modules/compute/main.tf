@@ -33,7 +33,13 @@ provider "aws" {
 locals {
   installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
   ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
-  role_boundary   = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
+  # Roles and their policies (plan 04B review): new roles live under /bioaf/, which only CreateRole
+  # sets, so the app's ownership of them cannot be claimed or moved; existing roles keep the path
+  # in state (the backend passes it). Their permissions are the installer-owned bioaf-role-*
+  # policies: the app attaches them but cannot write role policies itself.
+  role_path        = var.role_path
+  installer_policy = "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/"
+  role_boundary    = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
 }
 
 # --- Naming + shared locals ---------------------------------------------------
@@ -132,6 +138,7 @@ data "aws_iam_policy_document" "cluster_assume" {
 }
 
 resource "aws_iam_role" "cluster" {
+  path                 = local.role_path
   name                 = "${local.cluster_name}-cluster"
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.cluster_assume.json
@@ -253,6 +260,7 @@ data "aws_iam_policy_document" "node_assume" {
 }
 
 resource "aws_iam_role" "node" {
+  path                 = local.role_path
   name                 = "${local.cluster_name}-node"
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.node_assume.json
@@ -277,23 +285,11 @@ resource "aws_iam_role_policy_attachment" "node_ecr" {
 # Node-level S3 access to bioaf-* (the analog of the GCP module granting the
 # default node SA storage.objectAdmin). Pods that use IRSA get scoped creds via
 # their runner role; this covers node-level / non-IRSA access.
-data "aws_iam_policy_document" "node_s3" {
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "node_s3" {
-  name   = "bioaf-node-s3"
-  role   = aws_iam_role.node.id
-  policy = data.aws_iam_policy_document.node_s3.json
+
+resource "aws_iam_role_policy_attachment" "node_s3" {
+  role       = aws_iam_role.node.name
+  policy_arn = "${local.installer_policy}bioaf-role-s3-readwrite"
 }
 
 # --- Node groups (the AWS analogs of the GKE node pools) ----------------------
@@ -463,6 +459,7 @@ data "aws_iam_policy_document" "ebs_csi_trust" {
 }
 
 resource "aws_iam_role" "ebs_csi" {
+  path                 = local.role_path
   name                 = "${local.cluster_name}-ebs-csi"
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.ebs_csi_trust.json
@@ -542,6 +539,7 @@ data "aws_iam_policy_document" "runner_trust" {
 }
 
 resource "aws_iam_role" "runner" {
+  path                 = local.role_path
   for_each             = local.runners
   name                 = "bioaf-${each.key}-runner-${var.stack_uid}"
   permissions_boundary = local.role_boundary
@@ -549,27 +547,12 @@ resource "aws_iam_role" "runner" {
   tags                 = merge(local.tags, { runner = each.key })
 }
 
-data "aws_iam_policy_document" "runner_s3" {
-  for_each = local.runners
-  statement {
-    effect = "Allow"
-    actions = each.value.readonly ? ["s3:GetObject"] : [
-      "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
-    ]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "runner_s3" {
-  for_each = local.runners
-  name     = "bioaf-${each.key}-runner-s3"
-  role     = aws_iam_role.runner[each.key].id
-  policy   = data.aws_iam_policy_document.runner_s3[each.key].json
+
+resource "aws_iam_role_policy_attachment" "runner_s3" {
+  for_each   = local.runners
+  role       = aws_iam_role.runner[each.key].name
+  policy_arn = "${local.installer_policy}${each.value.readonly ? "bioaf-role-s3-readonly" : "bioaf-role-s3-readwrite"}"
 }
 
 # --- Work-node (EC2) networking + instance profile (cleanup item 8b) ----------
@@ -617,6 +600,7 @@ data "aws_iam_policy_document" "work_node_assume" {
 }
 
 resource "aws_iam_role" "work_node" {
+  path                 = local.role_path
   name                 = "bioaf-work-node-${var.stack_uid}"
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.work_node_assume.json
@@ -625,26 +609,15 @@ resource "aws_iam_role" "work_node" {
 
 # S3 read/write to bioaf-* buckets (inputs in, outputs/scripts out), mirroring the
 # non-readonly runner_s3 policy.
-data "aws_iam_policy_document" "work_node_s3" {
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "work_node_s3" {
-  name   = "bioaf-work-node-s3"
-  role   = aws_iam_role.work_node.id
-  policy = data.aws_iam_policy_document.work_node_s3.json
+
+resource "aws_iam_role_policy_attachment" "work_node_s3" {
+  role       = aws_iam_role.work_node.name
+  policy_arn = "${local.installer_policy}bioaf-role-s3-readwrite"
 }
 
 resource "aws_iam_instance_profile" "work_node" {
+  path = local.role_path
   name = "bioaf-work-node-${var.stack_uid}"
   role = aws_iam_role.work_node.name
   # Tagged only through the provider default tags (the installation owner, plan 04B); the
@@ -712,62 +685,19 @@ data "aws_iam_policy_document" "cluster_autoscaler_trust" {
 }
 
 resource "aws_iam_role" "cluster_autoscaler" {
+  path                 = local.role_path
   name                 = "${local.cluster_name}-cluster-autoscaler"
   permissions_boundary = local.role_boundary
   assume_role_policy   = data.aws_iam_policy_document.cluster_autoscaler_trust.json
   tags                 = local.tags
 }
 
-# The Cluster Autoscaler permission set, scoped per AWS's least-privilege guidance (plan 04B):
-# reads stay account-wide because these Describe/Get calls do not support resource scoping, while
-# scaling and terminating are allowed only on node-group ASGs carrying this cluster's
-# k8s.io/cluster-autoscaler/<cluster> = owned tag (applied below), and node-group reads only on this
-# cluster's node groups.
-data "aws_iam_policy_document" "cluster_autoscaler" {
-  statement {
-    sid    = "Discover"
-    effect = "Allow"
-    actions = [
-      "autoscaling:DescribeAutoScalingGroups",
-      "autoscaling:DescribeAutoScalingInstances",
-      "autoscaling:DescribeLaunchConfigurations",
-      "autoscaling:DescribeScalingActivities",
-      "autoscaling:DescribeTags",
-      "ec2:DescribeImages",
-      "ec2:DescribeInstanceTypes",
-      "ec2:DescribeLaunchTemplateVersions",
-      "ec2:GetInstanceTypesFromInstanceRequirements",
-    ]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "DescribeThisClustersNodeGroups"
-    effect    = "Allow"
-    actions   = ["eks:DescribeNodegroup"]
-    resources = ["arn:${data.aws_partition.current.partition}:eks:${var.region}:${var.account_id == "" ? "*" : var.account_id}:nodegroup/${local.cluster_name}/*"]
-  }
-
-  statement {
-    sid    = "ScaleThisClustersGroups"
-    effect = "Allow"
-    actions = [
-      "autoscaling:SetDesiredCapacity",
-      "autoscaling:TerminateInstanceInAutoScalingGroup",
-    ]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/${local.cluster_name}"
-      values   = ["owned"]
-    }
-  }
-}
-
-resource "aws_iam_role_policy" "cluster_autoscaler" {
-  name   = "bioaf-cluster-autoscaler"
-  role   = aws_iam_role.cluster_autoscaler.id
-  policy = data.aws_iam_policy_document.cluster_autoscaler.json
+# The Cluster Autoscaler's permissions are the installer-owned bioaf-role-cluster-autoscaler policy:
+# account-wide reads (AWS does not scope them), and scaling only of EKS node-group ASGs of bioaf
+# clusters that are enabled for the autoscaler (tags applied below).
+resource "aws_iam_role_policy_attachment" "cluster_autoscaler" {
+  role       = aws_iam_role.cluster_autoscaler.name
+  policy_arn = "${local.installer_policy}bioaf-role-cluster-autoscaler"
 }
 
 # Discovery + scale-from-zero tags on each scalable node group's ASG. EKS does

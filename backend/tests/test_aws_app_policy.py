@@ -1,4 +1,5 @@
-"""The installer's bioaf-app policy and app-created-role boundary (plan 04B), evaluated statically.
+"""The installer's bioaf-app policies and the documents app-created roles may hold (plan 04B),
+evaluated statically.
 
 The documents come from ``installer/aws_iam.sh`` exactly as the installer renders them. Each test
 asks the static evaluator in ``tests/support/iam_policy_eval.py`` whether a request the app makes
@@ -16,7 +17,16 @@ import pytest
 from tests.support.iam_policy_eval import Request, allowed, allowed_with_boundary, decide
 
 REPO = Path(__file__).resolve().parents[2]
-A, R, VPC = "123456789012", "us-west-1", "vpc-0a1b2c3d4e5f60718"
+A, R, VPC, DVPC = "123456789012", "us-west-1", "vpc-0a1b2c3d4e5f60718", "vpc-0d0d0d0d0d0d0d0d0"
+APP_POLICIES = ("bioaf-app-access-core", "bioaf-app-access-control", "bioaf-app-access-services")
+ALL_POLICIES = (
+    "bioaf-app-created-role-boundary",
+    "bioaf-role-s3-readwrite",
+    "bioaf-role-s3-readonly",
+    "bioaf-role-cluster-autoscaler",
+    "bioaf-role-image-build",
+    *APP_POLICIES,
+)
 ID = f"{A}-{R}"
 BOUNDARY = f"arn:aws:iam::{A}:policy/bioaf-app-created-role-boundary"
 EC2 = f"arn:aws:ec2:{R}:{A}"
@@ -33,14 +43,23 @@ def _render(function: str, *args: str) -> dict:
     return json.loads(out)
 
 
+def _doc(name: str, region: str = R, vpc: str = VPC, dvpc: str = DVPC) -> dict:
+    return _render("aws_iam_policy_document", name, A, region, vpc, dvpc)
+
+
 @pytest.fixture(scope="module")
 def app():
-    return [_render("aws_iam_app_policy", A, R, VPC)]
+    return [_doc(name) for name in APP_POLICIES]
 
 
 @pytest.fixture(scope="module")
 def boundary():
-    return _render("aws_iam_role_boundary_policy", A, R)
+    return _doc("bioaf-app-created-role-boundary")
+
+
+@pytest.fixture(scope="module")
+def build_role():
+    return [_doc("bioaf-role-image-build")]
 
 
 def _role(name: str) -> str:
@@ -50,13 +69,14 @@ def _role(name: str) -> str:
 # --- Size and shape -----------------------------------------------------------------
 
 
-def test_the_policy_fits_iams_inline_limit_for_the_longest_region():
-    rendered = _render("aws_iam_app_policy", A, "ap-southeast-3", "vpc-0123456789abcdef0")
-    assert len(json.dumps(rendered, separators=(",", ":"))) < 10240
+@pytest.mark.parametrize("name", ALL_POLICIES)
+def test_every_document_fits_the_managed_policy_limit_for_the_longest_region(name):
+    rendered = _doc(name, "ap-southeast-3", "vpc-0123456789abcdef0", "vpc-0fedcba9876543210")
+    assert len(json.dumps(rendered, separators=(",", ":"))) < 6144
 
 
 def test_no_service_is_granted_wholesale(app):
-    for statement in app[0]["Statement"]:
+    for statement in [st for doc in app for st in doc["Statement"]]:
         if statement["Effect"] != "Allow":
             continue
         actions = statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
@@ -89,56 +109,133 @@ def test_the_app_cannot_change_the_boundary_policy(app):
         assert not allowed(app, Request(action, BOUNDARY))
 
 
-def test_roles_are_created_only_under_the_boundary(app):
-    assert allowed(app, Request("iam:CreateRole", _role("bioaf-acme-1-node"), {"iam:PermissionsBoundary": BOUNDARY}))
-    assert not allowed(app, Request("iam:CreateRole", _role("bioaf-acme-1-node")))
-    other = f"arn:aws:iam::{A}:policy/AdministratorAccessBoundary"
-    assert not allowed(app, Request("iam:CreateRole", _role("bioaf-acme-1-node"), {"iam:PermissionsBoundary": other}))
-    assert not allowed(app, Request("iam:CreateRole", _role("ops-recovery"), {"iam:PermissionsBoundary": BOUNDARY}))
+def _new(name: str) -> str:
+    """A role the app creates now: under the /bioaf/ path, which nothing can change later."""
+    return f"arn:aws:iam::{A}:role/bioaf/{name}"
 
 
-def test_only_bounded_roles_take_new_permissions(app):
+EKS_POLICY = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+
+
+def test_roles_are_created_only_under_the_bioaf_path_and_the_boundary(app):
     bounded = {"iam:PermissionsBoundary": BOUNDARY}
-    assert allowed(app, Request("iam:PutRolePolicy", _role("bioaf-acme-1-node"), bounded))
-    assert not allowed(app, Request("iam:PutRolePolicy", _role("bioaf-operator-made")))
+    assert allowed(app, Request("iam:CreateRole", _new("bioaf-acme-1-node"), bounded))
+    assert not allowed(app, Request("iam:CreateRole", _new("bioaf-acme-1-node")))
+    other = f"arn:aws:iam::{A}:policy/AdministratorAccessBoundary"
+    assert not allowed(app, Request("iam:CreateRole", _new("bioaf-acme-1-node"), {"iam:PermissionsBoundary": other}))
+    assert not allowed(app, Request("iam:CreateRole", _role("bioaf-acme-1-node"), bounded))
+    assert not allowed(app, Request("iam:CreateRole", _role("ops-recovery"), bounded))
+
+
+@pytest.mark.parametrize("role", [_new("bioaf-acme-1-node"), _role("bioaf-acme-1-node")])
+def test_the_app_can_never_write_a_role_policy(app, role):
+    """Review finding 1: an arbitrary inline policy on a role the app can pass is an escalation."""
+    ctx = {"iam:PermissionsBoundary": BOUNDARY, **OWNED}
+    assert decide(app, Request("iam:PutRolePolicy", role, ctx)) == "explicit_deny"
 
 
 def test_the_boundary_cannot_be_removed_or_replaced(app):
-    assert decide(app, Request("iam:DeleteRolePermissionsBoundary", _role("bioaf-acme-1-node"))) == "explicit_deny"
-    other = {"iam:PermissionsBoundary": f"arn:aws:iam::{A}:policy/wide"}
-    assert not allowed(app, Request("iam:PutRolePermissionsBoundary", _role("bioaf-acme-1-node"), other))
+    for action in ("iam:DeleteRolePermissionsBoundary", "iam:PutRolePermissionsBoundary"):
+        ctx = {"iam:PermissionsBoundary": BOUNDARY, **OWNED}
+        assert decide(app, Request(action, _new("bioaf-acme-1-node"), ctx)) == "explicit_deny"
 
 
-def test_only_approved_managed_policies_attach(app):
+def test_only_aws_eks_and_installer_policies_attach(app):
     bounded = {"iam:PermissionsBoundary": BOUNDARY}
-    ok = {**bounded, "iam:PolicyARN": "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"}
-    admin = {**bounded, "iam:PolicyARN": "arn:aws:iam::aws:policy/AdministratorAccess"}
-    assert allowed(app, Request("iam:AttachRolePolicy", _role("bioaf-acme-1-node"), ok))
-    assert not allowed(app, Request("iam:AttachRolePolicy", _role("bioaf-acme-1-node"), admin))
+    for policy in (EKS_POLICY, f"arn:aws:iam::{A}:policy/bioaf-role-s3-readwrite"):
+        assert allowed(
+            app, Request("iam:AttachRolePolicy", _new("bioaf-acme-1-node"), {**bounded, "iam:PolicyARN": policy})
+        )
+    for policy in ("arn:aws:iam::aws:policy/AdministratorAccess", f"arn:aws:iam::{A}:policy/ops-wide"):
+        assert not allowed(
+            app, Request("iam:AttachRolePolicy", _new("bioaf-acme-1-node"), {**bounded, "iam:PolicyARN": policy})
+        )
+    unbounded = {"iam:PolicyARN": EKS_POLICY}
+    assert not allowed(app, Request("iam:AttachRolePolicy", _role("bioaf-operator-made"), unbounded))
+
+
+def test_the_installer_policies_themselves_are_off_limits(app):
+    for action in ("iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:DeletePolicy"):
+        assert decide(app, Request(action, f"arn:aws:iam::{A}:policy/bioaf-role-image-build")) == "explicit_deny"
 
 
 def test_roles_are_passed_only_when_owned_and_only_to_approved_services(app):
-    owned_role = _role("bioaf-acme-1-cluster")
-    assert allowed(app, Request("iam:PassRole", owned_role, {"iam:PassedToService": "eks.amazonaws.com", **OWNED}))
+    eks = {"iam:PassedToService": "eks.amazonaws.com"}
+    assert allowed(app, Request("iam:PassRole", _new("bioaf-acme-1-cluster"), eks))
+    assert allowed(app, Request("iam:PassRole", _role("bioaf-acme-1-cluster"), {**eks, **OWNED}))
+    assert not allowed(app, Request("iam:PassRole", _role("bioaf-acme-1-cluster"), eks))
     assert not allowed(
-        app, Request("iam:PassRole", owned_role, {"iam:PassedToService": "lambda.amazonaws.com", **OWNED})
+        app, Request("iam:PassRole", _new("bioaf-acme-1-cluster"), {"iam:PassedToService": "lambda.amazonaws.com"})
     )
-    assert not allowed(app, Request("iam:PassRole", owned_role, {"iam:PassedToService": "eks.amazonaws.com"}))
+
+
+def test_an_unrelated_role_cannot_be_claimed_by_tagging_it(app):
+    """Review finding 2: tagging a role the app does not own must not make it passable."""
+    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
+    assert decide(app, Request("iam:TagRole", _role("bioaf-operator-made"), claim)) == "explicit_deny"
+    assert (
+        decide(app, Request("iam:TagInstanceProfile", f"arn:aws:iam::{A}:instance-profile/bioaf-x", claim))
+        == "explicit_deny"
+    )
+    # Without the tag the role stays unpassable and its trust untouchable.
+    eks = {"iam:PassedToService": "eks.amazonaws.com"}
+    assert not allowed(app, Request("iam:PassRole", _role("bioaf-operator-made"), eks))
+    assert not allowed(app, Request("iam:UpdateAssumeRolePolicy", _role("bioaf-operator-made")))
+    # Roles the app creates under /bioaf/ carry the tag from creation.
+    assert allowed(app, Request("iam:TagRole", _new("bioaf-acme-1-node"), claim))
 
 
 def test_protected_operator_roles_are_off_limits(app):
     protected = {"aws:ResourceTag/bioaf:protected": "true", "iam:PermissionsBoundary": BOUNDARY, **OWNED}
-    for action in ("iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:DeleteRole"):
-        assert decide(app, Request(action, _role("bioaf-ops-recovery"), protected)) == "explicit_deny"
+    for action in ("iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:DeleteRole", "iam:PassRole"):
+        assert decide(app, Request(action, _new("bioaf-ops-recovery"), protected)) == "explicit_deny"
+    untag = {"aws:TagKeys": ["bioaf:protected"]}
+    assert decide(app, Request("iam:UntagRole", _role("bioaf-ops-recovery"), untag)) == "explicit_deny"
 
 
-def test_ownership_cannot_be_untagged_from_roles(app):
-    ctx = {"aws:TagKeys": ["bioaf:installation"]}
+def test_ownership_cannot_be_untagged_from_existing_roles(app):
+    ctx = {"aws:TagKeys": ["bioaf:installation"], **OWNED}
     assert decide(app, Request("iam:UntagRole", _role("bioaf-acme-1-node"), ctx)) == "explicit_deny"
 
 
-def test_app_created_roles_never_gain_iam_or_secret_access(boundary):
-    roles = [{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}]
+# --- Effective permissions of roles the app creates (review finding 1) --------------------------
+
+
+@pytest.fixture(scope="module")
+def anything():
+    """The widest identity policy a role could hold; the boundary alone must contain it."""
+    return [{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}]
+
+
+def test_a_bounded_role_cannot_terminate_or_stop_unrelated_instances(anything, boundary):
+    for action in ("ec2:TerminateInstances", "ec2:StopInstances"):
+        assert not allowed_with_boundary(anything, boundary, Request(action, f"{EC2}:instance/i-unrelated"))
+        assert allowed_with_boundary(anything, boundary, Request(action, f"{EC2}:instance/i-builder", OWNED))
+
+
+def test_a_bounded_role_cannot_delete_log_history_or_unrelated_storage(anything, boundary):
+    group = f"arn:aws:logs:{R}:{A}:log-group:/aws/eks/payments/cluster"
+    assert not allowed_with_boundary(anything, boundary, Request("logs:DeleteLogGroup", group))
+    assert not allowed_with_boundary(anything, boundary, Request("logs:PutLogEvents", f"{group}:log-stream:x"))
+    assert not allowed_with_boundary(anything, boundary, Request("ec2:DeleteVolume", f"{EC2}:volume/vol-unrelated"))
+    csi = {"aws:ResourceTag/ebs.csi.aws.com/cluster": "true"}
+    assert allowed_with_boundary(anything, boundary, Request("ec2:DeleteVolume", f"{EC2}:volume/vol-pvc", csi))
+    assert not allowed_with_boundary(
+        anything, boundary, Request("ec2:DeregisterImage", f"arn:aws:ec2:{R}::image/ami-1", OWNED)
+    )
+
+
+def test_a_bounded_role_cannot_claim_resources_or_share_images(anything, boundary):
+    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
+    assert not allowed_with_boundary(
+        anything, boundary, Request("ec2:CreateTags", f"{EC2}:instance/i-unrelated", claim)
+    )
+    image = f"arn:aws:ec2:{R}::image/ami-1"
+    assert not allowed_with_boundary(anything, boundary, Request("ec2:ModifyImageAttribute", image, OWNED))
+
+
+def test_app_created_roles_never_gain_iam_or_secret_access(anything, boundary):
+    roles = anything
     for action in (
         "iam:PutRolePolicy",
         "iam:CreateRole",
@@ -254,3 +351,63 @@ def test_secrets_and_unrelated_services_are_not_granted(app):
         ("lambda:CreateFunction", "*"),
     ):
         assert not allowed(app, Request(action, resource)), action
+
+
+# --- The image-build role (review finding 6) and the autoscaler ------------------------------------
+
+
+def test_the_build_role_cannot_claim_remove_or_share_images(build_role):
+    image, snapshot = f"arn:aws:ec2:{R}::image/ami-unrelated", f"arn:aws:ec2:{R}::snapshot/snap-unrelated"
+    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
+    for resource in (image, snapshot):
+        assert not allowed(build_role, Request("ec2:CreateTags", resource, claim))
+        assert allowed(build_role, Request("ec2:CreateTags", resource, {"aws:TagKeys": ["bioaf-managed"]}))
+    for action, resource in (
+        ("ec2:DeregisterImage", image),
+        ("ec2:DeleteSnapshot", snapshot),
+        ("ec2:ModifyImageAttribute", image),
+    ):
+        assert not allowed(build_role, Request(action, resource, OWNED)), action
+
+
+def test_the_build_role_launches_only_ubuntu_into_the_default_vpc(build_role):
+    for resource in ("instance/*", "volume/*"):
+        assert allowed(build_role, Request("ec2:RunInstances", f"{EC2}:{resource}", TAGGED))
+        assert not allowed(build_role, Request("ec2:RunInstances", f"{EC2}:{resource}"))
+    in_default = {"ec2:Vpc": f"{EC2}:vpc/{DVPC}"}
+    assert allowed(build_role, Request("ec2:RunInstances", f"{EC2}:subnet/subnet-d", in_default))
+    assert not allowed(build_role, Request("ec2:RunInstances", f"{EC2}:subnet/subnet-c", {"ec2:Vpc": APP_VPC}))
+    assert allowed(
+        build_role, Request("ec2:RunInstances", f"arn:aws:ec2:{R}::image/ami-u", {"ec2:Owner": "099720109477"})
+    )
+    assert not allowed(build_role, Request("ec2:RunInstances", f"arn:aws:ec2:{R}::image/ami-x", {"ec2:Owner": A}))
+    assert not allowed(build_role, Request("ec2:CreateSecurityGroup", f"{EC2}:security-group/*", TAGGED))
+    assert allowed(build_role, Request("ec2:TerminateInstances", f"{EC2}:instance/i-b", OWNED))
+    assert not allowed(build_role, Request("ec2:TerminateInstances", f"{EC2}:instance/i-x"))
+
+
+def test_the_autoscaler_scales_only_enabled_bioaf_node_groups():
+    autoscaler = [_doc("bioaf-role-cluster-autoscaler")]
+    asg = f"arn:aws:autoscaling:{R}:{A}:autoScalingGroup:uuid:autoScalingGroupName/eks-x"
+    tags = {
+        "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true",
+        "aws:ResourceTag/eks:cluster-name": "bioaf-acme-1",
+    }
+    assert allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, tags))
+    other = {**tags, "aws:ResourceTag/eks:cluster-name": "payments"}
+    assert not allowed(autoscaler, Request("autoscaling:SetDesiredCapacity", asg, other))
+    assert not allowed(autoscaler, Request("autoscaling:TerminateInstanceInAutoScalingGroup", asg))
+
+
+@pytest.mark.parametrize("name", ALL_POLICIES)
+def test_no_document_repeats_a_key(name):
+    """JSON keeps only the last of two equal keys, which silently drops a condition."""
+    script = f'source "{REPO}/installer/aws_iam.sh"; aws_iam_policy_document "{name}" "{A}" "{R}" "{VPC}" "{DVPC}"'
+    raw = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True).stdout
+
+    def unique(pairs):
+        keys = [k for k, _ in pairs]
+        assert len(keys) == len(set(keys)), keys
+        return dict(pairs)
+
+    json.loads(raw, object_pairs_hook=unique)

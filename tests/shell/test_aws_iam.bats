@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# install-aws.sh permissions (security plan 04B): a fresh install creates the role boundary before
-# the narrowed bioaf-app policy and tags the VM with its installation; --reconcile-permissions on an
+# install-aws.sh permissions (security plan 04B): a fresh install creates the role boundary and the
+# installer-owned managed policies before attaching the app's, and tags the VM with its installation; --reconcile-permissions on an
 # existing installation lists what it will claim, changes nothing without confirmation, and then
 # bounds and tags only bioAF's own roles and resources before replacing the app policy. Every AWS
 # call is a stub that records its arguments; nothing reaches AWS.
@@ -69,6 +69,9 @@ case "$*" in
     *"iam get-policy "*) [ "${FAKE_BOUNDARY:-0}" = 1 ] || exit 254 ;;
     *"iam list-policy-versions"*) n="${FAKE_VERSIONS:-0}"; out=""; for i in $(seq "$n" -1 1); do out="$out v$i"; done; echo "${out# }" ;;
     *"iam get-role-policy"*bioaf-app-starter*) [ "${FAKE_EXISTING:-0}" = 1 ] || exit 254 ;;
+    *"iam get-role-policy"*) exit 254 ;;
+    *"iam list-instance-profiles-for-role --role-name bioaf-acme-1-node"*) echo bioaf-work-node-1 ;;
+    *"iam list-instance-profiles-for-role"*) ;;
     *"iam list-roles"*) printf 'bioaf-app\tbioaf-acme-1-node\tbioaf-codebuild-image-build\tbioaf-ops-made\n' ;;
     *"iam list-role-tags --role-name bioaf-ops-made"*) echo 0 ;;
     *"iam list-role-tags"*) echo 1 ;;
@@ -96,18 +99,25 @@ line_of() { grep -n -- "$1" "$CALL_LOG" | head -1 | cut -d: -f1; }
 
 app_policy() { cat "$(ls "$DOCS"/iam-* | while read -r f; do grep -l '"Sid":"Ec2ChangeOwned"' "$f"; done | tail -1)"; }
 
-@test "a fresh install creates the boundary before the narrowed app policy" {
+app_policies=(bioaf-app-access-core bioaf-app-access-control bioaf-app-access-services)
+
+@test "a fresh install creates the boundary and managed policies, then attaches the app's" {
     answers n
     run bash "$REPO/install-aws.sh" </dev/null
     [ "$status" -eq 0 ]
     [ -n "$(calls 'iam create-policy --policy-name bioaf-app-created-role-boundary')" ]
-    [ -n "$(calls 'iam put-role-policy --role-name bioaf-app --policy-name bioaf-app ')" ]
-    [ "$(line_of 'create-policy --policy-name bioaf-app-created-role-boundary')" -lt "$(line_of 'put-role-policy --role-name bioaf-app')" ]
+    for name in bioaf-role-s3-readwrite bioaf-role-s3-readonly bioaf-role-cluster-autoscaler bioaf-role-image-build "${app_policies[@]}"; do
+        [ -n "$(calls "iam create-policy --policy-name $name")" ]
+    done
+    for name in "${app_policies[@]}"; do
+        [ -n "$(calls "iam attach-role-policy --role-name bioaf-app --policy-arn arn:aws:iam::123456789012:policy/$name")" ]
+    done
+    # Managed policies only: nothing is written inline on the app role.
+    [ -z "$(calls 'iam put-role-policy')" ]
+    [ "$(line_of 'create-policy --policy-name bioaf-app-created-role-boundary')" -lt "$(line_of 'attach-role-policy --role-name bioaf-app')" ]
     policy="$(app_policy)"
     [[ "$policy" == *'"ec2:Vpc":"arn:aws:ec2:us-west-1:123456789012:vpc/vpc-default"'* ]]
     [[ "$policy" != *'"ec2:*"'* ]]
-    [[ "$policy" != *'"eks:*","Resource":"*"'* ]]
-    [[ "$policy" == *'"Sid":"DenySelfAndProtected"'* ]]
 }
 
 @test "a launched VM carries the installation tag" {
@@ -149,15 +159,22 @@ app_policy() { cat "$(ls "$DOCS"/iam-* | while read -r f; do grep -l '"Sid":"Ec2
     [ -z "$(calls 'iam put-role-permissions-boundary --role-name bioaf-app')" ]
     [ -z "$(calls 'iam put-role-permissions-boundary --role-name bioaf-ops-made')" ]
     [ -n "$(calls 'iam tag-role --role-name bioaf-acme-1-node --tags Key=bioaf:installation,Value=123456789012-us-west-1')" ]
+    [ -n "$(calls 'iam tag-instance-profile --instance-profile-name bioaf-work-node-1 --tags Key=bioaf:installation,Value=123456789012-us-west-1')" ]
     tagged="$(calls 'resourcegroupstaggingapi tag-resources')"
-    [[ "$tagged" == *"vpc/vpc-c"* && "$tagged" == *"subnet/subnet-c"* && "$tagged" == *"image/ami-w"* ]]
+    [[ "$tagged" == *"vpc/vpc-c"* && "$tagged" == *"subnet/subnet-c"* ]]
+    [[ "$tagged" != *"image/"* ]]
     [[ "$tagged" == *"bioaf:installation=123456789012-us-west-1"* ]]
     [ -n "$(calls 'ec2 create-tags --region us-west-1 --resources i-app')" ]
-    [ -n "$(calls 'iam put-role-policy --role-name bioaf-app --policy-name bioaf-app ')" ]
+    for name in "${app_policies[@]}"; do
+        [ -n "$(calls "iam attach-role-policy --role-name bioaf-app --policy-arn arn:aws:iam::123456789012:policy/$name")" ]
+    done
     [ -n "$(calls 'iam delete-role-policy --role-name bioaf-app --policy-name bioaf-app-starter')" ]
+    [ -z "$(calls 'iam put-role-policy')" ]
     [[ "$(app_policy)" == *'vpc/vpc-app'* ]]
-    # The policy is replaced only after the roles and resources are claimed.
-    [ "$(line_of 'tag-resources')" -lt "$(line_of 'put-role-policy --role-name bioaf-app')" ]
+    # The starter policy goes only after the new policies are attached, and attachment only after
+    # the roles and resources are claimed.
+    [ "$(line_of 'tag-resources')" -lt "$(line_of 'attach-role-policy --role-name bioaf-app')" ]
+    [ "$(line_of 'attach-role-policy --role-name bioaf-app')" -lt "$(line_of 'delete-role-policy --role-name bioaf-app')" ]
     # Nothing else is created.
     [ -z "$(calls 'ec2 run-instances')" ]
     [ -z "$(calls 'ec2 create-key-pair')" ]
@@ -172,4 +189,5 @@ app_policy() { cat "$(ls "$DOCS"/iam-* | while read -r f; do grep -l '"Sid":"Ec2
     [[ "$output" == *"no installation to reconcile"* ]]
     [ -z "$(calls 'iam put-role')" ]
     [ -z "$(calls 'iam create-policy')" ]
+    [ -z "$(calls 'iam attach-role-policy')" ]
 }

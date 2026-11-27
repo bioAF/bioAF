@@ -85,80 +85,65 @@ def _statements(doc: str) -> list[str]:
     return out
 
 
-def test_the_autoscaler_can_scale_only_this_clusters_groups():
-    main = (AWS_MODULES / "compute" / "main.tf").read_text()
-    statements = _statements(_block(main, 'data "aws_iam_policy_document" "cluster_autoscaler"'))
-    mutating = [s for s in statements if "autoscaling:SetDesiredCapacity" in s]
-    assert len(mutating) == 1
-    scale = mutating[0]
-    assert "autoscaling:TerminateInstanceInAutoScalingGroup" in scale
-    assert "aws:ResourceTag/k8s.io/cluster-autoscaler/${local.cluster_name}" in scale
-    assert '"owned"' in scale
-    reads = [s for s in statements if s is not scale]
-    for statement in reads:
-        actions = re.findall(r'"([a-z0-9]+:[A-Za-z]+)"', statement)
-        assert all(a.split(":")[1].startswith(("Describe", "Get")) for a in actions), statement
-    nodegroup = [s for s in statements if "eks:DescribeNodegroup" in s]
-    assert nodegroup and "nodegroup/${local.cluster_name}/*" in nodegroup[0]
+@pytest.mark.parametrize("module", ["compute", "image_build"])
+def test_modules_write_no_role_policies_and_attach_only_installer_policies(module):
+    """Review finding 1: the app must not be able to give a role arbitrary permissions."""
+    main = (AWS_MODULES / module / "main.tf").read_text()
+    assert 'resource "aws_iam_role_policy" ' not in main
+    attachments = re.findall(r'resource "aws_iam_role_policy_attachment" "[^"]+" \{(.*?)\n\}', main, re.S)
+    for body in attachments:
+        arn = re.search(r"policy_arn\s*=\s*(.+)", body).group(1)
+        assert "iam::aws:policy/" in arn or "bioaf-role-" in arn, arn
 
 
-def _codebuild():
-    main = (AWS_MODULES / "image_build" / "main.tf").read_text()
-    return main, _statements(_block(main, 'data "aws_iam_policy_document" "codebuild"'))
+@pytest.mark.parametrize("module", ["compute", "image_build"])
+def test_roles_and_profiles_take_the_path_the_backend_chooses(module):
+    main = (AWS_MODULES / module / "main.tf").read_text()
+    for kind in ("aws_iam_role", "aws_iam_instance_profile"):
+        for body in re.findall(rf'resource "{kind}" "[^"]+" \{{(.*?)\n\}}', main, re.S):
+            assert re.search(r"path\s*=\s*(local\.role_path|var\.role_path)", body), (kind, body[:80])
+    assert re.search(
+        r'variable "role_path" \{[^}]*default\s*=\s*"/"', (AWS_MODULES / module / "variables.tf").read_text(), re.S
+    )
 
 
-def test_the_build_role_has_no_unconditioned_ec2_mutation():
-    _, statements = _codebuild()
-    for statement in statements:
-        actions = re.findall(r'"(ec2:[A-Za-z]+)"', statement)
-        mutating = [a for a in actions if not a.split(":")[1].startswith(("Describe", "Get"))]
-        if mutating and '"*"' in statement:
-            assert "condition" in statement, statement
+def _role_state(path):
+    return {
+        "resources": [
+            {"mode": "managed", "type": "aws_iam_role", "name": "node", "instances": [{"attributes": {"path": path}}]}
+        ]
+    }
 
 
-def test_the_build_role_cannot_share_images_or_edit_security_groups():
-    _, statements = _codebuild()
-    actions = {a for s in statements for a in re.findall(r'"(ec2:[A-Za-z]+)"', s)}
-    for forbidden in (
-        "ec2:ModifyImageAttribute",
-        "ec2:ModifySnapshotAttribute",
-        "ec2:CopyImage",
-        "ec2:CreateSecurityGroup",
-        "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:DeleteSecurityGroup",
-        "ec2:GetPasswordData",
-    ):
-        assert forbidden not in actions
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state, expected", [({"resources": []}, "/bioaf/"), (_role_state("/"), "/"), (_role_state("/bioaf/"), "/bioaf/")]
+)
+async def test_new_roles_go_under_bioaf_and_existing_roles_keep_their_path(tmp_path, state, expected):
+    async def pull():
+        return state
+
+    config = await AwsTerraformCloud().prepare_run(
+        None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+    )
+    assert AwsTerraformCloud().write_tfvars(tmp_path, "image_build", config)["role_path"] == expected
 
 
-def test_the_build_role_cleans_up_only_owned_images_and_snapshots():
-    _, statements = _codebuild()
-    cleanup = [s for s in statements if "ec2:DeregisterImage" in s]
-    assert len(cleanup) == 1
-    assert "ec2:DeleteSnapshot" in cleanup[0]
-    assert "aws:ResourceTag/bioaf:installation" in cleanup[0]
+@pytest.mark.asyncio
+async def test_unreadable_state_refuses_the_image_build_plan():
+    from app.exceptions import ValidationError
 
+    async def pull():
+        return None
 
-def test_the_build_role_launches_only_into_the_default_vpc_from_canonical_images():
-    main, statements = _codebuild()
-    launch = [s for s in statements if "ec2:RunInstances" in s]
-    joined = "\n".join(launch)
-    assert "ec2:Vpc" in joined and "data.aws_vpc.default.arn" in joined
-    assert "ec2:Owner" in joined and "local.canonical" in joined
-    assert re.search(r'canonical\s*=\s*"099720109477"', main)
-    assert "aws:RequestTag/bioaf:installation" in joined
-
-
-def test_the_build_role_logs_and_context_reads_are_scoped():
-    _, statements = _codebuild()
-    logs = [s for s in statements if "logs:PutLogEvents" in s][0]
-    assert "log-group:/aws/codebuild/${local.project_name}" in logs and '"*"' not in logs
-    context = [s for s in statements if "s3:GetObject" in s][0]
-    assert "aws:ResourceAccount" in context
+    with pytest.raises(ValidationError, match="state"):
+        await AwsTerraformCloud().prepare_run(
+            None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+        )
 
 
 def test_the_packer_builder_group_is_created_by_terraform_in_the_default_vpc():
-    main, _ = _codebuild()
+    main = (AWS_MODULES / "image_build" / "main.tf").read_text()
     group = _block(main, 'resource "aws_security_group" "packer_builder"')
     assert 'name        = "bioaf-packer-builder"' in group
     assert "vpc_id      = data.aws_vpc.default.id" in group

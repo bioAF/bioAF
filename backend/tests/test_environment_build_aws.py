@@ -426,16 +426,21 @@ async def test_a_work_node_image_build_carries_the_installation_identity(session
     assert env_vars["PKR_VAR_installation_id"] == "043671579834-us-west-1"
 
 
-def test_the_packer_template_tags_every_transient_and_final_resource():
+def test_the_packer_template_tags_its_builder_but_never_claims_images():
     import re
 
     from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS as template
 
     assert 'variable "installation_id"' in template
-    for block in ("run_tags", "run_volume_tags", "snapshot_tags", "tags"):
+    # Builder instance and volumes are tagged at launch, so they carry the ownership tag ...
+    for block in ("run_tags", "run_volume_tags"):
         body = re.search(rf"\n  {block}\s*=\s*\{{(.*?)\}}", template, re.S)
         assert body, block
         assert '"bioaf:installation" = var.installation_id' in body.group(1), block
+    # ... the AMI and snapshots are tagged after creation, so they must not (it would be claimable).
+    for block in ("snapshot_tags", "tags"):
+        body = re.search(rf"\n  {block}\s*=\s*\{{(.*?)\}}", template, re.S)
+        assert body and "bioaf:installation" not in body.group(1), block
     # The builder uses the pre-created, tagged security group instead of creating one.
     group = re.search(r"security_group_filter \{(.*?)\n  \}", template, re.S).group(1)
     assert '"tag:bioaf:installation" = var.installation_id' in group

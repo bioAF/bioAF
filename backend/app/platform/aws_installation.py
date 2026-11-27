@@ -33,3 +33,20 @@ def ownership_tags(account_id: str | None, region: str | None) -> list[dict]:
     """The ownership tag as an EC2 ``Tags`` list (empty when the identity is unknown)."""
     value = installation_id(account_id, region)
     return [{"Key": INSTALLATION_TAG, "Value": value}] if value else []
+
+
+# New roles and instance profiles the app creates live under this IAM path (plan 04B). Only
+# CreateRole sets a path and nothing changes it, so the app's ownership of these roles cannot be
+# claimed by tagging; roles created before keep the path already in state.
+NEW_ROLE_PATH = "/bioaf/"
+
+
+def role_path_from_state(state: dict) -> str:
+    """The path of the module's roles already in state, else the path for new roles."""
+    for resource in state.get("resources") or []:
+        if resource.get("mode") == "managed" and resource.get("type") == "aws_iam_role":
+            for instance in resource.get("instances") or []:
+                path = (instance.get("attributes") or {}).get("path")
+                if path:
+                    return path
+    return NEW_ROLE_PATH

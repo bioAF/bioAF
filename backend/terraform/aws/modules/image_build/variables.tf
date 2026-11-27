@@ -13,3 +13,9 @@ variable "org_slug" {
   type        = string
   default     = "bioaf"
 }
+
+variable "role_path" {
+  type        = string
+  default     = "/"
+  description = "IAM path for the roles (and instance profiles) this module creates. The backend passes /bioaf/ for new roles and the existing path for roles already in state (plan 04B)."
+}
