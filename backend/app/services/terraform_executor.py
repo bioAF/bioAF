@@ -183,6 +183,11 @@ class TerraformExecutor:
         return run
 
     @staticmethod
+    def _saved_plan_apply_args() -> list[str]:
+        """Apply exactly the plan file just written and checked (its targets are already in it)."""
+        return ["terraform", "apply", "-json", "-no-color", "-input=false", "tfplan"]
+
+    @staticmethod
     def _build_apply_args(targets: list[str] | None = None) -> list[str]:
         """Build the `terraform apply` argv. When targets are given, append a
         -target flag per address so only those resources (and their deps) are
@@ -321,11 +326,23 @@ class TerraformExecutor:
                 run_id=run.id,
                 pull_state=TerraformExecutor._state_puller(work_dir, env),
             )
-            cloud.review_apply_inputs(module_name, planned_tfvars, cloud.write_tfvars(work_dir, module_name, config))
+            apply_plan_file = await cloud.review_apply(
+                module_name,
+                config,
+                planned_tfvars=planned_tfvars,
+                applying_tfvars=cloud.write_tfvars(work_dir, module_name, config),
+                reviewed_plan=run.plan_json,
+                plan_now=lambda: TerraformExecutor._run_plan_capture(work_dir, env, targets),
+            )
             cloud_hooks_ready = True
+            apply_args = (
+                TerraformExecutor._saved_plan_apply_args()
+                if apply_plan_file
+                else TerraformExecutor._build_apply_args(targets)
+            )
 
             process = await asyncio.create_subprocess_exec(
-                *TerraformExecutor._build_apply_args(targets),
+                *apply_args,
                 cwd=str(work_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

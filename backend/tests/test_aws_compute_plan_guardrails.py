@@ -253,3 +253,91 @@ async def test_a_reviewed_cutover_commits_after_a_successful_apply(session):
 
     assert await PlatformConfigService.get(session, "aws_eks_endpoint_mode") == "private_only"
     assert not await PlatformConfigService.get(session, "aws_eks_endpoint_cutover")
+
+
+# --- The apply is the reviewed plan (review finding: fresh auto-approved apply) --------------
+
+
+async def _reviewed_update(session, user_id):
+    unchanged = (True, ["0.0.0.0/0"])
+    run, _ = await _plan(session, user_id, _state(), _show(["update"], unchanged, unchanged))
+    assert run.status == "awaiting_confirmation", run.error_message
+    return run
+
+
+async def _apply(session, user_id, run, show_at_apply):
+    describe, logs = _aws()
+    events = []
+    with (
+        describe,
+        logs,
+        _cli(_state(), show_at_apply),
+        _patch_work_dir(),
+        patch("asyncio.create_subprocess_exec", return_value=_mock_async_process(_make_apply_output(1))) as spawn,
+    ):
+        async for event in TerraformExecutor.run_apply(session=session, run_id=run.id, user_id=user_id):
+            events.append(event)
+    return spawn, events
+
+
+@pytest.mark.asyncio
+async def test_an_apply_whose_fresh_plan_would_replace_the_cluster_is_refused(session):
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run = await _reviewed_update(session, user_id)
+
+    replace = _show(["delete", "create"], (True, ["0.0.0.0/0"]), (True, ["0.0.0.0/0"]))
+    spawn, events = await _apply(session, user_id, run, replace)
+
+    spawn.assert_not_called()
+    assert any(e.event_type == "apply_error" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_an_apply_with_changes_the_review_did_not_contain_is_refused(session):
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run = await _reviewed_update(session, user_id)
+
+    extra = json.loads(_show(["update"], (True, ["0.0.0.0/0"]), (True, ["0.0.0.0/0"])))
+    extra["resource_changes"].append(
+        {
+            "address": "aws_vpc.this",
+            "type": "aws_vpc",
+            "name": "this",
+            "change": {"actions": ["delete"], "before": {}, "after": None},
+        }
+    )
+    spawn, events = await _apply(session, user_id, run, json.dumps(extra))
+
+    spawn.assert_not_called()
+    assert any(e.event_type == "apply_error" and "review" in (e.message or "") for e in events)
+
+
+@pytest.mark.asyncio
+async def test_an_apply_after_naming_inputs_changed_is_refused(session):
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run = await _reviewed_update(session, user_id)
+    await PlatformConfigService.set(session, "org_slug", "other")
+    await session.commit()
+
+    unchanged = _show(["update"], (True, ["0.0.0.0/0"]), (True, ["0.0.0.0/0"]))
+    spawn, events = await _apply(session, user_id, run, unchanged)
+
+    spawn.assert_not_called()
+    assert any(e.event_type == "apply_error" and "org_slug" in (e.message or "") for e in events)
+
+
+@pytest.mark.asyncio
+async def test_a_matching_apply_runs_the_checked_plan_file(session):
+    user_id = await _seed_user(session)
+    await _seed_aws(session, compute_deployed="true", gke_cluster_name=NAME)
+    run = await _reviewed_update(session, user_id)
+
+    unchanged = _show(["update"], (True, ["0.0.0.0/0"]), (True, ["0.0.0.0/0"]))
+    spawn, _ = await _apply(session, user_id, run, unchanged)
+
+    args = spawn.call_args.args
+    assert args[:2] == ("terraform", "apply") and args[-1] == "tfplan"
+    assert not any(str(a).startswith("-target") for a in args)

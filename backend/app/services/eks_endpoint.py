@@ -219,16 +219,54 @@ async def prepare_run(
     return config
 
 
+# Inputs recomputed per run that do not describe infrastructure.
+_TRANSIENT_INPUTS = frozenset({"adopt_control_plane_log_group"})
+
+
 def require_same_inputs(planned: dict | None, applying: dict) -> None:
-    """An apply recomputes tfvars from config; refuse if the endpoint/logging inputs moved since the plan."""
-    keys = [k for k in applying if k.startswith(("endpoint_", "public_access_cidrs", "control_plane_log"))]
+    """An apply recomputes tfvars from config; refuse if any input moved since the reviewed plan
+    (naming inputs such as org_slug or stack_uid decide the cluster's name and can force replacement)."""
     if planned is None:
-        return
-    moved = [k for k in keys if planned.get(k) != applying.get(k)]
+        raise ValidationError("This plan has no recorded inputs to compare; plan again and review.")
+    keys = (set(planned) | set(applying)) - _TRANSIENT_INPUTS
+    moved = sorted(k for k in keys if planned.get(k) != applying.get(k))
     if moved:
         raise ValidationError(
-            f"The EKS endpoint or logging inputs changed since this plan ({', '.join(moved)}). Plan again and review."
+            f"The compute inputs changed since this plan ({', '.join(moved)}). Plan again and review."
         )
+
+
+def require_within_review(reviewed: dict | None, fresh: dict) -> None:
+    """Every change the apply would make must be one the reviewed plan showed, with the same action."""
+    allowed = {(r.get("address"), r.get("action")) for r in (reviewed or {}).get("resources") or []}
+    outside = sorted(
+        f"{r.get('action')} {r.get('address')}"
+        for r in fresh.get("resources") or []
+        if (r.get("address"), r.get("action")) not in allowed
+    )
+    if outside:
+        raise ValidationError(
+            "The compute apply would make changes the review did not show "
+            f"({', '.join(outside)}). Nothing was applied; plan again and review."
+        )
+
+
+async def review_apply(
+    config: dict,
+    *,
+    planned_tfvars: dict | None,
+    applying_tfvars: dict,
+    reviewed_plan: dict | None,
+    plan_now: Callable[[], Awaitable[dict]],
+) -> None:
+    """Make the compute apply the reviewed plan: same inputs, a fresh plan that passes the same
+    review and contains nothing the review did not, applied from that exact plan file."""
+    from app.services.plan_parser import TerraformPlanParser
+
+    require_same_inputs(planned_tfvars, applying_tfvars)
+    fresh = await plan_now()
+    policy.review_plan(fresh, config)
+    require_within_review(reviewed_plan, TerraformPlanParser.parse(fresh))
 
 
 async def finish_apply(session: AsyncSession, config: dict, *, run_id: int | None, succeeded: bool) -> None:

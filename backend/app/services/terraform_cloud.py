@@ -98,9 +98,20 @@ class TerraformCloud(ABC):
         """Refuse a plan (``terraform show -json``) this cloud's guardrails do not allow. Default: allow."""
         return None
 
-    def review_apply_inputs(self, module_name: str, planned: dict | None, applying: dict) -> None:
-        """Refuse an apply whose recomputed inputs moved away from the reviewed plan. Default: allow."""
-        return None
+    async def review_apply(
+        self,
+        module_name: str,
+        config: dict,
+        *,
+        planned_tfvars: dict | None,
+        applying_tfvars: dict,
+        reviewed_plan: dict | None,
+        plan_now: Callable[[], Awaitable[dict]],
+    ) -> bool:
+        """Before an apply, after its tfvars are written: refuse an apply that is not the reviewed
+        plan. Return True to apply the plan file ``plan_now`` just wrote (and checked) instead of a
+        fresh auto-approved apply. Default: no check, fresh apply."""
+        return False
 
     async def finish_apply(self, session, module_name: str, config: dict, *, run_id: int, succeeded: bool) -> None:
         """After an apply exits. Default: nothing."""
@@ -249,11 +260,19 @@ class AwsTerraformCloud(TerraformCloud):
 
             eks_endpoint_policy.review_plan(raw_plan, config)
 
-    def review_apply_inputs(self, module_name, planned, applying):
-        if module_name == "compute":
-            from app.services import eks_endpoint
+    async def review_apply(self, module_name, config, *, planned_tfvars, applying_tfvars, reviewed_plan, plan_now):
+        if module_name != "compute":
+            return False
+        from app.services import eks_endpoint
 
-            eks_endpoint.require_same_inputs(planned, applying)
+        await eks_endpoint.review_apply(
+            config,
+            planned_tfvars=planned_tfvars,
+            applying_tfvars=applying_tfvars,
+            reviewed_plan=reviewed_plan,
+            plan_now=plan_now,
+        )
+        return True
 
     async def finish_apply(self, session, module_name, config, *, run_id, succeeded):
         if module_name == "compute":
