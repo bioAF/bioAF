@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.services.deployment_outputs import identifier_value
+from app.services.eks_endpoint_policy import CONFIG_KEYS as EKS_CONFIG_KEYS
 
 # The deployed layout: GCP modules at /app/terraform/modules (the executor's
 # MODULES_DIR), AWS modules at /app/terraform/aws/modules. Kept here (not imported
@@ -79,6 +80,36 @@ class TerraformCloud(ABC):
     def not_configured_message(self) -> str:
         """Operator-facing message raised when ``is_configured`` is False."""
 
+    async def prepare_run(
+        self,
+        session,
+        module_name: str,
+        config: dict,
+        *,
+        phase: str,
+        run_id: int | None,
+        pull_state: Callable[[], Awaitable[dict | None]],
+    ) -> dict:
+        """Before a plan (``phase="plan"``) or apply, after init: check and resolve cloud-specific
+        inputs, returning the config the tfvars are written from. Raise to refuse. Default: unchanged."""
+        return config
+
+    def review_plan(self, module_name: str, config: dict, raw_plan: dict) -> None:
+        """Refuse a plan (``terraform show -json``) this cloud's guardrails do not allow. Default: allow."""
+        return None
+
+    def review_apply_inputs(self, module_name: str, planned: dict | None, applying: dict) -> None:
+        """Refuse an apply whose recomputed inputs moved away from the reviewed plan. Default: allow."""
+        return None
+
+    async def finish_apply(self, session, module_name: str, config: dict, *, run_id: int, succeeded: bool) -> None:
+        """After an apply exits. Default: nothing."""
+        return None
+
+    async def finish_destroy(self, session, module_name: str) -> None:
+        """After a successful destroy. Default: nothing."""
+        return None
+
     def lock_object_path(self, module_name: str | None) -> str | None:
         """State-store object key for ``module_name``'s lock, or None when this
         cloud has no executor-deletable lock object.
@@ -112,6 +143,10 @@ class AwsTerraformCloud(TerraformCloud):
             # The application network, recorded by the backend for private backend sync (plan 03B).
             "aws_app_vpc_id",
             "aws_app_security_group_id",
+            # EKS endpoint and control-plane logging (plan 04C).
+            "compute_deployed",
+            "gke_cluster_name",
+            *EKS_CONFIG_KEYS,
         ]
 
     def _state_bucket(self, config: dict) -> str:
@@ -166,6 +201,8 @@ class AwsTerraformCloud(TerraformCloud):
             if app_vpc and app_sg:
                 tfvars["app_vpc_id"] = app_vpc
                 tfvars["app_security_group_id"] = app_sg
+            # Explicit endpoint/logging inputs resolved by prepare_run for a plan or apply (plan 04C).
+            tfvars.update(config.get("_eks_resolved") or {})
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))
@@ -198,6 +235,37 @@ class AwsTerraformCloud(TerraformCloud):
 
     def not_configured_message(self) -> str:
         return "AWS is not configured. Set the AWS account before bootstrapping."
+
+    async def prepare_run(self, session, module_name, config, *, phase, run_id, pull_state):
+        if module_name != "compute":
+            return config
+        from app.services import eks_endpoint
+
+        return await eks_endpoint.prepare_run(session, config, phase=phase, run_id=run_id, pull_state=pull_state)
+
+    def review_plan(self, module_name, config, raw_plan):
+        if module_name == "compute":
+            from app.services import eks_endpoint_policy
+
+            eks_endpoint_policy.review_plan(raw_plan, config)
+
+    def review_apply_inputs(self, module_name, planned, applying):
+        if module_name == "compute":
+            from app.services import eks_endpoint
+
+            eks_endpoint.require_same_inputs(planned, applying)
+
+    async def finish_apply(self, session, module_name, config, *, run_id, succeeded):
+        if module_name == "compute":
+            from app.services import eks_endpoint
+
+            await eks_endpoint.finish_apply(session, config, run_id=run_id, succeeded=succeeded)
+
+    async def finish_destroy(self, session, module_name):
+        if module_name == "compute":
+            from app.services import eks_endpoint
+
+            await eks_endpoint.finish_destroy(session)
 
     def lock_object_path(self, module_name: str | None) -> str | None:
         # Deferred: Terraform's S3 backend with use_lockfile writes a <key>.tflock

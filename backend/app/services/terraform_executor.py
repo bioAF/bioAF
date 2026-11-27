@@ -144,7 +144,17 @@ class TerraformExecutor:
             env, cleanup = await cloud.build_provider_env(config)
             try:
                 await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
+                config = await cloud.prepare_run(
+                    session,
+                    module_name,
+                    config,
+                    phase="plan",
+                    run_id=run.id,
+                    pull_state=TerraformExecutor._state_puller(work_dir, env),
+                )
+                run.tfvars_json = cloud.write_tfvars(work_dir, module_name, config)
                 plan_json = await TerraformExecutor._run_plan_capture(work_dir, env, targets)
+                cloud.review_plan(module_name, config, plan_json)
                 parsed = TerraformPlanParser.parse(plan_json)
                 if module_name == "foundation" and config.get("terraform_initialized") == "true":
                     TerraformExecutor._refuse_foundation_recreation(parsed)
@@ -226,6 +236,7 @@ class TerraformExecutor:
         failure_message: str | None = None
         process = None
         cleanup = None
+        cloud_hooks_ready = False
 
         async def classify(entry: dict, line: str) -> TerraformProgressEvent | None:
             entry_type = entry.get("type", "")
@@ -297,10 +308,21 @@ class TerraformExecutor:
                 )
 
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            planned_tfvars = run.tfvars_json
             tfvars = cloud.write_tfvars(work_dir, module_name, config)
             if not run.tfvars_json:
                 run.tfvars_json = tfvars
             await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
+            config = await cloud.prepare_run(
+                session,
+                module_name,
+                config,
+                phase="apply",
+                run_id=run.id,
+                pull_state=TerraformExecutor._state_puller(work_dir, env),
+            )
+            cloud.review_apply_inputs(module_name, planned_tfvars, cloud.write_tfvars(work_dir, module_name, config))
+            cloud_hooks_ready = True
 
             process = await asyncio.create_subprocess_exec(
                 *TerraformExecutor._build_apply_args(targets),
@@ -324,6 +346,10 @@ class TerraformExecutor:
 
             exit_result = await read_exit(process)
             run.apply_log = "\n".join(progress.log_lines)
+            await TerraformExecutor._finish_cloud_apply(
+                cloud, session, module_name, config, run.id, exit_result.return_code == 0
+            )
+            cloud_hooks_ready = False
 
             if exit_result.return_code == 0:
                 run.status = "completed"
@@ -379,6 +405,8 @@ class TerraformExecutor:
             run.completed_at = datetime.now(timezone.utc)
             apply_failed = True
             failure_message = str(exc)
+            if cloud_hooks_ready:
+                await TerraformExecutor._finish_cloud_apply(cloud, session, module_name, config, run.id, False)
         finally:
             with anyio.CancelScope(shield=True):
                 exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
@@ -756,6 +784,7 @@ class TerraformExecutor:
             if exit_result.return_code == 0:
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
+                await cloud.finish_destroy(session, module_name)
                 yield TerraformProgressEvent(
                     event_type="apply_complete",
                     message="Destroy complete",
@@ -1448,6 +1477,46 @@ class TerraformExecutor:
             logger.info("Deleted lock file %s", uri)
         except Exception as exc:
             logger.warning("Error deleting lock file %s: %s", uri, exc)
+
+    @staticmethod
+    def _state_puller(work_dir: Path, env: dict):
+        """A no-refresh reader of the module's remote state (``terraform state pull``).
+
+        Returns the parsed state, an empty state when none exists yet, or None when it cannot be read.
+        """
+
+        async def pull() -> dict | None:
+            try:
+                result = await TerraformExecutor._run_captured(
+                    ["terraform", "state", "pull"],
+                    cwd=str(work_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env={**TerraformExecutor._base_env(), **env},
+                )
+            except Exception as exc:
+                logger.warning("terraform state pull failed: %s", exc)
+                return None
+            if result.returncode != 0:
+                logger.warning("terraform state pull failed: %s", result.stderr)
+                return None
+            if not (result.stdout or "").strip():
+                return {"resources": []}
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError:
+                return None
+
+        return pull
+
+    @staticmethod
+    async def _finish_cloud_apply(cloud, session, module_name, config, run_id, succeeded) -> None:
+        """Run the cloud's post-apply hook without letting it mask the apply's own outcome."""
+        try:
+            await cloud.finish_apply(session, module_name, config, run_id=run_id, succeeded=succeeded)
+        except Exception:
+            logger.exception("Post-apply check for %s did not finish; the next plan reconciles it", module_name)
 
     # Foundation resources whose re-creation would collide with an existing state or backup bucket.
     _FOUNDATION_BUCKETS = frozenset(
