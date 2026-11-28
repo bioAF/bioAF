@@ -3,8 +3,8 @@
 - Enforce public-access prevention on all nine GCP buckets, so a future IAM grant cannot make
   scientific, Terraform-state or backup data public. Signed uploads and downloads keep working.
   Existing installations get it on the seven application buckets through **Check for
-  Infrastructure Updates**; an operator adds it to the state and backup buckets with the steps in
-  `docs/operations/foundation-bucket-guards.md`.
+  Infrastructure Updates**, and the backend applies it to the state and backup buckets itself when
+  it starts on this release (`docs/operations/foundation-bucket-guards.md`). No commands to run.
 - Refuse a foundation plan or apply that would recreate an initialized installation's state or
   backup bucket, and point to that procedure instead.
 - New AWS clusters get a private-only Kubernetes API, reached by the backend over the existing VPC

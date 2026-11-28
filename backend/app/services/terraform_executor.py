@@ -1559,8 +1559,8 @@ class TerraformExecutor:
             raise StateError(
                 "This foundation plan would create or replace existing buckets "
                 f"({', '.join(recreated)}). The installation is already initialized and the foundation "
-                "module has no remote state, so its buckets are changed by an operator instead: "
-                "see docs/operations/foundation-bucket-guards.md."
+                "module has no remote state, so bioAF does not plan its buckets; their public-access guard is "
+                "applied when the backend starts: see docs/operations/foundation-bucket-guards.md."
             )
 
     @staticmethod
