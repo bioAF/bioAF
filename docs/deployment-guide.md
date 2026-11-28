@@ -101,7 +101,8 @@ The VM authenticates to AWS through its instance profile (the analog of the GCP
 VM's attached service account), so no long-lived credentials are stored. The profile
 can change only this installation's resources; an installation set up before that
 change moves over with `./install-aws.sh --reconcile-permissions` (see
-[AWS permissions reconciliation](operations/aws-permissions-reconcile.md)). The
+[AWS permissions reconciliation](operations/aws-permissions-reconcile.md)). Install bioAF in a
+dedicated AWS account that holds nothing else; the reconciliation guide explains why. The
 script then offers to finish setup on the VM for you, or prints a worksheet so
 you can SSH in and run `./bioaf setup` yourself.
 

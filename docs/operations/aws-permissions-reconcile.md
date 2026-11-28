@@ -7,27 +7,31 @@ permissions.
 
 ## What changes
 
-- **The `bioaf-app` role** gets three installer-owned managed policies (`bioaf-app-access-core`,
-  `bioaf-app-access-control`, `bioaf-app-access-services`, written by `installer/aws_iam.sh`) in
-  place of the inline `bioaf-app-starter` policy. Reads stay account-wide where AWS cannot scope
+- **The `bioaf-app` role** gets four installer-owned managed policies (`bioaf-app-access-core`,
+  `bioaf-app-access-control`, `bioaf-app-access-roles`, `bioaf-app-access-services`, written by
+  `installer/aws_iam.sh`) in place of the inline `bioaf-app-starter` policy. Reads stay account-wide where AWS cannot scope
   them. Changes are limited to:
   - EC2 resources tagged `bioaf:installation=<account>-<region>`;
   - security groups and routes in the application VPC;
   - `bioaf-*` EKS, ECR, CodeBuild and log resources in this account and region;
   - IAM roles under the `/bioaf/` path (new) or roles you tag during reconciliation (existing).
 
-  The app can no longer write any role policy, edit or pass its own role, change a boundary, touch
-  a role tagged `bioaf:protected=true`, tag IAM resources as its own, move the EC2 ownership tag,
-  read control-plane logs, delete log history, or remove or share images.
-- **What app-created roles can hold.** The app can attach only AWS's EKS policies and four
-  installer-owned policies (`bioaf-role-s3-readwrite`, `bioaf-role-s3-readonly`,
-  `bioaf-role-cluster-autoscaler`, `bioaf-role-image-build`). Every role also carries the
-  `bioaf-app-created-role-boundary`. That boundary lists only the actions those policies need and
-  repeats the app's denials, so no app-created role can terminate unrelated instances, delete
-  unrelated volumes or log groups, remove images, write IAM or read secrets.
+  The app can no longer write any role policy or edit a role's trust policy, edit or pass its own
+  role, change a boundary, touch a role tagged `bioaf:protected=true`, tag IAM resources as its own,
+  move the EC2 ownership tag, read control-plane logs, delete log history, or share images.
+- **What app-created roles can hold.** Each policy attaches only to the role it is for: AWS's
+  `AmazonEKSClusterPolicy` to `*-cluster`, the node policies and `bioaf-role-s3-readwrite` to
+  `*-node`, the EBS CSI policy to `*-ebs-csi`, the S3 policies to runners and Work Nodes,
+  `bioaf-role-cluster-autoscaler` to `*-cluster-autoscaler`, and `bioaf-role-image-build` to the
+  build role. Each role can be passed only to its own service (cluster, node and EBS CSI roles to
+  EKS, Work Node roles to EC2, the build role to CodeBuild). Every role also carries
+  `bioaf-app-created-role-boundary`, which lists only the actions those policies need and repeats
+  the app's denials: no app-created role can terminate unrelated instances, delete unrelated
+  volumes, images or log groups, write IAM or read secrets.
 - **Ownership tags.** Existing EC2 resources, the app VM, and the roles and instance profiles bioAF
   created get the `bioaf:installation` tag. Only an operator can add it to IAM resources.
-  Work-node images and snapshots are not tagged; nothing needs them owned.
+  Packer tags new work-node AMIs and snapshots at creation; reconciliation also tags the existing
+  ones (`bioaf-managed=true`), so a rebuild can replace them.
 
 ## Order
 
@@ -92,16 +96,26 @@ again is safe.
 - To roll back, put the previous policy document back on `bioaf-app` with your own credentials. Do
   not give the app a broader policy to fix a failure.
 
+## Accepted residual risk: dedicated account required
+
+The app still chooses a new role's trust policy when it creates the role, and IAM has no condition
+on trust-policy contents. A compromised bioAF app could create a role named `bioaf-<x>-cluster`
+that trusts the cluster's OIDC provider, attach `AmazonEKSClusterPolicy`, and assume it from a pod
+(bioAF is cluster administrator). It would then hold that AWS-managed policy's unscoped
+load-balancer and security-group rights, capped by the boundary.
+
+The owner accepted this on 2026-11-27 for a **dedicated bioAF AWS account**: run bioAF in an
+account that holds nothing else. In a shared account, those rights reach other workloads' load
+balancers and security groups. Closing it needs installer-owned, fixed-trust roles; that is future
+work.
+
 ## Limits
 
 - One bioAF installation per AWS account (the `bioaf-app` role name is fixed), so the ownership tag
   is `<account>-<region>`.
-- Existing roles keep their path (`/`); only roles created after this change use `/bioaf/`.
-- The EKS cluster role holds AWS's `AmazonEKSClusterPolicy`, which manages load balancers and their
-  security groups for Kubernetes `LoadBalancer` services. AWS does not scope that policy, so the
-  boundary allows those actions.
-- Work-node AMIs are never removed automatically. A retry of the same build after its AMI was
-  registered fails with a name conflict; start a new build. Delete superseded `bioaf-worknode-*`
-  AMIs and their snapshots yourself.
+- Existing roles keep their path (`/`); only new or recreated roles use `/bioaf/`.
+- Packer removes a same-named AMI on rebuild and cleans up an AMI after a failed build only when the
+  image carries this installation's tag from creation. A same-named AMI from elsewhere stops the
+  build. Packer does not clean up an AMI if waiting for it to become available fails.
 - These documents were checked with a static evaluator in the test suite, not with AWS's policy
   simulator or a live installation. Validate on a test account before production.
