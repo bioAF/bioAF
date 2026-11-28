@@ -168,7 +168,7 @@ NG=system   # each node group from the message
 for asg in $(aws eks describe-nodegroup --cluster-name "$CLUSTER" --nodegroup-name "$NG" \
     --query 'nodegroup.resources.autoScalingGroups[].name' --output text); do
   aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg" \
-    --query 'AutoScalingGroups[].[LaunchTemplate.LaunchTemplateId,LaunchTemplate.Version,MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateId]' --output text
+    --query 'AutoScalingGroups[].[LaunchTemplate.LaunchTemplateId,LaunchTemplate.Version,MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateId,MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.Version]' --output text
 done
 aws ec2 describe-launch-template-versions --launch-template-id LT_ID --versions LT_VERSION \
   --query 'LaunchTemplateVersions[].LaunchTemplateData.IamInstanceProfile'
