@@ -25,7 +25,7 @@ at bootstrap (`terraform_state_bucket`, `backups_bucket_name`) and, for each:
 It changes no other setting, imports no state, and does not rerun bootstrap. One bucket's failure
 does not stop the other. Nothing happens on AWS, before initialization, or in simulated mode.
 
-Each outcome is logged by the backend (logger `bioaf.app.services.foundation_bucket_guard`):
+Each outcome is logged by the backend (logger `bioaf.services.foundation_bucket_guard`):
 
 - `Foundation bucket NAME public-access prevention: enforced` (or `already_enforced`);
 - `Public-access prevention not enforced on foundation bucket NAME: ...` with the reason.
