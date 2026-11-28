@@ -246,7 +246,8 @@ source "amazon-ebs" "work_node" {
   snapshot_tags = {
     bioaf-managed = "true"
   }
-  ami_description = "bioAF work node environment"
+  # No ami_description: amazon-ebs writes it with ModifyImageAttribute, which the build role is
+  # denied because the same call shares images. The description is a tag instead.
 
   # The build instance is transient (Packer creates it, provisions, destroys it).
   launch_block_device_mappings {
@@ -258,6 +259,7 @@ source "amazon-ebs" "work_node" {
 
   tags = {
     bioaf-managed = "true"
+    Description   = "bioAF work node environment"
   }
 }
 

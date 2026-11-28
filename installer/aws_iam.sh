@@ -104,6 +104,7 @@ JSON
 {"Sid":"PackerLaunchSourceImage","Effect":"Allow","Action":"ec2:RunInstances","Resource":"arn:aws:ec2:${r}::image/*","Condition":{"StringEquals":{"ec2:Owner":"099720109477"}}},
 {"Sid":"PackerLaunchKeyAndInterface","Effect":"Allow","Action":"ec2:RunInstances","Resource":["${ec2}:key-pair/packer_*","${ec2}:network-interface/*"]},
 {"Sid":"PackerTemporaryKeyPair","Effect":"Allow","Action":["ec2:CreateKeyPair","ec2:DeleteKeyPair"],"Resource":"${ec2}:key-pair/packer_*"},
+{"Sid":"PackerTagKeyPairAtCreate","Effect":"Allow","Action":"ec2:CreateTags","Resource":"${ec2}:key-pair/packer_*","Condition":{"StringEquals":{"ec2:CreateAction":"CreateKeyPair"}}},
 {"Sid":"PackerTagAtLaunch","Effect":"Allow","Action":"ec2:CreateTags","Resource":["${ec2}:instance/*","${ec2}:volume/*","${ec2}:network-interface/*"],"Condition":{"StringEquals":{"ec2:CreateAction":"RunInstances"}}},
 {"Sid":"PackerOwnedBuilder","Effect":"Allow","Action":["ec2:StopInstances","ec2:TerminateInstances","ec2:CreateImage","ec2:AttachVolume","ec2:DetachVolume","ec2:DeleteVolume"],"Resource":["${ec2}:instance/*","${ec2}:volume/*"],"Condition":{${owned}}},
 {"Sid":"PackerNewImage","Effect":"Allow","Action":["ec2:CreateImage","ec2:RegisterImage"],"Resource":["arn:aws:ec2:${r}::image/*","arn:aws:ec2:${r}::snapshot/*"]},

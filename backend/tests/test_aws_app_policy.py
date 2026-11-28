@@ -523,3 +523,45 @@ def test_no_document_repeats_a_key(name):
         return dict(pairs)
 
     json.loads(raw, object_pairs_hook=unique)
+
+
+# --- Review round 3: the configured Packer build sequence ----------------------------------------
+
+
+def _packer_sequence() -> list[Request]:
+    """The calls amazon-ebs makes for bioAF's template, in order, with the tags it sends.
+
+    run_tags go into the temporary key pair's and the builder's TagSpecifications and into
+    CreateImage; tags and snapshot_tags are applied afterwards with CreateTags.
+    """
+    run_tags = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation", "bioaf-managed"]}
+    later = {"aws:TagKeys": ["bioaf-managed", "Description"]}
+    image, snapshot = f"arn:aws:ec2:{R}::image/ami-new", f"arn:aws:ec2:{R}::snapshot/snap-new"
+    return [
+        Request("ec2:CreateKeyPair", f"{EC2}:key-pair/packer_6566", run_tags),
+        Request("ec2:CreateTags", f"{EC2}:key-pair/packer_6566", {**run_tags, "ec2:CreateAction": "CreateKeyPair"}),
+        Request("ec2:RunInstances", f"{EC2}:instance/*", run_tags),
+        Request("ec2:CreateTags", f"{EC2}:instance/*", {**run_tags, "ec2:CreateAction": "RunInstances"}),
+        Request("ec2:StopInstances", f"{EC2}:instance/i-b", OWNED),
+        Request("ec2:CreateImage", f"{EC2}:instance/i-b", OWNED),
+        Request("ec2:CreateImage", image, run_tags),
+        Request("ec2:CreateTags", image, {**run_tags, "ec2:CreateAction": "CreateImage"}),
+        Request("ec2:CreateTags", image, later),
+        Request("ec2:CreateTags", snapshot, later),
+        Request("ec2:TerminateInstances", f"{EC2}:instance/i-b", OWNED),
+        Request("ec2:DeleteKeyPair", f"{EC2}:key-pair/packer_6566"),
+    ]
+
+
+@pytest.mark.parametrize("request_", _packer_sequence(), ids=lambda r: f"{r.action}:{r.resource.rsplit(':', 1)[-1]}")
+def test_every_call_of_the_configured_packer_build_is_allowed(build_role, boundary, request_):
+    """Review round 3, findings 1 and 2: a denied call stops the AMI build part way."""
+    assert allowed_with_boundary(build_role, boundary, request_)
+
+
+def test_the_key_pair_tag_is_allowed_only_while_creating_a_packer_key(build_role):
+    claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
+    assert not allowed(build_role, Request("ec2:CreateTags", f"{EC2}:key-pair/packer_1", claim))
+    assert not allowed(
+        build_role, Request("ec2:CreateTags", f"{EC2}:key-pair/operator", {**claim, "ec2:CreateAction": "CreateKeyPair"})
+    )

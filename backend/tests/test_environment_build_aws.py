@@ -447,3 +447,17 @@ def test_the_packer_template_tags_its_builder_but_never_claims_images():
     assert '"group-name"' in group and "bioaf-packer-builder" in group
     # Nothing in the template shares the image outside the account.
     assert "ami_users" not in template and "ami_groups" not in template and "snapshot_users" not in template
+
+
+def test_the_packer_template_sets_no_attribute_packer_writes_with_modify_image_attribute():
+    """Review round 3, finding 2: the roles deny ModifyImageAttribute (it also shares images), and
+    amazon-ebs uses it for each of these settings, so any of them stops the build. The description
+    travels as a tag instead."""
+    import re
+
+    from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS as template
+
+    for setting in ("ami_description", "ami_product_codes", "ami_users", "ami_groups", "ami_org_arns", "ami_ou_arns"):
+        assert not re.search(rf"^\s*{setting}\s*=", template, re.M), setting
+    tags = re.search(r"\n  tags\s*=\s*\{(.*?)\}", template, re.S).group(1)
+    assert 'Description   = "bioAF work node environment"' in tags
