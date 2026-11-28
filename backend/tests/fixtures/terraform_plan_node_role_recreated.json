@@ -1,0 +1,31 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.14.6",
+  "resource_changes": [
+    {
+      "address": "aws_eks_node_group.system",
+      "type": "aws_eks_node_group",
+      "change": {
+        "actions": [
+          "delete",
+          "create"
+        ],
+        "replace_paths": [
+          [
+            "node_role_arn"
+          ]
+        ]
+      }
+    },
+    {
+      "address": "aws_iam_role.node",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "replace_paths": null
+      }
+    }
+  ]
+}

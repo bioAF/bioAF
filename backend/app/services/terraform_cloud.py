@@ -23,6 +23,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from app.services.deployment_outputs import identifier_value
+from app.platform.aws_installation import NEW_ROLE_PATH
+from app.services.eks_endpoint_policy import CONFIG_KEYS as EKS_CONFIG_KEYS
 
 # The deployed layout: GCP modules at /app/terraform/modules (the executor's
 # MODULES_DIR), AWS modules at /app/terraform/aws/modules. Kept here (not imported
@@ -79,6 +81,49 @@ class TerraformCloud(ABC):
     def not_configured_message(self) -> str:
         """Operator-facing message raised when ``is_configured`` is False."""
 
+    async def prepare_run(
+        self,
+        session,
+        module_name: str,
+        config: dict,
+        *,
+        phase: str,
+        run_id: int | None,
+        pull_state: Callable[[], Awaitable[dict | None]],
+    ) -> dict:
+        """Before a plan (``phase="plan"``) or apply, after init: check and resolve cloud-specific
+        inputs, returning the config the tfvars are written from. Raise to refuse. Default: unchanged."""
+        return config
+
+    def review_plan(self, module_name: str, config: dict, raw_plan: dict) -> dict:
+        """Refuse a plan (``terraform show -json``) this cloud's guardrails do not allow. Return
+        extra keys to record in the run's plan_json for the apply to compare. Default: allow,
+        record nothing."""
+        return {}
+
+    async def review_apply(
+        self,
+        module_name: str,
+        config: dict,
+        *,
+        planned_tfvars: dict | None,
+        applying_tfvars: dict,
+        reviewed_plan: dict | None,
+        plan_now: Callable[[], Awaitable[dict]],
+    ) -> bool:
+        """Before an apply, after its tfvars are written: refuse an apply that is not the reviewed
+        plan. Return True to apply the plan file ``plan_now`` just wrote (and checked) instead of a
+        fresh auto-approved apply. Default: no check, fresh apply."""
+        return False
+
+    async def finish_apply(self, session, module_name: str, config: dict, *, run_id: int, succeeded: bool) -> None:
+        """After an apply exits. Default: nothing."""
+        return None
+
+    async def finish_destroy(self, session, module_name: str) -> None:
+        """After a successful destroy. Default: nothing."""
+        return None
+
     def lock_object_path(self, module_name: str | None) -> str | None:
         """State-store object key for ``module_name``'s lock, or None when this
         cloud has no executor-deletable lock object.
@@ -112,6 +157,10 @@ class AwsTerraformCloud(TerraformCloud):
             # The application network, recorded by the backend for private backend sync (plan 03B).
             "aws_app_vpc_id",
             "aws_app_security_group_id",
+            # EKS endpoint and control-plane logging (plan 04C).
+            "compute_deployed",
+            "gke_cluster_name",
+            *EKS_CONFIG_KEYS,
         ]
 
     def _state_bucket(self, config: dict) -> str:
@@ -138,6 +187,9 @@ class AwsTerraformCloud(TerraformCloud):
             # names, so no stack_uid; account_id scopes the ECR repo ARNs.
             tfvars["account_id"] = config.get("aws_account_id") or ""
             tfvars["org_slug"] = org_slug
+            if "_aws_role_paths" in config:
+                tfvars["role_paths"] = config["_aws_role_paths"]
+                tfvars["new_role_path"] = NEW_ROLE_PATH
         elif module_name == "storage":
             tfvars["org_slug"] = org_slug
             if storage_suffix:
@@ -166,6 +218,12 @@ class AwsTerraformCloud(TerraformCloud):
             if app_vpc and app_sg:
                 tfvars["app_vpc_id"] = app_vpc
                 tfvars["app_security_group_id"] = app_sg
+            # Explicit endpoint/logging inputs resolved by prepare_run for a plan or apply (plan 04C).
+            tfvars.update(config.get("_eks_resolved") or {})
+            if "_aws_role_paths" in config:
+                tfvars["role_paths"] = config["_aws_role_paths"]
+                tfvars["profile_paths"] = config.get("_aws_profile_paths") or {}
+                tfvars["new_role_path"] = NEW_ROLE_PATH
 
         tfvars_path = work_dir / "terraform.tfvars.json"
         tfvars_path.write_text(json.dumps(tfvars, indent=2))
@@ -199,12 +257,202 @@ class AwsTerraformCloud(TerraformCloud):
     def not_configured_message(self) -> str:
         return "AWS is not configured. Set the AWS account before bootstrapping."
 
+    async def prepare_run(self, session, module_name, config, *, phase, run_id, pull_state):
+        if module_name not in ("compute", "image_build"):
+            return config
+        from app.exceptions import ValidationError
+
+        pulled: list = []
+
+        async def pull_once():
+            if not pulled:
+                pulled.append(await pull_state())
+            return pulled[0]
+
+        state = await pull_once()
+        if state is None:
+            raise ValidationError(
+                f"The remote {module_name} state could not be read, so the existing roles cannot be identified. "
+                "Nothing was changed; check the state bucket and retry."
+            )
+        paths = await _live_iam_paths(state)
+        config = {**config, "_aws_role_paths": paths["roles"], "_aws_profile_paths": paths["profiles"]}
+        if module_name == "image_build":
+            return config
+        from app.services import eks_endpoint
+
+        return await eks_endpoint.prepare_run(session, config, phase=phase, run_id=run_id, pull_state=pull_once)
+
+    def review_plan(self, module_name, config, raw_plan):
+        if module_name != "compute":
+            return {}
+        from app.services import eks_endpoint, eks_endpoint_policy
+
+        _refuse_role_arn_replacement(raw_plan)
+        eks_endpoint_policy.review_plan(raw_plan, config)
+        return {eks_endpoint.REVIEWED_CHANGES_KEY: eks_endpoint.change_digests(raw_plan)}
+
+    async def review_apply(self, module_name, config, *, planned_tfvars, applying_tfvars, reviewed_plan, plan_now):
+        if module_name != "compute":
+            return False
+        from app.services import eks_endpoint
+
+        await eks_endpoint.review_apply(
+            config,
+            planned_tfvars=planned_tfvars,
+            applying_tfvars=applying_tfvars,
+            reviewed_plan=reviewed_plan,
+            plan_now=plan_now,
+        )
+        return True
+
+    async def finish_apply(self, session, module_name, config, *, run_id, succeeded):
+        if module_name == "compute":
+            from app.services import eks_endpoint
+
+            await eks_endpoint.finish_apply(session, config, run_id=run_id, succeeded=succeeded)
+
+    async def finish_destroy(self, session, module_name):
+        if module_name == "compute":
+            from app.services import eks_endpoint
+
+            await eks_endpoint.finish_destroy(session)
+
     def lock_object_path(self, module_name: str | None) -> str | None:
         # Deferred: Terraform's S3 backend with use_lockfile writes a <key>.tflock
         # object whose deletion path differs from GCS; faithful S3 lock cleanup is
         # a separate follow-up (see cleanup-items). Until then, no executor-driven
         # lock deletion on AWS, so this returns None and lock cleanup no-ops.
         return None
+
+
+_RESTORE = (
+    "Nothing was changed. Restore the role at its recorded name and path with operator credentials, verify it, "
+    "and plan again (docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role')."
+)
+
+
+async def _require_role_dependencies(state: dict, paths: dict[str, dict[str, str]]) -> None:
+    """Every role an EKS cluster or node group in state uses must exist at its recorded ARN.
+
+    Driven by the dependents' recorded ARNs (role_arn, node_role_arn), not by the roles' own state
+    entries or paths: if Terraform had to create the role, its ARN would be unknown until apply and
+    the plan would replace the cluster or node groups even at the same path (plan 04B).
+    """
+    import asyncio
+
+    from app.adapters.eks_control_plane import aws
+    from app.exceptions import ValidationError
+
+    for name, (recorded, users) in _role_dependents(state).items():
+        used_by = ", ".join(users)
+        try:
+            live = await asyncio.to_thread(aws.role_arn, name)
+        except Exception as exc:
+            raise ValidationError(
+                f"The backend could not read the IAM role {name}, which {used_by} use(s) ({exc}). "
+                "Nothing was changed; check the app's IAM read access and retry."
+            ) from exc
+        if live is None:
+            raise ValidationError(
+                f"The IAM role {name} (recorded ARN {recorded}) no longer exists in AWS, and {used_by} use(s) that "
+                f"ARN. Recreating the role would give the plan a new ARN and replace them. {_RESTORE}"
+            )
+        if live != recorded:
+            raise ValidationError(
+                f"The IAM role {name} now has the ARN {live}, but {used_by} use(s) the recorded ARN {recorded}. "
+                f"Applying would replace them. {_RESTORE}"
+            )
+        if name not in paths["roles"]:
+            raise ValidationError(
+                f"The IAM role {name} (ARN {recorded}), which {used_by} use(s), is not in the compute state, so "
+                "Terraform would plan a new role and replace them. Nothing was changed; the compute state needs an "
+                "operator review (docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role')."
+            )
+
+
+async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
+    """Role and instance-profile paths from state, dropping legacy entries that no longer exist.
+
+    Roles an EKS cluster or node group uses are checked first and must exist at their recorded ARN
+    (``_require_role_dependencies``). Any other role or profile outside /bioaf/ keeps its path only
+    while it exists: one deleted in AWS but still in the (unrefreshed) state is recreated under
+    /bioaf/, the only path the app may create in. A lookup that fails for any other reason stops
+    the run rather than guessing (plan 04B).
+    """
+    import asyncio
+
+    from app.adapters.eks_control_plane import aws
+    from app.exceptions import ValidationError
+    from app.platform.aws_installation import iam_paths_from_state
+
+    paths = iam_paths_from_state(state)
+    await _require_role_dependencies(state, paths)
+    dependents = _role_dependents(state)
+    lookups = {"roles": ("role", aws.role_exists), "profiles": ("instance profile", aws.instance_profile_exists)}
+    for kind, (label, exists) in lookups.items():
+        for name, path in list(paths[kind].items()):
+            if path == NEW_ROLE_PATH or (kind == "roles" and name in dependents):
+                continue
+            try:
+                live = await asyncio.to_thread(exists, name)
+            except Exception as exc:
+                raise ValidationError(
+                    f"The backend could not check whether the IAM {label} {name} still exists ({exc}). "
+                    "Nothing was changed; check the app's IAM read access and retry."
+                ) from exc
+            if not live:
+                del paths[kind][name]
+    return paths
+
+
+def _refuse_role_arn_replacement(raw_plan: dict) -> None:
+    """Refuse a plan that replaces a cluster or node group because its role ARN changes or is unknown.
+
+    The pre-plan dependency check stops the known causes; this proves it on the plan itself. A node
+    group replaced for any other reason (deliberate, reviewed maintenance) is not refused here.
+    """
+    from app.exceptions import ValidationError
+
+    for change in raw_plan.get("resource_changes") or []:
+        spec = _ROLE_ARN_DEPENDENTS.get(change.get("type"))
+        body = change.get("change") or {}
+        if spec is None or not {"delete", "create"} <= set(body.get("actions") or []):
+            continue
+        causes = {path[0] for path in body.get("replace_paths") or [] if path}
+        if spec[0] in causes:
+            raise ValidationError(
+                f"This compute plan would replace {change.get('address')} because its IAM role ARN ({spec[0]}) "
+                f"changes or is not known until apply. {_RESTORE}"
+            )
+
+
+# Resources whose role ARN cannot change in place: a new ARN replaces the resource (plan 04B).
+_ROLE_ARN_DEPENDENTS = {
+    "aws_eks_cluster": ("role_arn", "name", "EKS cluster"),
+    "aws_eks_node_group": ("node_role_arn", "node_group_name", "node group"),
+}
+
+
+def _role_dependents(state: dict) -> dict[str, tuple[str, list[str]]]:
+    """For each role an EKS cluster or node group in state uses: its recorded ARN and the users.
+
+    One check for both kinds; deliberate node-group replacement for other reasons is unaffected.
+    """
+    found: dict[str, tuple[str, list[str]]] = {}
+    for resource in state.get("resources") or []:
+        spec = _ROLE_ARN_DEPENDENTS.get(resource.get("type"))
+        if resource.get("mode") != "managed" or spec is None:
+            continue
+        arn_key, name_key, label = spec
+        for instance in resource.get("instances") or []:
+            attributes = instance.get("attributes") or {}
+            arn = attributes.get(arn_key) or ""
+            if ":role/" not in arn:
+                continue
+            user = f"{label} {attributes.get(name_key) or resource.get('name')}"
+            found.setdefault(arn.rsplit("/", 1)[-1], (arn, []))[1].append(user)
+    return found
 
 
 class GcpTerraformCloud(TerraformCloud):

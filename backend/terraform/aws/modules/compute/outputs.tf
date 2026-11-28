@@ -95,3 +95,13 @@ output "backend_sync_security_group_id" {
   value       = local.backend_sync_private ? aws_security_group.backend_sync[0].id : ""
   description = "Security group Work Nodes join so the backend can save their outputs over VPC peering (empty: public sync)."
 }
+
+output "control_plane_log_reader_policy_json" {
+  value       = data.aws_iam_policy_document.control_plane_log_reader.json
+  description = "IAM policy document granting read access to this cluster's control-plane logs. An operator creates it and attaches it to designated operator roles."
+}
+
+output "control_plane_log_group_name" {
+  value       = aws_cloudwatch_log_group.control_plane.name
+  description = "CloudWatch log group receiving the EKS control-plane logs."
+}

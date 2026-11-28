@@ -144,8 +144,20 @@ class TerraformExecutor:
             env, cleanup = await cloud.build_provider_env(config)
             try:
                 await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
+                config = await cloud.prepare_run(
+                    session,
+                    module_name,
+                    config,
+                    phase="plan",
+                    run_id=run.id,
+                    pull_state=TerraformExecutor._state_puller(work_dir, env),
+                )
+                run.tfvars_json = cloud.write_tfvars(work_dir, module_name, config)
                 plan_json = await TerraformExecutor._run_plan_capture(work_dir, env, targets)
-                parsed = TerraformPlanParser.parse(plan_json)
+                recorded = cloud.review_plan(module_name, config, plan_json)
+                parsed = {**TerraformPlanParser.parse(plan_json), **recorded}
+                if module_name == "foundation" and config.get("terraform_initialized") == "true":
+                    TerraformExecutor._refuse_foundation_recreation(parsed)
 
                 run.plan_json = parsed
                 run.resources_planned = parsed["total"]
@@ -169,6 +181,11 @@ class TerraformExecutor:
             details={"module_name": module_name, "status": run.status},
         )
         return run
+
+    @staticmethod
+    def _saved_plan_apply_args() -> list[str]:
+        """Apply exactly the plan file just written and checked (its targets are already in it)."""
+        return ["terraform", "apply", "-json", "-no-color", "-input=false", "tfplan"]
 
     @staticmethod
     def _build_apply_args(targets: list[str] | None = None) -> list[str]:
@@ -206,6 +223,8 @@ class TerraformExecutor:
         if run.status not in ("awaiting_confirmation", "applying"):
             raise StateError(f"Run {run_id} is not awaiting confirmation (status: {run.status})")
         await TerraformExecutor._require_storage_identity(session, run.module_name)
+        if (run.module_name or "foundation") == "foundation" and await TerraformExecutor._initialized(session):
+            TerraformExecutor._refuse_foundation_recreation(run.plan_json or {})
 
         await TerraformExecutor._join_operation(session, run)
         run.action = "apply"
@@ -222,6 +241,7 @@ class TerraformExecutor:
         failure_message: str | None = None
         process = None
         cleanup = None
+        cloud_hooks_ready = False
 
         async def classify(entry: dict, line: str) -> TerraformProgressEvent | None:
             entry_type = entry.get("type", "")
@@ -293,13 +313,36 @@ class TerraformExecutor:
                 )
 
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
+            planned_tfvars = run.tfvars_json
             tfvars = cloud.write_tfvars(work_dir, module_name, config)
             if not run.tfvars_json:
                 run.tfvars_json = tfvars
             await TerraformExecutor._run_init(work_dir, env, config, cloud, module_name=module_name)
+            config = await cloud.prepare_run(
+                session,
+                module_name,
+                config,
+                phase="apply",
+                run_id=run.id,
+                pull_state=TerraformExecutor._state_puller(work_dir, env),
+            )
+            apply_plan_file = await cloud.review_apply(
+                module_name,
+                config,
+                planned_tfvars=planned_tfvars,
+                applying_tfvars=cloud.write_tfvars(work_dir, module_name, config),
+                reviewed_plan=run.plan_json,
+                plan_now=lambda: TerraformExecutor._run_plan_capture(work_dir, env, targets),
+            )
+            cloud_hooks_ready = True
+            apply_args = (
+                TerraformExecutor._saved_plan_apply_args()
+                if apply_plan_file
+                else TerraformExecutor._build_apply_args(targets)
+            )
 
             process = await asyncio.create_subprocess_exec(
-                *TerraformExecutor._build_apply_args(targets),
+                *apply_args,
                 cwd=str(work_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -320,6 +363,10 @@ class TerraformExecutor:
 
             exit_result = await read_exit(process)
             run.apply_log = "\n".join(progress.log_lines)
+            await TerraformExecutor._finish_cloud_apply(
+                cloud, session, module_name, config, run.id, exit_result.return_code == 0
+            )
+            cloud_hooks_ready = False
 
             if exit_result.return_code == 0:
                 run.status = "completed"
@@ -375,6 +422,8 @@ class TerraformExecutor:
             run.completed_at = datetime.now(timezone.utc)
             apply_failed = True
             failure_message = str(exc)
+            if cloud_hooks_ready:
+                await TerraformExecutor._finish_cloud_apply(cloud, session, module_name, config, run.id, False)
         finally:
             with anyio.CancelScope(shield=True):
                 exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
@@ -752,6 +801,7 @@ class TerraformExecutor:
             if exit_result.return_code == 0:
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
+                await cloud.finish_destroy(session, module_name)
                 yield TerraformProgressEvent(
                     event_type="apply_complete",
                     message="Destroy complete",
@@ -1444,6 +1494,80 @@ class TerraformExecutor:
             logger.info("Deleted lock file %s", uri)
         except Exception as exc:
             logger.warning("Error deleting lock file %s: %s", uri, exc)
+
+    @staticmethod
+    def _state_puller(work_dir: Path, env: dict):
+        """A no-refresh reader of the module's remote state (``terraform state pull``).
+
+        Returns the parsed state, an empty state when none exists yet, or None when it cannot be read.
+        """
+
+        async def pull() -> dict | None:
+            try:
+                result = await TerraformExecutor._run_captured(
+                    ["terraform", "state", "pull"],
+                    cwd=str(work_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env={**TerraformExecutor._base_env(), **env},
+                )
+            except Exception as exc:
+                logger.warning("terraform state pull failed: %s", exc)
+                return None
+            if result.returncode != 0:
+                logger.warning("terraform state pull failed: %s", result.stderr)
+                return None
+            if not (result.stdout or "").strip():
+                return {"resources": []}
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError:
+                return None
+
+        return pull
+
+    @staticmethod
+    async def _finish_cloud_apply(cloud, session, module_name, config, run_id, succeeded) -> None:
+        """Run the cloud's post-apply hook without letting it mask the apply's own outcome."""
+        try:
+            await cloud.finish_apply(session, module_name, config, run_id=run_id, succeeded=succeeded)
+        except Exception:
+            logger.exception("Post-apply check for %s did not finish; the next plan reconciles it", module_name)
+
+    # Foundation resources whose re-creation would collide with an existing state or backup bucket.
+    _FOUNDATION_BUCKETS = frozenset(
+        {"google_storage_bucket.terraform_state", "google_storage_bucket.backups", "aws_s3_bucket.this"}
+    )
+
+    @staticmethod
+    def foundation_recreations(plan: dict) -> list[str]:
+        """Foundation bucket addresses a parsed plan would create or replace."""
+        return [
+            r["address"]
+            for r in plan.get("resources") or []
+            if r.get("address") in TerraformExecutor._FOUNDATION_BUCKETS and r.get("action") in ("create", "replace")
+        ]
+
+    @staticmethod
+    def _refuse_foundation_recreation(plan: dict) -> None:
+        """Bootstrap keeps no durable foundation state, so after initialization a foundation plan
+        sees empty state and proposes creating the existing buckets. Refuse it rather than let it
+        collide with (or replace) the state and backup buckets."""
+        recreated = TerraformExecutor.foundation_recreations(plan)
+        if recreated:
+            raise StateError(
+                "This foundation plan would create or replace existing buckets "
+                f"({', '.join(recreated)}). The installation is already initialized and the foundation "
+                "module has no remote state, so bioAF does not plan its buckets; their public-access guard is "
+                "applied when the backend starts: see docs/operations/foundation-bucket-guards.md."
+            )
+
+    @staticmethod
+    async def _initialized(session: AsyncSession) -> bool:
+        from app.platform.platform_config_service import PlatformConfigService
+
+        return (await PlatformConfigService.get(session, "terraform_initialized")) == "true"
 
     @staticmethod
     async def _require_storage_identity(session: AsyncSession, module_name: str | None) -> None:

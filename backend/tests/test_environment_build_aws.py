@@ -400,3 +400,64 @@ async def test_dockerfile_build_context_substitutes_storage_placeholder():
     dockerfile = tf.extractfile("Dockerfile").read().decode()
     assert "__STORAGE_PIP_PACKAGES__" not in dockerfile
     assert "boto3" in dockerfile
+
+
+@pytest.mark.asyncio
+async def test_a_work_node_image_build_carries_the_installation_identity(session, admin_user, aws_install):
+    """Packer tags its builder instance, volumes, snapshots and AMI with this installation and finds
+    the pre-created builder security group by the same tag (plan 04B)."""
+    from app.adapters.image_build.aws import CodeBuildImageBuildProvider
+
+    env, version = await _make_draft_conda_worknode_env(session, admin_user, "Owned Env")
+    storage = MagicMock()
+    storage.build_uri.side_effect = lambda b, k: f"s3://{b}/{k}"
+    storage.upload_file = AsyncMock()
+    with (
+        patch("app.adapters.registry.get_storage_adapter", return_value=storage),
+        patch.object(CodeBuildImageBuildProvider, "_client") as cb_mk,
+    ):
+        cb_mk.return_value.start_build.return_value = {"build": {"id": "bioaf-image-build:ami-run-2"}}
+        await EnvironmentBuildService.build_version(
+            session, admin_user.organization_id, admin_user.id, env.id, version.id
+        )
+    env_vars = {
+        e["name"]: e["value"] for e in cb_mk.return_value.start_build.call_args.kwargs["environmentVariablesOverride"]
+    }
+    assert env_vars["PKR_VAR_installation_id"] == "043671579834-us-west-1"
+
+
+def test_the_packer_template_tags_its_builder_but_never_claims_images():
+    import re
+
+    from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS as template
+
+    assert 'variable "installation_id"' in template
+    # Builder instance and volumes are tagged at launch, so they carry the ownership tag ...
+    for block in ("run_tags", "run_volume_tags"):
+        body = re.search(rf"\n  {block}\s*=\s*\{{(.*?)\}}", template, re.S)
+        assert body, block
+        assert '"bioaf:installation" = var.installation_id' in body.group(1), block
+    # ... the AMI and snapshots are tagged after creation, so they must not (it would be claimable).
+    for block in ("snapshot_tags", "tags"):
+        body = re.search(rf"\n  {block}\s*=\s*\{{(.*?)\}}", template, re.S)
+        assert body and "bioaf:installation" not in body.group(1), block
+    # The builder uses the pre-created, tagged security group instead of creating one.
+    group = re.search(r"security_group_filter \{(.*?)\n  \}", template, re.S).group(1)
+    assert '"tag:bioaf:installation" = var.installation_id' in group
+    assert '"group-name"' in group and "bioaf-packer-builder" in group
+    # Nothing in the template shares the image outside the account.
+    assert "ami_users" not in template and "ami_groups" not in template and "snapshot_users" not in template
+
+
+def test_the_packer_template_sets_no_attribute_packer_writes_with_modify_image_attribute():
+    """Review round 3, finding 2: the roles deny ModifyImageAttribute (it also shares images), and
+    amazon-ebs uses it for each of these settings, so any of them stops the build. The description
+    travels as a tag instead."""
+    import re
+
+    from app.services.environment_build_service import PACKER_VM_TEMPLATE_AWS as template
+
+    for setting in ("ami_description", "ami_product_codes", "ami_users", "ami_groups", "ami_org_arns", "ami_ou_arns"):
+        assert not re.search(rf"^\s*{setting}\s*=", template, re.M), setting
+    tags = re.search(r"\n  tags\s*=\s*\{(.*?)\}", template, re.S).group(1)
+    assert 'Description   = "bioAF work node environment"' in tags

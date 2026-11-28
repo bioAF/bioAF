@@ -13,6 +13,15 @@ See [architecture and support status](architecture.md) before choosing a deploym
 - [Installation Metrics](installation-metrics.md): the optional, opt-in reports an installation can share,
   and how to change or withdraw that choice.
 
+## Operator Procedures
+
+- [Foundation Bucket Guards](operations/foundation-bucket-guards.md): how an existing GCP
+  installation's Terraform-state and backup buckets get public-access prevention on update.
+- [EKS API Endpoint and Control-Plane Logs](operations/eks-endpoint-and-logs.md): endpoint modes,
+  the reviewed cutover and its recovery, and log retention and readers on AWS installations.
+- [AWS Permissions Reconciliation](operations/aws-permissions-reconcile.md): move an existing AWS
+  installation to installation-scoped app permissions and the role boundary.
+
 ## Role Guides
 
 Built-in roles are starting points. Actual actions depend on effective permissions and enabled components.

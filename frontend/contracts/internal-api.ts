@@ -7103,6 +7103,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/infrastructure/eks-endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Eks Endpoint */
+        get: operations["get_eks_endpoint_api_v1_infrastructure_eks_endpoint_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/eks-endpoint/cutover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Eks Endpoint Cutover */
+        post: operations["request_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_post"];
+        /** Cancel Eks Endpoint Cutover */
+        delete: operations["cancel_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/eks-endpoint/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Eks Endpoint Settings */
+        put: operations["update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/infrastructure/notebook-image/build-status": {
         parameters: {
             query?: never;
@@ -11522,6 +11574,97 @@ export interface components {
         DocumentUpdate: {
             /** Title */
             title?: string | null;
+        };
+        /** EksEndpointCutover */
+        EksEndpointCutover: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "private_only" | "public_restricted";
+            /** Public Access Cidrs */
+            public_access_cidrs?: string[];
+            /** Requested At */
+            requested_at?: string | null;
+            /** Requested By User Id */
+            requested_by_user_id?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "applying" | "needs_reconcile";
+        };
+        /** EksEndpointCutoverRequest */
+        EksEndpointCutoverRequest: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "private_only" | "public_restricted";
+            /** Public Access Cidrs */
+            public_access_cidrs?: string[];
+            /**
+             * Recovery Paths Verified
+             * @description The administrator confirms the application, node and independent operator recovery paths were verified and the recovery procedure is ready.
+             */
+            recovery_paths_verified: boolean;
+        };
+        /** EksEndpointSettingsUpdate */
+        EksEndpointSettingsUpdate: {
+            /**
+             * Log Retention Days
+             * @description A CloudWatch Logs retention value; default 30.
+             */
+            log_retention_days?: number | null;
+            /**
+             * Log Types
+             * @description Control-plane log types; must keep audit and authenticator. Default all five.
+             */
+            log_types?: string[] | null;
+            /**
+             * Mode
+             * @description A new cluster's endpoint mode. Refused once a cluster exists (use a cutover).
+             */
+            mode?: ("private_only" | "public_restricted" | "preserve_existing") | null;
+            /**
+             * Public Access Cidrs
+             * @description Approved egress CIDRs for public_restricted; no unrestricted range.
+             */
+            public_access_cidrs?: string[] | null;
+        };
+        /** EksEndpointSnapshot */
+        EksEndpointSnapshot: {
+            /** Cluster Arn */
+            cluster_arn?: string | null;
+            /** Cluster Name */
+            cluster_name?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Endpoint Private Access */
+            endpoint_private_access: boolean;
+            /** Endpoint Public Access */
+            endpoint_public_access: boolean;
+            /** Public Access Cidrs */
+            public_access_cidrs?: string[];
+        };
+        /** EksEndpointStatus */
+        EksEndpointStatus: {
+            cutover?: components["schemas"]["EksEndpointCutover"] | null;
+            /** Endpoint Public Access */
+            endpoint_public_access: boolean;
+            /**
+             * Mode
+             * @description Recorded endpoint mode; null before the cluster's first upgraded compute plan.
+             */
+            mode: ("private_only" | "public_restricted" | "preserve_existing") | null;
+            /**
+             * Pending Hardening
+             * @description True while an existing cluster keeps its preserved (possibly unrestricted) endpoint.
+             */
+            pending_hardening: boolean;
+            /** Public Access Cidrs */
+            public_access_cidrs: string[];
+            snapshot?: components["schemas"]["EksEndpointSnapshot"] | null;
         };
         /** EmbeddingDiff */
         EmbeddingDiff: {
@@ -32464,6 +32607,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DefinitionNoticeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eks_endpoint_api_v1_infrastructure_eks_endpoint_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EksEndpointStatus"];
+                };
+            };
+        };
+    };
+    request_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EksEndpointCutoverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EksEndpointStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EksEndpointStatus"];
+                };
+            };
+        };
+    };
+    update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EksEndpointSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EksEndpointStatus"];
                 };
             };
             /** @description Validation Error */

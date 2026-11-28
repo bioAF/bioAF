@@ -13,6 +13,25 @@ provider "aws" {
   region = var.region
   # Ambient instance-profile creds (the bioaf-app role), like the other AWS
   # modules. No explicit credentials block.
+
+  default_tags {
+    tags = local.ownership_tags
+  }
+}
+
+data "aws_partition" "current" {}
+
+# --- Installation ownership (plan 04B) -------------------------------------------
+#
+# The narrowed bioaf-app policy lets the app change EC2 resources only when they carry this
+# installation's tag, and create roles only under the installer's permissions boundary. Both are
+# derived from the account and region (installer/aws_iam.sh and app/platform/aws_installation.py
+# use the same naming). The default tags put the ownership tag on every resource at creation.
+
+locals {
+  installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
+  ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
+  role_boundary   = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
 }
 
 # The AWS analog of GCP's Cloud Build: Cloud Build is serverless (the app just
@@ -43,8 +62,10 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "codebuild" {
-  name               = local.role_name
-  assume_role_policy = data.aws_iam_policy_document.assume.json
+  path                 = lookup(var.role_paths, local.role_name, var.new_role_path)
+  name                 = local.role_name
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.assume.json
 
   tags = {
     managed_by = "bioaf"
@@ -52,104 +73,48 @@ resource "aws_iam_role" "codebuild" {
   }
 }
 
-data "aws_iam_policy_document" "codebuild" {
-  # ECR auth token is account-wide (cannot be resource-scoped).
-  statement {
-    sid       = "EcrAuth"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
+# The account's default VPC: where the Packer builder instance runs (no compute dependency).
+data "aws_vpc" "default" {
+  default = true
+}
+
+# The builder's security group, so Packer never creates or edits one. SSH from anywhere matches the
+# temporary group Packer created before (temporary_security_group_source_cidrs defaults to
+# 0.0.0.0/0): CodeBuild's egress address is not fixed. The builder lives only for one build.
+resource "aws_security_group" "packer_builder" {
+  name        = "bioaf-packer-builder"
+  description = "bioAF Packer work-node AMI builder (transient instances only)"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "SSH from the CodeBuild Packer run"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Push/pull layers + manage the per-image bioaf-* ECR repos.
-  statement {
-    sid = "EcrPush"
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
-      "ecr:PutImage",
-      "ecr:BatchGetImage",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:DescribeRepositories",
-      "ecr:CreateRepository",
-    ]
-    resources = ["arn:aws:ecr:${var.region}:${var.account_id}:repository/bioaf-*"]
+  egress {
+    description = "Package mirrors and conda channels"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Read the build context (the Dockerfile tar.gz the app uploaded to the working
-  # bucket). Scoped to bioaf-* buckets, mirroring the bioaf-app s3:* on bioaf-*.
-  statement {
-    sid       = "ReadBuildContext"
-    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
-    resources = ["arn:aws:s3:::bioaf-*/*"]
-  }
-
-  # Build logs. STARTER scope (Resource "*"); tighten in Stage 7.
-  statement {
-    sid = "BuildLogs"
-    actions = [
-      "logs:CreateLogGroup",
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
-    ]
-    resources = ["*"]
-  }
-
-  # Packer (amazon-ebs) work-node AMI builds: Packer launches a transient builder
-  # EC2 instance in the default VPC, provisions it, then registers an AMI and
-  # tears the instance down. This is HashiCorp's documented minimal EC2 set for
-  # amazon-ebs. Most EC2 actions cannot be resource-scoped (they act on
-  # not-yet-created instances/images), so this is a STARTER statement (Resource
-  # "*"); tighten in Stage 7. Present so the same CodeBuild role can build both
-  # container images (ECR) and work-node AMIs.
-  statement {
-    sid = "PackerAmiBuild"
-    actions = [
-      "ec2:AttachVolume",
-      "ec2:AuthorizeSecurityGroupIngress",
-      "ec2:CopyImage",
-      "ec2:CreateImage",
-      "ec2:CreateKeypair",
-      "ec2:CreateSecurityGroup",
-      "ec2:CreateSnapshot",
-      "ec2:CreateTags",
-      "ec2:CreateVolume",
-      "ec2:DeleteKeyPair",
-      "ec2:DeleteSecurityGroup",
-      "ec2:DeleteSnapshot",
-      "ec2:DeleteVolume",
-      "ec2:DeregisterImage",
-      "ec2:DescribeImageAttribute",
-      "ec2:DescribeImages",
-      "ec2:DescribeInstances",
-      "ec2:DescribeInstanceStatus",
-      "ec2:DescribeRegions",
-      "ec2:DescribeSecurityGroups",
-      "ec2:DescribeSnapshots",
-      "ec2:DescribeSubnets",
-      "ec2:DescribeTags",
-      "ec2:DescribeVolumes",
-      "ec2:DescribeVpcs",
-      "ec2:DescribeAvailabilityZones",
-      "ec2:DetachVolume",
-      "ec2:GetPasswordData",
-      "ec2:ModifyImageAttribute",
-      "ec2:ModifyInstanceAttribute",
-      "ec2:ModifySnapshotAttribute",
-      "ec2:RegisterImage",
-      "ec2:RunInstances",
-      "ec2:StopInstances",
-      "ec2:TerminateInstances",
-    ]
-    resources = ["*"]
+  tags = {
+    managed_by = "bioaf"
+    purpose    = "image-build"
   }
 }
 
-resource "aws_iam_role_policy" "codebuild" {
-  name   = "bioaf-codebuild-image-build"
-  role   = aws_iam_role.codebuild.id
-  policy = data.aws_iam_policy_document.codebuild.json
+# The role's permissions are the installer-owned bioaf-role-image-build policy (installer/aws_iam.sh):
+# ECR push to bioaf-* repositories, this project's logs, build-context reads, and Packer limited to
+# Ubuntu images launched into the default VPC with the builder group, owned builders and volumes,
+# and no image removal, sharing or ownership tagging. The app attaches it; it cannot write it.
+resource "aws_iam_role_policy_attachment" "codebuild" {
+  role       = aws_iam_role.codebuild.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-role-image-build"
 }
 
 # --- CodeBuild project ---------------------------------------------------------

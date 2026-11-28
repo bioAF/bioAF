@@ -507,3 +507,29 @@ async def test_ec2_only_a_definite_refusal_is_recorded_as_failed(code, status, r
     with patch.object(p, "_client", return_value=ec2), pytest.raises(Exception):
         await p.provision(_vm_spec(launch_attempt_id="attempt9", record_launch_request=record))
     assert states == recorded
+
+
+@pytest.mark.asyncio
+async def test_ec2_launch_tags_the_instance_volume_and_interface_as_this_installations():
+    """The narrowed app policy (plan 04B) lets RunInstances create only resources tagged with this
+    installation, and later changes (terminate) need the same tag."""
+    p = _aws_provider()
+    assert p._aws_config is not None
+    p._aws_config["aws_account_id"] = "123456789012"
+    ec2 = MagicMock()
+    ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-new", "CreationDate": "2026-06-18T00:00:00Z"}]}
+    ec2.run_instances.return_value = {
+        "Instances": [{"InstanceId": "i-0abc", "Placement": {"AvailabilityZone": "us-west-1a"}}]
+    }
+    with patch.object(p, "_client", return_value=ec2), patch.object(p, "_poll_vm_ready", new=AsyncMock()):
+        await p.provision(_vm_spec())
+
+    specs = {
+        s["ResourceType"]: {t["Key"]: t["Value"] for t in s["Tags"]}
+        for s in ec2.run_instances.call_args.kwargs["TagSpecifications"]
+    }
+    assert set(specs) == {"instance", "volume", "network-interface"}
+    for resource_type, tags in specs.items():
+        assert tags["bioaf:installation"] == "123456789012-us-west-1", resource_type
+        assert tags["bioaf-managed"] == "true"
+    assert specs["instance"]["bioaf-session"] == "7"

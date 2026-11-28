@@ -6531,6 +6531,280 @@
         "title": "DocumentUpdate",
         "type": "object"
       },
+      "EksEndpointCutover": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "private_only",
+              "public_restricted"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "public_access_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Public Access Cidrs",
+            "type": "array"
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At"
+          },
+          "requested_by_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By User Id"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "applying",
+              "needs_reconcile"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "status"
+        ],
+        "title": "EksEndpointCutover",
+        "type": "object"
+      },
+      "EksEndpointCutoverRequest": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "private_only",
+              "public_restricted"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "public_access_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Public Access Cidrs",
+            "type": "array"
+          },
+          "recovery_paths_verified": {
+            "description": "The administrator confirms the application, node and independent operator recovery paths were verified and the recovery procedure is ready.",
+            "title": "Recovery Paths Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "recovery_paths_verified"
+        ],
+        "title": "EksEndpointCutoverRequest",
+        "type": "object"
+      },
+      "EksEndpointSettingsUpdate": {
+        "properties": {
+          "log_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A CloudWatch Logs retention value; default 30.",
+            "title": "Log Retention Days"
+          },
+          "log_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Control-plane log types; must keep audit and authenticator. Default all five.",
+            "title": "Log Types"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "private_only",
+                  "public_restricted",
+                  "preserve_existing"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A new cluster's endpoint mode. Refused once a cluster exists (use a cutover).",
+            "title": "Mode"
+          },
+          "public_access_cidrs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approved egress CIDRs for public_restricted; no unrestricted range.",
+            "title": "Public Access Cidrs"
+          }
+        },
+        "title": "EksEndpointSettingsUpdate",
+        "type": "object"
+      },
+      "EksEndpointSnapshot": {
+        "properties": {
+          "cluster_arn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Arn"
+          },
+          "cluster_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Name"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "endpoint_private_access": {
+            "title": "Endpoint Private Access",
+            "type": "boolean"
+          },
+          "endpoint_public_access": {
+            "title": "Endpoint Public Access",
+            "type": "boolean"
+          },
+          "public_access_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Public Access Cidrs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoint_public_access",
+          "endpoint_private_access"
+        ],
+        "title": "EksEndpointSnapshot",
+        "type": "object"
+      },
+      "EksEndpointStatus": {
+        "properties": {
+          "cutover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EksEndpointCutover"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endpoint_public_access": {
+            "title": "Endpoint Public Access",
+            "type": "boolean"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "private_only",
+                  "public_restricted",
+                  "preserve_existing"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recorded endpoint mode; null before the cluster's first upgraded compute plan.",
+            "title": "Mode"
+          },
+          "pending_hardening": {
+            "description": "True while an existing cluster keeps its preserved (possibly unrestricted) endpoint.",
+            "title": "Pending Hardening",
+            "type": "boolean"
+          },
+          "public_access_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Public Access Cidrs",
+            "type": "array"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EksEndpointSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "endpoint_public_access",
+          "public_access_cidrs",
+          "pending_hardening"
+        ],
+        "title": "EksEndpointStatus",
+        "type": "object"
+      },
       "EmbeddingDiff": {
         "properties": {
           "dimensions": {
@@ -49022,6 +49296,128 @@
         "summary": "Acknowledge Definition Notice Endpoint",
         "tags": [
           "infrastructure_operations"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/eks-endpoint": {
+      "get": {
+        "operationId": "get_eks_endpoint_api_v1_infrastructure_eks_endpoint_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EksEndpointStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Eks Endpoint",
+        "tags": [
+          "eks_endpoint"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/eks-endpoint/cutover": {
+      "delete": {
+        "operationId": "cancel_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EksEndpointStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cancel Eks Endpoint Cutover",
+        "tags": [
+          "eks_endpoint"
+        ]
+      },
+      "post": {
+        "operationId": "request_eks_endpoint_cutover_api_v1_infrastructure_eks_endpoint_cutover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EksEndpointCutoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EksEndpointStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Eks Endpoint Cutover",
+        "tags": [
+          "eks_endpoint"
+        ]
+      }
+    },
+    "/api/v1/infrastructure/eks-endpoint/settings": {
+      "put": {
+        "operationId": "update_eks_endpoint_settings_api_v1_infrastructure_eks_endpoint_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EksEndpointSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EksEndpointStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Eks Endpoint Settings",
+        "tags": [
+          "eks_endpoint"
         ]
       }
     },

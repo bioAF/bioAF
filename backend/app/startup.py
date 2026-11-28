@@ -464,6 +464,18 @@ async def infrastructure_notice(ctx: StartupContext) -> None:
         await session.commit()
 
 
+async def foundation_bucket_guard(ctx: StartupContext) -> None:
+    """Enforce public-access prevention on the GCP state and backup buckets (plan 04A).
+
+    Those two buckets are outside Terraform's state, so the update applies the setting itself.
+    """
+    from app.database import async_session_factory
+    from app.services.foundation_bucket_guard import reconcile
+
+    async with async_session_factory() as session:
+        await reconcile(session)
+
+
 async def install_metrics(ctx: StartupContext) -> None:
     """Apply a change of the installation metrics operator override made before this restart (ADR-075)."""
     from app.database import async_session_factory
@@ -553,6 +565,12 @@ NORMAL_STEPS = [
         "Infrastructure definition notice not reconciled: %s",
     ),
     Step("install_metrics", install_metrics, "optional", "Installation metrics state not reconciled: %s"),
+    Step(
+        "foundation_bucket_guard",
+        foundation_bucket_guard,
+        "optional",
+        "Foundation bucket public-access prevention not reconciled: %s",
+    ),
 ]
 
 

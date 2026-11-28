@@ -298,7 +298,20 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_aws_app_policy.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_aws_backend_sync_terraform.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_aws_compute_plan_guardrails.py": {
    "category": "single_connection",
    "evidence": [
     "fixture:db_engine",
@@ -317,6 +330,21 @@
    "route": "committed_reset_candidate"
   },
   "test_aws_config_schemas.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_aws_disproven_findings.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_aws_eks_guardrails_terraform.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_aws_installation_ownership.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"
@@ -1251,6 +1279,29 @@
    "evidence": [],
    "route": "none"
   },
+  "test_eks_endpoint_api.py": {
+   "category": "real_commit",
+   "evidence": [
+    "fixture:client",
+    "fixture:db_engine",
+    "fixture:session",
+    "http requests use their own sessions"
+   ],
+   "route": "committed_reset_candidate"
+  },
+  "test_eks_endpoint_hooks.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_eks_endpoint_policy.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
   "test_emitted_name_matching.py": {
    "category": "single_connection",
    "evidence": [
@@ -1735,6 +1786,22 @@
    ],
    "route": "committed_reset_candidate"
   },
+  "test_foundation_bucket_guard_startup.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
+  "test_foundation_upgrade_refusal.py": {
+   "category": "single_connection",
+   "evidence": [
+    "fixture:db_engine",
+    "fixture:session"
+   ],
+   "route": "rollback_candidate"
+  },
   "test_frozen_migrations.py": {
    "category": "no_database",
    "evidence": [],
@@ -1807,6 +1874,11 @@
    "route": "none"
   },
   "test_gcp_config_service.py": {
+   "category": "no_database",
+   "evidence": [],
+   "route": "none"
+  },
+  "test_gcp_public_access_prevention.py": {
    "category": "no_database",
    "evidence": [],
    "route": "none"

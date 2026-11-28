@@ -13,3 +13,15 @@ variable "org_slug" {
   type        = string
   default     = "bioaf"
 }
+
+variable "role_paths" {
+  type        = map(string)
+  default     = {}
+  description = "IAM path of each existing role in state, by name. The backend reads it from state and drops roles deleted in AWS, so existing roles never move and a missing one is recreated under new_role_path (plan 04B)."
+}
+
+variable "new_role_path" {
+  type        = string
+  default     = "/"
+  description = "IAM path for roles and instance profiles not yet in state. The backend passes /bioaf/; the default only matters when it does not (destroy, output reads)."
+}

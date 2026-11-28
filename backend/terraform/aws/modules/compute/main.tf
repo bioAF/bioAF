@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.9"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -17,6 +17,29 @@ provider "aws" {
   region = var.region
   # No explicit credentials: on AWS the app runs on an EC2 VM whose bioaf-app
   # instance profile is the ambient credential (same as the storage module).
+
+  default_tags {
+    tags = local.ownership_tags
+  }
+}
+
+# --- Installation ownership (plan 04B) -------------------------------------------
+#
+# The narrowed bioaf-app policy lets the app change EC2 resources only when they carry this
+# installation's tag, and create roles only under the installer's permissions boundary. Both are
+# derived from the account and region (installer/aws_iam.sh and app/platform/aws_installation.py
+# use the same naming). The default tags put the ownership tag on every resource at creation.
+
+locals {
+  installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
+  ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
+  # Roles and their policies (plan 04B review): each existing role and instance profile in state
+  # keeps its own path (role_paths and profile_paths, by name, from the backend); a new or missing
+  # one goes under /bioaf/, which only
+  # CreateRole sets, so the app's ownership of it cannot be claimed or moved. Their permissions are
+  # the installer-owned bioaf-role-* policies: the app attaches them but cannot write role policies.
+  installer_policy = "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/"
+  role_boundary    = var.account_id == "" ? null : "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/bioaf-app-created-role-boundary"
 }
 
 # --- Naming + shared locals ---------------------------------------------------
@@ -115,9 +138,11 @@ data "aws_iam_policy_document" "cluster_assume" {
 }
 
 resource "aws_iam_role" "cluster" {
-  name               = "${local.cluster_name}-cluster"
-  assume_role_policy = data.aws_iam_policy_document.cluster_assume.json
-  tags               = local.tags
+  path                 = lookup(var.role_paths, "${local.cluster_name}-cluster", var.new_role_path)
+  name                 = "${local.cluster_name}-cluster"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.cluster_assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "cluster" {
@@ -134,9 +159,13 @@ resource "aws_eks_cluster" "this" {
 
   vpc_config {
     subnet_ids              = aws_subnet.public[*].id
-    endpoint_public_access  = true
-    endpoint_private_access = true
+    endpoint_public_access  = var.endpoint_public_access
+    endpoint_private_access = var.endpoint_private_access
+    # Only meaningful with the public endpoint on; null leaves AWS's value alone otherwise.
+    public_access_cidrs = var.endpoint_public_access ? var.public_access_cidrs : null
   }
+
+  enabled_cluster_log_types = var.control_plane_log_types
 
   access_config {
     # API_AND_CONFIG_MAP lets the app authorize the bioaf-app role via EKS Access
@@ -151,7 +180,52 @@ resource "aws_eks_cluster" "this" {
 
   tags = local.tags
 
-  depends_on = [aws_iam_role_policy_attachment.cluster]
+  # The log group (with its retention) must exist before export starts, or EKS creates one that
+  # never expires.
+  depends_on = [aws_iam_role_policy_attachment.cluster, aws_cloudwatch_log_group.control_plane]
+}
+
+# --- Control-plane logs (plan 04C) ---------------------------------------------
+#
+# EKS writes to /aws/eks/<cluster>/cluster. Terraform owns the group so retention is set before the
+# first event. skip_destroy keeps the group and its history when the cluster or module is torn
+# down; a later deploy with the same cluster name adopts it through the import below.
+
+resource "aws_cloudwatch_log_group" "control_plane" {
+  name              = "/aws/eks/${local.cluster_name}/cluster"
+  retention_in_days = var.control_plane_log_retention_days
+  skip_destroy      = true
+  tags              = local.tags
+}
+
+import {
+  for_each = var.adopt_control_plane_log_group ? toset(["/aws/eks/${local.cluster_name}/cluster"]) : toset([])
+  to       = aws_cloudwatch_log_group.control_plane
+  id       = each.value
+}
+
+# Read access for designated infrastructure/security operators. The module only renders the policy
+# document (output below); an operator creates and attaches it to the roles they choose with their
+# own credentials. The app creates no IAM policy for it and grants no reads, and teardown is never
+# blocked by a policy still attached to operator roles.
+data "aws_iam_policy_document" "control_plane_log_reader" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:DescribeLogStreams",
+      "logs:GetLogEvents",
+      "logs:FilterLogEvents",
+      "logs:StartQuery",
+      "logs:GetLogGroupFields",
+    ]
+    resources = [aws_cloudwatch_log_group.control_plane.arn, "${aws_cloudwatch_log_group.control_plane.arn}:*"]
+  }
+  statement {
+    # Query results and log-group listing are not resource-scoped in CloudWatch Logs.
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups", "logs:GetQueryResults", "logs:StopQuery"]
+    resources = ["*"]
+  }
 }
 
 # --- IRSA OIDC provider -------------------------------------------------------
@@ -186,9 +260,11 @@ data "aws_iam_policy_document" "node_assume" {
 }
 
 resource "aws_iam_role" "node" {
-  name               = "${local.cluster_name}-node"
-  assume_role_policy = data.aws_iam_policy_document.node_assume.json
-  tags               = local.tags
+  path                 = lookup(var.role_paths, "${local.cluster_name}-node", var.new_role_path)
+  name                 = "${local.cluster_name}-node"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.node_assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "node_eks_worker" {
@@ -209,23 +285,11 @@ resource "aws_iam_role_policy_attachment" "node_ecr" {
 # Node-level S3 access to bioaf-* (the analog of the GCP module granting the
 # default node SA storage.objectAdmin). Pods that use IRSA get scoped creds via
 # their runner role; this covers node-level / non-IRSA access.
-data "aws_iam_policy_document" "node_s3" {
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "node_s3" {
-  name   = "bioaf-node-s3"
-  role   = aws_iam_role.node.id
-  policy = data.aws_iam_policy_document.node_s3.json
+
+resource "aws_iam_role_policy_attachment" "node_s3" {
+  role       = aws_iam_role.node.name
+  policy_arn = "${local.installer_policy}bioaf-role-s3-readwrite"
 }
 
 # --- Node groups (the AWS analogs of the GKE node pools) ----------------------
@@ -395,9 +459,11 @@ data "aws_iam_policy_document" "ebs_csi_trust" {
 }
 
 resource "aws_iam_role" "ebs_csi" {
-  name               = "${local.cluster_name}-ebs-csi"
-  assume_role_policy = data.aws_iam_policy_document.ebs_csi_trust.json
-  tags               = local.tags
+  path                 = lookup(var.role_paths, "${local.cluster_name}-ebs-csi", var.new_role_path)
+  name                 = "${local.cluster_name}-ebs-csi"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.ebs_csi_trust.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
@@ -473,33 +539,20 @@ data "aws_iam_policy_document" "runner_trust" {
 }
 
 resource "aws_iam_role" "runner" {
-  for_each           = local.runners
-  name               = "bioaf-${each.key}-runner-${var.stack_uid}"
-  assume_role_policy = data.aws_iam_policy_document.runner_trust[each.key].json
-  tags               = merge(local.tags, { runner = each.key })
+  path                 = lookup(var.role_paths, "bioaf-${each.key}-runner-${var.stack_uid}", var.new_role_path)
+  for_each             = local.runners
+  name                 = "bioaf-${each.key}-runner-${var.stack_uid}"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.runner_trust[each.key].json
+  tags                 = merge(local.tags, { runner = each.key })
 }
 
-data "aws_iam_policy_document" "runner_s3" {
-  for_each = local.runners
-  statement {
-    effect = "Allow"
-    actions = each.value.readonly ? ["s3:GetObject"] : [
-      "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
-    ]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "runner_s3" {
-  for_each = local.runners
-  name     = "bioaf-${each.key}-runner-s3"
-  role     = aws_iam_role.runner[each.key].id
-  policy   = data.aws_iam_policy_document.runner_s3[each.key].json
+
+resource "aws_iam_role_policy_attachment" "runner_s3" {
+  for_each   = local.runners
+  role       = aws_iam_role.runner[each.key].name
+  policy_arn = "${local.installer_policy}${each.value.readonly ? "bioaf-role-s3-readonly" : "bioaf-role-s3-readwrite"}"
 }
 
 # --- Work-node (EC2) networking + instance profile (cleanup item 8b) ----------
@@ -547,40 +600,28 @@ data "aws_iam_policy_document" "work_node_assume" {
 }
 
 resource "aws_iam_role" "work_node" {
-  name               = "bioaf-work-node-${var.stack_uid}"
-  assume_role_policy = data.aws_iam_policy_document.work_node_assume.json
-  tags               = merge(local.tags, { purpose = "work-node" })
+  path                 = lookup(var.role_paths, "bioaf-work-node-${var.stack_uid}", var.new_role_path)
+  name                 = "bioaf-work-node-${var.stack_uid}"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.work_node_assume.json
+  tags                 = merge(local.tags, { purpose = "work-node" })
 }
 
 # S3 read/write to bioaf-* buckets (inputs in, outputs/scripts out), mirroring the
 # non-readonly runner_s3 policy.
-data "aws_iam_policy_document" "work_node_s3" {
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = local.s3_object_arns
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = local.s3_bucket_arns
-  }
-}
 
-resource "aws_iam_role_policy" "work_node_s3" {
-  name   = "bioaf-work-node-s3"
-  role   = aws_iam_role.work_node.id
-  policy = data.aws_iam_policy_document.work_node_s3.json
+
+resource "aws_iam_role_policy_attachment" "work_node_s3" {
+  role       = aws_iam_role.work_node.name
+  policy_arn = "${local.installer_policy}bioaf-role-s3-readwrite"
 }
 
 resource "aws_iam_instance_profile" "work_node" {
+  path = lookup(var.profile_paths, "bioaf-work-node-${var.stack_uid}", var.new_role_path)
   name = "bioaf-work-node-${var.stack_uid}"
   role = aws_iam_role.work_node.name
-  # Intentionally NOT tagged: tagging an instance profile requires the separate
-  # iam:TagInstanceProfile permission (CreateInstanceProfile-with-tags fails 403
-  # without it), which the bioaf-app starter role does not grant. The profile is
-  # identified by its stable name and its (tagged) IAM role, so tags add nothing
-  # here; omitting them keeps the compute deploy free of an extra IAM grant.
+  # Tagged only through the provider default tags (the installation owner, plan 04B); the
+  # installer's app policy grants iam:TagInstanceProfile on bioaf-* profiles for that.
 }
 
 # --- Cluster access for the bioaf-app role (out-of-cluster control) -----------
@@ -644,40 +685,21 @@ data "aws_iam_policy_document" "cluster_autoscaler_trust" {
 }
 
 resource "aws_iam_role" "cluster_autoscaler" {
-  name               = "${local.cluster_name}-cluster-autoscaler"
-  assume_role_policy = data.aws_iam_policy_document.cluster_autoscaler_trust.json
-  tags               = local.tags
+  path                 = lookup(var.role_paths, "${local.cluster_name}-cluster-autoscaler", var.new_role_path)
+  name                 = "${local.cluster_name}-cluster-autoscaler"
+  permissions_boundary = local.role_boundary
+  assume_role_policy   = data.aws_iam_policy_document.cluster_autoscaler_trust.json
+  # The installer's autoscaler policy scales only node groups of the cluster named here
+  # (aws:PrincipalTag/bioaf:cluster), so one cluster's autoscaler cannot scale another's.
+  tags = merge(local.tags, { "bioaf:cluster" = local.cluster_name })
 }
 
-# The canonical Cluster Autoscaler permission set. STARTER scope (Resource "*"),
-# consistent with the install-aws.sh starter policy; TIGHTEN in Stage 7 (scope
-# the mutating actions to this cluster's ASGs via an autoscaling:ResourceTag
-# condition on k8s.io/cluster-autoscaler/${cluster_name}).
-data "aws_iam_policy_document" "cluster_autoscaler" {
-  statement {
-    effect = "Allow"
-    actions = [
-      "autoscaling:DescribeAutoScalingGroups",
-      "autoscaling:DescribeAutoScalingInstances",
-      "autoscaling:DescribeLaunchConfigurations",
-      "autoscaling:DescribeScalingActivities",
-      "autoscaling:DescribeTags",
-      "autoscaling:SetDesiredCapacity",
-      "autoscaling:TerminateInstanceInAutoScalingGroup",
-      "ec2:DescribeImages",
-      "ec2:DescribeInstanceTypes",
-      "ec2:DescribeLaunchTemplateVersions",
-      "ec2:GetInstanceTypesFromInstanceRequirements",
-      "eks:DescribeNodegroup",
-    ]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "cluster_autoscaler" {
-  name   = "bioaf-cluster-autoscaler"
-  role   = aws_iam_role.cluster_autoscaler.id
-  policy = data.aws_iam_policy_document.cluster_autoscaler.json
+# The Cluster Autoscaler's permissions are the installer-owned bioaf-role-cluster-autoscaler policy:
+# account-wide reads (AWS does not scope them), and scaling only of EKS node-group ASGs of bioaf
+# clusters that are enabled for the autoscaler (tags applied below).
+resource "aws_iam_role_policy_attachment" "cluster_autoscaler" {
+  role       = aws_iam_role.cluster_autoscaler.name
+  policy_arn = "${local.installer_policy}bioaf-role-cluster-autoscaler"
 }
 
 # Discovery + scale-from-zero tags on each scalable node group's ASG. EKS does
@@ -791,4 +813,23 @@ resource "aws_security_group" "backend_sync" {
   }
 
   tags = merge(local.tags, { Name = "${local.cluster_name}-backend-sync" })
+}
+
+# --- Private Kubernetes API for the application (plan 04C) ----------------------
+#
+# Over the same peering, the application's security group may reach the cluster's control-plane
+# ENIs on 443. Nothing else is opened; the backend-sync group stays SSH-only. EKS still
+# authenticates and authorizes every request (IAM access entry + RBAC).
+
+resource "aws_vpc_security_group_ingress_rule" "app_api" {
+  count                        = local.backend_sync_private ? 1 : 0
+  security_group_id            = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  referenced_security_group_id = var.app_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  description                  = "Kubernetes API from the bioAF application over VPC peering"
+  tags                         = merge(local.tags, { Name = "${local.cluster_name}-app-api" })
+
+  depends_on = [aws_vpc_peering_connection.app]
 }
