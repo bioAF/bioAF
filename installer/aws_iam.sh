@@ -275,6 +275,23 @@ aws_iam_owned_ec2() {
     } | tr '\t' '\n' | sed '/^$/d; /^None$/d' | sort -u
 }
 
+# aws_iam_tag_resources REGION ID ARN...
+#     Tag up to 20 ARNs with the ownership tag. TagResources reports per-resource failures in
+#     FailedResourcesMap with a successful exit, so any entry there is a failure: it is printed and
+#     the call fails, and the caller stops before the old app permissions are removed.
+aws_iam_tag_resources() {
+    local r="$1" id="$2" failed
+    shift 2
+    failed="$(aws resourcegroupstaggingapi tag-resources --region "$r" --resource-arn-list "$@" \
+        --tags "bioaf:installation=${id}" --query 'FailedResourcesMap' --output json)" || return 1
+    case "$(printf '%s' "$failed" | tr -d ' \t\r\n')" in
+        "" | "{}" | "null") return 0 ;;
+    esac
+    echo "  These resources were not tagged, so nothing else was changed:" >&2
+    printf '%s\n' "$failed" | sed 's/^/    /' >&2
+    return 1
+}
+
 # aws_iam_claim ACCOUNT REGION ROLES_FILE PROFILES_FILE EC2_FILE [INSTANCE_ID]
 #     Put the boundary on each listed role and tag it, the listed instance profiles, the EC2 ARNs and
 #     the application VM with this installation's ownership tag. Uses the operator's credentials,
@@ -297,14 +314,12 @@ aws_iam_claim() {
         [ -n "$name" ] || continue
         batch+=("$name")
         if [ "${#batch[@]}" -eq 20 ]; then
-            aws resourcegroupstaggingapi tag-resources --region "$r" --resource-arn-list "${batch[@]}" \
-                --tags "bioaf:installation=${id}" >/dev/null || return 1
+            aws_iam_tag_resources "$r" "$id" "${batch[@]}" || return 1
             batch=()
         fi
     done < "$arns"
     if [ "${#batch[@]}" -gt 0 ]; then
-        aws resourcegroupstaggingapi tag-resources --region "$r" --resource-arn-list "${batch[@]}" \
-            --tags "bioaf:installation=${id}" >/dev/null || return 1
+        aws_iam_tag_resources "$r" "$id" "${batch[@]}" || return 1
     fi
     if [ -n "$vm" ]; then
         aws ec2 create-tags --region "$r" --resources "$vm" --tags "Key=bioaf:installation,Value=${id}" || return 1

@@ -335,7 +335,7 @@ CALLER_ARN="$(aws sts get-caller-identity --query Arn --output text)"
 # reconciliation (security plan 04B). Loaded once credentials work, like the later helpers.
 bioaf_load_helper installer/aws_iam.sh required aws_iam_installation_id aws_iam_policy_document \
     aws_iam_ensure_policies aws_iam_put_app_policy aws_iam_owned_roles aws_iam_owned_profiles \
-    aws_iam_owned_ec2 aws_iam_claim || exit 1
+    aws_iam_owned_ec2 aws_iam_tag_resources aws_iam_claim || exit 1
 step "Authenticated as ${CALLER_ARN}" -- true
 note "Account: ${ACCOUNT_ID}"
 

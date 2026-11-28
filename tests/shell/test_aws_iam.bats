@@ -75,6 +75,9 @@ case "$*" in
     *"iam list-roles"*) printf 'bioaf-app\tbioaf-acme-1-node\tbioaf-codebuild-image-build\tbioaf-ops-made\n' ;;
     *"iam list-role-tags --role-name bioaf-ops-made"*) echo 0 ;;
     *"iam list-role-tags"*) echo 1 ;;
+    *"resourcegroupstaggingapi tag-resources"*) if [ "${FAKE_TAG_FAIL:-0}" = 1 ]; then
+        printf '{\n    "arn:aws:ec2:us-west-1:123456789012:subnet/subnet-c": {"StatusCode": 403, "ErrorCode": "AccessDeniedException", "ErrorMessage": "not authorized"}\n}\n'
+        else echo '{}'; fi ;;
     *"resourcegroupstaggingapi get-resources"*managed_by*) printf 'arn:aws:ec2:us-west-1:123456789012:vpc/vpc-c\tarn:aws:ec2:us-west-1:123456789012:subnet/subnet-c\n' ;;
     *"resourcegroupstaggingapi get-resources"*bioaf-managed*) printf 'arn:aws:ec2:us-west-1::image/ami-w\n' ;;
     *"ssm get-parameters"*) echo ami-1 ;;
@@ -189,4 +192,14 @@ app_policies=(bioaf-app-access-core bioaf-app-access-control bioaf-app-access-ro
     [ -z "$(calls 'iam put-role')" ]
     [ -z "$(calls 'iam create-policy')" ]
     [ -z "$(calls 'iam attach-role-policy')" ]
+}
+
+@test "reconcile stops before replacing the app policy when any resource failed to tag" {
+    answers y
+    FAKE_EXISTING=1 FAKE_TAG_FAIL=1 run bash "$REPO/install-aws.sh" --reconcile-permissions </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"subnet/subnet-c"* ]]
+    [[ "$output" == *"AccessDeniedException"* ]]
+    [ -z "$(calls 'iam attach-role-policy --role-name bioaf-app')" ]
+    [ -z "$(calls 'iam delete-role-policy --role-name bioaf-app')" ]
 }
