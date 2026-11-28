@@ -330,8 +330,8 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
 
     A role or profile outside /bioaf/ keeps its path only while it exists: one deleted in AWS but
     still in the (unrefreshed) state is recreated under /bioaf/, the only path the app may create
-    in. The exception is a cluster's own role: a new path is a new ARN, which replaces the cluster,
-    so a deleted legacy cluster role stops the run with the restore procedure. A lookup that fails
+    in. The exception is a role an EKS cluster or node group uses: a new path is a new ARN, which
+    replaces them, so a deleted legacy one stops the run with the restore procedure. A lookup that fails
     for any other reason also stops the run rather than guessing (plan 04B).
     """
     import asyncio
@@ -341,7 +341,7 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
     from app.platform.aws_installation import iam_paths_from_state
 
     paths = iam_paths_from_state(state)
-    cluster_roles = _cluster_roles(state)
+    dependents = _role_dependents(state)
     lookups = {"roles": ("role", aws.role_exists), "profiles": ("instance profile", aws.instance_profile_exists)}
     for kind, (label, exists) in lookups.items():
         for name, path in list(paths[kind].items()):
@@ -355,29 +355,46 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
                     "Nothing was changed; check the app's IAM read access and retry."
                 ) from exc
             if not live:
-                if kind == "roles" and name in cluster_roles:
+                if kind == "roles" and name in dependents:
+                    arn, users = dependents[name]
                     raise ValidationError(
-                        f"The EKS cluster role {name} ({cluster_roles[name]}) is in the compute state but no "
-                        "longer exists in AWS. Recreating it under /bioaf/ would change the role ARN the "
-                        "cluster uses, which replaces the cluster, so nothing was changed. Restore the role "
-                        "at its original ARN with operator credentials (docs/operations/"
-                        "aws-permissions-reconcile.md, 'A deleted cluster role'), then plan again."
+                        f"The IAM role {name} (recorded ARN {arn}) is in the compute state but no longer "
+                        f"exists in AWS, and {', '.join(users)} use that ARN. Recreating the role under "
+                        "/bioaf/ would give it a different ARN, which replaces them, so nothing was changed. "
+                        "Restore the role at its original name and path with operator credentials "
+                        "(docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role'), "
+                        "confirm its ARN, then plan again."
                     )
                 del paths[kind][name]
     return paths
 
 
-def _cluster_roles(state: dict) -> dict[str, str]:
-    """The role each EKS cluster in state uses, by role name: its ARN cannot change in place."""
-    roles: dict[str, str] = {}
+# Resources whose role ARN cannot change in place: a new ARN replaces the resource (plan 04B).
+_ROLE_ARN_DEPENDENTS = {
+    "aws_eks_cluster": ("role_arn", "name", "EKS cluster"),
+    "aws_eks_node_group": ("node_role_arn", "node_group_name", "node group"),
+}
+
+
+def _role_dependents(state: dict) -> dict[str, tuple[str, list[str]]]:
+    """For each role an EKS cluster or node group in state uses: its recorded ARN and the users.
+
+    One check for both kinds; deliberate node-group replacement for other reasons is unaffected.
+    """
+    found: dict[str, tuple[str, list[str]]] = {}
     for resource in state.get("resources") or []:
-        if resource.get("mode") != "managed" or resource.get("type") != "aws_eks_cluster":
+        spec = _ROLE_ARN_DEPENDENTS.get(resource.get("type"))
+        if resource.get("mode") != "managed" or spec is None:
             continue
+        arn_key, name_key, label = spec
         for instance in resource.get("instances") or []:
-            arn = (instance.get("attributes") or {}).get("role_arn") or ""
-            if ":role/" in arn:
-                roles[arn.rsplit("/", 1)[-1]] = arn
-    return roles
+            attributes = instance.get("attributes") or {}
+            arn = attributes.get(arn_key) or ""
+            if ":role/" not in arn:
+                continue
+            user = f"{label} {attributes.get(name_key) or resource.get('name')}"
+            found.setdefault(arn.rsplit("/", 1)[-1], (arn, []))[1].append(user)
+    return found
 
 
 class GcpTerraformCloud(TerraformCloud):

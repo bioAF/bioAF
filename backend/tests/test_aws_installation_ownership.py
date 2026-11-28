@@ -365,3 +365,88 @@ async def test_a_live_legacy_cluster_role_keeps_its_path(tmp_path):
     )
     tfvars = await _compute_paths(tmp_path, state)
     assert tfvars["role_paths"] == {"bioaf-a-1-cluster": "/"}
+
+
+def _with_node_group(state: dict, role_arn: str) -> dict:
+    group = {
+        "mode": "managed",
+        "type": "aws_eks_node_group",
+        "name": "system",
+        "instances": [{"attributes": {"node_group_name": "system", "node_role_arn": role_arn}}],
+    }
+    return {"resources": [*state["resources"], group]}
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_legacy_node_role_stops_the_plan_with_the_restore_procedure(tmp_path):
+    """Owner, round 4: a new node role ARN replaces every node group, so it cannot move either."""
+    from app.exceptions import ValidationError
+
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/")),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-node",
+    )
+    with pytest.raises(ValidationError) as caught:
+        await _compute_paths(tmp_path, state, roles=set())
+    message = str(caught.value)
+    assert "bioaf-a-1-node" in message
+    assert "arn:aws:iam::123456789012:role/bioaf-a-1-node" in message
+    assert "node group" in message
+    assert "aws-permissions-reconcile.md" in message
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_node_role_already_under_bioaf_is_recreated_at_the_same_arn(tmp_path):
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/bioaf/")),
+        "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-node",
+    )
+    tfvars = await _compute_paths(tmp_path, state, roles=set())
+    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/bioaf/"}
+
+
+@pytest.mark.asyncio
+async def test_a_live_legacy_node_role_keeps_its_path(tmp_path):
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/")),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-node",
+    )
+    tfvars = await _compute_paths(tmp_path, state)
+    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/"}
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_names_every_cluster_and_node_group_using_the_role(tmp_path):
+    from app.exceptions import ValidationError
+
+    arn = "arn:aws:iam::123456789012:role/bioaf-a-1-node"
+    state = _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/"))
+    for group in ("system", "pipelines"):
+        state["resources"].append(
+            {
+                "mode": "managed",
+                "type": "aws_eks_node_group",
+                "name": group,
+                "instances": [{"attributes": {"node_group_name": f"ng-{group}", "node_role_arn": arn}}],
+            }
+        )
+    state = _with_cluster(state, "arn:aws:iam::123456789012:role/bioaf-a-1-cluster")
+    with pytest.raises(ValidationError) as caught:
+        await _compute_paths(tmp_path, state, roles={"bioaf-a-1-cluster"})
+    message = str(caught.value)
+    assert "node group ng-system" in message and "node group ng-pipelines" in message
+    assert "EKS cluster" not in message
+
+
+@pytest.mark.asyncio
+async def test_a_role_no_cluster_or_node_group_uses_is_still_recreated_under_bioaf(tmp_path):
+    """Only ARN dependents are protected; other legacy roles keep the automatic recovery."""
+    state = _with_node_group(
+        _iam_state(
+            ("aws_iam_role", "node", "bioaf-a-1-node", "/"),
+            ("aws_iam_role", "ebs_csi", "bioaf-a-1-ebs-csi", "/"),
+        ),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-node",
+    )
+    tfvars = await _compute_paths(tmp_path, state, roles={"bioaf-a-1-node"})
+    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/"}

@@ -102,30 +102,66 @@ again is safe.
 - To roll back, put the previous policy document back on `bioaf-app` with your own credentials. Do
   not give the app a broader policy to fix a failure.
 
-## A deleted cluster role
+## A deleted cluster or node role
 
-A cluster's role ARN includes its path, and EKS cannot change a cluster's role in place. If the
-cluster role from before this release (path `/`, named `CLUSTER-cluster`) has been deleted, bioAF
-does not recreate it under `/bioaf/`, because that would replace the cluster. The compute plan stops
-with "The EKS cluster role ... no longer exists in AWS" and names the ARN.
+A role's ARN includes its path. EKS cannot change the role of an existing cluster or node group in
+place: a different ARN replaces the cluster or every node group using it. So when a role from
+before this release (path `/`) that the cluster or a node group uses has been deleted in AWS,
+bioAF does not recreate it under `/bioaf/`. The compute plan stops before proposing a new ARN. Its
+message names the role, the ARN recorded in the compute state, the cluster or node groups that use
+it, and this section.
 
-Restore the role at that ARN with your own operator credentials (the app cannot create roles at
-`/`), from the bioAF checkout:
+Restore the role at its original name and path with your own operator credentials (the app cannot
+create roles at `/`), then verify it, then plan again. Set the values from the plan's message:
 
 ```sh
-ACCOUNT=123456789012 REGION=us-west-1 CLUSTER=bioaf-acme-1   # from the plan's message
-aws iam create-role --path / --role-name "${CLUSTER}-cluster" \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
-  --permissions-boundary "arn:aws:iam::${ACCOUNT}:policy/bioaf-app-created-role-boundary" \
-  --tags Key=managed_by,Value=bioaf Key=bioaf:installation,Value="${ACCOUNT}-${REGION}"
-aws iam attach-role-policy --role-name "${CLUSTER}-cluster" \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
-aws iam get-role --role-name "${CLUSTER}-cluster" --query Role.Arn --output text
+ACCOUNT=123456789012 REGION=us-west-1 CLUSTER=bioaf-acme-1
+BOUNDARY="arn:aws:iam::${ACCOUNT}:policy/bioaf-app-created-role-boundary"
+TAGS="Key=managed_by,Value=bioaf Key=bioaf:installation,Value=${ACCOUNT}-${REGION}"
 ```
 
-The last command must print the ARN from the plan's message exactly. Then run **Check for
-Infrastructure Updates** again: Terraform finds the role by name and replans without replacing the
-cluster. Review the plan for any cluster replacement before confirming. bioAF refuses one anyway.
+**Cluster role** (`CLUSTER-cluster`), trusted by EKS:
+
+```sh
+aws iam create-role --path / --role-name "${CLUSTER}-cluster" \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+  --permissions-boundary "$BOUNDARY" --tags $TAGS
+aws iam attach-role-policy --role-name "${CLUSTER}-cluster" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+```
+
+**Node role** (`CLUSTER-node`), trusted by EC2:
+
+```sh
+aws iam create-role --path / --role-name "${CLUSTER}-node" \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+  --permissions-boundary "$BOUNDARY" --tags $TAGS
+for policy in arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy \
+              arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy \
+              arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly \
+              "arn:aws:iam::${ACCOUNT}:policy/bioaf-role-s3-readwrite"; do
+  aws iam attach-role-policy --role-name "${CLUSTER}-node" --policy-arn "$policy"
+done
+```
+
+**Verify before any infrastructure change.** For the restored role:
+
+```sh
+ROLE="${CLUSTER}-node"   # or "${CLUSTER}-cluster"
+aws iam get-role --role-name "$ROLE" \
+  --query '[Role.Arn, Role.PermissionsBoundary.PermissionsBoundaryArn]' --output text
+aws iam list-attached-role-policies --role-name "$ROLE" --query 'AttachedPolicies[].PolicyArn'
+```
+
+The ARN must equal the recorded ARN in the plan's message exactly, the boundary must be
+`bioaf-app-created-role-boundary`, and the policies must be the ones above. Then run **Check for
+Infrastructure Updates**: Terraform finds the role by name and the plan must show no replacement of
+the cluster or any node group. Confirm the apply only after reviewing that plan. Nodes that were
+running without their role may need to be cycled after the apply; check they are `Ready`.
+
+This check only blocks an ARN change caused by recovery. Replacing a node group on purpose (for
+example a new instance type or disk) is still possible through a separately reviewed maintenance
+plan; bioAF refuses only cluster replacement.
 
 ## Accepted residual risk: dedicated account required
 
@@ -147,8 +183,8 @@ work.
 - Existing roles and instance profiles keep their path (`/`); only new ones use `/bioaf/`. A role
   or profile deleted in AWS but still in Terraform state is recreated under `/bioaf/` on the next
   plan; bioAF checks each one still exists first. A Work Node profile left at `/` keeps that path
-  when its role is recreated. The EKS cluster's own role is the exception: see
-  [A deleted cluster role](#a-deleted-cluster-role).
+  when its role is recreated. The EKS cluster and node roles are the exception: see
+  [A deleted cluster or node role](#a-deleted-cluster-or-node-role).
 - Packer removes a same-named AMI on rebuild and cleans up an AMI after a failed build only when the
   image carries this installation's tag from creation. A same-named AMI from elsewhere stops the
   build. Packer does not clean up an AMI if waiting for it to become available fails.
