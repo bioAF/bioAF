@@ -102,6 +102,31 @@ again is safe.
 - To roll back, put the previous policy document back on `bioaf-app` with your own credentials. Do
   not give the app a broader policy to fix a failure.
 
+## A deleted cluster role
+
+A cluster's role ARN includes its path, and EKS cannot change a cluster's role in place. If the
+cluster role from before this release (path `/`, named `CLUSTER-cluster`) has been deleted, bioAF
+does not recreate it under `/bioaf/`, because that would replace the cluster. The compute plan stops
+with "The EKS cluster role ... no longer exists in AWS" and names the ARN.
+
+Restore the role at that ARN with your own operator credentials (the app cannot create roles at
+`/`), from the bioAF checkout:
+
+```sh
+ACCOUNT=123456789012 REGION=us-west-1 CLUSTER=bioaf-acme-1   # from the plan's message
+aws iam create-role --path / --role-name "${CLUSTER}-cluster" \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
+  --permissions-boundary "arn:aws:iam::${ACCOUNT}:policy/bioaf-app-created-role-boundary" \
+  --tags Key=managed_by,Value=bioaf Key=bioaf:installation,Value="${ACCOUNT}-${REGION}"
+aws iam attach-role-policy --role-name "${CLUSTER}-cluster" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+aws iam get-role --role-name "${CLUSTER}-cluster" --query Role.Arn --output text
+```
+
+The last command must print the ARN from the plan's message exactly. Then run **Check for
+Infrastructure Updates** again: Terraform finds the role by name and replans without replacing the
+cluster. Review the plan for any cluster replacement before confirming. bioAF refuses one anyway.
+
 ## Accepted residual risk: dedicated account required
 
 The app still chooses a new role's trust policy when it creates the role, and IAM has no condition
@@ -122,7 +147,8 @@ work.
 - Existing roles and instance profiles keep their path (`/`); only new ones use `/bioaf/`. A role
   or profile deleted in AWS but still in Terraform state is recreated under `/bioaf/` on the next
   plan; bioAF checks each one still exists first. A Work Node profile left at `/` keeps that path
-  when its role is recreated.
+  when its role is recreated. The EKS cluster's own role is the exception: see
+  [A deleted cluster role](#a-deleted-cluster-role).
 - Packer removes a same-named AMI on rebuild and cleans up an AMI after a failed build only when the
   image carries this installation's tag from creation. A same-named AMI from elsewhere stops the
   build. Packer does not clean up an AMI if waiting for it to become available fails.

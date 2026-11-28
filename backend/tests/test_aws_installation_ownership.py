@@ -315,3 +315,53 @@ def test_the_iam_lookups_treat_only_no_such_entity_as_missing(func):
     with patch.object(aws, "_client", return_value=_Iam(error=RuntimeError("throttled"))):
         with pytest.raises(RuntimeError):
             lookup("bioaf-x")
+
+
+# --- Review round 4: a deleted legacy cluster role cannot move ------------------------------------
+
+
+def _with_cluster(state: dict, role_arn: str) -> dict:
+    cluster = {
+        "mode": "managed",
+        "type": "aws_eks_cluster",
+        "name": "this",
+        "instances": [{"attributes": {"name": "bioaf-a-1", "role_arn": role_arn}}],
+    }
+    return {"resources": [*state["resources"], cluster]}
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_legacy_cluster_role_stops_the_plan_with_the_restore_procedure(tmp_path):
+    """Recreating it under /bioaf/ changes the ARN the cluster uses, which replaces the cluster."""
+    from app.exceptions import ValidationError
+
+    state = _with_cluster(
+        _iam_state(("aws_iam_role", "cluster", "bioaf-a-1-cluster", "/")),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-cluster",
+    )
+    with pytest.raises(ValidationError) as caught:
+        await _compute_paths(tmp_path, state, roles=set())
+    message = str(caught.value)
+    assert "bioaf-a-1-cluster" in message
+    assert "arn:aws:iam::123456789012:role/bioaf-a-1-cluster" in message
+    assert "aws-permissions-reconcile.md" in message
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_cluster_role_already_under_bioaf_is_recreated_at_the_same_arn(tmp_path):
+    state = _with_cluster(
+        _iam_state(("aws_iam_role", "cluster", "bioaf-a-1-cluster", "/bioaf/")),
+        "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-cluster",
+    )
+    tfvars = await _compute_paths(tmp_path, state, roles=set())
+    assert tfvars["role_paths"] == {"bioaf-a-1-cluster": "/bioaf/"}
+
+
+@pytest.mark.asyncio
+async def test_a_live_legacy_cluster_role_keeps_its_path(tmp_path):
+    state = _with_cluster(
+        _iam_state(("aws_iam_role", "cluster", "bioaf-a-1-cluster", "/")),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-cluster",
+    )
+    tfvars = await _compute_paths(tmp_path, state)
+    assert tfvars["role_paths"] == {"bioaf-a-1-cluster": "/"}

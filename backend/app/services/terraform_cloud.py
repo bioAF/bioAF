@@ -330,7 +330,9 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
 
     A role or profile outside /bioaf/ keeps its path only while it exists: one deleted in AWS but
     still in the (unrefreshed) state is recreated under /bioaf/, the only path the app may create
-    in. A lookup that fails for any other reason stops the run rather than guessing (plan 04B).
+    in. The exception is a cluster's own role: a new path is a new ARN, which replaces the cluster,
+    so a deleted legacy cluster role stops the run with the restore procedure. A lookup that fails
+    for any other reason also stops the run rather than guessing (plan 04B).
     """
     import asyncio
 
@@ -339,6 +341,7 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
     from app.platform.aws_installation import iam_paths_from_state
 
     paths = iam_paths_from_state(state)
+    cluster_roles = _cluster_roles(state)
     lookups = {"roles": ("role", aws.role_exists), "profiles": ("instance profile", aws.instance_profile_exists)}
     for kind, (label, exists) in lookups.items():
         for name, path in list(paths[kind].items()):
@@ -352,8 +355,29 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
                     "Nothing was changed; check the app's IAM read access and retry."
                 ) from exc
             if not live:
+                if kind == "roles" and name in cluster_roles:
+                    raise ValidationError(
+                        f"The EKS cluster role {name} ({cluster_roles[name]}) is in the compute state but no "
+                        "longer exists in AWS. Recreating it under /bioaf/ would change the role ARN the "
+                        "cluster uses, which replaces the cluster, so nothing was changed. Restore the role "
+                        "at its original ARN with operator credentials (docs/operations/"
+                        "aws-permissions-reconcile.md, 'A deleted cluster role'), then plan again."
+                    )
                 del paths[kind][name]
     return paths
+
+
+def _cluster_roles(state: dict) -> dict[str, str]:
+    """The role each EKS cluster in state uses, by role name: its ARN cannot change in place."""
+    roles: dict[str, str] = {}
+    for resource in state.get("resources") or []:
+        if resource.get("mode") != "managed" or resource.get("type") != "aws_eks_cluster":
+            continue
+        for instance in resource.get("instances") or []:
+            arn = (instance.get("attributes") or {}).get("role_arn") or ""
+            if ":role/" in arn:
+                roles[arn.rsplit("/", 1)[-1]] = arn
+    return roles
 
 
 class GcpTerraformCloud(TerraformCloud):
