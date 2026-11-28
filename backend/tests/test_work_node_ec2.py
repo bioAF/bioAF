@@ -514,6 +514,7 @@ async def test_ec2_launch_tags_the_instance_volume_and_interface_as_this_install
     """The narrowed app policy (plan 04B) lets RunInstances create only resources tagged with this
     installation, and later changes (terminate) need the same tag."""
     p = _aws_provider()
+    assert p._aws_config is not None
     p._aws_config["aws_account_id"] = "123456789012"
     ec2 = MagicMock()
     ec2.describe_images.return_value = {"Images": [{"ImageId": "ami-new", "CreationDate": "2026-06-18T00:00:00Z"}]}

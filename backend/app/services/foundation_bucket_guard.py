@@ -20,13 +20,13 @@ import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.storage import gcs_public_access
 from app.logging_config import get_app_logger
 from app.platform.platform_config_service import PlatformConfigService
 
 logger = get_app_logger(__name__)
 
 BUCKET_KEYS = ("terraform_state_bucket", "backups_bucket_name")
-ENFORCED = "enforced"
 
 
 def _simulated() -> bool:
@@ -38,21 +38,11 @@ def _simulated() -> bool:
 
 def _storage_client(project_id: str):
     """The single seam tests replace. ADC is the VM's bioaf-app service account."""
-    from google.cloud import storage
-
-    return storage.Client(project=project_id)
+    return gcs_public_access.storage_client(project_id)
 
 
 def _enforce(client, name: str) -> str:
-    bucket = client.get_bucket(name)
-    if bucket.iam_configuration.public_access_prevention == ENFORCED:
-        return "already_enforced"
-    bucket.iam_configuration.public_access_prevention = ENFORCED
-    bucket.patch(if_metageneration_match=bucket.metageneration)
-    bucket.reload()
-    if bucket.iam_configuration.public_access_prevention != ENFORCED:
-        return f"failed: read back {bucket.iam_configuration.public_access_prevention!r}"
-    return ENFORCED
+    return gcs_public_access.enforce_public_access_prevention(client, name)
 
 
 async def reconcile(session: AsyncSession) -> dict[str, str]:
