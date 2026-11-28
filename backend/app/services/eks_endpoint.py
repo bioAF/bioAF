@@ -20,18 +20,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ValidationError
+from app.logging_config import get_app_logger
 from app.platform.platform_config_service import PlatformConfigService
 from app.services import eks_endpoint_policy as policy
 from app.services.deployment_outputs import identifier_value
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger(__name__)
 
 RESOLVED_KEY = "_eks_resolved"
 STATUS_KEYS = (*policy.CONFIG_KEYS, "aws_region", "aws_account_id", "gke_cluster_name", "compute_deployed")
