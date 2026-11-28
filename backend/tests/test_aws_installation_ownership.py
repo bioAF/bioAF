@@ -111,8 +111,11 @@ def test_each_role_and_profile_keeps_its_own_path_or_takes_the_new_one(module):
     assert re.search(r'variable "new_role_path" \{[^}]*default\s*=\s*"/"', variables, re.S)
 
 
-def _live(roles=None, profiles=None):
-    """Patch the live IAM lookups: names in ``roles``/``profiles`` exist (None means all do)."""
+def _live(roles=None, profiles=None, live_paths=None):
+    """Patch the live IAM lookups: names in ``roles``/``profiles`` exist (None means all do).
+
+    A live role's ARN uses its path from ``live_paths`` (default ``/``).
+    """
     from contextlib import ExitStack
     from unittest.mock import patch
 
@@ -124,6 +127,13 @@ def _live(roles=None, profiles=None):
                 side_effect=lambda name, names=names: names is None or name in names,
             )
         )
+
+    def role_arn(name):
+        if roles is not None and name not in roles:
+            return None
+        return f"arn:aws:iam::123456789012:role{(live_paths or {}).get(name, '/')}{name}"
+
+    stack.enter_context(patch("app.adapters.eks_control_plane.aws.role_arn", side_effect=role_arn))
     return stack
 
 
@@ -195,7 +205,7 @@ def test_the_packer_builder_group_is_created_by_terraform_in_the_default_vpc():
 WORK_NODE = "bioaf-work-node-1"
 
 
-async def _compute_paths(tmp_path, state, *, roles=None, profiles=None):
+async def _compute_paths(tmp_path, state, *, roles=None, profiles=None, live_paths=None):
     from unittest.mock import patch
 
     async def pull():
@@ -205,7 +215,7 @@ async def _compute_paths(tmp_path, state, *, roles=None, profiles=None):
     async def passthrough(session, config, **kwargs):
         return config
 
-    with _live(roles, profiles), patch("app.services.eks_endpoint.prepare_run", side_effect=passthrough):
+    with _live(roles, profiles, live_paths), patch("app.services.eks_endpoint.prepare_run", side_effect=passthrough):
         config = await AwsTerraformCloud().prepare_run(
             None, "compute", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
         )
@@ -348,13 +358,17 @@ async def test_a_deleted_legacy_cluster_role_stops_the_plan_with_the_restore_pro
 
 
 @pytest.mark.asyncio
-async def test_a_deleted_cluster_role_already_under_bioaf_is_recreated_at_the_same_arn(tmp_path):
+async def test_a_deleted_cluster_role_already_under_bioaf_is_not_recreated_automatically(tmp_path):
+    """Review round 5, finding 1: a recreated role's ARN is unknown until apply, so the plan replaces
+    whatever uses it even when the path is unchanged."""
+    from app.exceptions import ValidationError
+
     state = _with_cluster(
         _iam_state(("aws_iam_role", "cluster", "bioaf-a-1-cluster", "/bioaf/")),
         "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-cluster",
     )
-    tfvars = await _compute_paths(tmp_path, state, roles=set())
-    assert tfvars["role_paths"] == {"bioaf-a-1-cluster": "/bioaf/"}
+    with pytest.raises(ValidationError, match="bioaf-a-1-cluster"):
+        await _compute_paths(tmp_path, state, roles=set())
 
 
 @pytest.mark.asyncio
@@ -396,13 +410,17 @@ async def test_a_deleted_legacy_node_role_stops_the_plan_with_the_restore_proced
 
 
 @pytest.mark.asyncio
-async def test_a_deleted_node_role_already_under_bioaf_is_recreated_at_the_same_arn(tmp_path):
+async def test_a_deleted_node_role_already_under_bioaf_is_not_recreated_automatically(tmp_path):
+    """Review round 5, finding 1: a recreated role's ARN is unknown until apply, so the plan replaces
+    whatever uses it even when the path is unchanged."""
+    from app.exceptions import ValidationError
+
     state = _with_node_group(
         _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/bioaf/")),
         "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-node",
     )
-    tfvars = await _compute_paths(tmp_path, state, roles=set())
-    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/bioaf/"}
+    with pytest.raises(ValidationError, match="bioaf-a-1-node"):
+        await _compute_paths(tmp_path, state, roles=set())
 
 
 @pytest.mark.asyncio
@@ -450,3 +468,127 @@ async def test_a_role_no_cluster_or_node_group_uses_is_still_recreated_under_bio
     )
     tfvars = await _compute_paths(tmp_path, state, roles={"bioaf-a-1-node"})
     assert tfvars["role_paths"] == {"bioaf-a-1-node": "/"}
+
+
+@pytest.mark.asyncio
+async def test_a_live_role_under_bioaf_used_by_a_node_group_keeps_its_path(tmp_path):
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/bioaf/")),
+        "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-node",
+    )
+    tfvars = await _compute_paths(tmp_path, state, live_paths={"bioaf-a-1-node": "/bioaf/"})
+    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/bioaf/"}
+
+
+@pytest.mark.asyncio
+async def test_a_node_group_whose_role_has_no_state_entry_stops_the_plan(tmp_path):
+    """Review round 5: without the role's state entry Terraform would create a new role (new ARN)."""
+    from app.exceptions import ValidationError
+
+    state = _with_node_group({"resources": []}, "arn:aws:iam::123456789012:role/bioaf-a-1-node")
+    with pytest.raises(ValidationError) as caught:
+        await _compute_paths(tmp_path, state)
+    assert "bioaf-a-1-node" in str(caught.value) and "not in the compute state" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_a_role_recreated_at_a_different_arn_stops_the_plan(tmp_path):
+    from app.exceptions import ValidationError
+
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/")),
+        "arn:aws:iam::123456789012:role/bioaf-a-1-node",
+    )
+    with pytest.raises(ValidationError, match="arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-node"):
+        await _compute_paths(tmp_path, state, live_paths={"bioaf-a-1-node": "/bioaf/"})
+
+
+@pytest.mark.asyncio
+async def test_a_failed_dependency_lookup_stops_the_plan():
+    from unittest.mock import patch
+
+    from app.exceptions import ValidationError
+
+    state = _with_node_group(
+        _iam_state(("aws_iam_role", "node", "bioaf-a-1-node", "/bioaf/")),
+        "arn:aws:iam::123456789012:role/bioaf/bioaf-a-1-node",
+    )
+
+    async def pull():
+        return state
+
+    with (
+        patch("app.adapters.eks_control_plane.aws.role_arn", side_effect=RuntimeError("AccessDenied")),
+        patch("app.services.eks_endpoint.prepare_run", side_effect=lambda session, config, **kw: config),
+    ):
+        with pytest.raises(ValidationError, match="bioaf-a-1-node"):
+            await AwsTerraformCloud().prepare_run(
+                None, "compute", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+            )
+
+
+def test_role_arn_returns_the_live_arn_or_none_when_missing():
+    from unittest.mock import patch
+
+    from app.adapters.eks_control_plane import aws
+
+    class Iam(_Iam):
+        def get_role(self, RoleName):
+            self._call()
+            return {"Role": {"Arn": f"arn:aws:iam::1:role/bioaf/{RoleName}"}}
+
+    with patch.object(aws, "_client", return_value=Iam()):
+        assert aws.role_arn("bioaf-x") == "arn:aws:iam::1:role/bioaf/bioaf-x"
+    with patch.object(aws, "_client", return_value=Iam(missing=True)):
+        assert aws.role_arn("bioaf-x") is None
+    with patch.object(aws, "_client", return_value=Iam(error=RuntimeError("throttled"))):
+        with pytest.raises(RuntimeError):
+            aws.role_arn("bioaf-x")
+
+
+# --- Review round 5: the plan itself must not replace a cluster or node group over its role -------
+
+
+def _replacing(address: str, kind: str, replace_paths: list) -> dict:
+    return {
+        "resource_changes": [
+            {
+                "address": address,
+                "type": kind,
+                "change": {"actions": ["delete", "create"], "before": {}, "after": {}, "replace_paths": replace_paths},
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "address, kind, path",
+    [
+        ("aws_eks_node_group.system", "aws_eks_node_group", "node_role_arn"),
+        ("aws_eks_cluster.this", "aws_eks_cluster", "role_arn"),
+    ],
+)
+def test_a_plan_replacing_a_cluster_or_node_group_because_of_its_role_is_refused(address, kind, path):
+    from app.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match=address):
+        AwsTerraformCloud().review_plan("compute", dict(CONFIG), _replacing(address, kind, [[path]]))
+
+
+def test_a_deliberate_node_group_replacement_for_another_reason_is_still_planned():
+    """Owner: separately reviewed maintenance may still replace a node group."""
+    raw = _replacing("aws_eks_node_group.system", "aws_eks_node_group", [["instance_types"]])
+    recorded = AwsTerraformCloud().review_plan("compute", dict(CONFIG), raw)
+    assert recorded
+
+
+def test_the_guard_refuses_the_real_plan_terraform_makes_for_a_recreated_node_role():
+    """A trimmed `terraform show -json` of a real plan (hashicorp/aws 5.100.0, the role under the same
+    /bioaf/ path, missing from state): the node group is replaced because node_role_arn is unknown."""
+    import json
+
+    from app.exceptions import ValidationError
+
+    raw = json.loads((Path(__file__).parent / "fixtures" / "terraform_plan_node_role_recreated.json").read_text())
+    with pytest.raises(ValidationError, match="aws_eks_node_group.system"):
+        AwsTerraformCloud().review_plan("compute", dict(CONFIG), raw)

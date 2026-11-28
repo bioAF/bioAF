@@ -288,6 +288,7 @@ class AwsTerraformCloud(TerraformCloud):
             return {}
         from app.services import eks_endpoint, eks_endpoint_policy
 
+        _refuse_role_arn_replacement(raw_plan)
         eks_endpoint_policy.review_plan(raw_plan, config)
         return {eks_endpoint.REVIEWED_CHANGES_KEY: eks_endpoint.change_digests(raw_plan)}
 
@@ -325,14 +326,59 @@ class AwsTerraformCloud(TerraformCloud):
         return None
 
 
+_RESTORE = (
+    "Nothing was changed. Restore the role at its recorded name and path with operator credentials, verify it, "
+    "and plan again (docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role')."
+)
+
+
+async def _require_role_dependencies(state: dict, paths: dict[str, dict[str, str]]) -> None:
+    """Every role an EKS cluster or node group in state uses must exist at its recorded ARN.
+
+    Driven by the dependents' recorded ARNs (role_arn, node_role_arn), not by the roles' own state
+    entries or paths: if Terraform had to create the role, its ARN would be unknown until apply and
+    the plan would replace the cluster or node groups even at the same path (plan 04B).
+    """
+    import asyncio
+
+    from app.adapters.eks_control_plane import aws
+    from app.exceptions import ValidationError
+
+    for name, (recorded, users) in _role_dependents(state).items():
+        used_by = ", ".join(users)
+        try:
+            live = await asyncio.to_thread(aws.role_arn, name)
+        except Exception as exc:
+            raise ValidationError(
+                f"The backend could not read the IAM role {name}, which {used_by} use(s) ({exc}). "
+                "Nothing was changed; check the app's IAM read access and retry."
+            ) from exc
+        if live is None:
+            raise ValidationError(
+                f"The IAM role {name} (recorded ARN {recorded}) no longer exists in AWS, and {used_by} use(s) that "
+                f"ARN. Recreating the role would give the plan a new ARN and replace them. {_RESTORE}"
+            )
+        if live != recorded:
+            raise ValidationError(
+                f"The IAM role {name} now has the ARN {live}, but {used_by} use(s) the recorded ARN {recorded}. "
+                f"Applying would replace them. {_RESTORE}"
+            )
+        if name not in paths["roles"]:
+            raise ValidationError(
+                f"The IAM role {name} (ARN {recorded}), which {used_by} use(s), is not in the compute state, so "
+                "Terraform would plan a new role and replace them. Nothing was changed; the compute state needs an "
+                "operator review (docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role')."
+            )
+
+
 async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
     """Role and instance-profile paths from state, dropping legacy entries that no longer exist.
 
-    A role or profile outside /bioaf/ keeps its path only while it exists: one deleted in AWS but
-    still in the (unrefreshed) state is recreated under /bioaf/, the only path the app may create
-    in. The exception is a role an EKS cluster or node group uses: a new path is a new ARN, which
-    replaces them, so a deleted legacy one stops the run with the restore procedure. A lookup that fails
-    for any other reason also stops the run rather than guessing (plan 04B).
+    Roles an EKS cluster or node group uses are checked first and must exist at their recorded ARN
+    (``_require_role_dependencies``). Any other role or profile outside /bioaf/ keeps its path only
+    while it exists: one deleted in AWS but still in the (unrefreshed) state is recreated under
+    /bioaf/, the only path the app may create in. A lookup that fails for any other reason stops
+    the run rather than guessing (plan 04B).
     """
     import asyncio
 
@@ -341,11 +387,12 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
     from app.platform.aws_installation import iam_paths_from_state
 
     paths = iam_paths_from_state(state)
+    await _require_role_dependencies(state, paths)
     dependents = _role_dependents(state)
     lookups = {"roles": ("role", aws.role_exists), "profiles": ("instance profile", aws.instance_profile_exists)}
     for kind, (label, exists) in lookups.items():
         for name, path in list(paths[kind].items()):
-            if path == NEW_ROLE_PATH:
+            if path == NEW_ROLE_PATH or (kind == "roles" and name in dependents):
                 continue
             try:
                 live = await asyncio.to_thread(exists, name)
@@ -355,18 +402,29 @@ async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
                     "Nothing was changed; check the app's IAM read access and retry."
                 ) from exc
             if not live:
-                if kind == "roles" and name in dependents:
-                    arn, users = dependents[name]
-                    raise ValidationError(
-                        f"The IAM role {name} (recorded ARN {arn}) is in the compute state but no longer "
-                        f"exists in AWS, and {', '.join(users)} use that ARN. Recreating the role under "
-                        "/bioaf/ would give it a different ARN, which replaces them, so nothing was changed. "
-                        "Restore the role at its original name and path with operator credentials "
-                        "(docs/operations/aws-permissions-reconcile.md, 'A deleted cluster or node role'), "
-                        "confirm its ARN, then plan again."
-                    )
                 del paths[kind][name]
     return paths
+
+
+def _refuse_role_arn_replacement(raw_plan: dict) -> None:
+    """Refuse a plan that replaces a cluster or node group because its role ARN changes or is unknown.
+
+    The pre-plan dependency check stops the known causes; this proves it on the plan itself. A node
+    group replaced for any other reason (deliberate, reviewed maintenance) is not refused here.
+    """
+    from app.exceptions import ValidationError
+
+    for change in raw_plan.get("resource_changes") or []:
+        spec = _ROLE_ARN_DEPENDENTS.get(change.get("type"))
+        body = change.get("change") or {}
+        if spec is None or not {"delete", "create"} <= set(body.get("actions") or []):
+            continue
+        causes = {path[0] for path in body.get("replace_paths") or [] if path}
+        if spec[0] in causes:
+            raise ValidationError(
+                f"This compute plan would replace {change.get('address')} because its IAM role ARN ({spec[0]}) "
+                f"changes or is not known until apply. {_RESTORE}"
+            )
 
 
 # Resources whose role ARN cannot change in place: a new ARN replaces the resource (plan 04B).

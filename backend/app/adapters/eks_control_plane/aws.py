@@ -52,3 +52,13 @@ def instance_profile_exists(name: str) -> bool:
             return False
         raise
     return True
+
+
+def role_arn(name: str) -> str | None:
+    """The live ARN of the IAM role, or None when it does not exist. Other errors are raised."""
+    try:
+        return _client("iam", None).get_role(RoleName=name)["Role"]["Arn"]
+    except Exception as exc:
+        if _missing(exc):
+            return None
+        raise
