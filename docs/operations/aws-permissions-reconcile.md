@@ -30,7 +30,9 @@ permissions.
   volumes, images or log groups, write IAM or read secrets.
 - **Ownership tags.** Existing EC2 resources, the app VM, and the roles and instance profiles bioAF
   created get the `bioaf:installation` tag. Only an operator can add it to IAM resources.
-  Packer tags new work-node AMIs and snapshots at creation; reconciliation also tags the existing
+  Packer tags its temporary key pair, builder, and new work-node AMIs and snapshots at creation
+  (the AMI's description is a `Description` tag, because the call that sets an AMI description
+  also shares images and is denied); reconciliation also tags the existing
   ones (`bioaf-managed=true`), so a rebuild can replace them.
 
 ## Order
@@ -81,7 +83,11 @@ On `y` it:
 1. creates or updates the boundary and the managed policies;
 2. puts the boundary on each listed role and tags it and its instance profiles;
 3. tags the listed EC2 resources and the app VM;
-4. attaches the three app policies, then deletes the inline `bioaf-app-starter`.
+4. attaches the four app policies, then deletes the inline `bioaf-app-starter`.
+
+If AWS refuses to tag any listed resource, reconciliation prints each one with AWS's error and
+stops before step 4, so the old policy stays in place. Fix the cause (usually the operator
+identity's tagging rights) and run it again.
 
 It creates no VM, key pair, security group or role, and does not touch the application. Running it
 again is safe.
@@ -113,7 +119,10 @@ work.
 
 - One bioAF installation per AWS account (the `bioaf-app` role name is fixed), so the ownership tag
   is `<account>-<region>`.
-- Existing roles keep their path (`/`); only new or recreated roles use `/bioaf/`.
+- Existing roles and instance profiles keep their path (`/`); only new ones use `/bioaf/`. A role
+  or profile deleted in AWS but still in Terraform state is recreated under `/bioaf/` on the next
+  plan; bioAF checks each one still exists first. A Work Node profile left at `/` keeps that path
+  when its role is recreated.
 - Packer removes a same-named AMI on rebuild and cleans up an AMI after a failed build only when the
   image carries this installation's tag from creation. A same-named AMI from elsewhere stops the
   build. Packer does not clean up an AMI if waiting for it to become available fails.

@@ -22,3 +22,6 @@
   dedicated AWS account.
   Existing AWS installations move over with `./install-aws.sh --reconcile-permissions`
   (`docs/operations/aws-permissions-reconcile.md`) before their next infrastructure update.
+  Reconciliation stops, leaving the old policy in place, if AWS refuses to tag any resource.
+- Work-node AMIs record their description as a `Description` tag instead of the AMI description
+  field, which the build role can no longer set.
