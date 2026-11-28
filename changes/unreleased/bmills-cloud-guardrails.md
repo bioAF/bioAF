@@ -23,5 +23,8 @@
   Existing AWS installations move over with `./install-aws.sh --reconcile-permissions`
   (`docs/operations/aws-permissions-reconcile.md`) before their next infrastructure update.
   Reconciliation stops, leaving the old policy in place, if AWS refuses to tag any resource.
+- A compute plan stops if a role the EKS cluster or a node group uses no longer exists at its recorded
+  ARN, and refuses any plan that would replace them because of their role. The operator restores
+  the role, its instance profiles and its node access entry (`docs/operations/aws-permissions-reconcile.md`).
 - Work-node AMIs record their description as a `Description` tag instead of the AMI description
   field, which the build role can no longer set.

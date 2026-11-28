@@ -104,26 +104,36 @@ again is safe.
 
 ## A deleted cluster or node role
 
-A role's ARN includes its path. EKS cannot change the role of an existing cluster or node group in
-place: a different ARN replaces the cluster or every node group using it. So when a role from
-before this release (path `/`) that the cluster or a node group uses has been deleted in AWS,
-bioAF does not recreate it under `/bioaf/`. The compute plan stops before proposing a new ARN. Its
-message names the role, the ARN recorded in the compute state, the cluster or node groups that use
-it, and this section.
+EKS cannot change the role of an existing cluster or node group in place. If Terraform had to
+create the role, its ARN would be unknown until apply, so the plan would replace the cluster or
+every node group using it, even with the same name and path. bioAF therefore never recreates these
+roles itself. Before each compute plan it reads the role ARN that every cluster (`role_arn`) and
+node group (`node_role_arn`) has in the compute state and checks that the role exists at exactly
+that ARN. If not, the plan stops before proposing anything. The message names the role, the
+recorded ARN, the cluster or node groups that use it, and this section. bioAF also refuses any plan
+that would replace a cluster or node group because of its role ARN.
 
-Restore the role at its original name and path with your own operator credentials (the app cannot
-create roles at `/`), then verify it, then plan again. Set the values from the plan's message:
+Recovery has four steps, in order, all with your own operator credentials: restore the role,
+repair what used the old role, verify, then plan again. Do not apply any infrastructure change
+until the last step shows no replacement.
+
+### 1. Restore the role at its recorded name and path
+
+Take the name and path from the recorded ARN (`arn:aws:iam::ACCOUNT:role/PATH/NAME`; a role from
+before this release has path `/`):
 
 ```sh
 ACCOUNT=123456789012 REGION=us-west-1 CLUSTER=bioaf-acme-1
+ROLE_PATH=/            # "/" or "/bioaf/", from the recorded ARN
+RECORDED_ARN=arn:aws:iam::123456789012:role/bioaf-acme-1-node   # from the message
 BOUNDARY="arn:aws:iam::${ACCOUNT}:policy/bioaf-app-created-role-boundary"
-TAGS="Key=managed_by,Value=bioaf Key=bioaf:installation,Value=${ACCOUNT}-${REGION}"
+TAGS="Key=managed_by,Value=bioaf Key=org,Value=ORG_SLUG Key=bioaf:installation,Value=${ACCOUNT}-${REGION}"
 ```
 
 **Cluster role** (`CLUSTER-cluster`), trusted by EKS:
 
 ```sh
-aws iam create-role --path / --role-name "${CLUSTER}-cluster" \
+aws iam create-role --path "$ROLE_PATH" --role-name "${CLUSTER}-cluster" \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
   --permissions-boundary "$BOUNDARY" --tags $TAGS
 aws iam attach-role-policy --role-name "${CLUSTER}-cluster" \
@@ -133,7 +143,7 @@ aws iam attach-role-policy --role-name "${CLUSTER}-cluster" \
 **Node role** (`CLUSTER-node`), trusted by EC2:
 
 ```sh
-aws iam create-role --path / --role-name "${CLUSTER}-node" \
+aws iam create-role --path "$ROLE_PATH" --role-name "${CLUSTER}-node" \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
   --permissions-boundary "$BOUNDARY" --tags $TAGS
 for policy in arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy \
@@ -144,7 +154,54 @@ for policy in arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy \
 done
 ```
 
-**Verify before any infrastructure change.** For the restored role:
+### 2. Repair what used the old role (node role)
+
+A recreated role is a new IAM principal with a new internal ID, even at the same ARN. Two things
+that pointed at the old one must be fixed by hand.
+
+**Instance profiles.** Deleting a role removes it from its instance profiles. Each node group's
+launch template names an EKS-created instance profile, which is now empty. For each node group in
+the message:
+
+```sh
+NG=system   # each node group from the message
+for asg in $(aws eks describe-nodegroup --cluster-name "$CLUSTER" --nodegroup-name "$NG" \
+    --query 'nodegroup.resources.autoScalingGroups[].name' --output text); do
+  aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg" \
+    --query 'AutoScalingGroups[].[LaunchTemplate.LaunchTemplateId,LaunchTemplate.Version,MixedInstancesPolicy.LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateId]' --output text
+done
+aws ec2 describe-launch-template-versions --launch-template-id LT_ID --versions LT_VERSION \
+  --query 'LaunchTemplateVersions[].LaunchTemplateData.IamInstanceProfile'
+```
+
+For each profile found (its name is the last part of the ARN):
+
+```sh
+aws iam get-instance-profile --instance-profile-name PROFILE --query 'InstanceProfile.Roles[].Arn'
+# empty: put the restored role back
+aws iam add-role-to-instance-profile --instance-profile-name PROFILE --role-name "${CLUSTER}-node"
+```
+
+**Node authentication.** The cluster uses access entries and the `aws-auth` ConfigMap
+(`API_AND_CONFIG_MAP`). AWS documents that an access entry for a deleted role is not removed and
+does not work for a role recreated at the same ARN. Delete it and create it again, keeping the type
+it had (managed Linux node groups use `EC2_LINUX`):
+
+```sh
+aws eks describe-access-entry --cluster-name "$CLUSTER" --principal-arn "$RECORDED_ARN" \
+  --query 'accessEntry.[type,principalArn]' --output text
+aws eks delete-access-entry --cluster-name "$CLUSTER" --principal-arn "$RECORDED_ARN"
+aws eks create-access-entry --cluster-name "$CLUSTER" --principal-arn "$RECORDED_ARN" --type EC2_LINUX
+```
+
+If `describe-access-entry` finds no entry, check the ConfigMap instead (`kubectl -n kube-system get
+configmap aws-auth -o yaml` from your operator access). It must map the role (written without its
+path, as `aws-auth` requires) to `system:bootstrappers` and `system:nodes`. Do not create a second
+mapping if an access entry exists.
+
+The cluster role needs neither repair: it is not a Kubernetes principal and has no instance profile.
+
+### 3. Verify before any infrastructure change
 
 ```sh
 ROLE="${CLUSTER}-node"   # or "${CLUSTER}-cluster"
@@ -153,15 +210,31 @@ aws iam get-role --role-name "$ROLE" \
 aws iam list-attached-role-policies --role-name "$ROLE" --query 'AttachedPolicies[].PolicyArn'
 ```
 
-The ARN must equal the recorded ARN in the plan's message exactly, the boundary must be
-`bioaf-app-created-role-boundary`, and the policies must be the ones above. Then run **Check for
-Infrastructure Updates**: Terraform finds the role by name and the plan must show no replacement of
-the cluster or any node group. Confirm the apply only after reviewing that plan. Nodes that were
-running without their role may need to be cycled after the apply; check they are `Ready`.
+- The ARN equals the recorded ARN exactly, the boundary is `bioaf-app-created-role-boundary`, and
+  the policies are the ones in step 1.
+- Node role: every profile from step 2 lists the role; `aws eks describe-nodegroup --cluster-name
+  "$CLUSTER" --nodegroup-name "$NG" --query 'nodegroup.[status,health.issues]'` shows `ACTIVE` with
+  no issues; nodes are `Ready` (`kubectl get nodes`). Nodes that were running without credentials
+  may need to be cycled (terminate one; its group replaces it) before they rejoin; check again.
+- Cluster role: `aws eks describe-cluster --name "$CLUSTER" --query 'cluster.[status,health]'`
+  shows `ACTIVE` with no issues.
 
-This check only blocks an ARN change caused by recovery. Replacing a node group on purpose (for
+Recovery is complete only when all of these hold.
+
+### 4. Plan again
+
+Run **Check for Infrastructure Updates**. bioAF re-checks the role, and Terraform finds it by name.
+Review the plan: it must show no replacement of the cluster or any node group (bioAF refuses one
+caused by the role). Confirm the apply only after that review.
+
+If the message instead says the role is **not in the compute state**, the state no longer records
+the role the cluster or node groups use. bioAF does not produce that state, and planning would
+create a new role. Do not work around it; restore the state from its versioned backup in the state
+bucket after review, or ask for help, before planning again.
+
+This check blocks only an ARN change caused by recovery. Replacing a node group on purpose (for
 example a new instance type or disk) is still possible through a separately reviewed maintenance
-plan; bioAF refuses only cluster replacement.
+plan; bioAF refuses only cluster replacement for other causes.
 
 ## Accepted residual risk: dedicated account required
 
@@ -183,7 +256,8 @@ work.
 - Existing roles and instance profiles keep their path (`/`); only new ones use `/bioaf/`. A role
   or profile deleted in AWS but still in Terraform state is recreated under `/bioaf/` on the next
   plan; bioAF checks each one still exists first. A Work Node profile left at `/` keeps that path
-  when its role is recreated. The EKS cluster and node roles are the exception: see
+  when its role is recreated. Roles the EKS cluster or a node group uses are the exception, at any
+  path: see
   [A deleted cluster or node role](#a-deleted-cluster-or-node-role).
 - Packer removes a same-named AMI on rebuild and cleans up an AMI after a failed build only when the
   image carries this installation's tag from creation. A same-named AMI from elsewhere stops the
