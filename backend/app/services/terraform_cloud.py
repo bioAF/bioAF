@@ -222,6 +222,7 @@ class AwsTerraformCloud(TerraformCloud):
             tfvars.update(config.get("_eks_resolved") or {})
             if "_aws_role_paths" in config:
                 tfvars["role_paths"] = config["_aws_role_paths"]
+                tfvars["profile_paths"] = config.get("_aws_profile_paths") or {}
                 tfvars["new_role_path"] = NEW_ROLE_PATH
 
         tfvars_path = work_dir / "terraform.tfvars.json"
@@ -260,7 +261,6 @@ class AwsTerraformCloud(TerraformCloud):
         if module_name not in ("compute", "image_build"):
             return config
         from app.exceptions import ValidationError
-        from app.platform.aws_installation import role_paths_from_state
 
         pulled: list = []
 
@@ -275,7 +275,8 @@ class AwsTerraformCloud(TerraformCloud):
                 f"The remote {module_name} state could not be read, so the existing roles cannot be identified. "
                 "Nothing was changed; check the state bucket and retry."
             )
-        config = {**config, "_aws_role_paths": role_paths_from_state(state)}
+        paths = await _live_iam_paths(state)
+        config = {**config, "_aws_role_paths": paths["roles"], "_aws_profile_paths": paths["profiles"]}
         if module_name == "image_build":
             return config
         from app.services import eks_endpoint
@@ -322,6 +323,37 @@ class AwsTerraformCloud(TerraformCloud):
         # a separate follow-up (see cleanup-items). Until then, no executor-driven
         # lock deletion on AWS, so this returns None and lock cleanup no-ops.
         return None
+
+
+async def _live_iam_paths(state: dict) -> dict[str, dict[str, str]]:
+    """Role and instance-profile paths from state, dropping legacy entries that no longer exist.
+
+    A role or profile outside /bioaf/ keeps its path only while it exists: one deleted in AWS but
+    still in the (unrefreshed) state is recreated under /bioaf/, the only path the app may create
+    in. A lookup that fails for any other reason stops the run rather than guessing (plan 04B).
+    """
+    import asyncio
+
+    from app.adapters.eks_control_plane import aws
+    from app.exceptions import ValidationError
+    from app.platform.aws_installation import iam_paths_from_state
+
+    paths = iam_paths_from_state(state)
+    lookups = {"roles": ("role", aws.role_exists), "profiles": ("instance profile", aws.instance_profile_exists)}
+    for kind, (label, exists) in lookups.items():
+        for name, path in list(paths[kind].items()):
+            if path == NEW_ROLE_PATH:
+                continue
+            try:
+                live = await asyncio.to_thread(exists, name)
+            except Exception as exc:
+                raise ValidationError(
+                    f"The backend could not check whether the IAM {label} {name} still exists ({exc}). "
+                    "Nothing was changed; check the app's IAM read access and retry."
+                ) from exc
+            if not live:
+                del paths[kind][name]
+    return paths
 
 
 class GcpTerraformCloud(TerraformCloud):

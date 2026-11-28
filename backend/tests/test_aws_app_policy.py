@@ -563,5 +563,6 @@ def test_the_key_pair_tag_is_allowed_only_while_creating_a_packer_key(build_role
     claim = {"aws:RequestTag/bioaf:installation": ID, "aws:TagKeys": ["bioaf:installation"]}
     assert not allowed(build_role, Request("ec2:CreateTags", f"{EC2}:key-pair/packer_1", claim))
     assert not allowed(
-        build_role, Request("ec2:CreateTags", f"{EC2}:key-pair/operator", {**claim, "ec2:CreateAction": "CreateKeyPair"})
+        build_role,
+        Request("ec2:CreateTags", f"{EC2}:key-pair/operator", {**claim, "ec2:CreateAction": "CreateKeyPair"}),
     )

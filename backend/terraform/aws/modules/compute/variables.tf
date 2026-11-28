@@ -177,7 +177,13 @@ variable "adopt_control_plane_log_group" {
 variable "role_paths" {
   type        = map(string)
   default     = {}
-  description = "IAM path of each role or instance profile already in state, by name. The backend reads it from state so existing roles never move (plan 04B)."
+  description = "IAM path of each existing role in state, by name. The backend reads it from state and drops roles deleted in AWS, so existing roles never move and a missing one is recreated under new_role_path (plan 04B)."
+}
+
+variable "profile_paths" {
+  type        = map(string)
+  default     = {}
+  description = "IAM path of each existing instance profile in state, by name, kept apart from role_paths because a Work Node role and its profile share a name (plan 04B)."
 }
 
 variable "new_role_path" {

@@ -41,13 +41,20 @@ def ownership_tags(account_id: str | None, region: str | None) -> list[dict]:
 NEW_ROLE_PATH = "/bioaf/"
 
 
-def role_paths_from_state(state: dict) -> dict[str, str]:
-    """Each role's and instance profile's current path, by name, so none of them moves."""
-    paths: dict[str, str] = {}
+def iam_paths_from_state(state: dict) -> dict[str, dict[str, str]]:
+    """The current path of each role and each instance profile in state, by name.
+
+    Roles and profiles are kept apart: a Work Node role and its profile share a name, and either
+    can exist without the other or at a different path.
+    """
+    paths: dict[str, dict[str, str]] = {"roles": {}, "profiles": {}}
+    kinds = {"aws_iam_role": "roles", "aws_iam_instance_profile": "profiles"}
     for resource in state.get("resources") or []:
-        if resource.get("mode") == "managed" and resource.get("type") in ("aws_iam_role", "aws_iam_instance_profile"):
-            for instance in resource.get("instances") or []:
-                attributes = instance.get("attributes") or {}
-                if attributes.get("name") and attributes.get("path"):
-                    paths[attributes["name"]] = attributes["path"]
+        kind = kinds.get(resource.get("type"))
+        if resource.get("mode") != "managed" or kind is None:
+            continue
+        for instance in resource.get("instances") or []:
+            attributes = instance.get("attributes") or {}
+            if attributes.get("name") and attributes.get("path"):
+                paths[kind][attributes["name"]] = attributes["path"]
     return paths

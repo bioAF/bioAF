@@ -33,8 +33,9 @@ provider "aws" {
 locals {
   installation_id = var.account_id == "" ? "" : "${var.account_id}-${var.region}"
   ownership_tags  = local.installation_id == "" ? {} : { "bioaf:installation" = local.installation_id }
-  # Roles and their policies (plan 04B review): each role already in state keeps its own path
-  # (role_paths, by name, from the backend); a new or missing role goes under /bioaf/, which only
+  # Roles and their policies (plan 04B review): each existing role and instance profile in state
+  # keeps its own path (role_paths and profile_paths, by name, from the backend); a new or missing
+  # one goes under /bioaf/, which only
   # CreateRole sets, so the app's ownership of it cannot be claimed or moved. Their permissions are
   # the installer-owned bioaf-role-* policies: the app attaches them but cannot write role policies.
   installer_policy = "arn:${data.aws_partition.current.partition}:iam::${var.account_id}:policy/"
@@ -616,7 +617,7 @@ resource "aws_iam_role_policy_attachment" "work_node_s3" {
 }
 
 resource "aws_iam_instance_profile" "work_node" {
-  path = lookup(var.role_paths, "bioaf-work-node-${var.stack_uid}", var.new_role_path)
+  path = lookup(var.profile_paths, "bioaf-work-node-${var.stack_uid}", var.new_role_path)
   name = "bioaf-work-node-${var.stack_uid}"
   role = aws_iam_role.work_node.name
   # Tagged only through the provider default tags (the installation owner, plan 04B); the

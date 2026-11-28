@@ -102,10 +102,29 @@ def test_each_role_and_profile_keeps_its_own_path_or_takes_the_new_one(module):
     for kind in ("aws_iam_role", "aws_iam_instance_profile"):
         for body in re.findall(rf'resource "{kind}" "[^"]+" \{{(.*?)\n\}}', main, re.S):
             name = re.search(r"\bname\s*=\s*(.+)", body).group(1).strip()
-            assert f"path = lookup(var.role_paths, {name}, var.new_role_path)" in re.sub(r"\s+", " ", body), body[:120]
+            paths = "role_paths" if kind == "aws_iam_role" else "profile_paths"
+            assert f"path = lookup(var.{paths}, {name}, var.new_role_path)" in re.sub(r"\s+", " ", body), body[:120]
     variables = (AWS_MODULES / module / "variables.tf").read_text()
     assert re.search(r'variable "role_paths" \{[^}]*default\s*=\s*\{\}', variables, re.S)
+    if "aws_iam_instance_profile" in main:
+        assert re.search(r'variable "profile_paths" \{[^}]*default\s*=\s*\{\}', variables, re.S)
     assert re.search(r'variable "new_role_path" \{[^}]*default\s*=\s*"/"', variables, re.S)
+
+
+def _live(roles=None, profiles=None):
+    """Patch the live IAM lookups: names in ``roles``/``profiles`` exist (None means all do)."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    stack = ExitStack()
+    for func, names in (("role_exists", roles), ("instance_profile_exists", profiles)):
+        stack.enter_context(
+            patch(
+                f"app.adapters.eks_control_plane.aws.{func}",
+                side_effect=lambda name, names=names: names is None or name in names,
+            )
+        )
+    return stack
 
 
 def _iam_state(*items):
@@ -131,7 +150,7 @@ def _iam_state(*items):
                 ("aws_iam_role", "node", "bioaf-a-1-node", "/"),
                 ("aws_iam_instance_profile", "work_node", "bioaf-work-node-1", "/"),
             ),
-            {"bioaf-a-1-node": "/", "bioaf-work-node-1": "/"},
+            {"bioaf-a-1-node": "/"},
         ),
     ],
 )
@@ -141,9 +160,10 @@ async def test_existing_roles_keep_their_paths_and_any_missing_role_goes_under_b
     async def pull():
         return state
 
-    config = await AwsTerraformCloud().prepare_run(
-        None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
-    )
+    with _live():
+        config = await AwsTerraformCloud().prepare_run(
+            None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+        )
     tfvars = AwsTerraformCloud().write_tfvars(tmp_path, "image_build", config)
     assert tfvars["role_paths"] == paths
     assert tfvars["new_role_path"] == "/bioaf/"
@@ -167,3 +187,131 @@ def test_the_packer_builder_group_is_created_by_terraform_in_the_default_vpc():
     group = _block(main, 'resource "aws_security_group" "packer_builder"')
     assert 'name        = "bioaf-packer-builder"' in group
     assert "vpc_id      = data.aws_vpc.default.id" in group
+
+
+# --- Review round 3, finding 3: roles and profiles are separate, and stale state is recoverable ----
+
+
+WORK_NODE = "bioaf-work-node-1"
+
+
+async def _compute_paths(tmp_path, state, *, roles=None, profiles=None):
+    from unittest.mock import patch
+
+    async def pull():
+        return state
+
+    # Only the role-path step is under test here; the endpoint lifecycle has its own tests.
+    async def passthrough(session, config, **kwargs):
+        return config
+
+    with _live(roles, profiles), patch("app.services.eks_endpoint.prepare_run", side_effect=passthrough):
+        config = await AwsTerraformCloud().prepare_run(
+            None, "compute", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+        )
+    return AwsTerraformCloud().write_tfvars(tmp_path, "compute", config)
+
+
+@pytest.mark.asyncio
+async def test_a_work_node_role_and_its_same_named_profile_keep_separate_paths(tmp_path):
+    state = _iam_state(
+        ("aws_iam_role", "work_node", WORK_NODE, "/bioaf/"),
+        ("aws_iam_instance_profile", "work_node", WORK_NODE, "/"),
+    )
+    tfvars = await _compute_paths(tmp_path, state)
+    assert tfvars["role_paths"] == {WORK_NODE: "/bioaf/"}
+    assert tfvars["profile_paths"] == {WORK_NODE: "/"}
+
+
+@pytest.mark.asyncio
+async def test_a_root_path_profile_does_not_pin_its_missing_role_to_the_root_path(tmp_path):
+    state = _iam_state(("aws_iam_instance_profile", "work_node", WORK_NODE, "/"))
+    tfvars = await _compute_paths(tmp_path, state)
+    assert WORK_NODE not in tfvars["role_paths"]
+    assert tfvars["profile_paths"] == {WORK_NODE: "/"}
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_role_deleted_in_aws_but_still_in_state_is_recreated_under_bioaf(tmp_path):
+    state = _iam_state(
+        ("aws_iam_role", "node", "bioaf-a-1-node", "/"),
+        ("aws_iam_role", "work_node", WORK_NODE, "/"),
+        ("aws_iam_instance_profile", "work_node", WORK_NODE, "/"),
+    )
+    tfvars = await _compute_paths(tmp_path, state, roles={"bioaf-a-1-node"}, profiles=set())
+    assert tfvars["role_paths"] == {"bioaf-a-1-node": "/"}
+    assert tfvars["profile_paths"] == {}
+    assert tfvars["new_role_path"] == "/bioaf/"
+
+
+@pytest.mark.asyncio
+async def test_roles_already_under_bioaf_are_not_looked_up(tmp_path):
+    from unittest.mock import patch
+
+    state = _iam_state(("aws_iam_role", "work_node", WORK_NODE, "/bioaf/"))
+    with patch("app.adapters.eks_control_plane.aws.role_exists", side_effect=AssertionError("looked up")):
+
+        async def pull():
+            return state
+
+        config = await AwsTerraformCloud().prepare_run(
+            None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+        )
+    assert config["_aws_role_paths"] == {WORK_NODE: "/bioaf/"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_role_lookup_stops_the_plan_instead_of_guessing():
+    from unittest.mock import patch
+
+    from app.exceptions import ValidationError
+
+    state = _iam_state(("aws_iam_role", "codebuild", "bioaf-codebuild-image-build", "/"))
+
+    async def pull():
+        return state
+
+    with patch("app.adapters.eks_control_plane.aws.role_exists", side_effect=RuntimeError("AccessDenied")):
+        with pytest.raises(ValidationError, match="bioaf-codebuild-image-build"):
+            await AwsTerraformCloud().prepare_run(
+                None, "image_build", dict(CONFIG), phase="plan", run_id=1, pull_state=pull
+            )
+
+
+class _NoSuchEntity(Exception):
+    def __init__(self):
+        self.response = {"Error": {"Code": "NoSuchEntity"}}
+
+
+class _Iam:
+    def __init__(self, missing=False, error=None):
+        self.missing, self.error = missing, error
+
+    def _call(self):
+        if self.error:
+            raise self.error
+        if self.missing:
+            raise _NoSuchEntity()
+        return {}
+
+    def get_role(self, RoleName):
+        return self._call()
+
+    def get_instance_profile(self, InstanceProfileName):
+        return self._call()
+
+
+@pytest.mark.parametrize("func", ["role_exists", "instance_profile_exists"])
+def test_the_iam_lookups_treat_only_no_such_entity_as_missing(func):
+    from unittest.mock import patch
+
+    from app.adapters.eks_control_plane import aws
+
+    lookup = getattr(aws, func)
+    with patch.object(aws, "_client", return_value=_Iam()):
+        assert lookup("bioaf-x") is True
+    with patch.object(aws, "_client", return_value=_Iam(missing=True)):
+        assert lookup("bioaf-x") is False
+    with patch.object(aws, "_client", return_value=_Iam(error=RuntimeError("throttled"))):
+        with pytest.raises(RuntimeError):
+            lookup("bioaf-x")
